@@ -4,19 +4,18 @@
 
 For an online test preview, see [Railway setup](docs/RAILWAY_TESTING.md). The included Dockerfile serves the UI and API together; demo-chain state resets on restart.
 
-Independent multichain memecoin launchpad targeting Solana, Ethereum, Base, BNB Chain and Robinhood Chain. The default EVM UI uses a virtual curve with native-asset or USDC pairing, a separate 10 USDC creation fee, and graduation into a locked custom test pool. Production DEX integration and the corresponding Solana program update are pending.
+Independent multichain memecoin launchpad targeting Solana, Ethereum, Base, BNB Chain and Robinhood Chain. Pricing is native on every chain: launches pair with the chain's own coin (or an approved token) and pay their creation fee in that coin, at values the team sets in `config/native-pricing.json` ([native pricing](docs/NATIVE_PRICING.md)). There are no dollar (USDC) pairs, fees or cash balances.
 
-The localhost preview now uses model 5: about $5K initial / $80K graduation FDV for USDC pairs, then actual Uniswap v3 graduation with a permanently locked full-range position. The durable SQLite indexer reads both curve and DEX trades. Base Sepolia wallet deployment is prepared; it requires your signatures and test funds. Model 4 is preserved for other EVM previews. See [DEX testing guide](docs/BASE_SEPOLIA_DEX_TESTING.md).
+The localhost preview uses model 7: a native-priced virtual curve (graduation at 16× the starting FDV), then actual Uniswap v3 graduation with a permanently locked full-range position. The durable SQLite indexer reads both curve and DEX trades. Base Sepolia wallet deployment is prepared; it requires your signatures and test funds. Model 6 (basic, no DEX) is used for the other EVM previews. See [DEX testing guide](docs/BASE_SEPOLIA_DEX_TESTING.md).
 
 See [current curve/pair guide](docs/VIRTUAL_CURVE_AND_PAIRS.md), [launchpad research](docs/LAUNCHPAD_RESEARCH.md) and [wallet/funding architecture](docs/WALLET_AND_CROSS_CHAIN_ARCHITECTURE.md). The direct-pool guide is historical.
 
 ## Agreed product requirements
-- $10 USDC token creation fee to protocol.
+- Token creation fee to protocol, paid in each chain's native coin at a price the team configures.
 - Mandatory developer first buy of any **valid positive** amount, atomic with launch.
 - Virtual curve first, then locked liquidity funded by accumulated trades; no separate liquidity deposit.
-- Native-asset or USDC pairing, independent of the USDC creation fee.
+- Native-asset pairing by default, or an approved paired token / tokenized stock; the creation fee is native either way.
 - 1.25% eligible trade fee; 50% protocol, 50% creator reward allocation.
-- Unified USDC cash balance routed to all five chains (not implemented yet).
 - Creator reward recipients: wallets, verified X/social identities and domains.
 - Holder rewards: creator-configurable minimum holdings, automatic accumulation and automatic batch distribution.
 - Optional reward conversion into supported tokens or eligible tokenized stocks at configured thresholds.
@@ -41,13 +40,14 @@ For the dependency-free reference-math checks alone, run `npm run test:math`. Fo
 ## Layout
 - `apps/web`: responsive launchpad UI with local demo accounts and browser-wallet testnet mode (Base Sepolia, Ethereum Sepolia, BNB Chain Testnet, Robinhood Chain Testnet with MetaMask-style wallets; Solana Devnet with Phantom, Solflare or Backpack). Create a token lets you pick the chain.
 - `apps/api`: loopback-only development server and isolated local chain
-- `contracts/evm/src`: experimental Solidity token, factory and curve (factory scales the fee and curve to the quote token's decimals)
-- `contracts/evm/testnet`: testnet-only Elpida tUSDC for chains without Circle test USDC
+- `contracts/evm/src`: experimental Solidity token, native-priced factories (`ElpidaBetaFactory`, `ElpidaDexFactory`) and curves; earlier USDC-priced prototypes are kept for reference only
+- `contracts/evm/testnet`: labelled test assets (simulated xStock, test paired token); the legacy tUSDC is no longer deployed
+- `config/native-pricing.json`: creation fee and curve FDVs per chain, in native coins
 - `contracts/solana`: Anchor locked-pool program, its compiled `build/elpida_launchpad.so` and build notes
 - `packages/core`: BigInt reference economics and the testnet registry (`networks.mjs`)
 - `packages/solana`: shared Solana client (instructions, account layouts, quote math) and RPC deploy helpers
 - `tests`: Node unit tests
-- `scripts`: Solidity compilation tooling and `solana-deploy.mjs` (`npm run solana:deploy`)
+- `scripts`: Solidity compilation tooling, `solana-deploy.mjs` (`npm run solana:deploy`) and `native-pricing.mjs` (apply the pricing file)
 - `db`: draft PostgreSQL schema
 - `docs`: network matrix and security blockers
 
@@ -56,9 +56,8 @@ For the dependency-free reference-math checks alone, run `npm run test:math`. Fo
 2. Add Solana token metadata (Metaplex/Token-2022) and the branded mint suffix generator; harden the program (fuzzing, audit) and plan its upgrade authority.
 3. Implement reward allocation, holder epoch and auto-distribution contracts.
 4. Implement verified identity attestations and recovery.
-5. Build cross-chain USDC cash vault and router with reconciliation and refunds.
-6. Integrate direct DEX pools and reviewed permanent lockers on each supported chain.
-7. Extend the localhost UI and testnet flows with persistent indexing, chain deployments, audits and staged rollout.
+5. Integrate direct DEX pools and reviewed permanent lockers on each supported chain.
+6. Extend the localhost UI and testnet flows with persistent indexing, chain deployments, audits and staged rollout.
 
 ## Try the launchpad
 

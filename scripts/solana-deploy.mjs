@@ -1,14 +1,18 @@
 // Deploys and initializes the Elpida Solana program, then records it for the web app.
 //
-//   npm run solana:deploy                      # Solana Devnet with Circle devnet USDC
+//   npm run solana:deploy                      # Solana Devnet
 //   npm run solana:deploy -- --treasury <addr> # protocol fees to another wallet (default: deployer)
-//   npm run solana:deploy -- --cluster localnet --fund <wallet>  # local solana-test-validator
+//   npm run solana:deploy -- --cluster localnet  # local solana-test-validator
 //
 // Mainnet beta (real SOL; see docs/MAINNET_BETA.md):
-//   npm run solana:deploy -- --cluster mainnet --treasury <wallet or Squads vault> --sol-usd 150 \
+//   npm run solana:deploy -- --cluster mainnet --treasury <wallet or Squads vault> \
 //     [--beta-admin <wallet>] [--allow <creator> ...] [--transfer-authority <Squads vault>] --yes
-// Mainnet uses build/elpida_launchpad-mainnet.so (no test instructions), real USDC and a SOL pair priced
-// at $5k → $50k FDV from --sol-usd. Launches are open; --invite-only turns on the beta gate (allowlist).
+// Mainnet uses build/elpida_launchpad-mainnet.so (no test instructions). Launches are open; --invite-only
+// turns on the beta gate (allowlist).
+//
+// Pricing is native: the SOL pair's curve and the SOL creation fee come from config/native-pricing.json
+// (solana.<cluster>). Each run creates the SOL pair config or reprices it to the file's values for
+// future launches. To only reprice, use node scripts/native-pricing.mjs.
 //
 // The deployer keypair is created at local-data/solana-deployer.json on first run (never share it).
 // It pays rent (~5.8 SOL on devnet, mostly returned only if the program is closed) and becomes the
@@ -18,20 +22,18 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import * as web3 from '@solana/web3.js';
 import { solanaDevnet } from '../packages/core/networks.mjs';
-import { SOLANA_TEST_PAIRS, solanaMainnetPairs, MAINNET_USDC } from '../packages/core/pairs.mjs';
-import { createElpidaSolana, curveParams, poolStats, DEFAULT_CURVE } from '../packages/solana/client.mjs';
-import { deployProgram, upgradeProgram, upgradeCost, programStatus, initializeConfig, deploymentCost, createTestQuoteMint, airdrop, findExistingBuffer, closeStaleBuffers, ensureTestUsdc, ensurePairConfigs, ensureBetaGate, rejectsTestInstructions, transferUpgradeAuthority } from '../packages/solana/deploy.mjs';
+import { solanaPairTemplates } from '../packages/core/pairs.mjs';
+import { solanaPricing } from '../packages/core/pricing.mjs';
+import { createElpidaSolana, poolStats } from '../packages/solana/client.mjs';
+import { deployProgram, upgradeProgram, upgradeCost, programStatus, deploymentCost, airdrop, findExistingBuffer, closeStaleBuffers, ensurePairConfigs, ensureBetaGate, rejectsTestInstructions, transferUpgradeAuthority, upgradeAuthority } from '../packages/solana/deploy.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const { values: args } = parseArgs({ options: {
   cluster: { type: 'string', default: 'devnet' }, rpc: { type: 'string' }, keypair: { type: 'string' },
-  treasury: { type: 'string' }, 'quote-mint': { type: 'string' }, fund: { type: 'string', multiple: true, default: [] },
+  treasury: { type: 'string' },
   rate: { type: 'string' }, // program-chunk uploads per second (public devnet allows only a few)
   upgrade: { type: 'boolean', default: false }, // upgrade an already deployed program to contracts/solana/build
-  'start-fdv': { type: 'string' }, 'end-fdv': { type: 'string' }, // curve: starting and graduation FDV in USDC (default 5000 / 50000)
-  'no-test-usdc': { type: 'boolean', default: false }, // skip the Elpida tUSDC faucet config on test networks
-  'no-test-pairs': { type: 'boolean', default: false }, // skip the SOL, test xStock and test paired-token configs
-  'sol-usd': { type: 'string' }, // mainnet: SOL price in USD used to price the SOL pair at $5k → $50k FDV
+  'no-test-pairs': { type: 'boolean', default: false }, // test networks: skip the test paired-token config
   'beta-admin': { type: 'string' }, // wallet that manages the beta allowlist (default: the deployer)
   allow: { type: 'string', multiple: true, default: [] }, // creators allowed to launch during the beta
   'invite-only': { type: 'boolean', default: false }, // turn on the beta gate: only allowlisted creators can launch
@@ -41,11 +43,8 @@ const { values: args } = parseArgs({ options: {
 if (!['devnet', 'localnet', 'mainnet'].includes(args.cluster)) throw new Error('--cluster must be devnet, localnet or mainnet');
 const localnet = args.cluster === 'localnet';
 const mainnet = args.cluster === 'mainnet';
-const solUsd = Number(args['sol-usd']);
-if (mainnet) {
-  if (!args.treasury) throw new Error('Mainnet needs --treasury: the wallet or Squads vault that receives protocol fees.');
-  if (!(solUsd > 0)) throw new Error('Mainnet needs --sol-usd <price> to price the SOL pair (for example --sol-usd 150).');
-}
+const pricing = solanaPricing(args.cluster);
+if (mainnet && !args.treasury) throw new Error('Mainnet needs --treasury: the wallet or Squads vault that receives protocol fees.');
 // A private devnet RPC (for example Helius) via --rpc or SOLANA_RPC_URL avoids public rate limits.
 const rpcUrl = args.rpc ?? process.env.SOLANA_RPC_URL ?? (localnet ? 'http://127.0.0.1:8899' : mainnet ? 'https://api.mainnet-beta.solana.com' : solanaDevnet.rpcUrl);
 const keypairPath = args.keypair ?? `${root}local-data/solana-deployer${localnet ? '-localnet' : mainnet ? '-mainnet' : ''}.json`;
@@ -74,7 +73,8 @@ if (mainnet && !args.yes) {
   const need = await deploymentCost(connection, elf.length);
   console.log(`\nMainnet deployment spends real SOL: about ${sol(need)} SOL (program rent, most of it locked while the program exists, plus a temporary upload buffer).`);
   console.log('Treasury:  ' + args.treasury);
-  console.log(`SOL pair:  priced at $${solUsd} per SOL. Launches: ${args['invite-only'] ? 'invite-only beta' : 'open to everyone'}.`);
+  console.log(`Pricing:   ${pricing.launchFee} SOL creation fee, ${pricing.startFdv} → ${pricing.endFdv} SOL FDV (config/native-pricing.json).`);
+  console.log(`Launches:  ${args['invite-only'] ? 'invite-only beta' : 'open to everyone'}.`);
   console.log('Run again with --yes to proceed.');
   process.exit(0);
 }
@@ -129,44 +129,22 @@ if (!deployed) {
   }
 }
 
-let quoteMint = args['quote-mint'] ?? (localnet ? null : mainnet ? MAINNET_USDC : solanaDevnet.quote.address);
 // The mainnet build must refuse test instructions; stop before any configuration if it does not.
 if (mainnet && !await rejectsTestInstructions({ connection, payer, programId: programKeypair.publicKey })) {
   throw new Error('The deployed program accepts test instructions. Mainnet must use build/elpida_launchpad-mainnet.so. Do not continue: upgrade it with the mainnet build first.');
 }
 const client = createElpidaSolana(web3, programKeypair.publicKey);
-const existingConfig = await connection.getAccountInfo(client.configPda);
-if (existingConfig) quoteMint = client.decodeConfig(existingConfig.data).quoteMint.toBase58();
-if (!quoteMint) {
-  quoteMint = (await createTestQuoteMint({ connection, payer, recipients: [payer.publicKey.toBase58(), ...args.fund] })).toBase58();
-  console.log(`Created local test USDC mint ${quoteMint}.`);
-}
-const startFdv = Number(args['start-fdv'] ?? DEFAULT_CURVE.startFdv);
-const endFdv = Number(args['end-fdv'] ?? DEFAULT_CURVE.endFdv);
-const quoteDecimals = (await connection.getAccountInfo(new web3.PublicKey(quoteMint)))?.data?.[44] ?? 6;
-const { config, alreadyInitialized } = await initializeConfig({
-  connection, payer, programId: programKeypair.publicKey, quoteMint, treasury: args.treasury ?? payer.publicKey.toBase58(),
-  params: curveParams({ startFdv, endFdv, quoteDecimals }),
-});
-console.log(alreadyInitialized ? 'Curve config already initialized (parameters are fixed once set).' : `Curve config initialized: $${startFdv.toLocaleString()} starting FDV, graduation at $${endFdv.toLocaleString()} FDV.`);
-// Test networks: a free-to-mint Elpida tUSDC with its own curve config, so curves can be completed and migrated.
-let testUsdc = null;
-if (!args['no-test-usdc'] && !mainnet) {
-  testUsdc = await ensureTestUsdc({ connection, payer, programId: programKeypair.publicKey, treasury: config.treasury.toBase58(), params: curveParams({ startFdv, endFdv, quoteDecimals: 6 }) });
-  console.log(testUsdc.created ? `Elpida tUSDC test config created (mint ${testUsdc.mint.toBase58()}).` : 'Elpida tUSDC test config already exists.');
-}
-// Test networks: SOL, a simulated xStock and a test paired token, each with its own curve config.
-let pairs = [];
-if (mainnet) {
-  pairs = await ensurePairConfigs({ connection, payer, programId: programKeypair.publicKey, treasury: config.treasury.toBase58(), templates: solanaMainnetPairs(solUsd), onProgress: message => console.log(message) });
-  for (const p of pairs) console.log(`${p.symbol} pair config ${p.created ? 'created' : 'already exists (parameters are fixed once set)'}.`);
-} else if (!args['no-test-pairs']) {
-  pairs = await ensurePairConfigs({ connection, payer, programId: programKeypair.publicKey, treasury: config.treasury.toBase58(), templates: SOLANA_TEST_PAIRS,
-    saved: state.testAssets ?? {}, onProgress: message => console.log(message) });
-  state.testAssets = Object.fromEntries(pairs.filter(p => p.test).map(p => [p.key, p.mint]));
-  writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
-  for (const p of pairs) console.log(`${p.symbol} pair config ${p.created ? 'created' : 'already exists'} (${p.kind}, mint ${p.mint}).`);
-}
+// Repricing needs the upgrade authority; once it is a multisig, use scripts/native-pricing.mjs --export.
+const isAuthority = (await upgradeAuthority(connection, programKeypair.publicKey))?.equals(payer.publicKey) ?? false;
+if (!isAuthority) console.log('The upgrade authority is not this deployer (multisig?): existing pair configs are left as they are. Reprice with node scripts/native-pricing.mjs --export.');
+// Native SOL pair (and, on test networks, a test paired token), created or repriced to config/native-pricing.json.
+const pairs = await ensurePairConfigs({ connection, payer, programId: programKeypair.publicKey, treasury: args.treasury ?? payer.publicKey.toBase58(),
+  templates: solanaPairTemplates(pricing, { test: !mainnet && !args['no-test-pairs'] }), saved: state.testAssets ?? {}, reprice: isAuthority, onProgress: message => console.log(message) });
+state.testAssets = Object.fromEntries(pairs.filter(p => p.test).map(p => [p.key, p.mint]));
+writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+for (const p of pairs) console.log(`${p.symbol} pair config ${p.created ? 'created' : p.repriced ? 'repriced for future launches' : 'up to date'} (${p.kind}, mint ${p.mint}).`);
+const native = pairs.find(p => p.kind === 'native');
+const config = { address: native.config, ...client.decodeConfig((await connection.getAccountInfo(new web3.PublicKey(native.config))).data) };
 // Beta launch gate: created on mainnet (off unless --invite-only), so it can be switched on later and the
 // allowlist prepared in advance; on test networks only when asked for.
 let betaGate = null;
@@ -176,21 +154,17 @@ if (mainnet || args['beta-admin'] || args['invite-only'] || args.allow.length) {
 }
 const startStats = poolStats({ ...config, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 }, config.quoteDecimals);
 const record = {
-  cluster: args.cluster, rpcUrl: shownRpc, programId: programKeypair.publicKey.toBase58(), config: client.configPda.toBase58(),
+  cluster: args.cluster, rpcUrl: shownRpc, programId: programKeypair.publicKey.toBase58(), config: config.address,
   quoteMint: config.quoteMint.toBase58(), quoteDecimals: config.quoteDecimals, treasury: config.treasury.toBase58(),
-  launchFee: config.launchFee.toString(), modelVersion: config.modelVersion,
+  // Native pricing: the creation fee in lamports (SOL) and FDVs in SOL, from config/native-pricing.json.
+  launchFee: config.launchFee.toString(), launchFeeSol: pricing.launchFee, modelVersion: config.modelVersion,
   curve: {
     virtualQuote: config.virtualQuote.toString(), virtualToken: config.virtualToken.toString(), curveSupply: config.curveSupply.toString(),
-    startFdv: Math.round(startStats.marketCap), baseFeeBps: config.baseFeeBps, snipeStartBps: config.snipeStartBps,
+    startFdv: Number(startStats.marketCap.toFixed(4)), endFdv: Number(pricing.endFdv), baseFeeBps: config.baseFeeBps, snipeStartBps: config.snipeStartBps,
     snipeWindowSecs: config.snipeWindowSecs, maxCreatorBuyBps: config.maxCreatorBuyBps,
   },
-  testUsdc: testUsdc ? { mint: testUsdc.mint.toBase58(), config: testUsdc.config.address.toBase58() } : null,
-  // Every launchable pair: the default USDC config, tUSDC and the test-network pairs above.
-  pairs: [
-    { kind: 'usdc', key: 'usdc', symbol: 'USDC', name: localnet ? 'Local test USDC' : mainnet ? 'USDC' : 'Circle test USDC', mint: config.quoteMint.toBase58(), config: client.configPda.toBase58(), decimals: config.quoteDecimals, tokenProgram: (await connection.getAccountInfo(config.quoteMint)).owner.toBase58(), test: false },
-    ...(testUsdc ? [{ kind: 'usdc', key: 'tusdc', symbol: 'tUSDC', name: 'Elpida tUSDC (free test USDC, no value)', mint: testUsdc.mint.toBase58(), config: testUsdc.config.address.toBase58(), decimals: 6, tokenProgram: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', test: true, faucet: '25000' }] : []),
-    ...pairs.map(({ created, ...p }) => p),
-  ],
+  // Every launchable pair: native SOL and, on test networks, the test paired token.
+  pairs: pairs.map(({ created, repriced, ...p }) => p),
   deployer: payer.publicKey.toBase58(), recordedAt: new Date().toISOString(),
   build: mainnet ? 'mainnet' : 'testnet',
   betaGate: betaGate ? { enabled: betaGate.enabled, authority: betaGate.authority.toBase58() } : null,

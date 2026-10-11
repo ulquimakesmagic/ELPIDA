@@ -45,7 +45,7 @@ export function renderToken(ctx, address) {
       h('div.empty', h('h3', 'Token not found on this network'), h('p', state.disconnected ? 'Connect your wallet to load this network.' : `This token is not listed on ${ctx.envLabel()}. It may belong to another network or to a local session that has restarted.`),
         h('a.btn.btn-primary', { href: '#/' }, 'Back to tokens')));
   }
-  const p = pricing(token), pct = progressOf(token), life = lifecycle(token), q = token.quoteSymbol ?? 'USDC', dex = dexName(ctx, token);
+  const p = pricing(token), pct = progressOf(token), life = lifecycle(token), q = token.quoteSymbol ?? ctx.state?.nativeSymbol ?? 'ETH', dex = dexName(ctx, token);
   const solana = ctx.mode === 'testnet' && ctx.wallet === ctx.solWallet;
 
   const head = h('div.token-head', avatar(token, 'avatar-lg'),
@@ -55,7 +55,7 @@ export function renderToken(ctx, address) {
 
   const metric = (label, value, note) => h('div.metric', h('span', label), h('strong', value), note ? h('small', note) : null);
   const figures = h('section.panel', { 'aria-labelledby': 'market-title' },
-    h('div.panel-head', h('div', h('h2#market-title', 'Market'), h('p', token.pair === 'usdc' ? 'USDC values shown in dollars, assuming 1 USDC = $1.' : `Values shown in ${q}, the trading pair. No dollar conversion is assumed.`))),
+    h('div.panel-head', h('div', h('h2#market-title', 'Market'), h('p', `Values shown in ${q}, the trading pair. No dollar conversion is assumed.`))),
     h('div.metrics',
       metric('Price', fmtPrice(token), token.graduated ? `${dex} pool price` : 'Current bonding-curve price'),
       metric('Market cap', fmtValue(p.marketCap, token), 'Price × circulating supply'),
@@ -101,7 +101,7 @@ export function renderToken(ctx, address) {
 }
 
 function tradePanel(ctx, token, { dex, solana }) {
-  const q = token.quoteSymbol ?? 'USDC';
+  const q = token.quoteSymbol ?? ctx.state?.nativeSymbol ?? 'ETH';
   if (token.graduated && token.venue === 'PumpSwap') {
     return h('section.panel.trade-panel', h('h2', 'Trade'), h('p.muted', `${token.symbol} now trades on PumpSwap. Its liquidity is locked permanently, and its LP fees are harvested 50/50 to Elpida and the creator.`),
       token.dexUrl ? h('a.btn.btn-primary.btn-block', { href: token.dexUrl, target: '_blank', rel: 'noopener noreferrer', style: undefined }, 'Open the PumpSwap pool', icon('external-link', 'icon-sm')) : null);

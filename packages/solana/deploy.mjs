@@ -207,20 +207,6 @@ export async function upgradeProgram({ connection, payer, programId, elf, ...upl
 }
 
 /**
- * Creates the program's curve config (quote mint, treasury, curve and fee parameters) when missing.
- * Must be signed by the upgrade authority. `params` defaults to `curveParams()` ($5k → $50k FDV).
- */
-export async function initializeConfig({ connection, payer, programId, quoteMint, treasury, params }) {
-  const client = createElpidaSolana(web3, programId);
-  const existing = await connection.getAccountInfo(client.configPda);
-  if (existing) return { config: client.decodeConfig(existing.data), alreadyInitialized: true };
-  const mintInfo = await connection.getAccountInfo(new PublicKey(quoteMint));
-  const quoteDecimals = mintInfo?.data?.[44] ?? 6;
-  await send(connection, payer, [client.initializeCurve({ authority: payer.publicKey, quoteMint: new PublicKey(quoteMint), treasury: new PublicKey(treasury), params: params ?? curveParams({ quoteDecimals }) })]);
-  return { config: client.decodeConfig((await connection.getAccountInfo(client.configPda)).data), alreadyInitialized: false };
-}
-
-/**
  * Closes this deployer's program buffers whose size no longer matches the build (left over from an
  * interrupted upload of an older version), returning their rent. Returns the lamports reclaimed.
  */
@@ -249,29 +235,43 @@ export async function closeStaleBuffers({ connection, payer, elfLength, remember
   return reclaimed;
 }
 
+/** Curve params for a pair template, keeping an existing config's fee schedule (live pools read it). */
+export function templateParams(t, existing = null, overrides = {}) {
+  const schedule = existing ? { baseFeeBps: existing.baseFeeBps, snipeStartBps: existing.snipeStartBps, snipeWindowSecs: existing.snipeWindowSecs, maxCreatorBuyBps: existing.maxCreatorBuyBps } : {};
+  return curveParams({ startFdv: t.startFdv, endFdv: t.endFdv, quoteDecimals: t.decimals, launchFee: t.launchFee, ...schedule, ...overrides });
+}
+
+const samePricing = (config, params) => config.virtualQuote === params.virtualQuote && config.virtualToken === params.virtualToken && config.curveSupply === params.curveSupply && config.launchFee === params.launchFee;
+
 /**
- * Test networks only: creates the program's Elpida tUSDC mint (PDA, minted only by the program's
- * faucet) and a curve config quoted in it, so anyone can get enough test USDC to complete a curve.
+ * Update instructions (signed by `authority`, the upgrade authority) that bring existing pair configs to
+ * the template prices. Configs that already match, or do not exist yet, are skipped.
  */
-export async function ensureTestUsdc({ connection, payer, programId, treasury, params }) {
+export async function pricingUpdates({ connection, programId, authority, templates, saved = {} }) {
   const client = createElpidaSolana(web3, programId);
-  const mint = client.testUsdcMint, configAddress = client.configFor(mint);
-  if (!await connection.getAccountInfo(mint)) await send(connection, payer, [client.createTestUsdc({ authority: payer.publicKey })]);
-  let created = false;
-  if (!await connection.getAccountInfo(configAddress)) {
-    await send(connection, payer, [client.addCurveConfig({ authority: payer.publicKey, quoteMint: mint, treasury: new PublicKey(treasury), params: params ?? curveParams() })]);
-    created = true;
+  const updates = [];
+  for (const t of templates) {
+    const mint = t.wsol ? new PublicKey(WSOL_MINT) : saved[t.key] ? new PublicKey(saved[t.key]) : null;
+    if (!mint) continue;
+    const address = client.configFor(mint);
+    const info = await connection.getAccountInfo(address);
+    if (!info) continue;
+    const config = client.decodeConfig(info.data);
+    const params = templateParams(t, config);
+    if (samePricing(config, params)) continue;
+    updates.push({ template: t, address, before: config, params, instruction: client.updateCurveConfig({ authority: new PublicKey(authority), config: address, params }) });
   }
-  return { mint, config: { address: configAddress, ...client.decodeConfig((await connection.getAccountInfo(configAddress)).data) }, created };
+  return updates;
 }
 
 /**
- * Test networks only: one curve config per pair template (packages/core/pairs.mjs SOLANA_TEST_PAIRS).
- * Native SOL uses the wrapped-SOL mint. Test assets are new mints whose only minter is the program's
- * faucet PDA; the simulated xStock is a Token-2022 mint with an issuer permanent delegate, like xStocks.
- * `saved` maps template keys to mints from an earlier run so re-runs reuse them. Returns pair records.
+ * One curve config per pair template (packages/core/pairs.mjs solanaPairTemplates). Native SOL uses the
+ * wrapped-SOL mint. Test assets are new mints whose only minter is the program's faucet PDA; a simulated
+ * xStock is a Token-2022 mint with an issuer permanent delegate, like xStocks.
+ * `saved` maps template keys to mints from an earlier run so re-runs reuse them. With `reprice`, existing
+ * configs are updated to the template prices (config/native-pricing.json). Returns pair records.
  */
-export async function ensurePairConfigs({ connection, payer, programId, treasury, templates, saved = {}, overrides = {}, onProgress = () => {} }) {
+export async function ensurePairConfigs({ connection, payer, programId, treasury, templates, saved = {}, overrides = {}, reprice = false, onProgress = () => {} }) {
   const client = createElpidaSolana(web3, programId);
   const spl = splTestMint(web3);
   const pairs = [];
@@ -290,15 +290,22 @@ export async function ensurePairConfigs({ connection, payer, programId, treasury
     const info = await connection.getAccountInfo(mint);
     const quoteTokenProgram = info.owner;
     const address = client.configFor(mint);
-    let created = false;
-    if (!await connection.getAccountInfo(address)) {
+    let created = false, repriced = false;
+    const existing = await connection.getAccountInfo(address);
+    if (!existing) {
       onProgress(`Creating the ${t.symbol} pair config…`);
-      await send(connection, payer, [client.addCurveConfig({ authority: payer.publicKey, quoteMint: mint, treasury: new PublicKey(treasury), quoteTokenProgram,
-        params: curveParams({ startFdv: t.startFdv, endFdv: t.endFdv, quoteDecimals: t.decimals, launchFee: t.launchFee, ...overrides }) })]);
+      await send(connection, payer, [client.addCurveConfig({ authority: payer.publicKey, quoteMint: mint, treasury: new PublicKey(treasury), quoteTokenProgram, params: templateParams(t, null, overrides) })]);
       created = true;
+    } else if (reprice) {
+      const config = client.decodeConfig(existing.data), params = templateParams(t, config, overrides);
+      if (!samePricing(config, params)) {
+        onProgress(`Repricing the ${t.symbol} pair config…`);
+        await send(connection, payer, [client.updateCurveConfig({ authority: payer.publicKey, config: address, params })]);
+        repriced = true;
+      }
     }
     pairs.push({ kind: t.kind, key: t.key, symbol: t.symbol, name: t.name, mint: mint.toBase58(), config: address.toBase58(), decimals: t.decimals,
-      tokenProgram: quoteTokenProgram.toBase58(), test: !t.wsol, wsol: !!t.wsol, testSized: !!t.testSized, faucet: t.faucet ?? null, created });
+      tokenProgram: quoteTokenProgram.toBase58(), test: !t.wsol, wsol: !!t.wsol, testSized: !!t.testSized, faucet: t.faucet ?? null, created, repriced });
   }
   return pairs;
 }
@@ -337,6 +344,25 @@ export async function rejectsTestInstructions({ connection, payer, programId }) 
   return JSON.stringify(result.value.err ?? '').includes('6022') || (result.value.logs ?? []).some(line => /TestNetworksOnly|0x1786/.test(line));
 }
 
+/** The program's current upgrade authority, or null when the program is immutable. */
+export async function upgradeAuthority(connection, programId) {
+  const client = createElpidaSolana(web3, programId);
+  const info = await connection.getAccountInfo(client.programDataAddress);
+  if (!info || info.owner.toBase58() !== LOADER_V3) throw new Error('Program data not found on this cluster.');
+  return info.data[12] === 1 ? new PublicKey(info.data.subarray(13, 45)) : null;
+}
+
+const ALPHABET = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+export function base58(bytes) {
+  let n = BigInt('0x' + (Buffer.from(bytes).toString('hex') || '0')), out = '';
+  while (n > 0n) { out = ALPHABET[Number(n % 58n)] + out; n /= 58n; }
+  for (const b of bytes) { if (b !== 0) break; out = '1' + out; }
+  return out;
+}
+
+/** An instruction in the form a multisig app (Squads transaction builder) takes: program, accounts, base58 data. */
+export const exportInstruction = instruction => ({ programId: instruction.programId.toBase58(), accounts: instruction.keys.map(k => ({ pubkey: k.pubkey.toBase58(), isSigner: k.isSigner, isWritable: k.isWritable })), data: base58(instruction.data) });
+
 /** Hands the program's upgrade authority to `newAuthority` (for example a Squads vault). */
 export async function transferUpgradeAuthority({ connection, payer, programId, newAuthority }) {
   const loader = loaderV3(web3);
@@ -353,19 +379,6 @@ export async function prepareUpgradeBuffer({ connection, payer, elf, multisig, .
   const buffer = await uploadToBuffer({ connection, payer, elf, ...uploadOptions });
   await send(connection, payer, [loader.setAuthority({ account: buffer, authority: payer.publicKey, newAuthority: new PublicKey(multisig) })]);
   return buffer;
-}
-
-/** Localnet only: a 6-decimal stand-in for USDC, with balances minted to `recipients`. */
-export async function createTestQuoteMint({ connection, payer, recipients = [], amount = 10_000_000_000n }) {
-  const mint = Keypair.generate();
-  const spl = splTestMint(web3);
-  await send(connection, payer, await spl.createMintIxs(connection, payer.publicKey, mint.publicKey, 6, payer.publicKey), [mint]);
-  const client = createElpidaSolana(web3, PublicKey.default);
-  for (const owner of recipients) {
-    const key = new PublicKey(owner);
-    await send(connection, payer, [client.createAtaIdempotent(payer.publicKey, key, mint.publicKey), spl.mintTo(mint.publicKey, client.ata(key, mint.publicKey), payer.publicKey, amount)]);
-  }
-  return mint.publicKey;
 }
 
 /** Airdrop (localnet/devnet faucet) confirmed by polling. */

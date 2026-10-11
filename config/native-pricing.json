@@ -1,0 +1,26 @@
+{
+  "_readme": [
+    "Elpida charges and prices every launch in each chain's native coin. Edit the numbers below, then apply them:",
+    "  Solana:  node scripts/native-pricing.mjs --chain solana-devnet --yes   (or solana-mainnet, solana-localnet)",
+    "  EVM:     open the site as the launchpad owner, pick the network and press 'Apply native pricing'.",
+    "All amounts are whole coins (SOL, ETH, BNB), written as strings.",
+    "  launchFee  creation fee paid by the creator to the treasury on every launch, whatever the pair.",
+    "  startFdv   fully diluted value of a new token at launch (price x 1B supply).",
+    "  endFdv     Solana only: FDV at which the curve completes and migrates to PumpSwap.",
+    "             EVM curves have a fixed shape and complete at 16 x startFdv.",
+    "New values apply to launches made after the change. Tokens already launched keep the values they launched with.",
+    "Mainnet values are examples: set them from the current coin price before deploying."
+  ],
+  "solana": {
+    "devnet":   { "launchFee": "0.01", "startFdv": "0.5", "endFdv": "5", "testSized": true },
+    "localnet": { "launchFee": "0.01", "startFdv": "0.5", "endFdv": "5", "testSized": true },
+    "mainnet":  { "launchFee": "0.05", "startFdv": "30", "endFdv": "300" }
+  },
+  "evm": {
+    "local":             { "launchFee": "0.002", "startFdv": "2" },
+    "base-sepolia":      { "launchFee": "0.0001", "startFdv": "0.02" },
+    "ethereum-sepolia":  { "launchFee": "0.002", "startFdv": "2" },
+    "bnb-testnet":       { "launchFee": "0.01", "startFdv": "8" },
+    "robinhood-testnet": { "launchFee": "0.002", "startFdv": "2" }
+  }
+}

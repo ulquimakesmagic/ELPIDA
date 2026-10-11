@@ -1,6 +1,6 @@
 // Shared client for the Elpida Solana program (contracts/solana), model 3: bonding curve over virtual
-// reserves with a decaying anti-snipe fee, one config per trading pair (wrapped SOL, USDC, an xStock or
-// another approved token; classic SPL or Token-2022). Works in Node and the browser: pass in the
+// reserves with a decaying anti-snipe fee, one config per trading pair (wrapped SOL by default, or another
+// approved token; classic SPL or Token-2022). The creation fee is always paid in SOL. Works in Node and the browser: pass in the
 // @solana/web3.js v1 module (Node) or `globalThis.solanaWeb3` (browser bundle).
 // Byte layouts and Anchor discriminators must match contracts/solana/programs/elpida_launchpad/src/lib.rs;
 // tests/solana.test.mjs checks them against the compiled program.
@@ -36,9 +36,10 @@ export const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 export const PUMPSWAP_FEES = { lpFeeBps: 25, protocolFeeBps: 5, creatorFeeBps: 0 };
 export const LAUNCH_COMPUTE_UNITS = 400_000;
 
-/** Default launch economics: $5k starting FDV, graduation at $50k FDV, 1.25% base fee,
+/** Default curve shape (FDVs are in whole units of the pair asset, SOL for native pairs; real
+ *  deployments take their values from config/native-pricing.json), 1.25% base fee,
  *  anti-snipe fee decaying linearly from 90% to the base fee over the first 60 seconds. */
-export const DEFAULT_CURVE = { startFdv: 5_000, endFdv: 50_000, baseFeeBps: 125, snipeStartBps: 9_000, snipeWindowSecs: 60, maxCreatorBuyBps: 0 };
+export const DEFAULT_CURVE = { startFdv: 30, endFdv: 300, launchFee: '0.05', baseFeeBps: 125, snipeStartBps: 9_000, snipeWindowSecs: 60, maxCreatorBuyBps: 0 };
 
 // sha256("global:<name>")[0..8] and sha256("account:<Name>")[0..8]
 export const DISCRIMINATORS = {
@@ -61,6 +62,7 @@ export const DISCRIMINATORS = {
   revokeBetaCreator: [225, 1, 249, 74, 23, 63, 36, 199],
   BetaGate: [157, 14, 100, 165, 88, 97, 119, 83],
   BetaCreator: [196, 152, 244, 127, 100, 59, 189, 139],
+  updateCurveConfig: [23, 123, 231, 253, 103, 196, 100, 218],
 };
 
 // sha256("event:<Name>")[0..8] and field layouts (32-byte keys or little-endian u64s after the
@@ -73,6 +75,8 @@ export const EVENTS = {
   CurveGraduated: { discriminator: [3, 228, 116, 195, 148, 182, 240, 104], fields: [['pool', 'key'], ['mint', 'key'], ['realQuote', 'u64'], ['liquidityBonus', 'u64'], ['lpTokens', 'u64']] },
   FeesWithdrawn: { discriminator: [234, 15, 0, 119, 148, 241, 40, 21], fields: [['pool', 'key'], ['recipient', 'key'], ['amount', 'u64']] },
   CurveMigrated: { discriminator: [73, 99, 54, 46, 71, 35, 47, 242], fields: [['pool', 'key'], ['mint', 'key'], ['pumpPool', 'key'], ['lpMint', 'key'], ['baseAmount', 'u64'], ['quoteAmount', 'u64'], ['lpLocked', 'u64']] },
+  // Native repricing by the upgrade authority (the trailing u16 max_creator_buy_bps is not decoded).
+  CurveConfigUpdated: { discriminator: [15, 223, 121, 188, 171, 123, 126, 224], fields: [['config', 'key'], ['quoteMint', 'key'], ['virtualQuote', 'u64'], ['virtualToken', 'u64'], ['curveSupply', 'u64'], ['launchFee', 'u64']] },
   LpFeesHarvested: { discriminator: [230, 156, 123, 178, 68, 124, 167, 67], fields: [['pool', 'key'], ['pumpPool', 'key'], ['lpBurned', 'u64'], ['baseOut', 'u64'], ['quoteOut', 'u64'], ['protocolBase', 'u64'], ['protocolQuote', 'u64'], ['lpLocked', 'u64']] },
 };
 
@@ -145,6 +149,7 @@ export const PROGRAM_ERRORS = [
   'This token cannot be a trading pair: PumpSwap or the curve cannot handle its token extensions (for example a transfer fee or an issuer permanent delegate, as xStocks have).',
   'This instruction exists only on test networks.',
   'Launches are invite-only during the beta. Ask the Elpida team to add your wallet.',
+  'The fee schedule of an existing pair cannot change, because live pools read it on every trade.',
 ];
 
 /** Turns a Solana/Anchor error into a readable message. */
@@ -183,7 +188,7 @@ export function formatAmount(units, decimals) {
  * S·m/(m−1), so the tokens left after the curve sells out exactly pair with the raised quote at the
  * graduation price on the DEX. `launchFee` is the creation fee in whole quote units (default 10).
  */
-export function curveParams({ startFdv = DEFAULT_CURVE.startFdv, endFdv = DEFAULT_CURVE.endFdv, quoteDecimals = 6, launchFee = 10, baseFeeBps = DEFAULT_CURVE.baseFeeBps, snipeStartBps = DEFAULT_CURVE.snipeStartBps, snipeWindowSecs = DEFAULT_CURVE.snipeWindowSecs, maxCreatorBuyBps = DEFAULT_CURVE.maxCreatorBuyBps } = {}) {
+export function curveParams({ startFdv = DEFAULT_CURVE.startFdv, endFdv = DEFAULT_CURVE.endFdv, quoteDecimals = 9, launchFee = DEFAULT_CURVE.launchFee, baseFeeBps = DEFAULT_CURVE.baseFeeBps, snipeStartBps = DEFAULT_CURVE.snipeStartBps, snipeWindowSecs = DEFAULT_CURVE.snipeWindowSecs, maxCreatorBuyBps = DEFAULT_CURVE.maxCreatorBuyBps } = {}) {
   const start = parseAmount(startFdv, quoteDecimals);
   const end = parseAmount(endFdv, quoteDecimals);
   if (start <= 0n || end <= start) throw new Error('endFdv must be greater than startFdv > 0.');
@@ -191,7 +196,8 @@ export function curveParams({ startFdv = DEFAULT_CURVE.startFdv, endFdv = DEFAUL
   const remainingAtEnd = isqrt(virtualToken * virtualToken * start / end); // Vt / √m
   const curveSupply = virtualToken - remainingAtEnd;
   const virtualQuote = (start * virtualToken + TOKEN_SUPPLY - 1n) / TOKEN_SUPPLY;
-  const fee = Number(launchFee) === 0 ? 0n : parseAmount(launchFee, quoteDecimals);
+  // The creation fee is always charged in SOL, so it is encoded in lamports whatever the pair.
+  const fee = Number(launchFee) === 0 ? 0n : parseAmount(launchFee, 9);
   return { virtualQuote, virtualToken, curveSupply, baseFeeBps, snipeStartBps, snipeWindowSecs, maxCreatorBuyBps, launchFee: fee };
 }
 
@@ -401,11 +407,15 @@ export function createElpidaSolana(web3, programIdInput) {
     launch({ creator, config, mint, name, symbol, firstBuy, minTokensOut, reward }) {
       const pool = poolPda(mint);
       return ix([
-        meta(creator, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(config.treasury), meta(qata(config.treasury, config), true),
+        meta(creator, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(config.treasury, true),
         meta(mint, true, true), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true),
         meta(qata(creator, config), true), meta(ata(creator, mint), true), meta(tokenProgram), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId),
         meta(betaGatePda), meta(betaCreatorPda(creator)),
       ], concat(DISCRIMINATORS.launch, str(name), str(symbol), u64(firstBuy), u64(minTokensOut), key(reward).toBytes()));
+    },
+    /** Upgrade authority: reprices a config for future launches. The fee schedule must stay the same. */
+    updateCurveConfig({ authority, config = configPda, params }) {
+      return ix([meta(authority, false, true), meta(config, true), meta(programId), meta(programDataAddress)], concat(DISCRIMINATORS.updateCurveConfig, encodeCurveParams(params)));
     },
     /** Succeeds only on the test build; the mainnet build fails with TestNetworksOnly (6022). */
     testBuildCheck: () => ix([], DISCRIMINATORS.testBuildCheck),

@@ -1,7 +1,9 @@
 //! Elpida launchpad for Solana, model 3: virtual-reserve bonding curve. NOT AUDITED.
 //!
 //! - Trading pairs: one `CurveConfig` per quote mint (wrapped SOL for native SOL, USDC, an xStock or
-//!   another approved token), each with its own curve parameters and creation fee in that asset.
+//!   another approved token), each with its own curve parameters. The creation fee is always charged
+//!   in SOL (lamports) to the treasury wallet, whatever the pair, and the upgrade authority can reprice
+//!   a config for future launches with `update_curve_config` (existing pools keep their own values).
 //!   Quote mints may be classic SPL or Token-2022. Mints with transfer fees, an active transfer hook,
 //!   non-transferability, frozen-by-default accounts or a permanent delegate are rejected at config
 //!   time: PumpSwap will not create a pool for permanent-delegate quotes (which includes xStocks), so
@@ -69,7 +71,7 @@ pub struct CurveParams {
     pub snipe_start_bps: u16,
     pub snipe_window_secs: u32,
     pub max_creator_buy_bps: u16,
-    /// Creation fee in the quote asset's base units (about $10 worth).
+    /// Creation fee in lamports (SOL), charged on every launch whatever the trading pair.
     pub launch_fee: u64,
 }
 
@@ -92,6 +94,24 @@ pub mod elpida_launchpad {
         let (quote_mint, treasury) = (ctx.accounts.quote_mint.key(), ctx.accounts.treasury.key());
         check_quote_mint(&ctx.accounts.quote_mint.to_account_info())?;
         write_config(&mut ctx.accounts.curve_config, quote_mint, ctx.accounts.quote_mint.decimals, treasury, &params, bump)
+    }
+
+    /// Upgrade authority: reprices an existing config for future launches (native SOL pricing set by the
+    /// team). Pools copy the curve values at launch, so live pools are unaffected. The fee schedule
+    /// (base fee and anti-snipe decay) is read by live pools on every trade and therefore cannot change.
+    pub fn update_curve_config(ctx: Context<UpdateCurveConfig>, params: CurveParams) -> Result<()> {
+        let config = &mut ctx.accounts.curve_config;
+        require!(
+            params.base_fee_bps == config.base_fee_bps && params.snipe_start_bps == config.snipe_start_bps && params.snipe_window_secs == config.snipe_window_secs,
+            ElpidaError::FeeScheduleFixed
+        );
+        let (quote_mint, decimals, treasury, bump) = (config.quote_mint, config.quote_decimals, config.treasury, config.bump);
+        write_config(config, quote_mint, decimals, treasury, &params, bump)?;
+        emit!(CurveConfigUpdated {
+            config: config.key(), quote_mint, virtual_quote: params.virtual_quote, virtual_token: params.virtual_token,
+            curve_supply: params.curve_supply, launch_fee: params.launch_fee, max_creator_buy_bps: params.max_creator_buy_bps,
+        });
+        Ok(())
     }
 
     /// TEST NETWORKS ONLY (devnet / localnet): creates "Elpida tUSDC", a valueless 6-decimal stand-in
@@ -160,7 +180,12 @@ pub mod elpida_launchpad {
         let a = &ctx.accounts;
         let tp = a.token_program.to_account_info();
         let decimals = a.quote_mint.decimals;
-        quote_transfer(&a.quote_token_program, &a.quote_mint, a.creator_quote.to_account_info(), a.treasury_quote.to_account_info(), a.creator.to_account_info(), a.curve_config.launch_fee, decimals, &[])?;
+        if a.curve_config.launch_fee > 0 {
+            system_program::transfer(
+                CpiContext::new(a.system_program.to_account_info(), system_program::Transfer { from: a.creator.to_account_info(), to: a.treasury.to_account_info() }),
+                a.curve_config.launch_fee,
+            )?;
+        }
         token::mint_to(
             CpiContext::new(tp.clone(), MintTo { mint: a.mint.to_account_info(), to: a.token_vault.to_account_info(), authority: a.creator.to_account_info() }),
             TOKEN_SUPPLY,
@@ -784,6 +809,17 @@ pub struct AddCurveConfig<'info> {
 }
 
 #[derive(Accounts)]
+pub struct UpdateCurveConfig<'info> {
+    pub authority: Signer<'info>,
+    #[account(mut)]
+    pub curve_config: Box<Account<'info, CurveConfig>>,
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ ElpidaError::Unauthorized)]
+    pub program: Program<'info, crate::program::ElpidaLaunchpad>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ ElpidaError::Unauthorized)]
+    pub program_data: Box<Account<'info, ProgramData>>,
+}
+
+#[derive(Accounts)]
 pub struct CreateTestUsdc<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
@@ -824,10 +860,9 @@ pub struct Launch<'info> {
     pub curve_config: Box<Account<'info, CurveConfig>>,
     #[account(mint::token_program = quote_token_program)]
     pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
-    /// CHECK: verified against curve_config.treasury.
+    /// CHECK: verified against curve_config.treasury; receives the SOL creation fee.
+    #[account(mut)]
     pub treasury: UncheckedAccount<'info>,
-    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = treasury, associated_token::token_program = quote_token_program)]
-    pub treasury_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
     #[account(init, payer = creator, mint::decimals = TOKEN_DECIMALS, mint::authority = creator)]
     pub mint: Box<Account<'info, Mint>>,
     #[account(init, payer = creator, space = 8 + CurvePool::INIT_SPACE, seeds = [b"curve", mint.key().as_ref()], bump)]
@@ -1128,6 +1163,8 @@ impl<'info> HarvestLpFees<'info> {
 // Trade events carry post-trade state so an indexer can derive price
 // ((virtual_quote) / token_reserve), market cap and candles from events alone.
 #[event]
+pub struct CurveConfigUpdated { pub config: Pubkey, pub quote_mint: Pubkey, pub virtual_quote: u64, pub virtual_token: u64, pub curve_supply: u64, pub launch_fee: u64, pub max_creator_buy_bps: u16 }
+#[event]
 pub struct BetaGateSet { pub authority: Pubkey, pub enabled: bool }
 #[event]
 pub struct BetaCreatorSet { pub creator: Pubkey, pub allowed: bool }
@@ -1172,4 +1209,5 @@ pub enum ElpidaError {
     #[msg("This token cannot be a trading pair: PumpSwap or the curve cannot handle its token extensions")] UnsupportedQuote,
     #[msg("This instruction exists only on test networks")] TestNetworksOnly,
     #[msg("Launches are invite-only during the beta")] BetaClosed,
+    #[msg("The fee schedule of an existing config cannot change; live pools read it")] FeeScheduleFixed,
 }

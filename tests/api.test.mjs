@@ -23,8 +23,11 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal((await fetch(`${base}/metadata-cache.mjs`)).status,200);
     assert.equal((await fetch(`${base}/launch-capabilities.mjs`)).status,200);
     assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
-    assert.equal((await request('faucet', {}, { 'X-Elpida-Token': 'wrong' })).status, 403);
-    assert.equal((await request('faucet', {}, { Origin: 'https://foreign.example' })).status, 403);
+    assert.equal((await request('withdraw', {}, { 'X-Elpida-Token': 'wrong' })).status, 403);
+    assert.equal((await request('withdraw', {}, { Origin: 'https://foreign.example' })).status, 403);
+    assert.equal((await request('faucet', {})).status, 404, 'no test-dollar faucet: pricing is native only');
+    assert.equal(config.local.launchFee, '0.002');
+    assert.ok(config.pricing['base-sepolia'], 'EVM native pricing is served to the browser');
     // Fetch normalizes Host, so send this header with the raw HTTP client.
     const foreignHostStatus = await new Promise((done, reject) => {
       const req = httpRequest(`${base}/api/state`, { headers: { Host: 'foreign.example' } }, response => { response.resume(); done(response.statusCode); });
@@ -39,7 +42,7 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal(await hostedStatus('/', {Host:'elpida-preview.up.railway.app',Origin:'https://foreign.example'}), 403);
     assert.equal(await hostedStatus('/health', {Host:'healthcheck.railway.app'}), 200);
     assert.equal(await hostedStatus('/api/config', {Host:'healthcheck.railway.app'}), 403);
-    assert.equal((await state()).balance, '10000.0');
+    assert.ok(Number((await state()).balance) > 9999, 'balances are native ETH');
     const bytes=Buffer.alloc(MAX_IMAGE_BYTES);bytes.write('GIF89a');
     const large=await request('launch',{name:'Upload boundary',symbol:'INVALID!',firstBuy:'25',image:'data:image/gif;base64,'+bytes.toString('base64')});
     assert.equal(large.status,400); // Valid body size reaches launch validation rather than HTTP 413.
@@ -47,57 +50,57 @@ test('localhost API exercises launch, trading, fee payout and request protection
   let address;
   await t.test('launches with a mandatory first buy and rejects invalid input', async () => {
     assert.equal((await request('launch', { name: 'No buy', symbol: 'ZERO', firstBuy: '0' })).status, 400);
-    assert.equal((await request('launch', { name: 'Invalid', symbol: '<script>', firstBuy: '25', pair: 'usdc' })).status, 400);
+    assert.equal((await request('launch', { name: 'Invalid', symbol: '<script>', firstBuy: '0.025' })).status, 400);
+    assert.equal((await request('launch', { name: 'Dollar', symbol: 'USD', firstBuy: '25', pair: 'usdc' })).status, 400, 'no USDC pair');
     const before = await state();
-    assert.equal((await request('launch', {name:'Bad links',symbol:'BAD',firstBuy:'25',website:'javascript:alert(1)'})).status,400);
+    assert.equal((await request('launch', {name:'Bad links',symbol:'BAD',firstBuy:'0.025',website:'javascript:alert(1)'})).status,400);
     assert.equal((await state()).balance,before.balance);
     const metadata = {description:'A garden for our community 🌱',image:'https://example.com/garden.png',website:'https://example.com/',twitter:'https://x.com/garden',telegram:'https://t.me/garden',discord:'https://discord.gg/garden'};
-    const result = await request('launch', { name: 'API Garden', symbol: 'APIG', firstBuy: '25', pair: 'usdc',...metadata });
+    const treasuryBefore = Number(before.treasuryBalance);
+    const result = await request('launch', { name: 'API Garden', symbol: 'APIG', firstBuy: '0.025',...metadata });
     assert.equal(result.status, 200);
     address = result.body.token;
     const snapshot = await state();
     assert.equal(snapshot.tokens.length, 1);
-    assert.equal(snapshot.balance, '9965.0');
-    assert.equal(snapshot.treasuryBalance, '10.0');
-    assert.equal(snapshot.tokens[0].reserve, '24.6875');
+    const spent = Number(before.balance) - Number(snapshot.balance);
+    assert.ok(spent > 0.027 && spent < 0.1, 'creation fee 0.002 ETH + first buy 0.025 ETH + gas');
+    assert.ok(Math.abs(Number(snapshot.treasuryBalance) - treasuryBefore - 0.002) < 1e-9, 'treasury received the 0.002 ETH creation fee');
+    assert.equal(snapshot.tokens[0].reserve, '0.0246875');
+    assert.equal(snapshot.tokens[0].quoteSymbol, 'ETH');
     assert.ok(Number(snapshot.tokens[0].balance) > 0);
     assert.equal(snapshot.tokens[0].liquidityLocked, false);
-    assert.equal(snapshot.tokens[0].pair, 'usdc');
+    assert.equal(snapshot.tokens[0].pair, 'native');
     assert.equal(snapshot.tokens[0].graduated, false);
     assert.deepEqual(snapshot.tokens[0].metadata,metadata);
     assert.deepEqual((await (await fetch(`${base}/api/tokens/${address}`)).json()).metadata,metadata);
     assert.deepEqual((await (await fetch(`${base}/api/tokens`)).json())[0].metadata,metadata);
   });
   await t.test('quotes and executes a buy and full sell from the trader account', async () => {
-    const quote = await request('quote', { token: address, side: 'buy', amount: '10' });
+    const quote = await request('quote', { token: address, side: 'buy', amount: '0.01' });
     assert.equal(quote.status, 200);
-    assert.equal(quote.body.fee, '0.125');
-    assert.equal((await request('buy', { token: address, amount: '10', account: '1', slippage: '0.5' })).status, 200);
+    assert.equal(quote.body.fee, '0.000125');
+    assert.equal((await request('buy', { token: address, amount: '0.01', account: '1', slippage: '0.5' })).status, 200);
     const held = (await state('1')).tokens[0].balance;
     assert.equal(held, quote.body.out);
     const sell = await request('quote', { token: address, side: 'sell', amount: held });
     assert.equal(sell.status, 200);
     assert.equal((await request('sell', { token: address, amount: held, account: '1', slippage: '0.5' })).status, 200);
     assert.equal((await state('1')).tokens[0].balance, '0.0');
-    assert.equal((await request('buy', { token: address, amount: '10', slippage: '50' })).status, 400);
+    assert.equal((await request('buy', { token: address, amount: '0.01', slippage: '50' })).status, 400);
   });
-  await t.test('pays accrued fees, adds faucet balance and survives rejected requests', async () => {
+  await t.test('pays accrued fees and survives rejected requests', async () => {
     const before = await state();
     assert.equal((await request('withdraw', { token: address, account: '1' })).status, 200);
     const after = await state();
     assert.equal(after.tokens[0].creatorFees, '0.0');
     assert.equal(after.tokens[0].protocolFees, '0.0');
     assert.equal(after.tokens[0].reserve, before.tokens[0].reserve);
-    assert.equal((await request('faucet', { account: '2' })).status, 400);
-    assert.equal((await request('faucet', {})).status, 200);
-    assert.equal(Number((await state()).balance), Number(after.balance) + 1000);
+    assert.equal((await request('withdraw', { token: address, account: '2' })).status, 400);
   });
-  await t.test('native pairing pays only the creation fee in USDC and trades native currency', async () => {
-    const before = await state();
+  await t.test('a second native launch trades native currency', async () => {
     const result = await request('launch', { name: 'Native Garden', symbol: 'NATIVE', pair: 'native', firstBuy: '0.01' });
     assert.equal(result.status, 200);
     const snapshot = await state();
-    assert.equal(Number(snapshot.balance), Number(before.balance) - 10);
     const token = snapshot.tokens.find(t => t.address === result.body.token);
     assert.equal(token.quoteSymbol, 'ETH');
     assert.equal(token.reserve, '0.009875');

@@ -1,4 +1,4 @@
-import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_FEES, TEST_USDC_FAUCET_MAX, WSOL_MINT, harvestNow, withdrawOut } from '/elpida-solana.mjs';
+import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut } from '/elpida-solana.mjs';
 import {normalizeMetadata} from './metadata.mjs';
 import { PAIR_LIMITS } from '/pairs.mjs';
 import { withWalletTimeout, walletErrorText } from './wallet.mjs';
@@ -27,20 +27,19 @@ const readMetadata=async key=>{try{return normalizeMetadata(await readMetadataCa
 const web3 = globalThis.solanaWeb3;
 
 // Browser-wallet flow for the Elpida Solana program, model 3 (Phantom, Solflare or Backpack).
-// Same surface as TestnetWallet so the UI can treat every chain alike. Launches use a USDC virtual
-// curve ($5k starting FDV, complete at $50k FDV); the anti-snipe fee starts at 90% and decays to the
+// Same surface as TestnetWallet so the UI can treat every chain alike. Pricing is native: launches pair
+// with SOL by default, curves are sized in SOL and every launch pays its creation fee in SOL, at the
+// values the team sets in config/native-pricing.json. The anti-snipe fee starts at 90% and decays to the
 // base fee over the first minute, with the surplus locked into the token's liquidity. A complete curve
 // migrates (anyone can trigger it) into a PumpSwap pool whose LP stays locked by the program; LP fee
-// growth is harvested 50/50 to the treasury and the creator reward wallet. On test networks the program
-// also has an Elpida tUSDC config (free faucet), used for new launches so curves can really complete;
-// pools always trade through the config they were launched with.
+// growth is harvested 50/50 to the treasury and the creator reward wallet. Pools always trade through
+// the config they were launched with.
 const MAX_U64 = (1n << 64n) - 1n;
 // Quote with a clock two seconds early: a slightly higher anti-snipe fee, so slippage limits stay safe.
 const chainNow = () => Math.floor(Date.now() / 1000) - 2;
 export class SolanaWallet {
   constructor(config, onProgress) {
     this.config = config; this.net = config.solana; this.onProgress = onProgress;
-    this.usesTestToken = false;
     this.launches = new Map();
     // Mainnet uses the server's RPC proxy (a relative URL), so the provider key stays server-side.
     this.connection = web3 ? new web3.Connection(new URL(this.net.rpcUrl, location.origin).href, 'confirmed') : null;
@@ -95,16 +94,16 @@ export class SolanaWallet {
     throw new Error('Solana programs are deployed from a terminal, not the browser: run npm run solana:deploy once, then restart npm run dev.');
   }
   /**
-   * Loads every trading-pair config the deployment records (SOL, USDC, tUSDC, test paired token), each
-   * checked on-chain, with its quote mint's token program. Older deployments list only USDC and tUSDC.
+   * Loads every trading-pair config the deployment records (SOL and, on test networks, the test paired
+   * token), each checked on-chain, with its quote mint's token program. Dollar (USDC) configs from older
+   * deployments are ignored: pricing is native only.
    */
   async loadConfig() {
     if (this.programConfig) return this.programConfig;
     const c = this.client;
-    const listed = Array.isArray(this.deployment.pairs) && this.deployment.pairs.length ? this.deployment.pairs : [
-      { kind: 'usdc', key: 'usdc', symbol: 'USDC', name: 'Circle test USDC', config: c.configPda.toBase58() },
-      { kind: 'usdc', key: 'tusdc', symbol: 'tUSDC', name: 'Elpida tUSDC (free test USDC, no value)', config: c.configFor(c.testUsdcMint).toBase58(), test: true, faucet: '25000' },
-    ];
+    const listed = (Array.isArray(this.deployment.pairs) && this.deployment.pairs.length ? this.deployment.pairs : [
+      { kind: 'native', key: 'sol', symbol: 'SOL', name: 'SOL (wrapped automatically)', config: c.configFor(new web3.PublicKey(WSOL_MINT)).toBase58() },
+    ]).filter(p => p.kind !== 'usdc');
     const infos = await this.connection.getMultipleAccountsInfo(listed.map(p => new web3.PublicKey(p.config)));
     this.configs = new Map();
     listed.forEach((p, i) => {
@@ -113,15 +112,13 @@ export class SolanaWallet {
       const config = { address: new web3.PublicKey(p.config), ...c.decodeConfig(info.data), symbol: p.symbol, name: p.name ?? p.symbol, kind: p.kind, key: p.key, test: !!p.test, faucet: p.faucet ?? null };
       if (config.modelVersion !== 3) return;
       config.wsol = config.quoteMint.toBase58() === WSOL_MINT;
-      if (p.key === 'usdc' && !p.test && this.net.quote.address && config.quoteMint.toBase58() !== this.net.quote.address) return;
       this.configs.set(p.config, config);
     });
-    if (!this.configs.size) throw new Error('The Solana curve configuration is missing. Upgrade the devnet program with solana-upgrade.cmd (npm.cmd run solana:deploy -- --upgrade).');
+    if (!this.configs.size) throw new Error('The Solana SOL pair is not set up. Upgrade the program and run the deploy again (solana-upgrade.cmd, then npm.cmd run solana:deploy).');
     const mints = await this.connection.getMultipleAccountsInfo([...this.configs.values()].map(cfg => cfg.quoteMint));
     [...this.configs.values()].forEach((cfg, i) => { cfg.quoteTokenProgram = mints[i]?.owner ?? c.tokenProgram; });
     const all = [...this.configs.values()];
-    const launch = all.find(cfg => cfg.kind === 'usdc' && cfg.test) ?? all.find(cfg => cfg.kind === 'usdc') ?? all[0];
-    this.usesTestToken = Boolean(launch.test);
+    const launch = all.find(cfg => cfg.kind === 'native') ?? all[0];
     this.programConfig = launch; this.decimals = launch.quoteDecimals;
     return launch;
   }
@@ -130,7 +127,8 @@ export class SolanaWallet {
     const all = [...(this.configs?.values() ?? [])];
     const asset = cfg => {
       const d = cfg.quoteDecimals, id = cfg.address.toBase58();
-      return { id, symbol: cfg.symbol, name: cfg.name, decimals: d, test: cfg.test, wsol: cfg.wsol, feeAmount: formatAmount(cfg.launchFee, d), feeSymbol: cfg.symbol,
+      // The creation fee is always lamports (SOL), whatever the pair.
+      return { id, symbol: cfg.symbol, name: cfg.name, decimals: d, test: cfg.test, wsol: cfg.wsol, feeAmount: formatAmount(cfg.launchFee, 9), feeSymbol: 'SOL',
         curve: { vq: Number(cfg.virtualQuote) / 10 ** d, vt: Number(cfg.virtualToken) / 10 ** TOKEN_DECIMALS, cap: Number(cfg.curveSupply) / 10 ** TOKEN_DECIMALS, feeBps: cfg.baseFeeBps },
         faucet: cfg.test && cfg.faucet ? { label: `Get ${Number(cfg.faucet).toLocaleString()} ${cfg.symbol}`, action: 'faucet', body: { asset: id } } : cfg.wsol && this.net.gasFaucet ? { label: 'Get devnet SOL', href: this.net.gasFaucet } : null };
     };
@@ -139,7 +137,7 @@ export class SolanaWallet {
       if (assets.length) return { assets };
       return { assets: [], unavailable: PAIR_LIMITS.solana[kind] ?? (!this.deployment ? 'The Solana program is not deployed yet.' : this.net.mainnet ? `No ${kind === 'token' ? 'paired token' : 'asset of this kind'} is approved on mainnet yet.` : `Not set up on ${this.net.name} yet. Run solana-upgrade.cmd to add the SOL and test-token pairs.`) };
     };
-    return { native: group('native'), usdc: group('usdc'), xstock: group('xstock'), token: group('token') };
+    return { native: group('native'), xstock: group('xstock'), token: group('token') };
   }
   /** The config a pool was launched with (null for pools of unknown configs). */
   configOf(pool) { return this.configs?.get(pool.config.toBase58()) ?? null; }
@@ -160,7 +158,7 @@ export class SolanaWallet {
   static SOL_HEADROOM = 30_000_000n;
   async state() {
     this.checkWallet();
-    if (!this.deployment) return { wallet: this.address, balance: '0', tokens: [], activity: [], treasuryBalance: '0', undeployed: true };
+    if (!this.deployment) return { wallet: this.address, balance: '0', balanceSymbol: 'SOL', nativeSymbol: 'SOL', tokens: [], activity: [], treasuryBalance: '0', undeployed: true };
     const launchConfig = await this.loadConfig();
     await this.loadBeta();
     const accounts = await this.connection.getProgramAccounts(this.client.programId, { filters: [{ dataSize: POOL_SIZE }] });
@@ -180,7 +178,7 @@ export class SolanaWallet {
       const remainingBuy = complete ? 0n : quoteBuy(pool, MAX_U64, config.baseFeeBps, config.baseFeeBps).gross;
       const token = {
         address, pool: pool.pubkey.toBase58(), name: pool.name, symbol: pool.symbol, creator: pool.creator.toBase58(), reward: pool.reward.toBase58(),
-        created: Number(pool.createdAt)*1000, metadata:await readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair: config.kind ?? 'usdc', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: 'PumpSwap',
+        created: Number(pool.createdAt)*1000, metadata:await readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair: config.kind ?? 'native', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: 'PumpSwap',
         reserve: formatAmount(pool.realQuote, d), liquidityBonus: formatAmount(pool.liquidityBonus, d), lockedLiquidity: formatAmount(stats.lockedLiquidity, d),
         sold: formatAmount(pool.sold, TOKEN_DECIMALS), circulatingSupply: formatAmount(pool.sold, TOKEN_DECIMALS), saleCap: formatAmount(pool.curveSupply, TOKEN_DECIMALS),
         supply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS), balance: formatAmount(this.client.tokenAmount(holdings[index]?.data), TOKEN_DECIMALS),
@@ -204,10 +202,14 @@ export class SolanaWallet {
       }
       return token;
     }));
-    const [balance, treasury, lamports] = await Promise.all([this.quoteBalance(this.publicKey, launchConfig), this.quoteBalance(launchConfig.treasury, launchConfig), this.connection.getBalance(this.publicKey)]);
+    const [treasury, lamports] = await Promise.all([this.connection.getBalance(launchConfig.treasury), this.connection.getBalance(this.publicKey)]);
     const pairBalances = {};
     for (const cfg of this.configs.values()) pairBalances[cfg.address.toBase58()] = formatAmount(await this.quoteBalance(this.publicKey, cfg), cfg.quoteDecimals);
-    return { wallet: this.address, balance: formatAmount(balance, launchConfig.quoteDecimals), balanceSymbol: launchConfig.symbol, pairBalances, nativeBalance: formatAmount(BigInt(lamports), 9), nativeSymbol: 'SOL', tokens, activity: [], treasuryBalance: formatAmount(treasury, launchConfig.quoteDecimals) };
+    const sol = formatAmount(BigInt(lamports), 9);
+    // Live native pricing of the SOL pair (set by the team with scripts/native-pricing.mjs).
+    const start = poolStats({ ...launchConfig, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 }, launchConfig.quoteDecimals);
+    const pricing = { launchFee: formatAmount(launchConfig.launchFee, 9), startFdv: String(start.marketCap), symbol: 'SOL', matches: true, owner: false };
+    return { wallet: this.address, balance: sol, balanceSymbol: 'SOL', pairBalances, nativeBalance: sol, nativeSymbol: 'SOL', tokens, activity: [], pricing, treasuryBalance: formatAmount(BigInt(treasury), 9) };
   }
   dexUrl(pumpPool) { return this.net.cluster === 'devnet' || this.net.cluster === 'localnet' ? this.addressUrl(pumpPool) : `https://dexscreener.com/solana/${pumpPool}`; }
   /** Migration record, PumpSwap reserves and harvestable LP for migrated pools. */
@@ -281,14 +283,14 @@ export class SolanaWallet {
     let refs = this.refsOf(config);
     if (action === 'faucet') {
       const target = body?.asset ? this.configs.get(String(body.asset)) : config;
-      if (!target?.test || !target.faucet) throw new Error(target?.wsol ? 'Get devnet SOL from faucet.solana.com.' : 'Get Solana Devnet test USDC from faucet.circle.com.');
-      const amount = target.key === 'tusdc' ? TEST_USDC_FAUCET_MAX : parseAmount(target.faucet, target.quoteDecimals);
+      if (!target?.test || !target.faucet) throw new Error('Get devnet SOL from faucet.solana.com.');
+      const amount = parseAmount(target.faucet, target.quoteDecimals);
       const signature = await this.sendInstructions([this.client.testUsdcFaucet({ user: this.publicKey, mint: target.quoteMint, tokenProgram: target.quoteTokenProgram, amount })], [], `Confirm the free ${target.symbol} mint in your wallet…`);
       return { hash: signature, message: `Minted ${Number(formatAmount(amount, target.quoteDecimals)).toLocaleString()} ${target.symbol} (test asset, no value).` };
     }
     if (action === 'launch') {
       if (!(await this.loadBeta()).allowed) throw new Error('Launches are invite-only during the beta, and this wallet is not on the list yet. Ask the Elpida team to add it.');
-      const kind = body.pair ?? 'usdc';
+      const kind = body.pair ?? 'native';
       const options = this.pairOptions()[kind];
       if (!options) throw new Error('Choose a trading pair.');
       if (!options.assets.length) throw new Error(options.unavailable);
@@ -305,15 +307,21 @@ export class SolanaWallet {
       const fresh = { virtualQuote: config.virtualQuote, virtualToken: config.virtualToken, curveSupply: config.curveSupply, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 };
       // The creator's first buy pays only the base fee (no anti-snipe tax); a buy beyond the curve is capped.
       const q = quoteBuy(fresh, firstBuy, config.baseFeeBps, config.baseFeeBps);
-      const needed = config.launchFee + q.gross;
-      if (await this.quoteBalance(this.publicKey, config) < needed + (config.wsol ? SolanaWallet.SOL_HEADROOM : 0n)) throw new Error(config.wsol ? `You need about ${formatAmount(needed + SolanaWallet.SOL_HEADROOM, 9)} SOL (creation fee, first buy and account rent). Get devnet SOL at faucet.solana.com.` : config.test ? `You need ${formatAmount(needed, d)} ${config.symbol}. Use its test faucet in Network and funds.` : `You need ${formatAmount(needed, d)} test USDC on ${this.net.name}. Get it from faucet.circle.com (choose Solana Devnet).`);
+      // The SOL creation fee is paid from plain SOL; for SOL pairs the first buy is wrapped from it too.
+      const solNeeded = config.launchFee + (config.wsol ? q.gross : 0n) + SolanaWallet.SOL_HEADROOM;
+      const getSol = this.net.mainnet ? '' : ' Get devnet SOL at faucet.solana.com.';
+      if (config.wsol) { if (await this.quoteBalance(this.publicKey, config) < solNeeded) throw new Error(`You need about ${formatAmount(solNeeded, 9)} SOL (creation fee, first buy and account rent).${getSol}`); }
+      else {
+        if (BigInt(await this.connection.getBalance(this.publicKey)) < solNeeded) throw new Error(`You need about ${formatAmount(solNeeded, 9)} SOL for the creation fee and account rent.${getSol}`);
+        if (await this.quoteBalance(this.publicKey, config) < q.gross) throw new Error(`You need ${formatAmount(q.gross, d)} ${config.symbol} for the first buy.${config.test ? ' Use its test faucet in Network and funds.' : ''}`);
+      }
       const mint = web3.Keypair.generate();
       const signature = await this.sendInstructions([
         this.client.computeBudget(),
-        ...await this.wrapFor(config, needed),
+        ...await this.wrapFor(config, q.gross),
         this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward }),
         ...(config.wsol ? [this.client.unwrapSol(this.publicKey)] : []),
-      ], [mint], 'Confirm your token launch in your wallet…');
+      ], [mint], `Confirm your token launch in your wallet (${formatAmount(config.launchFee, 9)} SOL creation fee)…`);
       const saved=await writeMetadataCache(metadataKey(this.deployment.programId,mint.publicKey.toBase58()),metadata);
       return { hash: signature, token: mint.publicKey.toBase58(), message: `Your token is live on ${this.net.name}.${saved?' Metadata saved in this browser.':' Metadata could not be saved in this browser.'}` };
     }

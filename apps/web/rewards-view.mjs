@@ -41,7 +41,7 @@ function feesSection(ctx, mine) {
   section.append(h('p.small.muted', 'Distributing sends each share to its fixed recipient: the creator wallet or reward treasury, and Elpida. Anyone can trigger it; the recipients cannot be changed.'));
   const table = h('div.activity');
   for (const token of mine) {
-    const q = token.quoteSymbol ?? 'USDC';
+    const q = token.quoteSymbol ?? ctx.state?.nativeSymbol ?? 'ETH';
     const harvest = Number(token.harvestableQuote) > 0;
     const nothing = !token.rewardVault && !token.feeSplitter && Number(token.protocolFees) + Number(token.creatorFees) === 0 && !harvest;
     const error = h('p.error-text', { role: 'alert' });

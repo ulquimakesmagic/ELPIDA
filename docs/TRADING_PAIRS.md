@@ -1,20 +1,18 @@
 # Trading pairs
 
-Every network uses the same four pair kinds, defined once in `packages/core/pairs.mjs`. The launch flow always shows all four; a kind that a network cannot offer is shown disabled with the reason.
+Every network uses the same three pair kinds, defined once in `packages/core/pairs.mjs`. The launch flow always shows all three; a kind that a network cannot offer is shown disabled with the reason. There are no dollar (USDC) pairs: pricing is native (see `docs/NATIVE_PRICING.md`).
 
 | Kind | Local simulation | Base Sepolia (DEX launchpad) | Other EVM testnets (basic launchpad) | Solana |
 |---|---|---|---|---|
 | Native coin | ETH | ETH | ETH / tBNB | SOL (wrapped automatically) |
-| USDC | Local test USDC | Circle test USDC | Elpida tUSDC | tUSDC and Circle devnet USDC |
 | xStock | TEST-STOCK (simulated) | TEST-STOCK once the owner approves it | Not available: needs DEX graduation | **Not available:** PumpSwap refuses xStock mints |
-| Paired token | Graduated USDC-paired Elpida tokens | TEST-MEME once the owner approves it | Not available: needs DEX graduation | TEST-MEME |
+| Paired token | Graduated ETH-paired Elpida tokens | TEST-MEME once the owner approves it | Not available: needs DEX graduation | TEST-MEME |
 
 ## Creation fee
 
-- **EVM:** always 10 USDC, whatever the pair (the factory is fixed this way).
-- **Solana:** charged in the pair asset, about $10 worth, set per pair config (0.01 SOL on test networks).
+Always paid in the network's own coin, whatever the pair, at the value in `config/native-pricing.json` (for example 0.01 SOL on Solana Devnet, 0.0001 ETH on Base Sepolia). The team changes it with `scripts/native-pricing.mjs` (Solana) or **Apply native pricing** (EVM).
 
-The launch flow shows the fee in its own asset, and adds it to the purchase when both are in the same asset.
+The launch flow shows the fee in the native coin, and adds it to the purchase when the pair is also the native coin.
 
 ## Setting up the test pairs
 

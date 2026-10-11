@@ -5,22 +5,22 @@ import {normalizeRewardPolicy,holderDistribution} from '../web/reward-policy.mjs
 import {XVerification} from './x-verification.mjs';
 const dead='0x000000000000000000000000000000000000dead';
 export class RewardEngine {
- constructor({compiled,provider,executor,verifier,quote,tokens,curveAbi,tokenAbi,dex}){
-  Object.assign(this,{provider,executor,verifier,quote,tokens,curveAbi,tokenAbi,dex});this.artifact=compiled['contracts/evm/src/ElpidaRewardVault.sol'].ElpidaRewardVault;
+ constructor({compiled,provider,executor,verifier,tokens,curveAbi,tokenAbi,dex}){
+  Object.assign(this,{provider,executor,verifier,tokens,curveAbi,tokenAbi,dex});this.artifact=compiled['contracts/evm/src/ElpidaRewardVault.sol'].ElpidaRewardVault;
   this.stockArtifact=compiled['tests/fixtures/MockRewardStock.sol'].MockRewardStock;this.records=new Map();this.challenges=new Map();this.events=[];this.xVerification=new XVerification();this.dnsResolver=resolveTxt;
  }
- async init(){this.stock=await new ContractFactory(this.stockArtifact.abi,this.stockArtifact.evm.bytecode.object,this.executor).deploy(this.quote.target);await this.stock.waitForDeployment();}
- assets(){return [...this.tokens.map(t=>({address:t.address,symbol:t.symbol,pairKind:'token',kind:'elpida',pair:t.pair,pairEligible:t.pair==='usdc'&&t.graduated===true,quoteAddress:t.quoteAddress||this.quote.target})),{address:this.stock.target,symbol:'TEST-STOCK',name:'Simulated stock (test only, not an issued xStock)',pairKind:'xstock',kind:'simulation',pair:'usdc',pairEligible:true,quoteAddress:this.quote.target}];}
- async prepare(input,owner,pair,source=this.quote.target){
+ async init(){this.stock=await new ContractFactory(this.stockArtifact.abi,this.stockArtifact.evm.bytecode.object,this.executor).deploy();await this.stock.waitForDeployment();}
+ assets(){return [...this.tokens.map(t=>({address:t.address,symbol:t.symbol,pairKind:'token',kind:'elpida',pair:t.pair,pairEligible:t.pair==='native'&&t.graduated===true,quoteAddress:t.quoteAddress||ZeroAddress})),{address:this.stock.target,symbol:'TEST-STOCK',name:'Simulated stock (test only, not an issued xStock)',pairKind:'xstock',kind:'simulation',pair:'native',pairEligible:true,quoteAddress:ZeroAddress}];}
+ async prepare(input,owner,pair,source=ZeroAddress){
   const policy=normalizeRewardPolicy(input,'local');
   if(policy.mode==='paired'){
-   const asset=this.assets().find(a=>a.address.toLowerCase()===policy.rewardToken);if(!asset||(asset.address.toLowerCase()!==String(source).toLowerCase()&&asset.quoteAddress.toLowerCase()!==String(source).toLowerCase()))throw new Error('The reward token must use the same source asset as this launch. Simulated stocks require USDC.');
+   const asset=this.assets().find(a=>a.address.toLowerCase()===policy.rewardToken);if(!asset||(asset.address.toLowerCase()!==String(source).toLowerCase()&&asset.quoteAddress.toLowerCase()!==String(source).toLowerCase()))throw new Error('The reward token must use the same source asset as this launch. Simulated stocks are bought with the native coin.');
   }
   const recipients=policy.recipients.map(r=>({...r,target:r.target||owner}));
   const vault=await new ContractFactory(this.artifact.abi,this.artifact.evm.bytecode.object,this.executor).deploy(await this.executor.getAddress(),await this.verifier.getAddress(),recipients.map(r=>r.kind==='wallet'?'0x'+'0'.repeat(64):id(r.kind+':'+r.target)),recipients.map(r=>r.kind==='wallet'?r.target:ZeroAddress),recipients.map(r=>r.bps));await vault.waitForDeployment();
   return {policy:{...policy,recipients},vault,events:[],status:'Accumulating fees',epochs:0};
  }
- async attach(record,prepared,block){prepared.token=record.address;prepared.block=block;this.records.set(record.address,prepared);await(await prepared.vault.initialize(record.address,record.curve,record.pair==='native'?ZeroAddress:(record.quoteAddress||this.quote.target))).wait();if(this.dex)await(await prepared.vault.configureDex(this.dex.v3.router.target,this.dex.v3.weth.target)).wait();record.rewardPolicy=prepared.policy;record.rewardVault=prepared.vault.target;}
+ async attach(record,prepared,block){prepared.token=record.address;prepared.block=block;this.records.set(record.address,prepared);await(await prepared.vault.initialize(record.address,record.curve,record.pair==='native'?ZeroAddress:(record.quoteAddress||ZeroAddress))).wait();if(this.dex)await(await prepared.vault.configureDex(this.dex.v3.router.target,this.dex.v3.weth.target)).wait();record.rewardPolicy=prepared.policy;record.rewardVault=prepared.vault.target;}
  async holders(record,snapshot){
   const token=new Contract(record.address,this.tokenAbi,this.provider);
   const logs=await token.queryFilter(token.filters.Transfer(),this.records.get(record.address).block,snapshot);
@@ -32,11 +32,11 @@ export class RewardEngine {
  }
  async process(record){
   const r=this.records.get(record.address);if(!r)return;
-  const source=record.pair==='native'?ZeroAddress:(record.quoteAddress||this.quote.target),d=record.quoteDecimals,v=r.vault;
+  const source=record.pair==='native'?ZeroAddress:(record.quoteAddress||ZeroAddress),d=record.quoteDecimals,v=r.vault;
   const ownCurve=new Contract(record.curve,this.curveAbi,this.executor);
   if(await ownCurve.creatorFees()>0n||await ownCurve.protocolFees()>0n)await(await ownCurve.withdrawFees()).wait();
   const graduated=await ownCurve.pool()!==ZeroAddress;
-  if(graduated&&this.dex){const locker=new Contract(await ownCurve.locker(),this.dex.lockerAbi,this.executor);await(await locker.collectFees()).wait();const splitter=new Contract(await ownCurve.feeSplitter(),this.dex.splitterAbi,this.executor);for(const asset of [record.address,record.pair==='native'?this.dex.v3.weth.target:(record.quoteAddress||this.quote.target)])await(await splitter.claim(asset,v.target)).wait();if(record.pair==='native'){const wrapped=await this.dex.v3.weth.balanceOf(v.target);if(wrapped>0n)await(await v.unwrapFees(wrapped)).wait();}}
+  if(graduated&&this.dex){const locker=new Contract(await ownCurve.locker(),this.dex.lockerAbi,this.executor);await(await locker.collectFees()).wait();const splitter=new Contract(await ownCurve.feeSplitter(),this.dex.splitterAbi,this.executor);for(const asset of [record.address,record.pair==='native'?this.dex.v3.weth.target:(record.quoteAddress||ZeroAddress)])await(await splitter.claim(asset,v.target)).wait();if(record.pair==='native'){const wrapped=await this.dex.v3.weth.balanceOf(v.target);if(wrapped>0n)await(await v.unwrapFees(wrapped)).wait();}}
   for(const asset of [source,record.address])if(await v.balance(asset)>await v.accounted(asset))await(await v.sync(asset)).wait();
   if(!r.policy.recipients.length&&graduated&&this.dex){const tokenFees=await v.strategyBalance(record.address);if(tokenFees>0n){const out=await this.dexQuote(record.address,source,tokenFees);if(out>0n)await(await v.convertDex(record.address,source,tokenFees,out*9950n/10000n||1n)).wait();}}
 
@@ -49,7 +49,7 @@ export class RewardEngine {
   if((r.policy.mode==='paired'&&r.policy.rewardToken!==source.toLowerCase())||r.policy.mode==='buyback'){
    asset=r.policy.mode==='buyback'?record.address:r.policy.rewardToken;
    const target=this.tokens.find(t=>t.address===asset);let route,out;
-   if(asset.toLowerCase()===this.stock.target.toLowerCase()){route=this.stock.target;out=amount*10n**12n/120n;}
+   if(asset.toLowerCase()===this.stock.target.toLowerCase()){route=this.stock.target;out=amount*10n**18n/(await this.stock.PRICE());}
    else {if(!target)throw new Error('Reward market missing.');const curve=new Contract(target.curve,this.curveAbi,this.provider);if(await curve.pool()!==ZeroAddress&&this.dex){route='dex';out=await this.dexQuote(source,asset,amount);}else if(await curve.complete()){r.status='Conversion paused · migrate the completed reward market first';return;}else{route=target.curve;[out]=await curve.quoteBuy(amount);}}
    if(out===0n){r.status='Waiting for a larger conversion amount';return;}
    await(await (route==='dex'?v.convertDex(source,asset,amount,out*9950n/10000n||1n):v.convert(source,asset,route,amount,out*9950n/10000n||1n))).wait();budget=await v.strategyBalance(asset);
@@ -63,8 +63,8 @@ export class RewardEngine {
  async tick(){for(const record of this.tokens){if(!this.records.has(record.address))continue;try{await this.process(record);}catch(error){this.records.get(record.address).status='Waiting · '+(error.shortMessage??error.message);}}}
  async dashboard(){
   const rows=[];
-  for(const t of this.tokens){const r=this.records.get(t.address);if(!r)continue;const source=t.pair==='native'?ZeroAddress:(t.quoteAddress||this.quote.target),assets=[source,t.address,...r.events.map(e=>e.asset)];
-   const balances=await Promise.all([...new Set(assets)].map(async asset=>{const decimals=asset===ZeroAddress?18:asset.toLowerCase()===this.quote.target.toLowerCase()?6:18;return {asset,symbol:asset===ZeroAddress?'ETH':asset.toLowerCase()===this.quote.target.toLowerCase()?'USDC':asset.toLowerCase()===this.stock.target.toLowerCase()?'TEST-STOCK':this.tokens.find(x=>x.address===asset)?.symbol??'Token',decimals,held:formatUnits(await r.vault.balance(asset),decimals),strategy:formatUnits(await r.vault.strategyBalance(asset),decimals)};}));
+  for(const t of this.tokens){const r=this.records.get(t.address);if(!r)continue;const source=t.pair==='native'?ZeroAddress:(t.quoteAddress||ZeroAddress),assets=[source,t.address,...r.events.map(e=>e.asset)];
+   const balances=await Promise.all([...new Set(assets)].map(async asset=>{const decimals=18;return {asset,symbol:asset===ZeroAddress?'ETH':asset.toLowerCase()===this.stock.target.toLowerCase()?'TEST-STOCK':this.tokens.find(x=>x.address===asset)?.symbol??'Token',decimals,held:formatUnits(await r.vault.balance(asset),decimals),strategy:formatUnits(await r.vault.strategyBalance(asset),decimals)};}));
    const recipients=await Promise.all(r.policy.recipients.map(async(recipient,index)=>{const identity=id(recipient.kind+':'+recipient.target);const verified=recipient.kind==='wallet'?recipient.target:await r.vault.verifiedWallet(identity);return {...recipient,index,verified:verified!==ZeroAddress?verified:null,balances:await Promise.all(balances.map(async a=>({...a,claimable:formatUnits(recipient.kind==='wallet'?await r.vault.claimable(recipient.target,a.asset):await r.vault.identityBalance(identity,a.asset),a.decimals)})))};}));
    const grants=[];for(let i=0;i<Number(await r.vault.grantCount());i++){const g=await r.vault.grants(i);grants.push({index:i,asset:g.asset,recipient:g.recipient,total:formatUnits(g.total,18),claimed:formatUnits(g.claimed,18),start:Number(g.start),duration:Number(g.duration)});}
    rows.push({token:t.address,symbol:t.symbol,vault:r.vault.target,policy:r.policy,status:r.status,epochs:r.epochs,events:r.events,balances,recipients,grants});

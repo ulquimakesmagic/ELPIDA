@@ -1,35 +1,45 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {network} from 'hardhat';
-import {BrowserProvider,Contract,ContractFactory,parseUnits,ZeroAddress} from 'ethers';
+import {BrowserProvider,Contract,ContractFactory,parseUnits,parseEther,ZeroAddress} from 'ethers';
 import {compileContracts} from '../scripts/compile.mjs';
 import {deployLocalV3,v3Artifacts} from '../packages/core/uniswap.mjs';
 import {rawCid} from '../apps/api/metadata-store.mjs';
+// DEX launchpad (ElpidaDexFactory, model 7): native pricing. Native pairs graduate through a WETH adapter;
+// the ERC-20 path is an approved paired token (a 6-decimal mock asset) whose creation fee is still native.
 const compiled=compileContracts({includeMocks:true}),art=n=>compiled['contracts/evm/src/'+n+'.sol'][n],mined=async p=>(await p).wait();
+const FEE=parseEther('0.002');
 async function fixture(t){
  const connection=await network.create('localTest'),provider=new BrowserProvider(connection.provider,undefined,{cacheTimeout:-1});provider.pollingInterval=10;t.after(async()=>{provider.destroy();await connection.close();});
  const signers=await Promise.all([0,1,2].map(i=>provider.getSigner(i))),addresses=await Promise.all(signers.map(s=>s.getAddress()));
  const deploy=async(a,...args)=>{const c=await new ContractFactory(a.abi,a.evm.bytecode.object,signers[0]).deploy(...args);await c.waitForDeployment();return c;};
  const usdc=await deploy(compiled['tests/fixtures/MockUSDC.sol'].MockUSDC),dex=await deployLocalV3(signers[0],compiled['tests/fixtures/LocalWrappedETH.sol'].LocalWrappedETH);
- const adapter=await deploy(art('ElpidaV3MigrationAdapter'),dex.manager.target,usdc.target,10000),factory=await deploy(art('ElpidaDexFactory'),usdc.target,addresses[2],parseUnits('2.133333333333333333',18),adapter.target);
- await mined(usdc.mint(addresses[0],parseUnits('100000',6)));return {provider,signers,addresses,usdc,dex,adapter,factory};
+ const nativeAdapter=await deploy(art('ElpidaV3MigrationAdapter'),dex.manager.target,dex.weth.target,10000);
+ const factory=await deploy(art('ElpidaDexFactory'),addresses[2],FEE,parseUnits('2.133333333333333333',18),nativeAdapter.target);
+ // The paired asset needs its own adapter and a treasury-approved template.
+ const adapter=await deploy(art('ElpidaV3MigrationAdapter'),dex.manager.target,usdc.target,10000);
+ await mined(factory.connect(signers[2]).approveQuote(usdc.target,parseUnits('5333.333333',6),adapter.target));
+ await mined(usdc.mint(addresses[0],parseUnits('100000',6)));return {provider,signers,addresses,usdc,dex,adapter,nativeAdapter,factory};
 }
 test('metadata is immutable, emitted with creation, and rolls back with a failed first buy',async t=>{
- const f=await fixture(t),uri='ipfs://'+rawCid(Buffer.from('metadata'));
- await mined(f.usdc.approve(f.factory.target,parseUnits('100000',6)));
- const before=await f.usdc.balanceOf(f.addresses[0]);
- await assert.rejects(f.factory.launchWithMetadata.staticCall('Invalid','BAD',false,parseUnits('25',6),0,f.addresses[0],'https://example.com'),/IPFS URI/);
- await assert.rejects(f.factory.launchWithMetadata.staticCall('Failed','BAD',false,parseUnits('25',6),parseUnits('1000000000',18),f.addresses[0],uri),/revert|slippage/);
- assert.equal(await f.usdc.balanceOf(f.addresses[0]),before);assert.equal((await f.factory.queryFilter(f.factory.filters.MetadataPublished())).length,0);
- const receipt=await mined(f.factory.launchWithMetadata('Shared','SHARED',false,parseUnits('25',6),0,f.addresses[0],uri));
+ const f=await fixture(t),uri='ipfs://'+rawCid(Buffer.from('metadata')),buy=parseEther('0.01');
+ const before=await f.provider.getBalance(f.addresses[2]);
+ await assert.rejects(f.factory.launchWithMetadata.staticCall('Invalid','BAD',buy,0,f.addresses[0],'https://example.com',{value:FEE+buy}),/IPFS URI/);
+ await assert.rejects(f.factory.launchWithMetadata.staticCall('Failed','BAD',buy,parseUnits('1000000000',18),f.addresses[0],uri,{value:FEE+buy}),/revert|slippage/);
+ assert.equal(await f.provider.getBalance(f.addresses[2]),before);assert.equal((await f.factory.queryFilter(f.factory.filters.MetadataPublished())).length,0);
+ const receipt=await mined(f.factory.launchWithMetadata('Shared','SHARED',buy,0,f.addresses[0],uri,{value:FEE+buy}));
+ assert.equal(await f.provider.getBalance(f.addresses[2])-before,FEE,'native creation fee');
  const events=receipt.logs.map(log=>{try{return f.factory.interface.parseLog(log);}catch{return null;}}),launch=events.find(e=>e?.name==='Launched'),metadata=events.find(e=>e?.name==='MetadataPublished');
  assert.equal(metadata.args.token,launch.args.token);assert.equal(metadata.args.uri,uri);assert.equal(await f.factory.tokenMetadataURI(launch.args.token),uri);assert.equal(await f.factory.METADATA_VERSION(),1n);
  assert.ok(!f.factory.interface.fragments.some(f=>f.type==='function'&&/^set.*metadata/i.test(f.name)));
 });
-for(const native of [false,true])test('actual Uniswap v3 graduation + swaps + permanent fee split: '+(native?'ETH':'USDC'),async t=>{
+for(const native of [true,false])test('actual Uniswap v3 graduation + swaps + permanent fee split: '+(native?'ETH':'paired token'),async t=>{
  const f=await fixture(t),first=parseUnits(native?'0.01':'100',native?18:6);
  await mined(f.usdc.approve(f.factory.target,parseUnits('100000',6)));
- const receipt=await mined(f.factory.launch('DEX demo','DEX',native,first,0,f.addresses[0],{value:native?first:0}));
+ const treasuryBefore=await f.provider.getBalance(f.addresses[2]);
+ const receipt=await mined(native?f.factory.launch('DEX demo','DEX',first,0,f.addresses[0],{value:FEE+first}):f.factory.launchPaired('DEX demo','DEX',f.usdc.target,first,0,f.addresses[0],{value:FEE}));
+ assert.equal(await f.provider.getBalance(f.addresses[2])-treasuryBefore,FEE,'creation fee in ETH whatever the pair');
+ if(!native)await assert.rejects(f.factory.launchPaired.staticCall('X','X',f.usdc.target,first,0,f.addresses[0]),/native value/);
  const ev=receipt.logs.map(l=>{try{return f.factory.interface.parseLog(l);}catch{return null;}}).find(e=>e?.name==='Launched');
  const curve=new Contract(ev.args.curve,art('ElpidaDexCurve').abi,f.signers[0]),token=new Contract(ev.args.token,art('ElpidaToken').abi,f.signers[0]);
  const remaining=await curve.completionQuote();if(!native)await mined(f.usdc.approve(curve.target,remaining));await mined(curve.buy(remaining,0,{value:native?remaining:0}));
@@ -55,7 +65,7 @@ for(const native of [false,true])test('actual Uniswap v3 graduation + swaps + pe
 
 test('active mismatched pool rejects migration atomically without losing curve reserves',async t=>{
  const f=await fixture(t);await mined(f.usdc.approve(f.factory.target,parseUnits('100000',6)));
- const receipt=await mined(f.factory.launch('Protected migration','SAFE',false,parseUnits('100',6),0,f.addresses[0]));const ev=receipt.logs.map(l=>{try{return f.factory.interface.parseLog(l);}catch{return null;}}).find(e=>e?.name==='Launched');
+ const receipt=await mined(f.factory.launchPaired('Protected migration','SAFE',f.usdc.target,parseUnits('100',6),0,f.addresses[0],{value:FEE}));const ev=receipt.logs.map(l=>{try{return f.factory.interface.parseLog(l);}catch{return null;}}).find(e=>e?.name==='Launched');
  const curve=new Contract(ev.args.curve,art('ElpidaDexCurve').abi,f.signers[0]),token=new Contract(ev.args.token,art('ElpidaToken').abi,f.signers[0]);
  const remaining=await curve.completionQuote();await mined(f.usdc.approve(curve.target,remaining));await mined(curve.buy(remaining,0));
  const first=BigInt(token.target)<BigInt(f.usdc.target),a=first?token.target:f.usdc.target,b=first?f.usdc.target:token.target;

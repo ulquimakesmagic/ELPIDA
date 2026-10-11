@@ -28,12 +28,11 @@ test('EVM test xStock and paired token: owner approval, faucet, paired launch at
     const mine = asset.connect(creator), limit = await asset.FAUCET_LIMIT();
     await (await mine.faucet(limit)).wait();
     await assert.rejects(mine.faucet(limit + 1n), /faucet limit/);
-    const usdc = new Contract(await factory.usdc(), r.config.contracts.quote.abi, creator);
-    await (await usdc.approve(factory.target, await factory.LAUNCH_FEE())).wait();
+    const fee = await factory.launchFee();
     const firstBuy = parseUnits(t.startFdv, t.decimals) / 100n;
     await (await mine.approve(factory.target, firstBuy)).wait();
     const net = firstBuy - firstBuy * 125n / 10000n, out = vt * net / (virtualQuote + net);
-    const receipt = await (await factory.connect(creator).launchPaired(`Pair ${t.symbol}`, t.key.replace(/\W/g, '').slice(0, 8).toUpperCase(), asset.target, firstBuy, out * 9950n / 10000n, await creator.getAddress())).wait();
+    const receipt = await (await factory.connect(creator).launchPaired(`Pair ${t.symbol}`, t.key.replace(/\W/g, '').slice(0, 8).toUpperCase(), asset.target, firstBuy, out * 9950n / 10000n, await creator.getAddress(), { value: fee })).wait();
     const event = receipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(l => l?.name === 'Launched');
     const curve = new Contract(event.args.curve, r.config.contracts.dexCurve.abi, r.provider);
     assert.equal(await curve.quote(), asset.target);

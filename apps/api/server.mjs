@@ -38,7 +38,7 @@ export function solanaConfig() {
     if (file) {
       try {
         const record = JSON.parse(readFileSync(file, 'utf8'));
-        if (base58.test(record.programId) && record.cluster === net.cluster) deployment = { programId: record.programId, shared: false, build: record.build ?? 'testnet', pairs: Array.isArray(record.pairs) ? record.pairs.filter(p => p && base58.test(p.config ?? '') && base58.test(p.mint ?? '') && ['native', 'usdc', 'xstock', 'token'].includes(p.kind)).map(({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test, wsol, faucet }) => ({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test: !!test, wsol: !!wsol, faucet: faucet ?? null })) : null };
+        if (base58.test(record.programId) && record.cluster === net.cluster) deployment = { programId: record.programId, shared: false, build: record.build ?? 'testnet', pairs: Array.isArray(record.pairs) ? record.pairs.filter(p => p && base58.test(p.config ?? '') && base58.test(p.mint ?? '') && ['native', 'xstock', 'token'].includes(p.kind)).map(({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test, wsol, faucet }) => ({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test: !!test, wsol: !!wsol, faucet: faucet ?? null })) : null };
       } catch {}
     }
   }
@@ -131,7 +131,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if(action==='metadata/publish')return send(200,await metadataStore.publish(body,true));
       if(action==='reward-x-start'){const result=await runtime.transact(action,body);res.setHeader('Set-Cookie',`elpida_x=${result.cookie}; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=600${cookieSecurity}`);return send(200,{url:result.url});}
       if (action === 'quote') return send(200, await runtime.getQuote(body));
-      if (!['launch', 'buy', 'sell', 'withdraw', 'faucet', 'graduate', 'reward-claim', 'reward-challenge', 'reward-verify', 'reward-process', 'reward-stock-faucet'].includes(action)) return send(404, { error: 'Action not found.' });
+      if (!['launch', 'buy', 'sell', 'withdraw', 'graduate', 'reward-claim', 'reward-challenge', 'reward-verify', 'reward-process', 'reward-stock-faucet'].includes(action)) return send(404, { error: 'Action not found.' });
       return send(200, await runtime.transact(action, body));
     } catch (error) {
       const message = error.reason ?? error.shortMessage ?? error.message ?? 'Request failed.';

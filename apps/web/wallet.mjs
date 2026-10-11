@@ -41,8 +41,11 @@ export function walletErrorText(error, name = 'your wallet') {
   return null;
 }
 const metadataKey = (chain, factory, token) => `elpida:metadata:${chain}:${factory.toLowerCase()}:${token.toLowerCase()}`;
-const deploymentKey = chainId => `elpida:${chainId===84532?"curve-dex-v5":"curve-beta-v4"}:deployment:${chainId}`;
-const pendingQuoteKey = chainId => `elpida:test-quote:${chainId}`;
+// Model 7 (DEX) and 6 (basic): native pricing. Older USDC-priced launchpads are not reused.
+const modelOf = chainId => chainId===84532?"curve-dex-v7":"curve-beta-v6";
+const deploymentKey = chainId => `elpida:${modelOf(chainId)}:deployment:${chainId}`;
+/** Whole native coins (a decimal string) to wei. */
+const wei = text => parseUnits(String(text), 18);
 const read = key => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
 const write = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; } };
 
@@ -55,20 +58,27 @@ export class TestnetWallet {
   select(key) {
     const net = this.config.testnets.find(item => item.key === key);
     if (!net) throw new Error('That test network is not available.');
-    if (this.net?.key !== key) { this.net = net; this.launches = new Map(); this.scannedBlock = undefined; this.quote = undefined; this.decimals = undefined; this.needsMetadataUpgrade = false; }
+    if (this.net?.key !== key) { this.net = net; this.launches = new Map(); this.scannedBlock = undefined; this.launchFee = undefined; this.nativeVirtualQuote = undefined; this.needsMetadataUpgrade = false; }
     return net;
   }
   get dex(){return this.net.key==='base-sepolia'?this.config.publicDex:null;}
   get artifacts(){return {...this.config.contracts,factory:this.dex?this.config.contracts.dexFactory:this.config.contracts.legacyFactory,curve:this.dex?this.config.contracts.dexCurve:this.config.contracts.legacyCurve};}
   router(runner=this.provider){return new Contract(this.dex.router,['function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns(uint256)','function multicall(uint256 deadline,bytes[] data) payable returns(bytes[])','function unwrapWETH9(uint256 amountMinimum,address recipient) payable'],runner);}
   txUrl(hash) { return `${this.net.explorer}/tx/${hash}`; }
-  // True on chains without Circle test USDC, where Elpida deploys its own labelled tUSDC.
-  get usesTestToken() { return !this.net.quote.address; }
+  /**
+   * This network's native pricing from config/native-pricing.json (served by /api/config): creation fee
+   * and starting FDV in the native coin. The EVM curve shape is fixed, so it completes at 16x startFdv.
+   */
+  get pricing() {
+    const p = this.config.pricing?.[this.net.key];
+    if (!p) throw new Error(`No native pricing is configured for ${this.net.name} (config/native-pricing.json).`);
+    return { ...p, launchFeeWei: wei(p.launchFee), virtualQuoteWei: wei(p.startFdv) * 16n / 15n };
+  }
   get deployment() {
     const saved=read(deploymentKey(this.net.chainId));
-    if(saved?.metadataVersion===1)return saved;
-    if (this.net.shared?.factory && this.net.shared.model === (this.dex?'curve-dex-v5':'curve-beta-v4')) return { ...this.net.shared, shared: true };
-    return saved;
+    if(saved)return saved;
+    if (this.net.shared?.factory && this.net.shared.model === modelOf(this.net.chainId)) return { ...this.net.shared, shared: true };
+    return null;
   }
   get eth() { return this._eth ?? evmProvider(); }
   get walletName() { const eth = this.eth; const entry = [...announced.values()].find(d => d.provider === eth); return entry?.info.name ?? (eth?.isMetaMask ? 'MetaMask' : 'your wallet'); }
@@ -107,24 +117,26 @@ export class TestnetWallet {
     if (!accounts[0] || accounts[0].toLowerCase() !== this.address.toLowerCase()) throw new Error('Your wallet account changed. Connect again to refresh it.');
   }
   /** Decimals, address and symbol of a launch's trading asset. */
-  qd(item) { return item.pair === 'native' ? 18 : item.quoteDecimals ?? this.decimals; }
-  qaddr(item) { return item.pair === 'native' ? this.dex?.weth : item.quoteAddress ?? this.quote; }
-  qsym(item, wrapped = false) { return item.pair === 'native' ? (wrapped ? 'WETH' : this.net.nativeCurrency.symbol) : item.quoteSymbol ?? (this.usesTestToken ? 'tUSDC' : 'USDC'); }
+  qd(item) { return item.pair === 'native' ? 18 : item.quoteDecimals ?? 18; }
+  qaddr(item) { return item.pair === 'native' ? this.dex?.weth : item.quoteAddress; }
+  qsym(item, wrapped = false) { return item.pair === 'native' ? (wrapped ? 'WETH' : this.net.nativeCurrency.symbol) : item.quoteSymbol ?? 'paired token'; }
+  /** The creation fee in whole native coins: the factory's live value once deployed, else the configured one. */
+  feeText() { return this.launchFee !== undefined ? formatUnits(this.launchFee, 18).replace(/\.0$/, '') : this.pricing.launchFee; }
   /**
-   * Launchable trading assets by kind (packages/core/pairs.mjs). Native and USDC come from the factory;
-   * xStock and paired-token assets are the factory's approved quotes (DEX launchpads only).
+   * Launchable trading assets by kind (packages/core/pairs.mjs). Native comes from the factory; xStock and
+   * paired-token assets are the factory's approved quotes (DEX launchpads only). Every launch pays its
+   * creation fee in the native coin.
    */
   pairOptions() {
-    const native = this.net.nativeCurrency.symbol, usdc = this.usesTestToken ? 'tUSDC' : 'USDC';
-    const fee = { feeAmount: '10', feeSymbol: usdc };
+    const native = this.net.nativeCurrency.symbol;
+    const fee = { feeAmount: this.feeText(), feeSymbol: native };
     const approved = kind => (this.approvedQuotes ?? []).filter(a => a.kind === kind).map(a => ({ ...a, ...fee }));
     const missing = kind => !this.dex
-      ? `${this.net.name} uses the basic launchpad, which supports ${native} and USDC pairs. xStock and paired-token launches need DEX graduation (Base Sepolia).`
+      ? `${this.net.name} uses the basic launchpad, which supports ${native} pairs. xStock and paired-token launches need DEX graduation (Base Sepolia).`
       : !this.deployment ? 'Set up the launchpad on this network first.'
       : `No ${kind === 'xstock' ? 'xStock' : 'paired token'} is approved on ${this.net.name} yet. The launchpad owner can add the test assets from Network and funds.`;
     return {
       native: { assets: [{ id: 'native', symbol: native, name: this.net.nativeCurrency.name, decimals: 18, ...fee }] },
-      usdc: { assets: [{ id: 'usdc', symbol: usdc, name: this.usesTestToken ? 'Elpida test USDC (no value)' : 'Circle test USDC', decimals: this.decimals ?? 6, address: this.quote, ...fee, faucet: this.usesTestToken ? { label: 'Get 1,000 tUSDC', action: 'faucet', body: {} } : null }] },
       xstock: approved('xstock').length ? { assets: approved('xstock') } : { assets: [], unavailable: missing('xstock') },
       token: approved('token').length ? { assets: approved('token') } : { assets: [], unavailable: missing('token') },
     };
@@ -168,11 +180,6 @@ export class TestnetWallet {
     this.pairsScanned = undefined; this.approvedQuotes = undefined; await this.loadPairs(factory);
     return { hash: last?.tx.hash, message: 'TEST-STOCK (xStock) and TEST-MEME (paired token) are now approved trading pairs.' };
   }
-  quoteAbi() { return this.usesTestToken ? this.config.contracts.testUsdc.abi : this.config.contracts.quote.abi; }
-  quoteContract(runner = this.provider) {
-    if (!this.quote) throw new Error('Deploy the launchpad first. It also creates this network\'s test USDC.');
-    return new Contract(this.quote, this.quoteAbi(), runner);
-  }
   factoryContract(runner = this.provider) {
     const deployment = this.deployment;
     if (!deployment || !isAddress(deployment.factory) || !Number.isSafeInteger(deployment.block) || deployment.block < 1) throw new Error('Deploy a testnet launchpad first.');
@@ -186,82 +193,61 @@ export class TestnetWallet {
     if (!receipt || receipt.status !== 1) throw new Error('Transaction did not succeed.');
     return { tx, receipt };
   }
-  async checkQuote(address) {
-    if (!isAddress(address) || await this.provider.getCode(address) === '0x') throw new Error(`Could not find the test quote token on ${this.net.name}.`);
-    const token = new Contract(address, this.quoteAbi(), this.provider);
-    const decimals = Number(await token.decimals());
-    if (decimals < 6 || decimals > 18) throw new Error('The test quote token has unsupported decimals.');
-    if (this.usesTestToken && await token.symbol() !== 'tUSDC') throw new Error('The saved test quote token is not Elpida tUSDC.');
-    return decimals;
-  }
-  // Resolves the quote token and its decimals: from the factory once deployed, otherwise from the registry.
-  async loadQuote() {
-    if (this.deployment) { await this.verifyFactory(); return; }
-    if (this.usesTestToken) { this.quote = undefined; this.decimals = 6; return; }
-    this.quote = this.net.quote.address;
-    this.decimals = await this.checkQuote(this.quote);
-  }
   async deploy() {
     await this.checkNetwork();
     if (this.deployment && !this.needsMetadataUpgrade) throw new Error(`This ${this.net.name} launchpad is already set up. Use it for your launches.`);
-    const previousDeployment=this.deployment;
+    const previousDeployment=this.deployment, pricing=this.pricing;
     if (await this.provider.getBalance(this.address) === 0n) throw new Error(`Get ${this.net.nativeCurrency.symbol} on ${this.net.name} from a faucet to pay deployment gas.`);
-    let quote = this.net.quote.address;
-    if (!quote) {
-      const pending = read(pendingQuoteKey(this.net.chainId));
-      if (pending && isAddress(pending) && await this.provider.getCode(pending) !== '0x') quote = pending;
-      else {
-        const artifact = this.config.contracts.testUsdc;
-        this.onProgress('Step 1 of 2: confirm the test USDC (tUSDC) deployment in your wallet…');
-        const token = await new ContractFactory(artifact.abi, artifact.bytecode, this.signer).deploy();
-        this.onProgress('tUSDC submitted. Waiting for confirmation…');
-        await token.waitForDeployment();
-        quote = await token.getAddress();
-        write(pendingQuoteKey(this.net.chainId), quote);
-      }
-    }
-    await this.checkQuote(quote);
-    this.onProgress(`${this.usesTestToken ? 'Step 2 of 2: confirm' : 'Confirm'} the launchpad deployment in your wallet…`);
     const artifact = this.artifacts.factory;
     let migrationAdapter;
     if(this.dex){
       const manager=new Contract(this.dex.manager,['function factory() view returns(address)','function WETH9() view returns(address)'],this.provider);
       if((await manager.factory()).toLowerCase()!==this.dex.factory.toLowerCase()||(await manager.WETH9()).toLowerCase()!==this.dex.weth.toLowerCase())throw new Error('Unexpected Uniswap manager configuration.');
-      const key='elpida:dex-adapter:'+this.net.chainId+':'+quote.toLowerCase(),saved=read(key);
+      // Native pairs graduate through an adapter whose ERC-20 side is WETH.
+      const key='elpida:dex-adapter:'+this.net.chainId+':native',saved=read(key);
       if(saved&&isAddress(saved)&&await this.provider.getCode(saved)!=='0x'){
         const existing=new Contract(saved,this.config.contracts.adapter.abi,this.provider);
-        if((await existing.manager()).toLowerCase()!==this.dex.manager.toLowerCase()||(await existing.usdc()).toLowerCase()!==quote.toLowerCase()||await existing.fee()!==10000n)throw new Error('Saved adapter configuration mismatch.');migrationAdapter=saved;
-      }else{this.onProgress('Confirm the Uniswap migration adapter deployment…');const a=this.config.contracts.adapter,c=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,quote,10000);await c.waitForDeployment();migrationAdapter=c.target;write(key,migrationAdapter);}
-      this.onProgress('Confirm the launchpad deployment…');
+        if((await existing.manager()).toLowerCase()!==this.dex.manager.toLowerCase()||(await existing.usdc()).toLowerCase()!==this.dex.weth.toLowerCase()||await existing.fee()!==10000n)throw new Error('Saved adapter configuration mismatch.');migrationAdapter=saved;
+      }else{this.onProgress('Step 1 of 2: confirm the Uniswap migration adapter deployment…');const a=this.config.contracts.adapter,c=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,this.dex.weth,10000);await c.waitForDeployment();migrationAdapter=c.target;write(key,migrationAdapter);}
     }
-    const contract = await new ContractFactory(artifact.abi, artifact.bytecode, this.signer).deploy(quote, this.address, parseUnits(this.config.nativeTemplates[this.net.key],18),...(this.dex?[migrationAdapter]:[]));
+    this.onProgress(`${this.dex ? 'Step 2 of 2: confirm' : 'Confirm'} the launchpad deployment (creation fee ${pricing.launchFee} ${this.net.nativeCurrency.symbol}, starting FDV ${pricing.startFdv} ${this.net.nativeCurrency.symbol})…`);
+    const contract = await new ContractFactory(artifact.abi, artifact.bytecode, this.signer).deploy(this.address, pricing.launchFeeWei, pricing.virtualQuoteWei, ...(this.dex?[migrationAdapter]:[]));
     this.onProgress('Deployment submitted. Waiting for confirmation…');
     await contract.waitForDeployment();
     const receipt = await contract.deploymentTransaction().wait();
-    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, quote, migrationAdapter, metadataVersion:this.dex?1:undefined };
+    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, migrationAdapter, model: modelOf(this.net.chainId), metadataVersion:this.dex?1:undefined };
     if(previousDeployment && !write('elpida:previous-factory:'+this.net.chainId+':'+previousDeployment.factory,previousDeployment))throw new Error('Factory deployed, but previous deployment could not be archived. Save the new factory '+record.factory+' manually.');
     this.launches.clear(); this.scannedBlock = undefined;
     if (!write(deploymentKey(this.net.chainId), record)) throw new Error(`Deployed, but this browser blocks storage. Save factory ${record.factory} (block ${record.block}) in packages/core/networks.mjs.`);
     this.needsMetadataUpgrade=false;
-    return { hash: receipt.hash, message: `Your ${this.net.name} launchpad is deployed.` };
+    return { hash: receipt.hash, message: `Your ${this.net.name} launchpad is deployed, charging ${pricing.launchFee} ${this.net.nativeCurrency.symbol} per launch.` };
   }
   async verifyFactory() {
     const factory = this.factoryContract();
-    let quote, fee, decimals, version;
-    try { [quote, fee, decimals, version] = await Promise.all([factory.usdc(), factory.LAUNCH_FEE(), factory.quoteDecimals(), factory.MODEL_VERSION()]); }
-    catch { throw new Error('This launchpad was deployed by an older Elpida version or is not a factory. Clear this site\'s storage and deploy again.'); }
-    if (this.net.quote.address && quote.toLowerCase() !== this.net.quote.address.toLowerCase()) throw new Error('This launchpad does not use the expected test USDC.');
-    if (version !== (this.dex?5n:4n) || Number(decimals) !== await this.checkQuote(quote) || fee !== 10n * 10n ** decimals) throw new Error('This launchpad does not match the virtual-curve configuration.');
-    this.quote = quote; this.decimals = Number(decimals);
+    let fee, virtualQuote, version;
+    try { [fee, virtualQuote, version] = await Promise.all([factory.launchFee(), factory.nativeVirtualQuote(), factory.MODEL_VERSION()]); }
+    catch { throw new Error('This launchpad was deployed by an older Elpida version (priced in USDC) or is not a factory. Deploy the native-priced launchpad again from Network and funds.'); }
+    if (version !== (this.dex?7n:6n)) throw new Error('This launchpad does not match the native-priced configuration. Deploy it again from Network and funds.');
+    this.launchFee = fee; this.nativeVirtualQuote = virtualQuote;
     if(this.dex){try{this.needsMetadataUpgrade=await factory.METADATA_VERSION()!==1n;}catch{this.needsMetadataUpgrade=true;}}
     return factory;
   }
+  /** Treasury only: sets the factory's fee and starting FDV to config/native-pricing.json for future launches. */
+  async applyPricing() {
+    await this.checkNetwork();
+    const factory = (await this.verifyFactory()).connect(this.signer), pricing = this.pricing;
+    if ((await factory.treasury()).toLowerCase() !== this.address.toLowerCase()) throw new Error('Only the launchpad owner (its treasury wallet) can change pricing.');
+    if (this.launchFee === pricing.launchFeeWei && this.nativeVirtualQuote === pricing.virtualQuoteWei) return { message: `${this.net.name} already uses the configured pricing.` };
+    const result = await this.wait(factory.setPricing(pricing.launchFeeWei, pricing.virtualQuoteWei), `Confirm the new pricing: ${pricing.launchFee} ${this.net.nativeCurrency.symbol} creation fee, ${pricing.startFdv} ${this.net.nativeCurrency.symbol} starting FDV…`);
+    await this.verifyFactory();
+    return { hash: result.tx.hash, message: `New ${this.net.name} launches now cost ${pricing.launchFee} ${this.net.nativeCurrency.symbol} and start at ${pricing.startFdv} ${this.net.nativeCurrency.symbol} FDV. Existing tokens are unchanged.` };
+  }
   async state() {
     await this.checkNetwork();
-    await this.loadQuote();
-    const balance = this.quote ? formatUnits(await this.quoteContract().balanceOf(this.address), this.decimals) : '0';
-    if (!this.deployment) return { wallet: this.address, balance, tokens: [], activity: [], treasuryBalance: '0', undeployed: true };
-    const factory = this.factoryContract();
+    const native = this.net.nativeCurrency.symbol;
+    const balance = formatUnits(await this.provider.getBalance(this.address), 18);
+    if (!this.deployment) return { wallet: this.address, balance, balanceSymbol: native, nativeBalance: balance, nativeSymbol: native, tokens: [], activity: [], treasuryBalance: '0', undeployed: true };
+    const factory = await this.verifyFactory();
     if(this.dex){try{this.needsMetadataUpgrade=await factory.METADATA_VERSION()!==1n;}catch{this.needsMetadataUpgrade=true;}}
     const latest = await this.provider.getBlockNumber();
     const start = this.scannedBlock === undefined ? this.deployment.block : this.scannedBlock + 1;
@@ -269,7 +255,7 @@ export class TestnetWallet {
     for (let block = start; block <= latest; block += 2000) {
       const to = Math.min(block + 1999, latest);
       const events = await factory.queryFilter(factory.filters.Launched(), block, to);
-      for (const event of events) this.launches.set(event.args.token, { address: event.args.token, curve: event.args.curve, pair: event.args.nativePair ? 'native' : 'usdc', creator: event.args.creator, hash: event.transactionHash, created: event.blockNumber });
+      for (const event of events) this.launches.set(event.args.token, { address: event.args.token, curve: event.args.curve, pair: event.args.nativePair ? 'native' : 'token', creator: event.args.creator, hash: event.transactionHash, created: event.blockNumber });
       if(this.dex)for(const event of await factory.queryFilter(factory.filters.MetadataPublished(),block,to)){const item=this.launches.get(event.args.token);if(item)item.metadataURI=event.args.uri;}
       if(this.dex)for(const event of await factory.queryFilter(factory.filters.CustomPair(),block,to)){const item=this.launches.get(event.args.token);if(item)item.quoteAddress=event.args.quote;}
       this.scannedBlock = to;
@@ -298,7 +284,10 @@ export class TestnetWallet {
     }));
     const pairBalances = {};
     for (const a of this.approvedQuotes ?? []) { try { pairBalances[a.id] = formatUnits(await new Contract(a.address, this.config.contracts.quote.abi, this.provider).balanceOf(this.address), a.decimals); } catch {} }
-    return { wallet: this.address, balance, balanceSymbol: this.usesTestToken ? 'tUSDC' : 'USDC', pairBalances, nativeBalance: formatUnits(await this.provider.getBalance(this.address),18), nativeSymbol: this.net.nativeCurrency.symbol, wrappedNativeBalance:this.dex?formatUnits(await new Contract(this.dex.weth,this.config.contracts.quote.abi,this.provider).balanceOf(this.address),18):undefined, tokens, activity: [], treasuryBalance: formatUnits(await this.quoteContract().balanceOf(await factory.treasury()), this.decimals) };
+    const treasury = await factory.treasury(), configured = this.pricing;
+    // Live factory pricing vs config/native-pricing.json; the owner can apply the file from Network and funds.
+    const pricing = { launchFee: formatUnits(this.launchFee, 18), startFdv: formatUnits(this.nativeVirtualQuote * 15n / 16n, 18), symbol: native, configured: { launchFee: configured.launchFee, startFdv: configured.startFdv }, matches: this.launchFee === configured.launchFeeWei && this.nativeVirtualQuote === configured.virtualQuoteWei, owner: treasury.toLowerCase() === this.address.toLowerCase() };
+    return { wallet: this.address, balance, balanceSymbol: native, pairBalances, nativeBalance: balance, nativeSymbol: native, wrappedNativeBalance:this.dex?formatUnits(await new Contract(this.dex.weth,this.config.contracts.quote.abi,this.provider).balanceOf(this.address),18):undefined, tokens, activity: [], pricing, treasuryBalance: formatUnits(await this.provider.getBalance(treasury), 18) };
   }
   async dexState(item,token,curve,pool,d){
     const market=new Contract(pool,this.config.contracts.dexPool.abi,this.provider),[slot,a,b,name,symbol,supply,sold,held,reward,cp,cc,locker,splitter]=await Promise.all([market.slot0(),market.token0(),market.token1(),token.name(),token.symbol(),token.totalSupply(),curve.sold(),token.balanceOf(this.address),curve.creatorRewardVault(),curve.protocolFees(),curve.creatorFees(),curve.locker(),curve.feeSplitter()]);
@@ -338,10 +327,9 @@ export class TestnetWallet {
   async transact(action, body) {
     await this.checkNetwork();
     const factory = (await this.verifyFactory()).connect(this.signer);
-    const quote = this.quoteContract(this.signer);
-    const d = this.decimals;
     let result;
     if (action === 'setup-pairs') return this.setupTestPairs();
+    if (action === 'apply-pricing') return this.applyPricing();
     if (action === 'faucet' && body?.asset) {
       const a = (this.approvedQuotes ?? []).find(x => x.address.toLowerCase() === String(body.asset).toLowerCase() && x.test);
       if (!a) throw new Error('That asset has no test faucet.');
@@ -349,29 +337,26 @@ export class TestnetWallet {
       result = await this.wait(c.faucet(limit), `Confirm the free ${a.symbol} test mint in your wallet…`);
       return { hash: result.tx.hash, message: `Added ${formatUnits(limit, a.decimals)} ${a.symbol} (test asset, no value).` };
     }
-    if (action === 'faucet') {
-      if (!this.usesTestToken) throw new Error('Use the Circle faucet for this network\'s test USDC.');
-      result = await this.wait(quote.faucet(1_000n * 10n ** BigInt(d)), 'Confirm the 1,000 tUSDC faucet claim in your wallet…');
-      return { hash: result.tx.hash, message: 'Added 1,000 tUSDC to your wallet.' };
-    }
+    if (action === 'faucet') throw new Error(`Get test ${this.net.nativeCurrency.symbol} from the network faucet linked in Network and funds.`);
     let metadataSaved = true, metadataPublished = false;
     if (action === 'launch') {
       const details = normalizeMetadata(body);
-      const kind = body.pair ?? 'usdc';
-      if (!['native','usdc','xstock','token'].includes(kind)) throw new Error('Choose a trading pair.');
+      const kind = body.pair ?? 'native';
+      if (!['native','xstock','token'].includes(kind)) throw new Error('Choose a trading pair.');
       const nativePair = kind === 'native', paired = kind === 'xstock' || kind === 'token';
       const asset = paired ? (this.approvedQuotes ?? []).find(a => a.kind === kind && a.address.toLowerCase() === String(body.quoteAsset ?? '').toLowerCase()) : null;
       if (paired && !asset) throw new Error(this.pairOptions()[kind].unavailable ?? 'Choose an approved asset for this pair.');
-      const firstBuy = parseUnits(body.firstBuy, nativePair ? 18 : paired ? asset.decimals : d);
+      const firstBuy = parseUnits(body.firstBuy, nativePair ? 18 : asset.decimals);
       const name = body.name.trim(), symbol = body.symbol.trim().toUpperCase();
       if (firstBuy <= 0n || !name || name.length > 40 || !/^[A-Z0-9]{1,10}$/.test(symbol)) throw new Error('Check the token name, symbol and first buy.');
       const reward = body.reward || this.address;
       if (!isAddress(reward) || reward === ZeroAddress) throw new Error('Enter a valid creator reward wallet.');
       const net = firstBuy - firstBuy * 125n / 10000n;
-      const virtualQuote = paired ? asset.virtualQuote : nativePair ? await factory.NATIVE_VIRTUAL_QUOTE() : await factory.VIRTUAL_QUOTE();
+      const virtualQuote = paired ? asset.virtualQuote : await factory.nativeVirtualQuote();
       const out = await factory.VIRTUAL_TOKEN() * net / (virtualQuote + net);
-      const approval = await factory.LAUNCH_FEE() + (nativePair || paired ? 0n : firstBuy);
-      if (await quote.balanceOf(this.address) < approval) throw new Error(`You need ${formatUnits(approval, d)} ${this.usesTestToken ? 'tUSDC' : 'USDC'} for the creation fee${nativePair || paired ? '' : ' and first buy'}.`);
+      // The creation fee is paid in the native coin with the launch itself (exact value, no approval).
+      const fee = await factory.launchFee(), value = fee + (nativePair ? firstBuy : 0n), native = this.net.nativeCurrency.symbol;
+      if (await this.provider.getBalance(this.address) <= value) throw new Error(`You need more than ${formatUnits(value, 18)} ${native} for the creation fee${nativePair ? ' and first buy' : ''} plus network fees.`);
       const pairToken = paired ? new Contract(asset.address, this.config.contracts.quote.abi, this.signer) : null;
       if (paired && await pairToken.balanceOf(this.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, asset.decimals)} ${asset.symbol} for the first buy.${asset.test ? ' Use its test faucet in Network and funds.' : ''}`);
       let published;
@@ -382,11 +367,10 @@ export class TestnetWallet {
         if(!published.public || !/^ipfs:\/\//.test(published.uri))throw new Error('Public metadata did not publish. No launch was submitted.');
         await this.checkNetwork();
       }
-      if (await quote.allowance(this.address, await factory.getAddress()) < approval) await this.wait(quote.approve(await factory.getAddress(), approval), 'Approve the USDC creation fee and any USDC first buy…');
       if (paired && await pairToken.allowance(this.address, await factory.getAddress()) < firstBuy) await this.wait(pairToken.approve(await factory.getAddress(), firstBuy), `Approve the ${asset.symbol} first buy…`);
-      const launchArgs=[name,symbol,nativePair,firstBuy,out*9950n/10000n,reward];
+      const launchArgs=[name,symbol,firstBuy,out*9950n/10000n,reward];
       const pairedArgs=[name,symbol,asset?.address,firstBuy,out*9950n/10000n,reward];
-      result = await this.wait(paired?(published?factory.launchPairedWithMetadata(...pairedArgs,published.uri):factory.launchPaired(...pairedArgs)):published?factory.launchWithMetadata(...launchArgs,published.uri,{value:nativePair?firstBuy:0n}):factory.launch(...launchArgs,{value:nativePair?firstBuy:0n}), 'Confirm the token launch and first buy…');
+      result = await this.wait(paired?(published?factory.launchPairedWithMetadata(...pairedArgs,published.uri,{value}):factory.launchPaired(...pairedArgs,{value})):published?factory.launchWithMetadata(...launchArgs,published.uri,{value}):factory.launch(...launchArgs,{value}), `Confirm the token launch (${formatUnits(fee, 18)} ${native} creation fee) and first buy…`);
       const event = result.receipt.logs.map(log => {try{return factory.interface.parseLog(log);}catch{return null;}}).find(log => log?.name === 'Launched');
       metadataSaved = !!event && await writeMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,event.args.token),published?.metadata??details);
       if(published){metadataSaved=true;metadataPublished=true;}
@@ -407,7 +391,7 @@ export class TestnetWallet {
         const input = parseUnits(body.amount, action === 'buy' ? this.qd(item) : 18);
         if (input <= 0n) throw new Error('Enter a positive amount.');
         const [out] = action === 'buy' ? await curve.quoteBuy(input) : await curve.quoteSell(input);
-        const payment = action === 'buy' ? (item.pair === 'usdc' ? quote : new Contract(this.qaddr(item) ?? ZeroAddress, this.config.contracts.quote.abi, this.signer)) : new Contract(item.address, this.config.contracts.token.abi, this.signer);
+        const payment = action === 'buy' ? new Contract(this.qaddr(item) ?? ZeroAddress, this.config.contracts.quote.abi, this.signer) : new Contract(item.address, this.config.contracts.token.abi, this.signer);
         const marketAddress = await curve.getAddress();
         if (!(action === 'buy' && item.pair === 'native') && await payment.allowance(this.address, marketAddress) < input) await this.wait(payment.approve(marketAddress, input), 'Approve this trade in your wallet…');
         const minimum = out * (10000n - BigInt(Math.round(percent * 100))) / 10000n;

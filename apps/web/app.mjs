@@ -110,7 +110,7 @@ function envBanner() {
     : wallet.net.mainnet
       ? `${wallet.net.name} mainnet beta. Real funds: your wallet signs every transaction and pays network fees in SOL. The contracts are new; launch and trade only what you can afford to lose.${wallet.beta?.enabled ? ' Launching is invite-only during the beta.' : ''}`
       : wallet.net.kind === 'solana'
-      ? `${wallet.net.name} public testnet. Your wallet signs every transaction and pays network fees in devnet SOL.${wallet.usesTestToken ? ' New launches use Elpida tUSDC, a free test token with no value.' : ''}`
+      ? `${wallet.net.name} public testnet. Your wallet signs every transaction and pays network fees in devnet SOL. Launches pay their creation fee in SOL.`
       : `${wallet.net.name} public testnet. Your wallet signs every transaction and pays gas in test ${wallet.net.nativeCurrency.symbol}.`;
   return h('div.env-banner', { 'data-env': mode }, icon(local ? 'flask-conical' : 'globe'), h('span', text),
     h('button.btn.btn-sm.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: openTools } }, local ? 'Test funds' : 'Network and funds'));
@@ -155,10 +155,11 @@ function loadingView() { return h('div', h('div.page-head', h('div', h('h1', 'Ex
 /* ---------- Explore ---------- */
 function stats() {
   const totals = {};
-  for (const t of state.tokens) { const q = t.quoteSymbol ?? 'USDC'; totals[q] = (totals[q] ?? 0) + Number(t.reserve); }
+  for (const t of state.tokens) { const q = t.quoteSymbol ?? state.nativeSymbol ?? 'ETH'; totals[q] = (totals[q] ?? 0) + Number(t.reserve); }
   const solana = mode === 'testnet' && wallet === solWallet;
   const dex = mode === 'local' ? config.dex : wallet.dex;
-  const balance = `${number(state.balance)} ${state.balanceSymbol ?? 'USDC'}${state.nativeBalance ? ` + ${number(state.nativeBalance, 4)} ${state.nativeSymbol}` : ''}`;
+  // Balances are in the network's native coin (pricing is native only).
+  const balance = `${number(state.nativeBalance ?? state.balance, 4)} ${state.nativeSymbol ?? state.balanceSymbol ?? 'ETH'}`;
   return h('section.stats', { 'aria-label': 'Launchpad overview' },
     h('div', h('span', 'Tokens launched'), h('strong', String(state.tokens.length))),
     h('div', h('span', 'Trading reserves'), h('strong', Object.entries(totals).map(([q, v]) => `${number(v, 2)} ${q}`).join(' + ') || '0'), h('small', mode === 'local' ? 'Simulated assets held by curves and pools' : 'Test assets held by curves and pools')),
@@ -169,7 +170,7 @@ function tokenCard(token) {
   const life = lifecycle(token), pct = progressOf(token), p = pricing(token);
   return h('a.token-card', { href: `#/token/${token.address}`, 'aria-label': `${token.name}, ${token.symbol}. ${life.label}.` },
     h('div.token-card-head', avatar(token), h('div', h('h3', token.name), h('span.sym', `$${token.symbol}`))),
-    h('div.chips', h(`span.chip${life.chip ? '.' + life.chip : ''}`, life.label), h('span.chip', `${token.quoteSymbol ?? 'USDC'} pair`)),
+    h('div.chips', h(`span.chip${life.chip ? '.' + life.chip : ''}`, life.label), h('span.chip', `${token.quoteSymbol ?? state.nativeSymbol ?? 'ETH'} pair`)),
     h('p.desc', token.metadata?.description || 'No description yet.'),
     h('div.figures', h('div.figure', h('span', 'Price'), h('strong', fmtPrice(token))), h('div.figure', h('span', 'Market cap'), h('strong', fmtValue(p.marketCap, token)))),
     h('div.progress', h('div.progress-label', h('span', token.graduated ? 'Graduated' : 'Bonding curve'), h('strong', `${number(pct, 1)}%`)), bar(pct, token.complete || token.graduated)));
@@ -220,7 +221,7 @@ function activitySection() {
     const when = a.time ? new Date(a.time).toLocaleString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }) : '';
     const link = a.url ?? (mode === 'testnet' && a.hash ? wallet.txUrl(a.hash) : null);
     return h('div.activity-row', h('span.glyph', { 'data-kind': a.type }, icon(a.type === 'Sell' ? 'trending-up' : a.type === 'Launch' ? 'plus' : a.type === 'Buy' ? 'arrow-down-up' : 'coins', 'icon-sm')),
-      h('div', h('strong', `${a.type === 'Fees paid' ? 'Creator fees distributed' : a.type} · ${a.symbol}`), h('span.meta', a.amount ? `${number(a.amount, 4)} ${a.type === 'Sell' ? a.symbol : a.quoteSymbol ?? 'USDC'}` : 'On-chain transaction')),
+      h('div', h('strong', `${a.type === 'Fees paid' ? 'Creator fees distributed' : a.type} · ${a.symbol}`), h('span.meta', a.amount ? `${number(a.amount, 4)} ${a.type === 'Sell' ? a.symbol : a.quoteSymbol ?? state.nativeSymbol ?? 'ETH'}` : 'On-chain transaction')),
       h('span.meta.who', short(a.account)),
       link ? h('a.small', { href: link, target: '_blank', rel: 'noopener noreferrer' }, 'View', icon('external-link', 'icon-sm')) : h('span.meta', when));
   });
@@ -267,16 +268,15 @@ function openTools() {
     funds.append(h('div.field', h('label', { for: 'demo-account' }, 'Demo account'),
       h('select.select#demo-account', { on: { change: async e => { account = e.target.value; await refresh(); updateChrome(); } } }, config.accounts.map(a => h('option', { value: a.id, selected: a.id === account }, `${a.name} · ${short(a.address)}`))),
       h('p.hint', 'Switch accounts to try trading against your own launches.')),
-      h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('faucet', {}); } catch (e) { fail(e); } } } }, icon('droplet'), 'Add 1,000 test USDC'));
+      h('p.small.muted', `Demo accounts hold simulated local ETH. Each launch pays a ${config.local?.launchFee ?? ''} ETH creation fee, the native price set in config/native-pricing.json.`));
   } else {
     const net = wallet.net;
-    // A free faucet for every test pair asset (tUSDC, the test xStock, the test paired token).
+    // A free faucet for every test pair asset (the test xStock and the test paired token).
     let pairs = null; try { pairs = wallet.address ? wallet.pairOptions?.() : null; } catch {}
     const faucets = Object.values(pairs ?? {}).flatMap(group => group.assets).filter(a => a.faucet && !a.faucet.href);
     if (faucets.length) funds.append(h('div.wallet-choices', faucets.map(a => h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run(a.faucet.action, a.faucet.body); } catch (e) { fail(e); } } } }, icon('droplet'), a.faucet.label))),
       h('p.hint', 'Test assets are free and have no value. TEST-STOCK is a simulated stock, not an issued xStock.'));
-    else if (wallet.usesTestToken && wallet.address) funds.append(h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('faucet', {}); } catch (e) { fail(e); } } } }, icon('droplet'), net.kind === 'solana' ? 'Get 25,000 Elpida tUSDC' : 'Get 1,000 Elpida tUSDC'));
-    const links = [...(net.gasFaucet ? [[`${net.nativeCurrency.symbol} faucet${net.kind === 'solana' ? ' (network fees and SOL-paired launches)' : ' for network fees'}`, net.gasFaucet]] : []), ...(net.quote?.faucet && !wallet.usesTestToken ? [['Circle test USDC faucet', net.quote.faucet]] : [])];
+    const links = net.gasFaucet ? [[`${net.nativeCurrency.symbol} faucet (network fees, creation fees and ${net.nativeCurrency.symbol}-paired launches)`, net.gasFaucet]] : [];
     funds.append(h('div.links', links.map(([label, href]) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, label, icon('external-link', 'icon-sm')))));
     if (!wallet.address) funds.append(h('h4', 'Connect a wallet'), walletButtons(net, { onDone: () => openTools(), onError: fail }));
     else funds.append(h('p.small.muted', `Connected${/^your/i.test(wallet.walletName ?? 'your') ? '' : ' with ' + wallet.walletName}: ${wallet.address}`), h('details.small', h('summary', 'Use a different wallet'), walletButtons(net, { onDone: () => openTools(), onError: fail })));
@@ -285,9 +285,11 @@ function openTools() {
       funds.append(h('div.tools-section', h('h4', 'Launchpad on this network'),
         h('p.small.muted', deployed ? `${wallet.deployment.shared ? 'Shared team' : 'Your'} launchpad: ${short(wallet.deployment.factory)}.${wallet.needsMetadataUpgrade ? ' A newer version with shared token metadata is available.' : ''}` : 'Each public testnet needs a one-time launchpad setup from your wallet before the first token.'),
         (!deployed || wallet.needsMetadataUpgrade) && wallet.address ? h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('deploy', {}); openTools(); } catch (e) { fail(e); } } } }, deployed ? 'Set up the newer launchpad' : 'Set up launchpad') : null,
+        deployed && state?.pricing ? h('div.stack', h('p.small.muted', `Pricing: ${number(state.pricing.launchFee, 6)} ${state.pricing.symbol} creation fee, starting FDV ${number(state.pricing.startFdv, 6)} ${state.pricing.symbol}.${state.pricing.matches ? '' : ` The config sets ${state.pricing.configured.launchFee} ${state.pricing.symbol} and ${state.pricing.configured.startFdv} ${state.pricing.symbol}.`}`),
+          !state.pricing.matches && state.pricing.owner ? h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('apply-pricing', {}); openTools(); } catch (e) { fail(e); } } } }, 'Apply native pricing') : null) : null,
         deployed && wallet.dex && wallet.address && pairs && (pairs.xstock.unavailable || pairs.token.unavailable) ? h('div.stack', h('p.small.muted', 'xStock and paired-token launches need approved assets. The launchpad owner can deploy the labelled test assets (TEST-STOCK and TEST-MEME) and approve them: six confirmations, gas only.'),
           h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('setup-pairs', {}); openTools(); } catch (e) { fail(e); } } } }, 'Add test xStock and token pairs')) : null));
-    } else funds.append(h('p.small.muted', wallet.deployment ? `Solana program: ${short(wallet.deployment.programId)}.` : 'The Solana program is not deployed. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.'));
+    } else funds.append(h('p.small.muted', wallet.deployment ? `Solana program: ${short(wallet.deployment.programId)}.${state?.pricing ? ` Creation fee ${number(state.pricing.launchFee, 6)} SOL. The team reprices with node scripts/native-pricing.mjs.` : ''}` : 'The Solana program is not deployed. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.'));
   }
   body.replaceChildren(envSection, funds, error);
   $('#tools-intro').textContent = local ? 'You are using the local simulation. Choose a network when you create a token, or switch here.' : `You are connected to ${wallet.net.name}.`;

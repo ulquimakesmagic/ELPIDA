@@ -49,16 +49,15 @@ export function formatPrice(value, prefix = '$') {
   if (zeros < 4) return `${prefix}${Number(value.toPrecision(4))}`;
   return `${prefix}0.0${[...String(zeros)].map(d => SUBSCRIPT[d]).join('')}${mantissa.replace('.', '').replace(/0+$/, '')}`;
 }
-/** Price and market values for a token, in its trading pair. USDC pairs show dollars (USDC assumed at $1). */
+/** Price and market values for a token, in its trading pair (the native coin or the paired asset). No dollar conversion. */
 export function pricing(token) {
   const supply = Number(token.supply), sold = Number(token.sold), reserve = Number(token.reserve);
   const price = token.spotPrice ?? (supply - sold > 0 ? reserve / (supply - sold) : 0);
   const circulating = Number(token.circulatingSupply ?? token.sold);
   return { price, fdv: price * supply, marketCap: price * circulating, circulating, supply };
 }
-export const isUsd = token => (token.pair ?? 'usdc') === 'usdc';
-export const fmtPrice = token => isUsd(token) ? formatPrice(pricing(token).price) : `${formatPrice(pricing(token).price, '')} ${token.quoteSymbol}`;
-export const fmtValue = (value, token) => isUsd(token) ? `$${compact(value)}` : `${compact(value)} ${token.quoteSymbol}`;
+export const fmtPrice = token => `${formatPrice(pricing(token).price, '')} ${token.quoteSymbol ?? ''}`.trim();
+export const fmtValue = (value, token) => `${compact(value)} ${token.quoteSymbol ?? ''}`.trim();
 export function progressOf(token) {
   const cap = Number(token.saleCap ?? token.supply);
   return Math.min(100, Math.max(0, cap > 0 ? Number(token.sold) / cap * 100 : 0));

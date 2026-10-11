@@ -1,8 +1,8 @@
 // Solana program tests (model 3 bonding curve) against a throwaway solana-test-validator. They deploy
 // contracts/solana/build/elpida_launchpad.so with the same code as `npm run solana:deploy`, then
 // exercise launch, the anti-snipe fee, trading, fee payout and graduation at the target FDV.
-// The config uses the production curve ($5k → $50k FDV) with a short 4-second anti-snipe window so the
-// decay can be observed quickly. Migration tests load the real PumpSwap program from
+// The main config is a 6-decimal paired test token sized 5k → 50k FDV in that token, with a SOL creation
+// fee and a short 4-second anti-snipe window so the decay can be observed quickly. Migration tests load the real PumpSwap program from
 // contracts/solana/fixtures (solana-pumpswap-fixtures.cmd). Skipped when solana-test-validator is
 // not installed (for example on plain Windows); set SOLANA_TEST_VALIDATOR to its path to run them.
 import test from 'node:test';
@@ -17,10 +17,11 @@ import * as web3 from '@solana/web3.js';
 import {
   createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, curveParams, poolStats, encodeCurveParams,
   DISCRIMINATORS, EVENTS, LEGACY_EVENTS, TOKEN_SUPPLY, STATUS_GRADUATED, STATUS_MIGRATED, BPS, explainError, decodeEvents,
-  harvestableLp, harvestNow, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_USDC_FAUCET_MAX, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint,
+  harvestableLp, harvestNow, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint,
 } from '../packages/solana/client.mjs';
-import { SOLANA_TEST_PAIRS } from '../packages/core/pairs.mjs';
-import { deployProgram, upgradeProgram, initializeConfig, createTestQuoteMint, ensureTestUsdc, ensurePairConfigs, ensureBetaGate, rejectsTestInstructions, prepareUpgradeBuffer, transferUpgradeAuthority, send, airdrop } from '../packages/solana/deploy.mjs';
+import { solanaPairTemplates } from '../packages/core/pairs.mjs';
+import { solanaPricing } from '../packages/core/pricing.mjs';
+import { deployProgram, upgradeProgram, ensurePairConfigs, pricingUpdates, ensureBetaGate, rejectsTestInstructions, prepareUpgradeBuffer, transferUpgradeAuthority, send, airdrop } from '../packages/solana/deploy.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const elfPath = `${root}contracts/solana/build/elpida_launchpad.so`;
@@ -34,8 +35,9 @@ const fixtures = `${root}contracts/solana/fixtures/`;
 const pumpSkip = skip || (!existsSync(`${fixtures}pump_amm.so`) || !existsSync(`${fixtures}pumpswap_global_config.json`) ? 'PumpSwap fixtures missing (run solana-pumpswap-fixtures.cmd or node scripts/solana-pumpswap-fixtures.mjs).' : false);
 
 const { Keypair, PublicKey } = web3;
-const USDC = 1_000_000n;
-const PARAMS = curveParams({ snipeWindowSecs: 4 });
+const USDC = 1_000_000n; // one whole unit of the 6-decimal test quote token
+const FEE_SOL = 10_000_000n; // 0.01 SOL creation fee
+const PARAMS = curveParams({ startFdv: 5_000, endFdv: 50_000, quoteDecimals: 6, launchFee: '0.01', snipeWindowSecs: 4 });
 const BASE = BigInt(PARAMS.baseFeeBps);
 const f = {};
 const sleep = ms => new Promise(r => setTimeout(r, ms));
@@ -56,9 +58,13 @@ test.before(async () => {
   f.programKeypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(keyPath, 'utf8'))));
   await deployProgram({ connection: f.connection, payer: f.authority, programKeypair: f.programKeypair, elf: readFileSync(elfPath), sendsPerSecond: 200 });
   f.client = createElpidaSolana(web3, f.programKeypair.publicKey);
-  f.quoteMint = await createTestQuoteMint({ connection: f.connection, payer: f.authority, recipients: [f.creator.publicKey, f.trader.publicKey], amount: 100_000n * USDC });
+  // A 6-decimal test token as the main pair asset, minted to the creator and the trader.
+  const spl = splTestMint(web3), quote = Keypair.generate();
+  await send(f.connection, f.authority, await spl.createMintIxs(f.connection, f.authority.publicKey, quote.publicKey, 6, f.authority.publicKey), [quote]);
+  for (const owner of [f.creator.publicKey, f.trader.publicKey]) await send(f.connection, f.authority, [f.client.createAtaIdempotent(f.authority.publicKey, owner, quote.publicKey), spl.mintTo(quote.publicKey, f.client.ata(owner, quote.publicKey), f.authority.publicKey, 100_000n * USDC)]);
+  f.quoteMint = quote.publicKey;
   f.treasury = Keypair.generate().publicKey;
-  f.config = { quoteMint: f.quoteMint, treasury: f.treasury };
+  f.config = { address: f.client.configFor(f.quoteMint), quoteMint: f.quoteMint, treasury: f.treasury };
 });
 test.after(() => {
   f.validator?.kill('SIGKILL');
@@ -105,7 +111,7 @@ async function invariant(mint) {
 
 test('Solana client discriminators, curve parameters and error decoding', () => {
   const disc = name => [...createHash('sha256').update(name).digest().subarray(0, 8)];
-  for (const [key, name] of [['initializeCurve', 'global:initialize_curve'], ['launch', 'global:launch'], ['buy', 'global:buy'], ['sell', 'global:sell'], ['withdrawFees', 'global:withdraw_fees'], ['CurveConfig', 'account:CurveConfig'], ['CurvePool', 'account:CurvePool'], ['migrateToPumpswap', 'global:migrate_to_pumpswap'], ['harvestLpFees', 'global:harvest_lp_fees'], ['PumpMigration', 'account:PumpMigration'], ['setBetaGate', 'global:set_beta_gate'], ['allowBetaCreator', 'global:allow_beta_creator'], ['revokeBetaCreator', 'global:revoke_beta_creator'], ['BetaGate', 'account:BetaGate'], ['BetaCreator', 'account:BetaCreator'], ['testBuildCheck', 'global:test_build_check']]) {
+  for (const [key, name] of [['updateCurveConfig', 'global:update_curve_config'], ['initializeCurve', 'global:initialize_curve'], ['launch', 'global:launch'], ['buy', 'global:buy'], ['sell', 'global:sell'], ['withdrawFees', 'global:withdraw_fees'], ['CurveConfig', 'account:CurveConfig'], ['CurvePool', 'account:CurvePool'], ['migrateToPumpswap', 'global:migrate_to_pumpswap'], ['harvestLpFees', 'global:harvest_lp_fees'], ['PumpMigration', 'account:PumpMigration'], ['setBetaGate', 'global:set_beta_gate'], ['allowBetaCreator', 'global:allow_beta_creator'], ['revokeBetaCreator', 'global:revoke_beta_creator'], ['BetaGate', 'account:BetaGate'], ['BetaCreator', 'account:BetaCreator'], ['testBuildCheck', 'global:test_build_check']]) {
     assert.deepEqual(DISCRIMINATORS[key], disc(name), key);
   }
   for (const [name, { discriminator }] of [...Object.entries(EVENTS), ...Object.entries(LEGACY_EVENTS)]) assert.deepEqual(discriminator, disc(`event:${name}`), name);
@@ -117,13 +123,19 @@ test('Solana client discriminators, curve parameters and error decoding', () => 
   assert.equal(explainError(new Error('failed: custom program error: 0x1777')), 'Price moved beyond your slippage limit.');
   assert.match(explainError(new Error('failed: custom program error: 0x177c')), /complete/);
 
-  // Default curve: $5k starting FDV, graduation at $50k, and the DEX opens at the graduation price.
-  const p = curveParams();
+  // A 5k → 50k FDV curve; the DEX opens at the graduation price. The creation fee is always lamports.
+  const p = curveParams({ startFdv: 5_000, endFdv: 50_000, quoteDecimals: 6, launchFee: 10 });
   assert.equal(p.virtualToken, 1_111_111_111_111_111n);
   assert.equal(p.virtualQuote, 5_555_555_556n);
   assert.equal(encodeCurveParams(p).length, 42);
-  assert.equal(p.launchFee, 10n * USDC);
+  assert.equal(p.launchFee, 10n * 1_000_000_000n, 'fee in lamports whatever the quote decimals');
   assert.equal(curveParams({ startFdv: '0.5', endFdv: '5', quoteDecimals: 9, launchFee: '0.01' }).launchFee, 10_000_000n);
+  // Native pricing file: SOL pair templates carry the configured values.
+  const dev = solanaPricing('devnet');
+  const [solPair, testToken] = solanaPairTemplates(dev, { test: true });
+  assert.equal(solPair.wsol, true); assert.equal(solPair.launchFee, dev.launchFee); assert.equal(solPair.startFdv, dev.startFdv);
+  assert.equal(testToken.launchFee, dev.launchFee, 'paired-token launches pay the same SOL fee');
+  assert.equal(solanaPairTemplates(solanaPricing('mainnet')).length, 1, 'mainnet: native SOL only');
   assert.ok(Math.abs(poolStats(freshPool()).marketCap - 5_000) < 0.01);
   const last = quoteBuy(freshPool(), 1_000_000n * USDC, 125n);
   assert.equal(last.graduates, true); assert.equal(last.tokens, p.curveSupply);
@@ -145,25 +157,27 @@ test('Solana client discriminators, curve parameters and error decoding', () => 
   assert.deepEqual([0, 30, 59, 60, 600].map(t => currentFeeBps(cfg, 1000, 1000 + t)), [9000n, 4562n, 272n, 125n, 125n]);
 });
 
-test('Solana: only the upgrade authority can initialize, with valid parameters, once', { skip }, async () => {
-  const init = (payer, params = PARAMS) => initializeConfig({ connection: f.connection, payer, programId: f.programKeypair.publicKey, quoteMint: f.quoteMint, treasury: f.treasury, params });
-  await failsWith(init(f.outsider), /0x1770/);
-  await failsWith(init(f.authority, { ...PARAMS, curveSupply: 0n }), /0x1774/);
-  await failsWith(init(f.authority, { ...PARAMS, snipeStartBps: 9_950 }), /0x1774/);
-  const { config } = await init(f.authority);
+test('Solana: only the upgrade authority can create a pair config, with valid parameters, once', { skip }, async () => {
+  const add = (payer, params = PARAMS) => send(f.connection, payer, [f.client.addCurveConfig({ authority: payer.publicKey, quoteMint: f.quoteMint, treasury: f.treasury, params })], [], 1);
+  await failsWith(add(f.outsider), /0x1770/);
+  await failsWith(add(f.authority, { ...PARAMS, curveSupply: 0n }), /0x1774/);
+  await failsWith(add(f.authority, { ...PARAMS, snipeStartBps: 9_950 }), /0x1774/);
+  await add(f.authority);
+  const config = f.client.decodeConfig((await f.connection.getAccountInfo(f.config.address)).data);
   assert.equal(config.quoteMint.toBase58(), f.quoteMint.toBase58());
   assert.equal(config.treasury.toBase58(), f.treasury.toBase58());
-  assert.equal(config.launchFee, 10n * USDC);
+  assert.equal(config.launchFee, FEE_SOL);
   assert.equal(config.quoteDecimals, 6);
   assert.equal(config.modelVersion, 3);
   assert.equal(config.virtualQuote, PARAMS.virtualQuote); assert.equal(config.virtualToken, PARAMS.virtualToken); assert.equal(config.curveSupply, PARAMS.curveSupply);
   assert.equal(config.baseFeeBps, 125); assert.equal(config.snipeStartBps, 9000); assert.equal(config.snipeWindowSecs, 4); assert.equal(config.maxCreatorBuyBps, 0);
-  await failsWith(send(f.connection, f.authority, [f.client.initializeCurve({ authority: f.authority.publicKey, quoteMint: f.quoteMint, treasury: f.treasury, params: PARAMS })], [], 1), /already in use|0x0/);
+  await failsWith(add(f.authority), /already in use|0x0/);
 });
 
 test('Solana launch charges the fee, fixes supply and does the creator buy at the base fee', { skip }, async () => {
   const before = await balance(f.client.ata(f.creator.publicKey, f.quoteMint));
   const { mint, expected, signature } = await launch();
+  assert.equal(await f.connection.getBalance(f.treasury), Number(FEE_SOL), 'treasury received the 0.01 SOL creation fee');
   const p = await invariant(mint);
   assert.equal(p.name, 'Solana Garden'); assert.equal(p.symbol, 'SOLG');
   assert.equal(p.creator.toBase58(), f.creator.publicKey.toBase58());
@@ -173,8 +187,8 @@ test('Solana launch charges the fee, fixes supply and does the creator buy at th
   assert.equal(p.liquidityBonus, 0n);
   assert.equal(p.protocolFees + p.creatorFees, expected.fee);
   assert.equal(p.status, 0); assert.equal(p.graduatedAt, 0n);
-  assert.equal(await balance(f.client.ata(f.treasury, f.quoteMint)), 10n * USDC, 'treasury received the 10 USDC launch fee');
-  assert.equal(await balance(f.client.ata(f.creator.publicKey, f.quoteMint)), before - 35n * USDC);
+  assert.equal(await balance(f.client.ata(f.treasury, f.quoteMint)), 0n, 'no creation fee in the pair asset');
+  assert.equal(await balance(f.client.ata(f.creator.publicKey, f.quoteMint)), before - 25n * USDC, 'the creator spent only the first buy in the pair asset');
   assert.equal(await balance(f.client.ata(f.creator.publicKey, mint)), expected.tokens);
   const mintData = (await f.connection.getAccountInfo(mint)).data;
   assert.equal(mintData[0], 0, 'mint authority revoked');
@@ -188,14 +202,14 @@ test('Solana launch charges the fee, fixes supply and does the creator buy at th
 
 test('Solana launch rejects bad input and leaves no partial state', { skip }, async () => {
   const before = await balance(f.client.ata(f.creator.publicKey, f.quoteMint));
-  const treasuryBefore = await balance(f.client.ata(f.treasury, f.quoteMint));
+  const treasuryBefore = await f.connection.getBalance(f.treasury);
   await failsWith(launch({ firstBuy: 0n }), /0x1775/);
   await failsWith(launch({ symbol: 'bad!' }), /0x1773/);
   await failsWith(launch({ minOut: TOKEN_SUPPLY }), /0x1777/);
-  // A creator without USDC cannot launch (a buy larger than the curve is capped, not rejected).
+  // A creator without the pair asset cannot launch (a buy larger than the curve is capped, not rejected).
   await failsWith(launch({ creator: f.outsider }), /AccountNotInitialized|0xbc4|insufficient funds|0x1\b/);
   assert.equal(await balance(f.client.ata(f.creator.publicKey, f.quoteMint)), before);
-  assert.equal(await balance(f.client.ata(f.treasury, f.quoteMint)), treasuryBefore);
+  assert.equal(await f.connection.getBalance(f.treasury), treasuryBefore);
 });
 
 test('Solana anti-snipe fee decays over the window and its surplus stays locked as liquidity', { skip }, async () => {
@@ -285,7 +299,7 @@ test('Solana creator first buy larger than the curve is capped and graduates at 
   const before = await balance(f.client.ata(f.creator.publicKey, f.quoteMint));
   const { mint, expected, signature } = await launch({ firstBuy: 50_000n * USDC, minOut: 1n, symbol: 'WHALE' });
   assert.equal(expected.graduates, true);
-  assert.equal(await balance(f.client.ata(f.creator.publicKey, f.quoteMint)), before - 10n * USDC - expected.gross);
+  assert.equal(await balance(f.client.ata(f.creator.publicKey, f.quoteMint)), before - expected.gross);
   const p = await invariant(mint);
   assert.equal(p.status, STATUS_GRADUATED); assert.equal(p.sold, p.curveSupply);
   assert.ok((await eventsOf(signature)).some(e => e.name === 'CurveGraduated'));
@@ -444,38 +458,40 @@ test('Solana harvest ignores liquidity other people deposit into the PumpSwap po
   await failsWith(harvest(f.outsider, mint), /0x1782/);
 });
 
-test('Solana test USDC: only the upgrade authority creates it, anyone mints up to the cap, and its own config completes and migrates', { skip: pumpSkip }, async () => {
-  const programId = f.programKeypair.publicKey;
-  await failsWith(ensureTestUsdc({ connection: f.connection, payer: f.outsider, programId, treasury: f.treasury }), /0x1770/);
-  const { mint: tusdc, config } = await ensureTestUsdc({ connection: f.connection, payer: f.authority, programId, treasury: f.treasury, params: PARAMS });
-  assert.equal(tusdc.toBase58(), f.client.testUsdcMint.toBase58());
-  assert.equal(config.quoteMint.toBase58(), tusdc.toBase58()); assert.equal(config.curveSupply, PARAMS.curveSupply);
-  const user = Keypair.generate();
-  await airdrop(f.connection, user.publicKey, 5 * web3.LAMPORTS_PER_SOL);
-  await failsWith(send(f.connection, user, [f.client.testUsdcFaucet({ user: user.publicKey, amount: TEST_FAUCET_MAX_WHOLE * USDC + 1n })], [], 1), /0x1774/);
-  await send(f.connection, user, [f.client.testUsdcFaucet({ user: user.publicKey })]);
-  assert.equal(await balance(f.client.ata(user.publicKey, tusdc)), TEST_USDC_FAUCET_MAX);
-  const tcfg = { address: config.address, quoteMint: tusdc, treasury: f.treasury };
+test('Solana native repricing: only the upgrade authority, fee schedule fixed, live pools unchanged', { skip }, async () => {
+  const { mint: before } = await launch({ symbol: 'OLDP' });
+  const repriced = { ...curveParams({ startFdv: 10_000, endFdv: 80_000, quoteDecimals: 6, launchFee: '0.02', snipeWindowSecs: 4 }) };
+  const update = (who, params) => send(f.connection, who, [f.client.updateCurveConfig({ authority: who.publicKey, config: f.config.address, params })], [], 1);
+  await failsWith(update(f.outsider, repriced), /0x1770/);
+  await failsWith(update(f.authority, { ...repriced, baseFeeBps: 200 }), /0x1788/);
+  await failsWith(update(f.authority, { ...repriced, snipeWindowSecs: 30 }), /0x1788/);
+  assert.match(explainError(new Error('custom program error: 0x1788')), /fee schedule/);
+  await failsWith(update(f.authority, { ...repriced, curveSupply: 0n }), /0x1774/);
+  const signature = await update(f.authority, repriced);
+  const [event] = (await eventsOf(signature)).filter(e => e.name === 'CurveConfigUpdated');
+  assert.equal(event.launchFee, 20_000_000n); assert.equal(event.virtualQuote, repriced.virtualQuote);
+  const cfg = f.client.decodeConfig((await f.connection.getAccountInfo(f.config.address)).data);
+  assert.equal(cfg.launchFee, 20_000_000n); assert.equal(cfg.virtualQuote, repriced.virtualQuote); assert.equal(cfg.curveSupply, repriced.curveSupply);
+  assert.equal(cfg.quoteMint.toBase58(), f.quoteMint.toBase58()); assert.equal(cfg.treasury.toBase58(), f.treasury.toBase58());
+  // Live pools keep the curve they launched with; new launches use the new one and pay the new fee.
+  assert.equal((await pool(before)).virtualQuote, PARAMS.virtualQuote);
+  const treasuryBefore = await f.connection.getBalance(f.treasury);
   const mint = Keypair.generate();
-  await send(f.connection, user, [f.client.computeBudget(), f.client.launch({ creator: user.publicKey, config: tcfg, mint: mint.publicKey, name: 'Test Dollar Coin', symbol: 'TDC', firstBuy: 10n * USDC, minTokensOut: 1n, reward: user.publicKey })], [mint], 1);
-  const p = await pool(mint.publicKey);
-  assert.equal(p.config.toBase58(), config.address.toBase58());
-  // A pool can only be traded through its own config, even if someone creates vaults for another quote mint.
-  await send(f.connection, f.trader, [f.client.createAtaIdempotent(f.trader.publicKey, f.client.poolPda(mint.publicKey), f.quoteMint)]);
-  await failsWith(send(f.connection, f.trader, [f.client.buy({ buyer: f.trader.publicKey, config: f.config, mint: mint.publicKey, grossIn: USDC, minTokensOut: 1n })], [], 1), /0x177e/);
-  await afterSnipeWindow(mint.publicKey);
-  await send(f.connection, user, [f.client.buy({ buyer: user.publicKey, config: tcfg, mint: mint.publicKey, grossIn: 20_000n * USDC, minTokensOut: 1n })]);
-  assert.equal((await pool(mint.publicKey)).status, STATUS_GRADUATED);
-  await send(f.connection, user, [f.client.computeBudget(MIGRATE_COMPUTE_UNITS), f.client.migrateToPumpswap({ payer: user.publicKey, config: tcfg, mint: mint.publicKey })], [], 1);
-  assert.equal((await pool(mint.publicKey)).status, STATUS_MIGRATED);
-  const pp = f.client.pumpAccounts(mint.publicKey, tusdc);
-  assert.equal(f.client.decodePumpPool((await f.connection.getAccountInfo(pp.pool)).data).quoteMint.toBase58(), tusdc.toBase58());
+  await send(f.connection, f.creator, [f.client.computeBudget(), f.client.launch({ creator: f.creator.publicKey, config: f.config, mint: mint.publicKey, name: 'New Price', symbol: 'NEWP', firstBuy: USDC, minTokensOut: 1n, reward: f.rewardWallet.publicKey })], [mint], 1);
+  assert.equal((await pool(mint.publicKey)).virtualQuote, repriced.virtualQuote);
+  assert.equal(await f.connection.getBalance(f.treasury) - treasuryBefore, 20_000_000);
+  await afterSnipeWindow(before);
+  await buy(f.trader, before, USDC, 1n);
+  // Back to the suite's prices.
+  await update(f.authority, PARAMS);
+  assert.equal(f.client.decodeConfig((await f.connection.getAccountInfo(f.config.address)).data).virtualQuote, PARAMS.virtualQuote);
 });
 
 test('Solana pairs: SOL, a paired token and a Token-2022 token each launch, trade, complete, migrate and harvest', { skip: pumpSkip }, async () => {
   const programId = f.programKeypair.publicKey;
   // Token-2022 pair assets without blocked extensions work end to end (PumpSwap included).
-  const templates = [...SOLANA_TEST_PAIRS, { kind: 'token', key: 'test-t22', symbol: 'TEST-T22', name: 'Token-2022 test pair', decimals: 6, token2022: true, permanentDelegate: false, startFdv: '1000', endFdv: '10000', launchFee: '2', faucet: '20000' }];
+  const native = solanaPricing('localnet');
+  const templates = [...solanaPairTemplates(native, { test: true }), { kind: 'token', key: 'test-t22', symbol: 'TEST-T22', name: 'Token-2022 test pair', decimals: 6, token2022: true, permanentDelegate: false, startFdv: '1000', endFdv: '10000', launchFee: native.launchFee, faucet: '20000' }];
   const pairs = await ensurePairConfigs({ connection: f.connection, payer: f.authority, programId, treasury: f.treasury, templates, overrides: { snipeWindowSecs: 4 } });
   assert.deepEqual(pairs.map(p => p.kind), ['native', 'token', 'token']);
   assert.equal(pairs[0].mint, WSOL_MINT);
@@ -483,9 +499,26 @@ test('Solana pairs: SOL, a paired token and a Token-2022 token each launch, trad
   // Re-running reuses the mints and configs.
   const again = await ensurePairConfigs({ connection: f.connection, payer: f.authority, programId, treasury: f.treasury, templates, saved: Object.fromEntries(pairs.map(p => [p.key, p.mint])) });
   assert.deepEqual(again.map(p => [p.mint, p.created]), pairs.map(p => [p.mint, false]));
+  const saved = Object.fromEntries(pairs.map(p => [p.key, p.mint]));
+  assert.equal((await pricingUpdates({ connection: f.connection, programId, authority: f.authority.publicKey, templates, saved })).length, 0, 'configs match the pricing file');
+  // Repricing to a new SOL fee from the pricing file updates every pair; the fee schedule is kept.
+  const pricier = templates.map(t => ({ ...t, launchFee: '0.03' }));
+  const pending = await pricingUpdates({ connection: f.connection, programId, authority: f.authority.publicKey, templates: pricier, saved });
+  assert.equal(pending.length, templates.length);
+  const repriced = await ensurePairConfigs({ connection: f.connection, payer: f.authority, programId, treasury: f.treasury, templates: pricier, saved, reprice: true });
+  assert.ok(repriced.every(p => p.repriced));
+  for (const p of repriced) {
+    const c = f.client.decodeConfig((await f.connection.getAccountInfo(new PublicKey(p.config))).data);
+    assert.equal(c.launchFee, 30_000_000n); assert.equal(c.snipeWindowSecs, 4, 'fee schedule kept');
+  }
+  await ensurePairConfigs({ connection: f.connection, payer: f.authority, programId, treasury: f.treasury, templates, saved, reprice: true });
+  // The test-asset faucet is capped per call.
+  const capUser = Keypair.generate(); await airdrop(f.connection, capUser.publicKey, web3.LAMPORTS_PER_SOL);
+  await failsWith(send(f.connection, capUser, [f.client.testUsdcFaucet({ user: capUser.publicKey, mint: new PublicKey(pairs[1].mint), amount: TEST_FAUCET_MAX_WHOLE * USDC + 1n })], [], 1), /0x1774/);
   const user = Keypair.generate();
   await airdrop(f.connection, user.publicKey, 20 * web3.LAMPORTS_PER_SOL);
   const amountOf = async (owner, cfg) => balance(f.client.quoteAta(owner, cfg));
+  f.faucetMint = new PublicKey(pairs[1].mint);
   for (const pair of pairs) {
     const cfg = { address: new PublicKey(pair.config), quoteMint: new PublicKey(pair.mint), treasury: f.treasury, quoteTokenProgram: new PublicKey(pair.tokenProgram) };
     const onchain = f.client.decodeConfig((await f.connection.getAccountInfo(cfg.address)).data);
@@ -496,13 +529,13 @@ test('Solana pairs: SOL, a paired token and a Token-2022 token each launch, trad
     const fund = async amount => pair.wsol ? send(f.connection, user, f.client.wrapSol(user.publicKey, amount))
       : send(f.connection, user, [f.client.testUsdcFaucet({ user: user.publicKey, mint: cfg.quoteMint, tokenProgram: cfg.quoteTokenProgram, amount })]);
     // Enough to pay the fee and complete the curve (end FDV in the pair asset is an upper bound).
-    const budget = parseAmountWhole(template.endFdv, unit) + onchain.launchFee;
+    const budget = parseAmountWhole(template.endFdv, unit);
     await fund(budget);
-    const treasuryBefore = await amountOf(f.treasury, cfg);
+    const treasuryBefore = await f.connection.getBalance(f.treasury);
     const mint = Keypair.generate();
     const firstBuy = parseAmountWhole(template.startFdv, unit) / 50n;
     await send(f.connection, user, [f.client.computeBudget(), f.client.launch({ creator: user.publicKey, config: cfg, mint: mint.publicKey, name: `Pair ${pair.symbol}`, symbol: pair.key.replace(/[^a-z]/g, '').slice(0, 8).toUpperCase(), firstBuy, minTokensOut: 1n, reward: user.publicKey })], [mint], 1);
-    assert.equal(await amountOf(f.treasury, cfg) - treasuryBefore, onchain.launchFee, `${pair.symbol} creation fee in the pair asset`);
+    assert.equal(BigInt(await f.connection.getBalance(f.treasury) - treasuryBefore), onchain.launchFee, `${pair.symbol} launch pays the creation fee in SOL`);
     const launched = await pool(mint.publicKey);
     assert.equal(launched.config.toBase58(), cfg.address.toBase58());
     assert.ok(Math.abs(poolStats({ ...launched, sold: 0n, realQuote: 0n }, pair.decimals).marketCap / Number(template.startFdv) - 1) < 1e-6, `${pair.symbol} starts at ${template.startFdv} ${pair.symbol} FDV`);
@@ -589,7 +622,7 @@ test('Solana mainnet build rejects test instructions; the upgrade authority can 
   await upgradeProgram({ connection: f.connection, payer: f.authority, programId, elf: readFileSync(mainnetElfPath), sendsPerSecond: 200 });
   assert.equal(await rejectsTestInstructions({ connection: f.connection, payer: f.authority, programId }), true, 'the mainnet build rejects them');
   const user = Keypair.generate(); await airdrop(f.connection, user.publicKey, web3.LAMPORTS_PER_SOL);
-  await failsWith(send(f.connection, user, [f.client.testUsdcFaucet({ user: user.publicKey })], [], 1), /0x1786/);
+  await failsWith(send(f.connection, user, [f.client.testUsdcFaucet({ user: user.publicKey, mint: f.faucetMint })], [], 1), /0x1786/);
   // Normal trading still works on the mainnet build.
   const { mint } = await launch({ symbol: 'MAINB' });
   await afterSnipeWindow(mint);
