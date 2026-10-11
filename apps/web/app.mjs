@@ -188,7 +188,7 @@ function stats() {
   const balance = `${number(state.nativeBalance ?? state.balance, 4)} ${state.nativeSymbol ?? state.balanceSymbol ?? 'ETH'}`;
   return h('section.stats', { 'aria-label': 'Launchpad overview' },
     h('div', h('span', 'Tokens launched'), h('strong', String(state.tokens.length))),
-    h('div', h('span', 'Trading reserves'), h('strong', Object.entries(totals).map(([q, v]) => `${number(v, 2)} ${q}`).join(' + ') || '0'), h('small', mode === 'local' ? 'Simulated assets held by curves and pools' : 'Test assets held by curves and pools')),
+    h('div', h('span', 'Trading reserves'), h('strong', Object.entries(totals).map(([q, v]) => `${number(v, v < 1 ? 4 : 2)} ${q}`).join(' + ') || '0'), h('small', mode === 'local' ? 'Simulated assets held by curves and pools' : 'Test assets held by curves and pools')),
     h('div', h('span', mode === 'local' ? 'Your simulated balance' : 'Your balance'), h('strong', state.disconnected ? '—' : balance)),
     h('div', h('span', 'Trading fee'), h('strong', solana ? '1.25% → 0.30%' : dex ? '1.25% → 1%' : '1.25%'), h('small', solana ? 'Curve, then PumpSwap pool' : dex ? 'Curve, then Uniswap v3 pool' : 'Bonding curve')));
 }
@@ -198,7 +198,8 @@ function tokenCard(token) {
     h('div.token-card-head', avatar(token), h('div', h('h3', token.name), h('span.sym', `$${token.symbol}`))),
     h('div.chips', h(`span.chip${life.chip ? '.' + life.chip : ''}`, life.label), h('span.chip', `${token.quoteSymbol ?? state.nativeSymbol ?? 'ETH'} pair`)),
     h('p.desc', token.metadata?.description || 'No description yet.'),
-    h('div.figures', h('div.figure', h('span', 'Price'), h('strong', fmtPrice(token))), h('div.figure', h('span', 'Circulating cap'), h('strong', fmtValue(p.marketCap, token))),h('div.figure',h('span','FDV'),h('strong',fmtValue(p.fdv,token)))),
+    // Market cap = price × the full 1B supply (all minted at launch), the same figure as FDV.
+    h('div.figures', h('div.figure', h('span', 'Market cap'), h('strong', fmtValue(p.marketCap, token))), h('div.figure', h('span', 'Price'), h('strong.nowrap', fmtPrice(token)))),
     h('div.progress', h('div.progress-label', h('span', token.graduated ? 'Graduated' : 'Bonding curve'), h('strong', `${number(pct, 1)}%`)), bar(pct, token.complete || token.graduated)));
 }
 function filtered(list) {

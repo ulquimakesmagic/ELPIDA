@@ -123,8 +123,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname.startsWith('/api/content/')){const record=metadataStore.get(url.pathname.slice('/api/content/'.length));if(!record)return send(404,{error:'Content not found.'});res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}
         if (url.pathname === '/api/indexer/status') { await runtime.indexer.sync(); return send(200,runtime.indexer.status()); }
         if (url.pathname === '/api/tokens') { await runtime.indexer.sync(); return send(200,runtime.listings()); }
-        const indexed = url.pathname.match(/^\/api\/tokens\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles))?$/);
-        if (indexed) { await runtime.indexer.sync(); const token=runtime.listings().find(t=>t.address===indexed[1].toLowerCase()); if(!token)return send(404,{error:'Token not found.'}); return send(200,indexed[2]==='trades'?runtime.indexer.trades(token.address):indexed[2]==='candles'?runtime.indexer.candles(token.address,Number(url.searchParams.get('interval')??60)):token); }
+        const indexed = url.pathname.match(/^\/api\/tokens\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?$/);
+        if (indexed) { await runtime.indexer.sync(); const token=runtime.listings().find(t=>t.address===indexed[1].toLowerCase()); if(!token)return send(404,{error:'Token not found.'}); return send(200,indexed[2]==='trades'?runtime.indexer.trades(token.address):indexed[2]==='holders'?runtime.indexer.holders(token.address):indexed[2]==='candles'?runtime.indexer.candles(token.address,Number(url.searchParams.get('interval')??60)):token); }
         if (url.pathname === '/api/state') return send(200, await runtime.state(url.searchParams.get('account') ?? '0'));
         if (vendorFiles.has(url.pathname)) { res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' }); return res.end(await readFile(vendorFiles.get(url.pathname))); }
         const resource = resources.get(url.pathname);
