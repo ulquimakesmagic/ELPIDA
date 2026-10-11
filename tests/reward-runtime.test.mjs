@@ -68,8 +68,9 @@ test('reward treasury runs wallet allocations, identity escrow, holder payouts, 
   const epochs=r.rewards.record(launched.token).epochs;await r.transact('buy',{token:launched.token,amount:'10000'});assert.ok(r.rewards.record(launched.token).epochs>epochs,'post-migration position fees reach the holder treasury');
 
   await r.transact('reward-stock-faucet',{});
-  const stockPair=await r.transact('launch',{name:'Stock pair',symbol:'XPAIR',pair:'token',quoteToken:r.rewards.stock.target,firstBuy:'0.01',rewardPolicy:{mode:'holders',threshold:'0.00001',minimumHolding:'1'}});
-  assert.equal(r.indexer.listings().find(t=>t.address===stockPair.token).quoteSymbol,'TEST-STOCK');assert.equal(r.rewards.record(stockPair.token).epochs,1);
+  const stockPair=await r.transact('launch',{name:'Stock pair',symbol:'XPAIR',pair:'xstock',quoteToken:r.rewards.stock.target,firstBuy:'0.01',rewardPolicy:{mode:'holders',threshold:'0.00001',minimumHolding:'1'}});
+  assert.equal(r.indexer.listings().find(t=>t.address===stockPair.token).quoteSymbol,'TEST-STOCK');assert.equal(r.indexer.listings().find(t=>t.address===stockPair.token).pair,'xstock');
+  await assert.rejects(r.transact('launch',{name:'Wrong kind',symbol:'WRONG',pair:'token',quoteToken:r.rewards.stock.target,firstBuy:'0.01'}),/graduated Elpida token/);assert.equal(r.rewards.record(stockPair.token).epochs,1);
  });
  const dashboard=await r.rewards.dashboard();assert.equal(dashboard.rows.length,7);assert.equal(dashboard.localOnly,true);assert.equal(dashboard.xVerificationConfigured,false);
 });

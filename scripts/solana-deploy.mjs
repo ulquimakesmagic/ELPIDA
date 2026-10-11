@@ -12,8 +12,9 @@ import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import * as web3 from '@solana/web3.js';
 import { solanaDevnet } from '../packages/core/networks.mjs';
+import { SOLANA_TEST_PAIRS } from '../packages/core/pairs.mjs';
 import { createElpidaSolana, curveParams, poolStats, DEFAULT_CURVE } from '../packages/solana/client.mjs';
-import { deployProgram, upgradeProgram, upgradeCost, programStatus, initializeConfig, deploymentCost, createTestQuoteMint, airdrop, findExistingBuffer, closeStaleBuffers, ensureTestUsdc } from '../packages/solana/deploy.mjs';
+import { deployProgram, upgradeProgram, upgradeCost, programStatus, initializeConfig, deploymentCost, createTestQuoteMint, airdrop, findExistingBuffer, closeStaleBuffers, ensureTestUsdc, ensurePairConfigs } from '../packages/solana/deploy.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const { values: args } = parseArgs({ options: {
@@ -23,6 +24,7 @@ const { values: args } = parseArgs({ options: {
   upgrade: { type: 'boolean', default: false }, // upgrade an already deployed program to contracts/solana/build
   'start-fdv': { type: 'string' }, 'end-fdv': { type: 'string' }, // curve: starting and graduation FDV in USDC (default 5000 / 50000)
   'no-test-usdc': { type: 'boolean', default: false }, // skip the Elpida tUSDC faucet config on test networks
+  'no-test-pairs': { type: 'boolean', default: false }, // skip the SOL, test xStock and test paired-token configs
 } });
 if (!['devnet', 'localnet'].includes(args.cluster)) throw new Error('--cluster must be devnet or localnet');
 const localnet = args.cluster === 'localnet';
@@ -122,6 +124,15 @@ if (!args['no-test-usdc']) {
   testUsdc = await ensureTestUsdc({ connection, payer, programId: programKeypair.publicKey, treasury: config.treasury.toBase58(), params: curveParams({ startFdv, endFdv, quoteDecimals: 6 }) });
   console.log(testUsdc.created ? `Elpida tUSDC test config created (mint ${testUsdc.mint.toBase58()}).` : 'Elpida tUSDC test config already exists.');
 }
+// Test networks: SOL, a simulated xStock and a test paired token, each with its own curve config.
+let pairs = [];
+if (!args['no-test-pairs']) {
+  pairs = await ensurePairConfigs({ connection, payer, programId: programKeypair.publicKey, treasury: config.treasury.toBase58(), templates: SOLANA_TEST_PAIRS,
+    saved: state.testAssets ?? {}, onProgress: message => console.log(message) });
+  state.testAssets = Object.fromEntries(pairs.filter(p => p.test).map(p => [p.key, p.mint]));
+  writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
+  for (const p of pairs) console.log(`${p.symbol} pair config ${p.created ? 'created' : 'already exists'} (${p.kind}, mint ${p.mint}).`);
+}
 const startStats = poolStats({ ...config, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 }, config.quoteDecimals);
 const record = {
   cluster: args.cluster, rpcUrl: shownRpc, programId: programKeypair.publicKey.toBase58(), config: client.configPda.toBase58(),
@@ -133,6 +144,12 @@ const record = {
     snipeWindowSecs: config.snipeWindowSecs, maxCreatorBuyBps: config.maxCreatorBuyBps,
   },
   testUsdc: testUsdc ? { mint: testUsdc.mint.toBase58(), config: testUsdc.config.address.toBase58() } : null,
+  // Every launchable pair: the default USDC config, tUSDC and the test-network pairs above.
+  pairs: [
+    { kind: 'usdc', key: 'usdc', symbol: 'USDC', name: localnet ? 'Local test USDC' : 'Circle test USDC', mint: config.quoteMint.toBase58(), config: client.configPda.toBase58(), decimals: config.quoteDecimals, tokenProgram: (await connection.getAccountInfo(config.quoteMint)).owner.toBase58(), test: false },
+    ...(testUsdc ? [{ kind: 'usdc', key: 'tusdc', symbol: 'tUSDC', name: 'Elpida tUSDC (free test USDC, no value)', mint: testUsdc.mint.toBase58(), config: testUsdc.config.address.toBase58(), decimals: 6, tokenProgram: 'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA', test: true, faucet: '25000' }] : []),
+    ...pairs.map(({ created, ...p }) => p),
+  ],
   deployer: payer.publicKey.toBase58(), recordedAt: new Date().toISOString(),
 };
 writeFileSync(outPath, `${JSON.stringify(record, null, 2)}\n`);

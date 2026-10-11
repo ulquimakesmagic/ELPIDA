@@ -1,4 +1,11 @@
-//! Elpida launchpad for Solana, model 3: USDC-quoted virtual-reserve bonding curve. NOT AUDITED.
+//! Elpida launchpad for Solana, model 3: virtual-reserve bonding curve. NOT AUDITED.
+//!
+//! - Trading pairs: one `CurveConfig` per quote mint (wrapped SOL for native SOL, USDC, an xStock or
+//!   another approved token), each with its own curve parameters and creation fee in that asset.
+//!   Quote mints may be classic SPL or Token-2022. Mints with transfer fees, an active transfer hook,
+//!   non-transferability, frozen-by-default accounts or a permanent delegate are rejected at config
+//!   time: PumpSwap will not create a pool for permanent-delegate quotes (which includes xStocks), so
+//!   such a curve could never graduate.
 //!
 //! - `launch` atomically charges the creation fee, mints a fixed 1B supply into the pool vault
 //!   (mint authority revoked in the same instruction, no freeze authority) and executes the creator's
@@ -25,6 +32,7 @@ use anchor_spl::associated_token::{get_associated_token_address_with_program_id,
 use anchor_spl::token_2022::Token2022;
 use anchor_spl::token::spl_token::instruction::AuthorityType;
 use anchor_spl::token::{self, Mint, MintTo, SetAuthority, Token, TokenAccount, Transfer};
+use anchor_spl::token_interface::{self as ti, Mint as QuoteMint, TokenAccount as QuoteAccount, TokenInterface};
 
 declare_id!("ANkA5pytoVkiKQbjzd5NdPWKgmwfsihNJvSfg3vtKLNz");
 
@@ -45,8 +53,8 @@ const PUMP_CREATE_POOL: [u8; 8] = [233, 146, 209, 142, 207, 104, 64, 188];
 const PUMP_WITHDRAW: [u8; 8] = [183, 18, 70, 156, 148, 109, 161, 34];
 /// SOL lent to the LP-authority PDA so it can pay PumpSwap's account rent; the rest is refunded.
 pub const MIGRATION_RENT_LAMPORTS: u64 = 50_000_000;
-/// Largest single test-faucet mint: 25,000 tUSDC (enough to complete a curve).
-pub const TEST_USDC_FAUCET_MAX: u64 = 25_000 * 1_000_000;
+/// Largest single test-faucet mint, in whole units of the test asset (10,000,000).
+pub const TEST_FAUCET_MAX_WHOLE: u64 = 10_000_000;
 // PumpSwap `Pool` layout offsets (8-byte discriminator included).
 const PUMP_POOL_LP_SUPPLY: usize = 203;
 const PUMP_POOL_PROTOCOL_FEES: usize = 271;
@@ -61,6 +69,8 @@ pub struct CurveParams {
     pub snipe_start_bps: u16,
     pub snipe_window_secs: u32,
     pub max_creator_buy_bps: u16,
+    /// Creation fee in the quote asset's base units (about $10 worth).
+    pub launch_fee: u64,
 }
 
 #[program]
@@ -71,6 +81,7 @@ pub mod elpida_launchpad {
     pub fn initialize_curve(ctx: Context<InitializeCurve>, params: CurveParams) -> Result<()> {
         let bump = ctx.bumps.curve_config;
         let (quote_mint, treasury) = (ctx.accounts.quote_mint.key(), ctx.accounts.treasury.key());
+        check_quote_mint(&ctx.accounts.quote_mint.to_account_info())?;
         write_config(&mut ctx.accounts.curve_config, quote_mint, ctx.accounts.quote_mint.decimals, treasury, &params, bump)
     }
 
@@ -79,6 +90,7 @@ pub mod elpida_launchpad {
     pub fn add_curve_config(ctx: Context<AddCurveConfig>, params: CurveParams) -> Result<()> {
         let bump = ctx.bumps.curve_config;
         let (quote_mint, treasury) = (ctx.accounts.quote_mint.key(), ctx.accounts.treasury.key());
+        check_quote_mint(&ctx.accounts.quote_mint.to_account_info())?;
         write_config(&mut ctx.accounts.curve_config, quote_mint, ctx.accounts.quote_mint.decimals, treasury, &params, bump)
     }
 
@@ -88,12 +100,14 @@ pub mod elpida_launchpad {
         Ok(())
     }
 
-    /// TEST NETWORKS ONLY: mints up to 25,000 Elpida tUSDC to the caller. Only affects the test mint.
+    /// TEST NETWORKS ONLY: mints a test asset to the caller. Works only for mints whose mint authority
+    /// is the faucet PDA (Elpida tUSDC and the labelled test assets created by the deploy script).
     pub fn test_usdc_faucet(ctx: Context<TestUsdcFaucet>, amount: u64) -> Result<()> {
-        require!(amount > 0 && amount <= TEST_USDC_FAUCET_MAX, ElpidaError::InvalidParams);
+        let max = TEST_FAUCET_MAX_WHOLE.checked_mul(10u64.pow(ctx.accounts.test_mint.decimals as u32)).ok_or(ElpidaError::MathOverflow)?;
+        require!(amount > 0 && amount <= max, ElpidaError::InvalidParams);
         let seeds: &[&[u8]] = &[b"test-usdc-authority", &[ctx.bumps.faucet_authority]];
-        token::mint_to(
-            CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), MintTo { mint: ctx.accounts.test_usdc.to_account_info(), to: ctx.accounts.user_token.to_account_info(), authority: ctx.accounts.faucet_authority.to_account_info() }, &[seeds]),
+        ti::mint_to(
+            CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), ti::MintTo { mint: ctx.accounts.test_mint.to_account_info(), to: ctx.accounts.user_token.to_account_info(), authority: ctx.accounts.faucet_authority.to_account_info() }, &[seeds]),
             amount,
         )
     }
@@ -110,10 +124,8 @@ pub mod elpida_launchpad {
 
         let a = &ctx.accounts;
         let tp = a.token_program.to_account_info();
-        token::transfer(
-            CpiContext::new(tp.clone(), Transfer { from: a.creator_quote.to_account_info(), to: a.treasury_quote.to_account_info(), authority: a.creator.to_account_info() }),
-            a.curve_config.launch_fee,
-        )?;
+        let decimals = a.quote_mint.decimals;
+        quote_transfer(&a.quote_token_program, &a.quote_mint, a.creator_quote.to_account_info(), a.treasury_quote.to_account_info(), a.creator.to_account_info(), a.curve_config.launch_fee, decimals, &[])?;
         token::mint_to(
             CpiContext::new(tp.clone(), MintTo { mint: a.mint.to_account_info(), to: a.token_vault.to_account_info(), authority: a.creator.to_account_info() }),
             TOKEN_SUPPLY,
@@ -163,10 +175,7 @@ pub mod elpida_launchpad {
         let pool_key = pool.key();
         let snapshot = Snapshot::of(pool);
         let a = &ctx.accounts;
-        token::transfer(
-            CpiContext::new(a.token_program.to_account_info(), Transfer { from: a.creator_quote.to_account_info(), to: a.quote_vault.to_account_info(), authority: a.creator.to_account_info() }),
-            trade.gross,
-        )?;
+        quote_transfer(&a.quote_token_program, &a.quote_mint, a.creator_quote.to_account_info(), a.quote_vault.to_account_info(), a.creator.to_account_info(), trade.gross, decimals, &[])?;
         let seeds: &[&[u8]] = &[b"curve", mint_key.as_ref(), &[bump]];
         token::transfer(
             CpiContext::new_with_signer(a.token_program.to_account_info(), Transfer { from: a.token_vault.to_account_info(), to: a.creator_token.to_account_info(), authority: a.pool.to_account_info() }, &[seeds]),
@@ -192,10 +201,7 @@ pub mod elpida_launchpad {
         let (mint_key, bump, pool_key) = (pool.mint, pool.bump, pool.key());
         let snapshot = Snapshot::of(pool);
         let a = &ctx.accounts;
-        token::transfer(
-            CpiContext::new(a.token_program.to_account_info(), Transfer { from: a.trader_quote.to_account_info(), to: a.quote_vault.to_account_info(), authority: a.trader.to_account_info() }),
-            trade.gross,
-        )?;
+        quote_transfer(&a.quote_token_program, &a.quote_mint, a.trader_quote.to_account_info(), a.quote_vault.to_account_info(), a.trader.to_account_info(), trade.gross, a.quote_mint.decimals, &[])?;
         let seeds: &[&[u8]] = &[b"curve", mint_key.as_ref(), &[bump]];
         token::transfer(
             CpiContext::new_with_signer(a.token_program.to_account_info(), Transfer { from: a.token_vault.to_account_info(), to: a.trader_token.to_account_info(), authority: a.pool.to_account_info() }, &[seeds]),
@@ -228,10 +234,7 @@ pub mod elpida_launchpad {
             tokens_in,
         )?;
         let seeds: &[&[u8]] = &[b"curve", mint_key.as_ref(), &[bump]];
-        token::transfer(
-            CpiContext::new_with_signer(a.token_program.to_account_info(), Transfer { from: a.quote_vault.to_account_info(), to: a.trader_quote.to_account_info(), authority: a.pool.to_account_info() }, &[seeds]),
-            trade.net,
-        )?;
+        quote_transfer(&a.quote_token_program, &a.quote_mint, a.quote_vault.to_account_info(), a.trader_quote.to_account_info(), a.pool.to_account_info(), trade.net, a.quote_mint.decimals, &[seeds])?;
         emit!(CurveSold {
             pool: pool_key, seller: a.trader.key(), tokens_in, quote_out: trade.net, fee: trade.fee, anti_snipe_fee: trade.surplus,
             real_quote: snapshot.real_quote, virtual_quote: snapshot.virtual_quote_total, token_reserve: snapshot.token_reserve, sold: snapshot.sold,
@@ -251,10 +254,7 @@ pub mod elpida_launchpad {
         let seeds: &[&[u8]] = &[b"curve", mint_key.as_ref(), &[bump]];
         for (to, amount) in [(a.treasury_quote.to_account_info(), protocol), (a.reward_quote.to_account_info(), creator)] {
             if amount > 0 {
-                token::transfer(
-                    CpiContext::new_with_signer(a.token_program.to_account_info(), Transfer { from: a.quote_vault.to_account_info(), to: to.clone(), authority: a.pool.to_account_info() }, &[seeds]),
-                    amount,
-                )?;
+                quote_transfer(&a.quote_token_program, &a.quote_mint, a.quote_vault.to_account_info(), to.clone(), a.pool.to_account_info(), amount, a.quote_mint.decimals, &[seeds])?;
                 emit!(FeesWithdrawn { pool: pool_key, recipient: to.key(), amount });
             }
         }
@@ -276,10 +276,7 @@ pub mod elpida_launchpad {
             CpiContext::new_with_signer(a.token_program.to_account_info(), Transfer { from: a.token_vault.to_account_info(), to: a.authority_base.to_account_info(), authority: a.pool.to_account_info() }, &[curve_seeds]),
             base_amount,
         )?;
-        token::transfer(
-            CpiContext::new_with_signer(a.token_program.to_account_info(), Transfer { from: a.quote_vault.to_account_info(), to: a.authority_quote.to_account_info(), authority: a.pool.to_account_info() }, &[curve_seeds]),
-            quote_amount,
-        )?;
+        quote_transfer(&a.quote_token_program, &a.quote_mint, a.quote_vault.to_account_info(), a.authority_quote.to_account_info(), a.pool.to_account_info(), quote_amount, a.quote_mint.decimals, &[curve_seeds])?;
         system_program::transfer(
             CpiContext::new(a.system_program.to_account_info(), system_program::Transfer { from: a.payer.to_account_info(), to: a.lp_authority.to_account_info() }),
             MIGRATION_RENT_LAMPORTS,
@@ -310,7 +307,7 @@ pub mod elpida_launchpad {
             AccountMeta::new_readonly(a.system_program.key(), false),
             AccountMeta::new_readonly(a.token_2022_program.key(), false),
             AccountMeta::new_readonly(a.token_program.key(), false),
-            AccountMeta::new_readonly(a.token_program.key(), false),
+            AccountMeta::new_readonly(a.quote_token_program.key(), false),
             AccountMeta::new_readonly(a.associated_token_program.key(), false),
             AccountMeta::new_readonly(a.pump_event_authority.key(), false),
             AccountMeta::new_readonly(a.pump_amm_program.key(), false),
@@ -321,7 +318,7 @@ pub mod elpida_launchpad {
                 a.pump_pool.to_account_info(), a.pump_global_config.to_account_info(), a.lp_authority.to_account_info(), a.mint.to_account_info(),
                 a.quote_mint.to_account_info(), a.lp_mint.to_account_info(), a.authority_base.to_account_info(), a.authority_quote.to_account_info(),
                 a.authority_lp.to_account_info(), a.pump_pool_base.to_account_info(), a.pump_pool_quote.to_account_info(), a.system_program.to_account_info(),
-                a.token_2022_program.to_account_info(), a.token_program.to_account_info(), a.associated_token_program.to_account_info(),
+                a.token_2022_program.to_account_info(), a.token_program.to_account_info(), a.quote_token_program.to_account_info(), a.associated_token_program.to_account_info(),
                 a.pump_event_authority.to_account_info(), a.pump_amm_program.to_account_info(),
             ],
             &[authority_seeds],
@@ -417,13 +414,20 @@ pub mod elpida_launchpad {
         for (from, to, amount) in [
             (a.authority_base.to_account_info(), a.treasury_base.to_account_info(), protocol_base),
             (a.authority_base.to_account_info(), a.reward_base.to_account_info(), base_out - protocol_base),
-            (a.authority_quote.to_account_info(), a.treasury_quote.to_account_info(), protocol_quote),
-            (a.authority_quote.to_account_info(), a.reward_quote.to_account_info(), quote_out - protocol_quote),
         ] {
             if amount > 0 {
                 token::transfer(
                     CpiContext::new_with_signer(a.token_program.to_account_info(), Transfer { from, to, authority: a.lp_authority.to_account_info() }, &[authority_seeds]),
                     amount,
+                )?;
+            }
+        }
+        let quote_program = a.quote_program_info();
+        for (to, amount) in [(a.treasury_quote.to_account_info(), protocol_quote), (a.reward_quote.to_account_info(), quote_out - protocol_quote)] {
+            if amount > 0 {
+                ti::transfer_checked(
+                    CpiContext::new_with_signer(quote_program.clone(), ti::TransferChecked { from: a.authority_quote.to_account_info(), mint: a.quote_mint.to_account_info(), to, authority: a.lp_authority.to_account_info() }, &[authority_seeds]),
+                    amount, a.curve_config.quote_decimals,
                 )?;
             }
         }
@@ -496,6 +500,42 @@ pub fn harvestable_lp(lp: u64, principal: u128, state: &PumpState) -> Result<u64
     Ok((lp as u128).saturating_sub(keep).min(u64::MAX as u128) as u64)
 }
 
+/// Moves quote tokens with `transfer_checked`, which works for classic SPL and Token-2022 mints.
+#[allow(clippy::too_many_arguments)]
+fn quote_transfer<'info>(program: &Interface<'info, TokenInterface>, mint: &InterfaceAccount<'info, QuoteMint>, from: AccountInfo<'info>, to: AccountInfo<'info>, authority: AccountInfo<'info>, amount: u64, decimals: u8, seeds: &[&[&[u8]]]) -> Result<()> {
+    if amount == 0 { return Ok(()); }
+    ti::transfer_checked(CpiContext::new_with_signer(program.to_account_info(), ti::TransferChecked { from, mint: mint.to_account_info(), to, authority }, seeds), amount, decimals)
+}
+
+/// Token-2022 mint extensions that would break curve accounting or make the vault unusable.
+/// Parsed from the raw TLV area (type and length are u16) so newer extension types never fail to load.
+fn check_quote_mint(mint: &AccountInfo) -> Result<()> {
+    if *mint.owner != anchor_spl::token_2022::ID { return Ok(()); }
+    const BASE: usize = 165; // extensions start after the account-type byte that follows the padded base state
+    let data = mint.try_borrow_data()?;
+    if data.len() <= 82 { return Ok(()); }
+    require!(data.len() > BASE && data[BASE] == 1, ElpidaError::UnsupportedQuote);
+    let mut offset = BASE + 1;
+    while offset + 4 <= data.len() {
+        let kind = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        let len = u16::from_le_bytes([data[offset + 2], data[offset + 3]]) as usize;
+        let value = data.get(offset + 4..offset + 4 + len).ok_or(ElpidaError::UnsupportedQuote)?;
+        match kind {
+            0 => break,
+            // TransferFeeConfig, NonTransferable, ConfidentialTransferFeeConfig; PermanentDelegate (12):
+            // PumpSwap refuses such quote mints, so the curve could never graduate (this includes xStocks).
+            1 | 9 | 12 | 16 => return err!(ElpidaError::UnsupportedQuote),
+            // DefaultAccountState: Frozen (2) would freeze every vault at creation.
+            6 => require!(value.first() != Some(&2), ElpidaError::UnsupportedQuote),
+            // TransferHook: allowed only while no hook program is set (authority 32 bytes, then program id).
+            14 => require!(value.len() >= 64 && value[32..64].iter().all(|b| *b == 0), ElpidaError::UnsupportedQuote),
+            _ => {}
+        }
+        offset += 4 + len;
+    }
+    Ok(())
+}
+
 fn write_config(config: &mut CurveConfig, quote_mint: Pubkey, decimals: u8, treasury: Pubkey, params: &CurveParams, bump: u8) -> Result<()> {
     require!((6..=9).contains(&decimals), ElpidaError::QuoteDecimals);
     require!(params.virtual_quote > 0, ElpidaError::InvalidParams);
@@ -507,7 +547,7 @@ fn write_config(config: &mut CurveConfig, quote_mint: Pubkey, decimals: u8, trea
     require!(params.max_creator_buy_bps <= 10_000, ElpidaError::InvalidParams);
     config.quote_mint = quote_mint;
     config.treasury = treasury;
-    config.launch_fee = 10u64 * 10u64.pow(decimals as u32);
+    config.launch_fee = params.launch_fee;
     config.quote_decimals = decimals;
     config.model_version = MODEL_VERSION;
     config.virtual_quote = params.virtual_quote;
@@ -653,17 +693,17 @@ pub struct InitializeCurve<'info> {
     #[account(mut)]
     pub authority: Signer<'info>,
     #[account(init, payer = authority, space = 8 + CurveConfig::INIT_SPACE, seeds = [b"curve-config"], bump)]
-    pub curve_config: Account<'info, CurveConfig>,
-    pub quote_mint: Account<'info, Mint>,
+    pub curve_config: Box<Account<'info, CurveConfig>>,
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
     /// CHECK: any wallet; protocol fees go to its quote-token associated account.
     pub treasury: UncheckedAccount<'info>,
-    #[account(init_if_needed, payer = authority, associated_token::mint = quote_mint, associated_token::authority = treasury)]
-    pub treasury_quote: Account<'info, TokenAccount>,
+    #[account(init_if_needed, payer = authority, associated_token::mint = quote_mint, associated_token::authority = treasury, associated_token::token_program = token_program)]
+    pub treasury_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
     #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ ElpidaError::Unauthorized)]
     pub program: Program<'info, crate::program::ElpidaLaunchpad>,
     #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ ElpidaError::Unauthorized)]
     pub program_data: Account<'info, ProgramData>,
-    pub token_program: Program<'info, Token>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
@@ -674,16 +714,17 @@ pub struct AddCurveConfig<'info> {
     pub authority: Signer<'info>,
     #[account(init, payer = authority, space = 8 + CurveConfig::INIT_SPACE, seeds = [b"curve-config", quote_mint.key().as_ref()], bump)]
     pub curve_config: Box<Account<'info, CurveConfig>>,
-    pub quote_mint: Box<Account<'info, Mint>>,
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
     /// CHECK: any wallet; protocol fees go to its quote-token associated account.
     pub treasury: UncheckedAccount<'info>,
-    #[account(init_if_needed, payer = authority, associated_token::mint = quote_mint, associated_token::authority = treasury)]
-    pub treasury_quote: Box<Account<'info, TokenAccount>>,
+    #[account(init_if_needed, payer = authority, associated_token::mint = quote_mint, associated_token::authority = treasury, associated_token::token_program = token_program)]
+    pub treasury_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
     #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ ElpidaError::Unauthorized)]
     pub program: Program<'info, crate::program::ElpidaLaunchpad>,
     #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ ElpidaError::Unauthorized)]
     pub program_data: Box<Account<'info, ProgramData>>,
-    pub token_program: Program<'info, Token>,
+    /// The quote mint's token program (SPL Token or Token-2022).
+    pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
@@ -709,14 +750,14 @@ pub struct CreateTestUsdc<'info> {
 pub struct TestUsdcFaucet<'info> {
     #[account(mut)]
     pub user: Signer<'info>,
-    #[account(mut, seeds = [b"test-usdc"], bump)]
-    pub test_usdc: Box<Account<'info, Mint>>,
+    #[account(mut, mint::authority = faucet_authority, mint::token_program = token_program)]
+    pub test_mint: Box<InterfaceAccount<'info, QuoteMint>>,
     /// CHECK: PDA minter.
     #[account(seeds = [b"test-usdc-authority"], bump)]
     pub faucet_authority: UncheckedAccount<'info>,
-    #[account(init_if_needed, payer = user, associated_token::mint = test_usdc, associated_token::authority = user)]
-    pub user_token: Box<Account<'info, TokenAccount>>,
-    pub token_program: Program<'info, Token>,
+    #[account(init_if_needed, payer = user, associated_token::mint = test_mint, associated_token::authority = user, associated_token::token_program = token_program)]
+    pub user_token: Box<InterfaceAccount<'info, QuoteAccount>>,
+    pub token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
@@ -727,24 +768,26 @@ pub struct Launch<'info> {
     pub creator: Signer<'info>,
     #[account(has_one = quote_mint, has_one = treasury)]
     pub curve_config: Box<Account<'info, CurveConfig>>,
-    pub quote_mint: Box<Account<'info, Mint>>,
+    #[account(mint::token_program = quote_token_program)]
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
     /// CHECK: verified against curve_config.treasury.
     pub treasury: UncheckedAccount<'info>,
-    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = treasury)]
-    pub treasury_quote: Box<Account<'info, TokenAccount>>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = treasury, associated_token::token_program = quote_token_program)]
+    pub treasury_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
     #[account(init, payer = creator, mint::decimals = TOKEN_DECIMALS, mint::authority = creator)]
     pub mint: Box<Account<'info, Mint>>,
     #[account(init, payer = creator, space = 8 + CurvePool::INIT_SPACE, seeds = [b"curve", mint.key().as_ref()], bump)]
     pub pool: Box<Account<'info, CurvePool>>,
     #[account(init, payer = creator, associated_token::mint = mint, associated_token::authority = pool)]
     pub token_vault: Box<Account<'info, TokenAccount>>,
-    #[account(init, payer = creator, associated_token::mint = quote_mint, associated_token::authority = pool)]
-    pub quote_vault: Box<Account<'info, TokenAccount>>,
-    #[account(mut, token::mint = quote_mint, token::authority = creator)]
-    pub creator_quote: Box<Account<'info, TokenAccount>>,
+    #[account(init, payer = creator, associated_token::mint = quote_mint, associated_token::authority = pool, associated_token::token_program = quote_token_program)]
+    pub quote_vault: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(mut, token::mint = quote_mint, token::authority = creator, token::token_program = quote_token_program)]
+    pub creator_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
     #[account(init, payer = creator, associated_token::mint = mint, associated_token::authority = creator)]
     pub creator_token: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
@@ -755,19 +798,21 @@ pub struct Trade<'info> {
     pub trader: Signer<'info>,
     #[account(has_one = quote_mint)]
     pub curve_config: Box<Account<'info, CurveConfig>>,
-    pub quote_mint: Box<Account<'info, Mint>>,
+    #[account(mint::token_program = quote_token_program)]
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut, seeds = [b"curve", mint.key().as_ref()], bump = pool.bump, has_one = mint, constraint = pool.config == curve_config.key() @ ElpidaError::WrongConfig)]
     pub pool: Box<Account<'info, CurvePool>>,
     #[account(mut, associated_token::mint = mint, associated_token::authority = pool)]
     pub token_vault: Box<Account<'info, TokenAccount>>,
-    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = pool)]
-    pub quote_vault: Box<Account<'info, TokenAccount>>,
-    #[account(init_if_needed, payer = trader, associated_token::mint = quote_mint, associated_token::authority = trader)]
-    pub trader_quote: Box<Account<'info, TokenAccount>>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = pool, associated_token::token_program = quote_token_program)]
+    pub quote_vault: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(init_if_needed, payer = trader, associated_token::mint = quote_mint, associated_token::authority = trader, associated_token::token_program = quote_token_program)]
+    pub trader_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
     #[account(init_if_needed, payer = trader, associated_token::mint = mint, associated_token::authority = trader)]
     pub trader_token: Box<Account<'info, TokenAccount>>,
     pub token_program: Program<'info, Token>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
@@ -778,7 +823,8 @@ pub struct WithdrawFees<'info> {
     pub payer: Signer<'info>,
     #[account(has_one = quote_mint, has_one = treasury)]
     pub curve_config: Box<Account<'info, CurveConfig>>,
-    pub quote_mint: Box<Account<'info, Mint>>,
+    #[account(mint::token_program = quote_token_program)]
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut, seeds = [b"curve", mint.key().as_ref()], bump = pool.bump, has_one = mint, has_one = reward, constraint = pool.config == curve_config.key() @ ElpidaError::WrongConfig)]
     pub pool: Box<Account<'info, CurvePool>>,
@@ -786,13 +832,13 @@ pub struct WithdrawFees<'info> {
     pub treasury: UncheckedAccount<'info>,
     /// CHECK: verified against pool.reward.
     pub reward: UncheckedAccount<'info>,
-    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = treasury)]
-    pub treasury_quote: Box<Account<'info, TokenAccount>>,
-    #[account(init_if_needed, payer = payer, associated_token::mint = quote_mint, associated_token::authority = reward)]
-    pub reward_quote: Box<Account<'info, TokenAccount>>,
-    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = pool)]
-    pub quote_vault: Box<Account<'info, TokenAccount>>,
-    pub token_program: Program<'info, Token>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = treasury, associated_token::token_program = quote_token_program)]
+    pub treasury_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(init_if_needed, payer = payer, associated_token::mint = quote_mint, associated_token::authority = reward, associated_token::token_program = quote_token_program)]
+    pub reward_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = pool, associated_token::token_program = quote_token_program)]
+    pub quote_vault: Box<InterfaceAccount<'info, QuoteAccount>>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
@@ -824,21 +870,22 @@ pub struct MigrateToPumpswap<'info> {
     pub payer: Signer<'info>,
     #[account(has_one = quote_mint)]
     pub curve_config: Box<Account<'info, CurveConfig>>,
-    pub quote_mint: Box<Account<'info, Mint>>,
+    #[account(mint::token_program = quote_token_program)]
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
     pub mint: Box<Account<'info, Mint>>,
     #[account(mut, seeds = [b"curve", mint.key().as_ref()], bump = pool.bump, has_one = mint, constraint = pool.config == curve_config.key() @ ElpidaError::WrongConfig)]
     pub pool: Box<Account<'info, CurvePool>>,
     #[account(mut, associated_token::mint = mint, associated_token::authority = pool)]
     pub token_vault: Box<Account<'info, TokenAccount>>,
-    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = pool)]
-    pub quote_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = pool, associated_token::token_program = quote_token_program)]
+    pub quote_vault: Box<InterfaceAccount<'info, QuoteAccount>>,
     /// Data-less PDA that creates the PumpSwap pool and owns its LP tokens forever.
     #[account(mut, seeds = [b"pump-lp", mint.key().as_ref()], bump)]
     pub lp_authority: SystemAccount<'info>,
     #[account(init_if_needed, payer = payer, associated_token::mint = mint, associated_token::authority = lp_authority)]
     pub authority_base: Box<Account<'info, TokenAccount>>,
-    #[account(init_if_needed, payer = payer, associated_token::mint = quote_mint, associated_token::authority = lp_authority)]
-    pub authority_quote: Box<Account<'info, TokenAccount>>,
+    #[account(init_if_needed, payer = payer, associated_token::mint = quote_mint, associated_token::authority = lp_authority, associated_token::token_program = quote_token_program)]
+    pub authority_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
     /// CHECK: the LP authority's Token-2022 LP account, created by PumpSwap.
     #[account(mut, address = get_associated_token_address_with_program_id(&lp_authority.key(), &lp_mint.key(), &token_2022_program.key()) @ ElpidaError::PumpAccount)]
     pub authority_lp: UncheckedAccount<'info>,
@@ -867,6 +914,7 @@ pub struct MigrateToPumpswap<'info> {
     pub pump_amm_program: UncheckedAccount<'info>,
     pub token_program: Program<'info, Token>,
     pub token_2022_program: Program<'info, Token2022>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
 }
@@ -940,16 +988,22 @@ pub struct HarvestLpFees<'info> {
     pub token_2022_program: Program<'info, Token2022>,
 }
 
-impl HarvestLpFees<'_> {
+impl<'info> HarvestLpFees<'info> {
+    /// The quote mint's token program account (the quote mint is owned by SPL Token or Token-2022).
+    fn quote_program_info(&self) -> AccountInfo<'info> {
+        if *self.quote_mint.owner == anchor_spl::token_2022::ID { self.token_2022_program.to_account_info() } else { self.token_program.to_account_info() }
+    }
     #[inline(never)]
     fn check_token_accounts(&self) -> Result<()> {
         let (spl, t22) = (self.token_program.key(), self.token_2022_program.key());
+        let qp = *self.quote_mint.owner;
+        require!(qp == spl || qp == t22, ElpidaError::UnsupportedQuote);
         let (mint, quote, lp) = (self.mint.key(), self.quote_mint.key(), self.lp_mint.key());
         let (authority, treasury, reward) = (self.lp_authority.key(), self.treasury.key(), self.reward.key());
         for (account, owner, account_mint, program) in [
-            (&self.authority_base, authority, mint, spl), (&self.authority_quote, authority, quote, spl), (&self.authority_lp, authority, lp, t22),
-            (&self.treasury_base, treasury, mint, spl), (&self.treasury_quote, treasury, quote, spl),
-            (&self.reward_base, reward, mint, spl), (&self.reward_quote, reward, quote, spl),
+            (&self.authority_base, authority, mint, spl), (&self.authority_quote, authority, quote, qp), (&self.authority_lp, authority, lp, t22),
+            (&self.treasury_base, treasury, mint, spl), (&self.treasury_quote, treasury, quote, qp),
+            (&self.reward_base, reward, mint, spl), (&self.reward_quote, reward, quote, qp),
         ] {
             require_keys_eq!(account.key(), get_associated_token_address_with_program_id(&owner, &account_mint, &program), ElpidaError::PumpAccount);
         }
@@ -997,4 +1051,5 @@ pub enum ElpidaError {
     #[msg("No trading fees to harvest yet")] NothingToHarvest,
     #[msg("Unexpected PumpSwap account")] PumpAccount,
     #[msg("Harvest would reduce the locked liquidity")] PrincipalBreached,
+    #[msg("This token cannot be a trading pair: PumpSwap or the curve cannot handle its token extensions")] UnsupportedQuote,
 }

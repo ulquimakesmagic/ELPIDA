@@ -1,5 +1,6 @@
-// Shared client for the Elpida Solana program (contracts/solana), model 3: USDC-quoted bonding curve
-// over virtual reserves with a decaying anti-snipe fee. Works in Node and the browser: pass in the
+// Shared client for the Elpida Solana program (contracts/solana), model 3: bonding curve over virtual
+// reserves with a decaying anti-snipe fee, one config per trading pair (wrapped SOL, USDC, an xStock or
+// another approved token; classic SPL or Token-2022). Works in Node and the browser: pass in the
 // @solana/web3.js v1 module (Node) or `globalThis.solanaWeb3` (browser bundle).
 // Byte layouts and Anchor discriminators must match contracts/solana/programs/elpida_launchpad/src/lib.rs;
 // tests/solana.test.mjs checks them against the compiled program.
@@ -17,8 +18,12 @@ export const STATUS_TRADING = 0;
 export const STATUS_GRADUATED = 1; // curve complete, waiting for migration
 export const STATUS_MIGRATED = 2; // liquidity moved into a locked PumpSwap pool
 export const MIGRATION_SIZE = 210;
-/** Test networks only: largest single tUSDC faucet mint (25,000 tUSDC, 6 decimals). */
+/** Test networks only: default tUSDC faucet mint (25,000 tUSDC, 6 decimals). */
 export const TEST_USDC_FAUCET_MAX = 25_000_000_000n;
+/** Test networks only: the program's per-call faucet limit, in whole units of any test asset. */
+export const TEST_FAUCET_MAX_WHOLE = 10_000_000n;
+/** Wrapped SOL: the quote mint of native-SOL pairs. The client wraps and unwraps around each trade. */
+export const WSOL_MINT = 'So11111111111111111111111111111111111111112';
 export const MIGRATE_COMPUTE_UNITS = 600_000;
 export const HARVEST_COMPUTE_UNITS = 400_000;
 
@@ -131,6 +136,7 @@ export const PROGRAM_ERRORS = [
   'No trading fees to harvest yet.',
   'Unexpected PumpSwap account.',
   'Harvest would reduce the locked liquidity.',
+  'This token cannot be a trading pair: PumpSwap or the curve cannot handle its token extensions (for example a transfer fee or an issuer permanent delegate, as xStocks have).',
 ];
 
 /** Turns a Solana/Anchor error into a readable message. */
@@ -139,7 +145,8 @@ export function explainError(error) {
   const hex = text.match(/custom program error: 0x([0-9a-f]+)/i);
   const code = hex ? parseInt(hex[1], 16) : Number(text.match(/"Custom":(\d+)/)?.[1]);
   if (code >= 6000 && PROGRAM_ERRORS[code - 6000]) return PROGRAM_ERRORS[code - 6000];
-  if (/insufficient (funds|lamports)|0x1\b/i.test(text)) return 'Not enough SOL or test USDC for this transaction.';
+  if (/insufficient (funds|lamports)|0x1\b/i.test(text)) return 'Not enough balance for this transaction (the pair asset or SOL for network fees).';
+  if (/0x43\b|paused/i.test(text)) return 'The issuer of this pair asset has paused transfers. Try again later.';
   if (/User rejected|rejected the request/i.test(text)) return 'You cancelled the wallet request. Nothing was submitted.';
   return error?.message ?? String(error);
 }
@@ -164,18 +171,20 @@ export function formatAmount(units, decimals) {
 
 /**
  * On-chain `CurveParams` for a launch that starts at `startFdv` and graduates at `endFdv` (whole quote
- * units, e.g. dollars). With m = endFdv/startFdv the virtual token reserve is S·m/(m−1), so the tokens
- * left after the curve sells out exactly pair with the raised quote at the graduation price on the DEX.
+ * units, decimals allowed, e.g. "0.5" SOL). With m = endFdv/startFdv the virtual token reserve is
+ * S·m/(m−1), so the tokens left after the curve sells out exactly pair with the raised quote at the
+ * graduation price on the DEX. `launchFee` is the creation fee in whole quote units (default 10).
  */
-export function curveParams({ startFdv = DEFAULT_CURVE.startFdv, endFdv = DEFAULT_CURVE.endFdv, quoteDecimals = 6, baseFeeBps = DEFAULT_CURVE.baseFeeBps, snipeStartBps = DEFAULT_CURVE.snipeStartBps, snipeWindowSecs = DEFAULT_CURVE.snipeWindowSecs, maxCreatorBuyBps = DEFAULT_CURVE.maxCreatorBuyBps } = {}) {
-  const start = BigInt(startFdv) * 10n ** BigInt(quoteDecimals);
-  const end = BigInt(endFdv) * 10n ** BigInt(quoteDecimals);
+export function curveParams({ startFdv = DEFAULT_CURVE.startFdv, endFdv = DEFAULT_CURVE.endFdv, quoteDecimals = 6, launchFee = 10, baseFeeBps = DEFAULT_CURVE.baseFeeBps, snipeStartBps = DEFAULT_CURVE.snipeStartBps, snipeWindowSecs = DEFAULT_CURVE.snipeWindowSecs, maxCreatorBuyBps = DEFAULT_CURVE.maxCreatorBuyBps } = {}) {
+  const start = parseAmount(startFdv, quoteDecimals);
+  const end = parseAmount(endFdv, quoteDecimals);
   if (start <= 0n || end <= start) throw new Error('endFdv must be greater than startFdv > 0.');
   const virtualToken = TOKEN_SUPPLY * end / (end - start);
   const remainingAtEnd = isqrt(virtualToken * virtualToken * start / end); // Vt / √m
   const curveSupply = virtualToken - remainingAtEnd;
   const virtualQuote = (start * virtualToken + TOKEN_SUPPLY - 1n) / TOKEN_SUPPLY;
-  return { virtualQuote, virtualToken, curveSupply, baseFeeBps, snipeStartBps, snipeWindowSecs, maxCreatorBuyBps };
+  const fee = Number(launchFee) === 0 ? 0n : parseAmount(launchFee, quoteDecimals);
+  return { virtualQuote, virtualToken, curveSupply, baseFeeBps, snipeStartBps, snipeWindowSecs, maxCreatorBuyBps, launchFee: fee };
 }
 
 /** Mirrors `current_fee_bps`: linear decay from the snipe fee at launch to the base fee. Times in seconds. */
@@ -297,7 +306,7 @@ export function concat(...parts) {
   return out;
 }
 const sameBytes = (data, expected) => expected.every((byte, i) => data[i] === byte);
-export const encodeCurveParams = p => concat(u64(p.virtualQuote), u64(p.virtualToken), u64(p.curveSupply), u16(p.baseFeeBps), u16(p.snipeStartBps), u32(p.snipeWindowSecs), u16(p.maxCreatorBuyBps));
+export const encodeCurveParams = p => concat(u64(p.virtualQuote), u64(p.virtualToken), u64(p.curveSupply), u16(p.baseFeeBps), u16(p.snipeStartBps), u32(p.snipeWindowSecs), u16(p.maxCreatorBuyBps), u64(p.launchFee ?? 0n));
 
 export function createElpidaSolana(web3, programIdInput) {
   const { PublicKey, TransactionInstruction, SystemProgram, ComputeBudgetProgram } = web3;
@@ -319,7 +328,11 @@ export function createElpidaSolana(web3, programIdInput) {
   const testUsdcMint = PublicKey.findProgramAddressSync([enc('test-usdc')], programId)[0];
   const faucetAuthority = PublicKey.findProgramAddressSync([enc('test-usdc-authority')], programId)[0];
   const poolPda = mint => PublicKey.findProgramAddressSync([enc('curve'), key(mint).toBytes()], programId)[0];
-  const ata = (owner, mint) => PublicKey.findProgramAddressSync([key(owner).toBytes(), tokenProgram.toBytes(), key(mint).toBytes()], ataProgram)[0];
+  const ata = (owner, mint, program = tokenProgram) => PublicKey.findProgramAddressSync([key(owner).toBytes(), key(program).toBytes(), key(mint).toBytes()], ataProgram)[0];
+  /** The quote mint's token program for a config (`quoteTokenProgram`, default SPL Token). */
+  const qp = config => key(config.quoteTokenProgram ?? tokenProgram);
+  const qata = (owner, config) => ata(owner, config.quoteMint, qp(config));
+  const wsol = new PublicKey(WSOL_MINT);
   const programDataAddress = PublicKey.findProgramAddressSync([programId.toBytes()], loader)[0];
   const programs = [meta(tokenProgram), meta(ataProgram), meta(SystemProgram.programId)];
   const pumpProgram = new PublicKey(PUMP_AMM_PROGRAM);
@@ -328,80 +341,90 @@ export function createElpidaSolana(web3, programIdInput) {
   const migrationPda = mint => PublicKey.findProgramAddressSync([enc('pump-migration'), key(mint).toBytes()], programId)[0];
   const ataWith = (owner, mint, program) => PublicKey.findProgramAddressSync([key(owner).toBytes(), key(program).toBytes(), key(mint).toBytes()], ataProgram)[0];
   /** PumpSwap accounts for the pool Elpida creates for `mint` (index 0, creator = LP-authority PDA). */
-  const pumpAccounts = (mint, quoteMint) => {
+  const pumpAccounts = (mint, quoteMint, quoteProgram = tokenProgram) => {
     const authority = lpAuthorityPda(mint);
     const pool = PublicKey.findProgramAddressSync([enc('pool'), new Uint8Array([0, 0]), authority.toBytes(), key(mint).toBytes(), key(quoteMint).toBytes()], pumpProgram)[0];
     const lpMint = PublicKey.findProgramAddressSync([enc('pool_lp_mint'), pool.toBytes()], pumpProgram)[0];
     return {
-      lpAuthority: authority, pool, lpMint, poolBase: ata(pool, mint), poolQuote: ata(pool, quoteMint),
-      authorityBase: ata(authority, mint), authorityQuote: ata(authority, quoteMint), authorityLp: ataWith(authority, lpMint, token2022),
+      lpAuthority: authority, pool, lpMint, poolBase: ata(pool, mint), poolQuote: ata(pool, quoteMint, quoteProgram),
+      authorityBase: ata(authority, mint), authorityQuote: ata(authority, quoteMint, quoteProgram), authorityLp: ataWith(authority, lpMint, token2022),
     };
   };
   const pumpFixed = [meta(PUMP_EVENT_AUTHORITY), meta(pumpProgram)];
   const trade = (trader, config, mint, bytes) => {
     const pool = poolPda(mint);
-    return ix([meta(trader, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(mint), meta(pool, true), meta(ata(pool, mint), true), meta(ata(pool, config.quoteMint), true), meta(ata(trader, config.quoteMint), true), meta(ata(trader, mint), true), ...programs], bytes);
+    return ix([meta(trader, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(mint), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true), meta(qata(trader, config), true), meta(ata(trader, mint), true), meta(tokenProgram), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId)], bytes);
   };
 
   return {
-    programId, configPda, configFor, testUsdcMint, faucetAuthority, poolPda, ata, programDataAddress, tokenProgram, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts,
+    programId, configPda, configFor, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, wsol,
     computeBudget: (units = LAUNCH_COMPUTE_UNITS) => ComputeBudgetProgram.setComputeUnitLimit({ units }),
-    createAtaIdempotent(payer, owner, mint) {
-      return new TransactionInstruction({ programId: ataProgram, data: data([1]), keys: [meta(payer, true, true), meta(ata(owner, mint), true), meta(owner), meta(mint), meta(SystemProgram.programId), meta(tokenProgram)] });
+    createAtaIdempotent(payer, owner, mint, program = tokenProgram) {
+      return new TransactionInstruction({ programId: ataProgram, data: data([1]), keys: [meta(payer, true, true), meta(ata(owner, mint, program), true), meta(owner), meta(mint), meta(SystemProgram.programId), meta(program)] });
     },
-    initializeCurve({ authority, quoteMint, treasury, params = curveParams() }) {
-      return ix([meta(authority, true, true), meta(configPda, true), meta(quoteMint), meta(treasury), meta(ata(treasury, quoteMint), true), meta(programId), meta(programDataAddress), ...programs],
+    /** Wraps `lamports` SOL into the owner's wrapped-SOL account (created if missing). */
+    wrapSol(owner, lamports) {
+      const account = ata(owner, wsol);
+      return [this.createAtaIdempotent(owner, owner, wsol), SystemProgram.transfer({ fromPubkey: key(owner), toPubkey: account, lamports: BigInt(lamports) }),
+        new TransactionInstruction({ programId: tokenProgram, data: data([17]), keys: [meta(account, true)] })];
+    },
+    /** Closes the owner's wrapped-SOL account, returning all of it to the wallet as SOL. */
+    unwrapSol(owner) {
+      return new TransactionInstruction({ programId: tokenProgram, data: data([9]), keys: [meta(ata(owner, wsol), true), meta(owner, true), meta(owner, false, true)] });
+    },
+    initializeCurve({ authority, quoteMint, treasury, params = curveParams(), quoteTokenProgram = tokenProgram }) {
+      return ix([meta(authority, true, true), meta(configPda, true), meta(quoteMint), meta(treasury), meta(ata(treasury, quoteMint, quoteTokenProgram), true), meta(programId), meta(programDataAddress), meta(quoteTokenProgram), meta(ataProgram), meta(SystemProgram.programId)],
         concat(DISCRIMINATORS.initializeCurve, encodeCurveParams(params)));
     },
-    addCurveConfig({ authority, quoteMint, treasury, params = curveParams() }) {
-      return ix([meta(authority, true, true), meta(configFor(quoteMint), true), meta(quoteMint), meta(treasury), meta(ata(treasury, quoteMint), true), meta(programId), meta(programDataAddress), ...programs],
+    addCurveConfig({ authority, quoteMint, treasury, params = curveParams(), quoteTokenProgram = tokenProgram }) {
+      return ix([meta(authority, true, true), meta(configFor(quoteMint), true), meta(quoteMint), meta(treasury), meta(ata(treasury, quoteMint, quoteTokenProgram), true), meta(programId), meta(programDataAddress), meta(quoteTokenProgram), meta(ataProgram), meta(SystemProgram.programId)],
         concat(DISCRIMINATORS.addCurveConfig, encodeCurveParams(params)));
     },
     /** Test networks only: creates the Elpida tUSDC mint (upgrade authority). */
     createTestUsdc({ authority }) {
       return ix([meta(authority, true, true), meta(testUsdcMint, true), meta(faucetAuthority), meta(programId), meta(programDataAddress), meta(tokenProgram), meta(SystemProgram.programId)], DISCRIMINATORS.createTestUsdc);
     },
-    /** Test networks only: mints up to 25,000 tUSDC to `user`. */
-    testUsdcFaucet({ user, amount = TEST_USDC_FAUCET_MAX }) {
-      return ix([meta(user, true, true), meta(testUsdcMint, true), meta(faucetAuthority), meta(ata(user, testUsdcMint), true), ...programs], concat(DISCRIMINATORS.testUsdcFaucet, u64(amount)));
+    /** Test networks only: mints a test asset whose mint authority is the faucet PDA (default: 25,000 tUSDC). */
+    testUsdcFaucet({ user, amount = TEST_USDC_FAUCET_MAX, mint = testUsdcMint, tokenProgram: program = tokenProgram }) {
+      return ix([meta(user, true, true), meta(mint, true), meta(faucetAuthority), meta(ata(user, mint, program), true), meta(program), meta(ataProgram), meta(SystemProgram.programId)], concat(DISCRIMINATORS.testUsdcFaucet, u64(amount)));
     },
     launch({ creator, config, mint, name, symbol, firstBuy, minTokensOut, reward }) {
       const pool = poolPda(mint);
       return ix([
-        meta(creator, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(config.treasury), meta(ata(config.treasury, config.quoteMint), true),
-        meta(mint, true, true), meta(pool, true), meta(ata(pool, mint), true), meta(ata(pool, config.quoteMint), true),
-        meta(ata(creator, config.quoteMint), true), meta(ata(creator, mint), true), ...programs,
+        meta(creator, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(config.treasury), meta(qata(config.treasury, config), true),
+        meta(mint, true, true), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true),
+        meta(qata(creator, config), true), meta(ata(creator, mint), true), meta(tokenProgram), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId),
       ], concat(DISCRIMINATORS.launch, str(name), str(symbol), u64(firstBuy), u64(minTokensOut), key(reward).toBytes()));
     },
     buy: ({ buyer, config, mint, grossIn, minTokensOut }) => trade(buyer, config, mint, concat(DISCRIMINATORS.buy, u64(grossIn), u64(minTokensOut))),
     sell: ({ seller, config, mint, tokensIn, minQuoteOut }) => trade(seller, config, mint, concat(DISCRIMINATORS.sell, u64(tokensIn), u64(minQuoteOut))),
     withdrawFees({ payer, config, mint, reward }) {
       const pool = poolPda(mint);
-      return ix([meta(payer, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(mint), meta(pool, true), meta(config.treasury), meta(reward), meta(ata(config.treasury, config.quoteMint), true), meta(ata(reward, config.quoteMint), true), meta(ata(pool, config.quoteMint), true), ...programs],
+      return ix([meta(payer, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(mint), meta(pool, true), meta(config.treasury), meta(reward), meta(qata(config.treasury, config), true), meta(qata(reward, config), true), meta(qata(pool, config), true), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId)],
         DISCRIMINATORS.withdrawFees);
     },
     /** Permissionless once the curve is complete; the payer advances ~0.05 SOL rent (most is refunded). */
     migrateToPumpswap({ payer, config, mint }) {
       const pool = poolPda(mint);
-      const p = pumpAccounts(mint, config.quoteMint);
+      const p = pumpAccounts(mint, config.quoteMint, qp(config));
       return ix([
-        meta(payer, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(mint), meta(pool, true), meta(ata(pool, mint), true), meta(ata(pool, config.quoteMint), true),
+        meta(payer, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(mint), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true),
         meta(p.lpAuthority, true), meta(p.authorityBase, true), meta(p.authorityQuote, true), meta(p.authorityLp, true), meta(migrationPda(mint), true),
         meta(p.pool, true), meta(PUMP_GLOBAL_CONFIG), meta(p.lpMint, true), meta(p.poolBase, true), meta(p.poolQuote, true), ...pumpFixed,
-        meta(tokenProgram), meta(token2022), meta(ataProgram), meta(SystemProgram.programId),
+        meta(tokenProgram), meta(token2022), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId),
       ], DISCRIMINATORS.migrateToPumpswap);
     },
     /** Instructions to harvest LP trading fees: idempotent ATA creation for the four destinations, then the harvest. */
     harvestLpFees({ payer, config, mint, reward }) {
       const pool = poolPda(mint);
-      const p = pumpAccounts(mint, config.quoteMint);
+      const p = pumpAccounts(mint, config.quoteMint, qp(config));
       return [
-        this.createAtaIdempotent(payer, config.treasury, mint), this.createAtaIdempotent(payer, reward, mint), this.createAtaIdempotent(payer, reward, config.quoteMint),
+        this.createAtaIdempotent(payer, config.treasury, mint), this.createAtaIdempotent(payer, reward, mint), this.createAtaIdempotent(payer, reward, config.quoteMint, qp(config)),
         ix([
           meta(payer, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(mint), meta(pool), meta(migrationPda(mint), true), meta(p.lpAuthority),
           meta(p.authorityBase, true), meta(p.authorityQuote, true), meta(p.authorityLp, true), meta(p.pool, true), meta(PUMP_GLOBAL_CONFIG), meta(p.lpMint, true),
           meta(p.poolBase, true), meta(p.poolQuote, true), meta(config.treasury), meta(reward),
-          meta(ata(config.treasury, mint), true), meta(ata(config.treasury, config.quoteMint), true), meta(ata(reward, mint), true), meta(ata(reward, config.quoteMint), true),
+          meta(ata(config.treasury, mint), true), meta(qata(config.treasury, config), true), meta(ata(reward, mint), true), meta(qata(reward, config), true),
           ...pumpFixed, meta(tokenProgram), meta(token2022),
         ], DISCRIMINATORS.harvestLpFees),
       ];
@@ -511,13 +534,41 @@ export function loaderV3(web3) {
   };
 }
 
-/** Test-only helpers: a 6-decimal SPL mint standing in for USDC on a local validator. */
+/** Test-only helpers: SPL and Token-2022 mints standing in for USDC, xStocks and other pair assets. */
 export function splTestMint(web3) {
   const { TransactionInstruction, SystemProgram } = web3;
   const tokenProgram = new web3.PublicKey(TOKEN_PROGRAM);
+  const token2022 = new web3.PublicKey(TOKEN_2022_PROGRAM);
   const data = bytes => (globalThis.Buffer ? globalThis.Buffer.from(bytes) : bytes);
+  // Token-2022 mint with one PermanentDelegate extension: 165 padded base + account type + TLV(4 + 32).
+  const MINT_2022_DELEGATE_SIZE = 165 + 1 + 4 + 32;
   return {
-    MINT_SIZE: 82,
+    MINT_SIZE: 82, MINT_2022_DELEGATE_SIZE,
+    /** A Token-2022 mint shaped like an xStock: issuer permanent delegate, no freeze authority. */
+    createMint2022Ixs: async (connection, payer, mint, decimals, authority, permanentDelegate) => {
+      if (!permanentDelegate) {
+        const plain = await connection.getMinimumBalanceForRentExemption(82);
+        return [SystemProgram.createAccount({ fromPubkey: payer, newAccountPubkey: mint, lamports: plain, space: 82, programId: token2022 }),
+          new TransactionInstruction({ programId: token2022, data: data(concat([20, decimals], authority.toBytes(), [0])), keys: [{ pubkey: mint, isSigner: false, isWritable: true }] })];
+      }
+      const lamports = await connection.getMinimumBalanceForRentExemption(MINT_2022_DELEGATE_SIZE);
+      return [
+        SystemProgram.createAccount({ fromPubkey: payer, newAccountPubkey: mint, lamports, space: MINT_2022_DELEGATE_SIZE, programId: token2022 }),
+        new TransactionInstruction({ programId: token2022, data: data(concat([35], permanentDelegate.toBytes())), keys: [{ pubkey: mint, isSigner: false, isWritable: true }] }),
+        new TransactionInstruction({ programId: token2022, data: data(concat([20, decimals], authority.toBytes(), [0])), keys: [{ pubkey: mint, isSigner: false, isWritable: true }] }),
+      ];
+    },
+    /** A Token-2022 mint with a transfer fee (rejected as a trading pair; used in tests). */
+    createFeeMint2022Ixs: async (connection, payer, mint, decimals, authority) => {
+      const size = 165 + 1 + 4 + 108;
+      const lamports = await connection.getMinimumBalanceForRentExemption(size);
+      // TransferFeeExtension(26) / InitializeTransferFeeConfig(0): two COption<Pubkey> authorities, bps u16, max u64.
+      return [
+        SystemProgram.createAccount({ fromPubkey: payer, newAccountPubkey: mint, lamports, space: size, programId: token2022 }),
+        new TransactionInstruction({ programId: token2022, data: data(concat([26, 0, 1], authority.toBytes(), [1], authority.toBytes(), u16(100), u64(1_000_000n))), keys: [{ pubkey: mint, isSigner: false, isWritable: true }] }),
+        new TransactionInstruction({ programId: token2022, data: data(concat([20, decimals], authority.toBytes(), [0])), keys: [{ pubkey: mint, isSigner: false, isWritable: true }] }),
+      ];
+    },
     createMintIxs: async (connectionOrRent, payer, mint, decimals, authority) => {
       const lamports = typeof connectionOrRent === 'bigint' || typeof connectionOrRent === 'number' ? Number(connectionOrRent) : await connectionOrRent.getMinimumBalanceForRentExemption(82);
       return [

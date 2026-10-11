@@ -17,9 +17,10 @@ import * as web3 from '@solana/web3.js';
 import {
   createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, curveParams, poolStats, encodeCurveParams,
   DISCRIMINATORS, EVENTS, LEGACY_EVENTS, TOKEN_SUPPLY, STATUS_GRADUATED, STATUS_MIGRATED, BPS, explainError, decodeEvents,
-  harvestableLp, harvestNow, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_USDC_FAUCET_MAX,
+  harvestableLp, harvestNow, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_USDC_FAUCET_MAX, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint,
 } from '../packages/solana/client.mjs';
-import { deployProgram, upgradeProgram, initializeConfig, createTestQuoteMint, ensureTestUsdc, send, airdrop } from '../packages/solana/deploy.mjs';
+import { SOLANA_TEST_PAIRS } from '../packages/core/pairs.mjs';
+import { deployProgram, upgradeProgram, initializeConfig, createTestQuoteMint, ensureTestUsdc, ensurePairConfigs, send, airdrop } from '../packages/solana/deploy.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const elfPath = `${root}contracts/solana/build/elpida_launchpad.so`;
@@ -83,6 +84,7 @@ async function afterSnipeWindow(mint) {
 const buy = (who, mint, grossIn, minTokensOut) => send(f.connection, who, [f.client.buy({ buyer: who.publicKey, config: f.config, mint, grossIn, minTokensOut })], [], 1);
 const sell = (who, mint, tokensIn, minQuoteOut) => send(f.connection, who, [f.client.sell({ seller: who.publicKey, config: f.config, mint, tokensIn, minQuoteOut })], [], 1);
 const withdraw = mint => send(f.connection, f.outsider, [f.client.withdrawFees({ payer: f.outsider.publicKey, config: f.config, mint, reward: f.rewardWallet.publicKey })]);
+const parseAmountWhole = (whole, unit) => { const [i, d = ''] = String(whole).split('.'); const digits = unit.toString().length - 1; return BigInt(i) * unit + BigInt((d + '0'.repeat(digits)).slice(0, digits) || '0'); };
 const freshPool = () => ({ virtualQuote: PARAMS.virtualQuote, virtualToken: PARAMS.virtualToken, curveSupply: PARAMS.curveSupply, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 });
 
 async function launch({ firstBuy = 25n * USDC, minOut, symbol = 'SOLG', name = 'Solana Garden', creator = f.creator } = {}) {
@@ -118,7 +120,9 @@ test('Solana client discriminators, curve parameters and error decoding', () => 
   const p = curveParams();
   assert.equal(p.virtualToken, 1_111_111_111_111_111n);
   assert.equal(p.virtualQuote, 5_555_555_556n);
-  assert.equal(encodeCurveParams(p).length, 34);
+  assert.equal(encodeCurveParams(p).length, 42);
+  assert.equal(p.launchFee, 10n * USDC);
+  assert.equal(curveParams({ startFdv: '0.5', endFdv: '5', quoteDecimals: 9, launchFee: '0.01' }).launchFee, 10_000_000n);
   assert.ok(Math.abs(poolStats(freshPool()).marketCap - 5_000) < 0.01);
   const last = quoteBuy(freshPool(), 1_000_000n * USDC, 125n);
   assert.equal(last.graduates, true); assert.equal(last.tokens, p.curveSupply);
@@ -447,7 +451,7 @@ test('Solana test USDC: only the upgrade authority creates it, anyone mints up t
   assert.equal(config.quoteMint.toBase58(), tusdc.toBase58()); assert.equal(config.curveSupply, PARAMS.curveSupply);
   const user = Keypair.generate();
   await airdrop(f.connection, user.publicKey, 5 * web3.LAMPORTS_PER_SOL);
-  await failsWith(send(f.connection, user, [f.client.testUsdcFaucet({ user: user.publicKey, amount: TEST_USDC_FAUCET_MAX + 1n })], [], 1), /0x1774/);
+  await failsWith(send(f.connection, user, [f.client.testUsdcFaucet({ user: user.publicKey, amount: TEST_FAUCET_MAX_WHOLE * USDC + 1n })], [], 1), /0x1774/);
   await send(f.connection, user, [f.client.testUsdcFaucet({ user: user.publicKey })]);
   assert.equal(await balance(f.client.ata(user.publicKey, tusdc)), TEST_USDC_FAUCET_MAX);
   const tcfg = { address: config.address, quoteMint: tusdc, treasury: f.treasury };
@@ -465,6 +469,89 @@ test('Solana test USDC: only the upgrade authority creates it, anyone mints up t
   assert.equal((await pool(mint.publicKey)).status, STATUS_MIGRATED);
   const pp = f.client.pumpAccounts(mint.publicKey, tusdc);
   assert.equal(f.client.decodePumpPool((await f.connection.getAccountInfo(pp.pool)).data).quoteMint.toBase58(), tusdc.toBase58());
+});
+
+test('Solana pairs: SOL, a paired token and a Token-2022 token each launch, trade, complete, migrate and harvest', { skip: pumpSkip }, async () => {
+  const programId = f.programKeypair.publicKey;
+  // Token-2022 pair assets without blocked extensions work end to end (PumpSwap included).
+  const templates = [...SOLANA_TEST_PAIRS, { kind: 'token', key: 'test-t22', symbol: 'TEST-T22', name: 'Token-2022 test pair', decimals: 6, token2022: true, permanentDelegate: false, startFdv: '1000', endFdv: '10000', launchFee: '2', faucet: '20000' }];
+  const pairs = await ensurePairConfigs({ connection: f.connection, payer: f.authority, programId, treasury: f.treasury, templates, overrides: { snipeWindowSecs: 4 } });
+  assert.deepEqual(pairs.map(p => p.kind), ['native', 'token', 'token']);
+  assert.equal(pairs[0].mint, WSOL_MINT);
+  assert.equal(pairs[2].tokenProgram, TOKEN_2022_PROGRAM);
+  // Re-running reuses the mints and configs.
+  const again = await ensurePairConfigs({ connection: f.connection, payer: f.authority, programId, treasury: f.treasury, templates, saved: Object.fromEntries(pairs.map(p => [p.key, p.mint])) });
+  assert.deepEqual(again.map(p => [p.mint, p.created]), pairs.map(p => [p.mint, false]));
+  const user = Keypair.generate();
+  await airdrop(f.connection, user.publicKey, 20 * web3.LAMPORTS_PER_SOL);
+  const amountOf = async (owner, cfg) => balance(f.client.quoteAta(owner, cfg));
+  for (const pair of pairs) {
+    const cfg = { address: new PublicKey(pair.config), quoteMint: new PublicKey(pair.mint), treasury: f.treasury, quoteTokenProgram: new PublicKey(pair.tokenProgram) };
+    const onchain = f.client.decodeConfig((await f.connection.getAccountInfo(cfg.address)).data);
+    const unit = 10n ** BigInt(pair.decimals);
+    const template = templates.find(t => t.key === pair.key);
+    assert.equal(onchain.quoteDecimals, pair.decimals);
+    assert.equal(onchain.launchFee, curveParams({ startFdv: template.startFdv, endFdv: template.endFdv, quoteDecimals: pair.decimals, launchFee: template.launchFee }).launchFee);
+    const fund = async amount => pair.wsol ? send(f.connection, user, f.client.wrapSol(user.publicKey, amount))
+      : send(f.connection, user, [f.client.testUsdcFaucet({ user: user.publicKey, mint: cfg.quoteMint, tokenProgram: cfg.quoteTokenProgram, amount })]);
+    // Enough to pay the fee and complete the curve (end FDV in the pair asset is an upper bound).
+    const budget = parseAmountWhole(template.endFdv, unit) + onchain.launchFee;
+    await fund(budget);
+    const treasuryBefore = await amountOf(f.treasury, cfg);
+    const mint = Keypair.generate();
+    const firstBuy = parseAmountWhole(template.startFdv, unit) / 50n;
+    await send(f.connection, user, [f.client.computeBudget(), f.client.launch({ creator: user.publicKey, config: cfg, mint: mint.publicKey, name: `Pair ${pair.symbol}`, symbol: pair.key.replace(/[^a-z]/g, '').slice(0, 8).toUpperCase(), firstBuy, minTokensOut: 1n, reward: user.publicKey })], [mint], 1);
+    assert.equal(await amountOf(f.treasury, cfg) - treasuryBefore, onchain.launchFee, `${pair.symbol} creation fee in the pair asset`);
+    const launched = await pool(mint.publicKey);
+    assert.equal(launched.config.toBase58(), cfg.address.toBase58());
+    assert.ok(Math.abs(poolStats({ ...launched, sold: 0n, realQuote: 0n }, pair.decimals).marketCap / Number(template.startFdv) - 1) < 1e-6, `${pair.symbol} starts at ${template.startFdv} ${pair.symbol} FDV`);
+    // Sell part of the first buy back; for SOL the wrapped account is closed so the proceeds return as SOL.
+    await afterSnipeWindow(mint.publicKey);
+    const held = await balance(f.client.ata(user.publicKey, mint.publicKey));
+    const lamportsBefore = await f.connection.getBalance(user.publicKey);
+    await send(f.connection, user, [f.client.sell({ seller: user.publicKey, config: cfg, mint: mint.publicKey, tokensIn: held / 2n, minQuoteOut: 1n }), ...(pair.wsol ? [f.client.unwrapSol(user.publicKey)] : [])]);
+    if (pair.wsol) {
+      assert.equal(await f.connection.getAccountInfo(f.client.quoteAta(user.publicKey, cfg)), null, 'wrapped SOL account closed');
+      assert.ok(await f.connection.getBalance(user.publicKey) > lamportsBefore, 'sale proceeds and leftover wrapped SOL returned as SOL');
+      await fund(budget);
+    }
+    // Complete the curve with one oversized buy; it is partially filled.
+    await send(f.connection, user, [f.client.buy({ buyer: user.publicKey, config: cfg, mint: mint.publicKey, grossIn: await amountOf(user.publicKey, cfg), minTokensOut: 1n })]);
+    const done = await pool(mint.publicKey);
+    assert.equal(done.status, STATUS_GRADUATED, `${pair.symbol} curve completes`);
+    assert.ok(Math.abs(poolStats(done, pair.decimals).marketCap / Number(template.endFdv) - 1) < 1e-6, `${pair.symbol} graduates at ${template.endFdv} ${pair.symbol} FDV`);
+    await send(f.connection, user, [f.client.computeBudget(MIGRATE_COMPUTE_UNITS), f.client.migrateToPumpswap({ payer: user.publicKey, config: cfg, mint: mint.publicKey })], [], 1);
+    assert.equal((await pool(mint.publicKey)).status, STATUS_MIGRATED);
+    const pp = f.client.pumpAccounts(mint.publicKey, cfg.quoteMint, cfg.quoteTokenProgram);
+    const pumpPool = f.client.decodePumpPool((await f.connection.getAccountInfo(pp.pool)).data);
+    assert.equal(pumpPool.quoteMint.toBase58(), pair.mint);
+    assert.equal((await f.connection.getAccountInfo(pp.poolQuote)).owner.toBase58(), pair.tokenProgram, `${pair.symbol} PumpSwap vault uses the pair asset's token program`);
+    const m0 = await migration(mint.publicKey);
+    assert.equal(await balance(pp.poolQuote), m0.quoteMigrated);
+    // Fee growth (a donation stands in for PumpSwap LP fees), then a harvest split 50/50.
+    const extra = m0.quoteMigrated / 5n;
+    await fund(extra);
+    const transfer = new web3.TransactionInstruction({ programId: cfg.quoteTokenProgram, data: Buffer.concat([Buffer.from([12]), Buffer.from(new BigUint64Array([extra]).buffer), Buffer.from([pair.decimals])]),
+      keys: [{ pubkey: f.client.quoteAta(user.publicKey, cfg), isSigner: false, isWritable: true }, { pubkey: cfg.quoteMint, isSigner: false, isWritable: false }, { pubkey: pp.poolQuote, isSigner: false, isWritable: true }, { pubkey: user.publicKey, isSigner: true, isWritable: false }] });
+    await send(f.connection, user, [transfer]);
+    const rewardBefore = await amountOf(user.publicKey, cfg);
+    await send(f.connection, user, [f.client.computeBudget(HARVEST_COMPUTE_UNITS), ...f.client.harvestLpFees({ payer: user.publicKey, config: cfg, mint: mint.publicKey, reward: user.publicKey })], [], 1);
+    const m1 = await migration(mint.publicKey);
+    assert.ok(m1.harvestedQuote > 0n && m1.lpLocked < m0.lpLocked, `${pair.symbol} harvest`);
+    assert.equal(await amountOf(user.publicKey, cfg) - rewardBefore, m1.harvestedQuote - m1.harvestedQuote / 2n, 'creator half of the quote');
+  }
+});
+
+test('Solana pairs reject quote tokens that would break the curve or never graduate (transfer fee, permanent delegate as on xStocks)', { skip }, async () => {
+  const spl = splTestMint(web3);
+  const t22 = new PublicKey(TOKEN_2022_PROGRAM);
+  const feeMint = Keypair.generate(), stockLike = Keypair.generate();
+  await send(f.connection, f.authority, await spl.createFeeMint2022Ixs(f.connection, f.authority.publicKey, feeMint.publicKey, 6, f.authority.publicKey), [feeMint]);
+  await send(f.connection, f.authority, await spl.createMint2022Ixs(f.connection, f.authority.publicKey, stockLike.publicKey, 8, f.authority.publicKey, f.authority.publicKey), [stockLike]);
+  for (const mint of [feeMint, stockLike]) {
+    await failsWith(send(f.connection, f.authority, [f.client.addCurveConfig({ authority: f.authority.publicKey, quoteMint: mint.publicKey, treasury: f.treasury, quoteTokenProgram: t22, params: PARAMS })], [], 1), /0x1785/);
+  }
+  assert.match(explainError(new Error('custom program error: 0x1785')), /permanent delegate/);
 });
 
 test('Solana upgrade is a no-op when the deployed program already matches the build', { skip }, async () => {

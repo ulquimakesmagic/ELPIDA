@@ -1,6 +1,17 @@
 # Elpida Solana program
 
-Anchor program `elpida_launchpad` (program ID `ANkA5pytoVkiKQbjzd5NdPWKgmwfsihNJvSfg3vtKLNz`), model 3: a USDC-quoted virtual-reserve bonding curve that graduates into a PumpSwap pool. Test prototype, **not audited**.
+Anchor program `elpida_launchpad` (program ID `ANkA5pytoVkiKQbjzd5NdPWKgmwfsihNJvSfg3vtKLNz`), model 3: a virtual-reserve bonding curve, one config per trading pair (SOL, USDC or another approved token), that graduates into a PumpSwap pool. Test prototype, **not audited**.
+
+## Trading pairs
+
+Every chain offers the same four pair kinds (`packages/core/pairs.mjs`): native coin, USDC, xStock and paired token. On Solana each pair is a `CurveConfig` for its quote mint, with its own curve and creation fee in that asset.
+
+- **SOL:** the wrapped-SOL mint. The client wraps exactly what an instruction spends and closes the wrapped account in the same transaction, so people pay and receive plain SOL.
+- **USDC:** Circle USDC (Elpida tUSDC on test networks).
+- **Paired token:** any approved classic SPL or Token-2022 mint (TEST-MEME on test networks).
+- **xStock: not available.** xStocks are Token-2022 mints with an issuer **permanent delegate**, and PumpSwap refuses permanent-delegate quote mints (`UnsupportedQuoteMint`, verified against the real program), so such a curve could never graduate. `add_curve_config` therefore rejects them, together with transfer-fee, non-transferable, frozen-by-default and active-transfer-hook mints (error 6021). Adding xStocks needs a second graduation venue: Meteora DAMM v2 accepts the badged xStock mints.
+
+On test networks the SOL pair is test sized (0.5 → 5 SOL FDV, 0.01 SOL creation fee) so a curve can be completed with faucet SOL; mainnet configs would be priced at $5k → $50k. `npm run solana:deploy` creates the SOL and TEST-MEME configs and records every pair in `local-data/solana-<cluster>.json`, which the web app reads.
 
 ## Lifecycle
 
@@ -22,13 +33,13 @@ Anchor program `elpida_launchpad` (program ID `ANkA5pytoVkiKQbjzd5NdPWKgmwfsihNJ
 
 | Instruction | Who | What it does |
 | --- | --- | --- |
-| `initialize_curve(params)` | Program upgrade authority, once | Quote mint (6–9 decimals), treasury, curve and fee parameters; launch fee = 10 whole quote units |
-| `launch(name, symbol, first_buy, min_tokens_out, reward)` | Creator | Atomically does four things: charges the 10 USDC fee to the treasury, mints a fixed 1B supply (6 decimals) to the curve, revokes mint authority (no freeze authority) and makes the mandatory first buy |
+| `initialize_curve(params)` | Program upgrade authority, once | Quote mint (6–9 decimals), treasury, curve and fee parameters, including the creation fee in quote base units |
+| `launch(name, symbol, first_buy, min_tokens_out, reward)` | Creator | Atomically does four things: charges the pair's creation fee to the treasury, mints a fixed 1B supply (6 decimals) to the curve, revokes mint authority (no freeze authority) and makes the mandatory first buy |
 | `buy(gross_in, min_tokens_out)` / `sell(tokens_in, min_quote_out)` | Anyone | Curve trades at the current fee (anti-snipe schedule, then 1.25%) |
 | `withdraw_fees` | Anyone | Pays accrued curve fees 50/50 to the treasury and the creator reward wallet; works before and after migration |
 | `migrate_to_pumpswap` | Anyone, once the curve is complete | Creates the PumpSwap pool. The caller advances 0.05 SOL; about 0.017 SOL is used for rent and the rest is refunded in the same transaction |
-| `add_curve_config(params)` | Program upgrade authority | An extra config for another quote mint at `["curve-config", quote_mint]`; pools always trade through the config they launched with |
-| `create_test_usdc` / `test_usdc_faucet(amount)` | Upgrade authority / anyone | **Test networks only.** Elpida tUSDC, a valueless 6-decimal mint at `["test-usdc"]` that only the faucet can mint (max 25,000 per call). It exists so curves can be completed and migrated on devnet. Never create it on mainnet |
+| `add_curve_config(params)` | Program upgrade authority | A trading pair: an extra config for another quote mint (classic SPL or Token-2022) at `["curve-config", quote_mint]`; unsupported token extensions are rejected; pools always trade through the config they launched with |
+| `create_test_usdc` / `test_usdc_faucet(amount)` | Upgrade authority / anyone | **Test networks only.** Elpida tUSDC, a valueless 6-decimal mint at `["test-usdc"]` that only the faucet can mint. The same faucet mints any test asset whose mint authority is its PDA (TEST-MEME), up to 10,000,000 whole units per call. It exists so curves can be completed and migrated on devnet. Never create it on mainnet |
 | `harvest_lp_fees` | Anyone, after migration | Withdraws LP fee growth and splits it 50/50; destination token accounts must exist (the client adds idempotent creation) |
 
 **Accounts:**

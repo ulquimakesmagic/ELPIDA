@@ -134,7 +134,7 @@ function openVerify(ctx, row, recipient, data) {
     error.textContent = /DNS TXT record is not visible/i.test(text) ? 'The DNS record is not visible yet. Check that the name and value match exactly, wait a few minutes for DNS to update, then try again.' : /expired/i.test(text) ? 'This challenge expired after 10 minutes. Get a new record and sign again.' : text;
   };
   const step1 = h('li', h('div', h('h4', 'Choose the payout wallet'), h('p.small.muted', 'Rewards for this allocation are paid to this wallet after verification. It cannot be changed later.'),
-    walletInput, h('div', h('button.btn.btn-secondary.btn-sm', { type: 'button', on: { click: async () => { try { if (!window.ethereum) throw new Error('No browser wallet found. Paste the payout address instead.'); const [a] = await window.ethereum.request({ method: 'eth_requestAccounts' }); walletInput.value = a; } catch (e) { fail(e); } } } }, icon('wallet', 'icon-sm'), 'Use connected wallet'))));
+    walletInput, h('div', h('button.btn.btn-secondary.btn-sm', { type: 'button', on: { click: async () => { try { const eth = ctx.evmProvider() ?? window.ethereum; if (!eth) throw new Error('No browser wallet found. Paste the payout address instead.'); const [a] = await eth.request({ method: 'eth_requestAccounts' }); walletInput.value = a; } catch (e) { fail(e); } } } }, icon('wallet', 'icon-sm'), 'Use connected wallet'))));
   const step2 = h('li', h('div', h('h4', x ? 'Create a sign-in challenge' : 'Add the DNS record'),
     h('p.small.muted', x ? 'The challenge links this X account to your payout wallet for 10 minutes.' : `Add this TXT record at your DNS provider for ${recipient.target}. The record is valid for 10 minutes.`),
     h('div', h('button.btn.btn-secondary.btn-sm', { type: 'button', on: { click: async () => {
@@ -151,11 +151,12 @@ function openVerify(ctx, row, recipient, data) {
       error.textContent = '';
       try {
         if (!challenge) throw new Error(x ? 'Create the challenge first.' : 'Get the DNS record first.');
-        if (!window.ethereum) throw new Error('No browser wallet found. Sign the message elsewhere and paste the signature below.');
-        const [a] = await window.ethereum.request({ method: 'eth_requestAccounts' });
+        const eth = ctx.evmProvider() ?? window.ethereum;
+        if (!eth) throw new Error('No browser wallet found. Sign the message elsewhere and paste the signature below.');
+        const [a] = await eth.request({ method: 'eth_requestAccounts' });
         if (a.toLowerCase() !== walletInput.value.trim().toLowerCase()) throw new Error('Switch your wallet to the payout address entered in step 1.');
         const hex = '0x' + [...new TextEncoder().encode(challenge.message)].map(n => n.toString(16).padStart(2, '0')).join('');
-        signature.value = await window.ethereum.request({ method: 'personal_sign', params: [hex, a] });
+        signature.value = await eth.request({ method: 'personal_sign', params: [hex, a] });
         step2.dataset.done = 'true';
       } catch (e) { fail(e); }
     } } }, icon('pencil', 'icon-sm'), 'Sign message')),

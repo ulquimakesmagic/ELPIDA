@@ -1,8 +1,8 @@
 // Elpida web app shell: environment (local simulation or public testnet), wallets, routing, discovery,
 // portfolio and the network/test-funds panel. Views live in launch-flow.mjs, token-page.mjs and
 // rewards-view.mjs and receive the shared `ctx` object below.
-import { TestnetWallet } from './wallet.mjs';
-import { SolanaWallet } from './solana-wallet.mjs';
+import { TestnetWallet, evmWallets, chosenEvmWallet } from './wallet.mjs';
+import { SolanaWallet, solanaWallets, chosenSolanaWallet } from './solana-wallet.mjs';
 import { $, $$, h, icon, short, number, compact, avatar, bar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, toast, errorText, closeOnBackdrop, callout } from './ui.mjs';
 import { renderLaunch } from './launch-flow.mjs';
 import { renderToken } from './token-page.mjs';
@@ -47,13 +47,13 @@ async function refresh() {
   state = next; updateChrome(); rerender('data');
   return state;
 }
-async function connect(key) {
+async function connect(key, walletId) {
   const previousWallet = wallet, previousKey = wallet.net.key;
   let connected = false;
   try {
     wallet = key === config.solana.key ? solWallet : evmWallet;
     wallet.select(key);
-    await wallet.connect(); connected = true; mode = 'testnet';
+    await wallet.connect(walletId); connected = true; mode = 'testnet';
     try { localStorage.setItem('elpida:network', key); } catch {}
     state = { wallet: wallet.address, balance: '0', tokens: [], activity: [] };
     await refresh();
@@ -68,9 +68,28 @@ async function useLocal() {
   try { localStorage.setItem('elpida:network', 'local'); } catch {}
   await refresh(); return true;
 }
+/**
+ * One button per installed wallet of the network's kind, so the person picks which extension opens
+ * (several extensions compete for window.ethereum; the wrong one never shows a prompt for some chains).
+ */
+function walletButtons(net, { onDone = () => {}, onError = () => {} } = {}) {
+  const solana = net.kind === 'solana';
+  const list = solana ? solanaWallets() : evmWallets();
+  const chosen = solana ? chosenSolanaWallet() : chosenEvmWallet();
+  if (!list.length) return h('p.small.muted', solana ? 'No Solana wallet found. Install Phantom, Solflare or Backpack, then reload this page.' : 'No Ethereum wallet found. Install MetaMask or another browser wallet, then reload this page.');
+  const sorted = [...list].sort((a, b) => Number(b.id === chosen) - Number(a.id === chosen));
+  return h('div.wallet-choices', sorted.map((w, i) => h(`button.btn.${i === 0 ? 'btn-primary' : 'btn-secondary'}`, { type: 'button', 'data-busy-disable': '', on: { click: async event => {
+    const button = event.currentTarget, text = button.lastChild, label = text.textContent; button.disabled = true; text.textContent = `Waiting for ${w.name}…`;
+    try { await connect(net.key, w.id); toast(`Connected to ${net.name} with ${w.name}.`, { kind: 'success' }); onDone(); }
+    catch (e) { onError(e); }
+    finally { button.disabled = false; text.textContent = label; }
+  } } }, w.icon && /^data:image\//.test(w.icon) ? h('img.wallet-icon', { src: w.icon, alt: '', width: 18, height: 18 }) : icon('wallet', 'icon-sm'), h('span', list.length > 1 ? w.name : `Connect ${w.name}`))));
+}
 const ctx = {
   get config() { return config; }, get state() { return state; }, get mode() { return mode; }, get wallet() { return wallet; }, get account() { return account; },
-  get busy() { return busy; }, get solWallet() { return solWallet; }, api, run, act, refresh, connect, useLocal, currentChain, networks, networkByKey, txLink,
+  get busy() { return busy; }, get solWallet() { return solWallet; }, api, run, act, refresh, connect, useLocal, currentChain, networks, networkByKey, txLink, walletButtons,
+  /** The EVM provider for signatures outside a launch (ownership verification): the chosen wallet. */
+  evmProvider: () => evmWallet.eth,
   navigate: hash => { if (location.hash === hash) route(); else location.hash = hash; },
   envLabel, isCreatorOf: token => !!state?.wallet && [token.creator, token.reward].some(a => a?.toLowerCase() === state.wallet.toLowerCase()),
 };
@@ -228,6 +247,8 @@ function portfolioView() {
 
 /* ---------- Network and test funds ---------- */
 async function connectCurrent() {
+  const list = wallet.net.kind === 'solana' ? solanaWallets() : evmWallets();
+  if (list.length > 1 && !(wallet.net.kind === 'solana' ? chosenSolanaWallet() : chosenEvmWallet())) return openTools();
   try { await connect(wallet.net.key); toast(`Connected to ${wallet.net.name}.`, { kind: 'success' }); } catch (error) { toast(errorText(error), { kind: 'error' }); }
 }
 function openTools() {
@@ -247,16 +268,23 @@ function openTools() {
       h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('faucet', {}); } catch (e) { fail(e); } } } }, icon('droplet'), 'Add 1,000 test USDC'));
   } else {
     const net = wallet.net;
-    if (wallet.usesTestToken) funds.append(h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('faucet', {}); } catch (e) { fail(e); } } } }, icon('droplet'), net.kind === 'solana' ? 'Get 25,000 Elpida tUSDC' : 'Get 1,000 Elpida tUSDC'), h('p.hint', 'Elpida tUSDC is a free test token with no value.'));
-    const links = [...(net.gasFaucet ? [[`${net.nativeCurrency.symbol} faucet for network fees`, net.gasFaucet]] : []), ...(net.quote?.faucet && !wallet.usesTestToken ? [['Circle test USDC faucet', net.quote.faucet]] : [])];
+    // A free faucet for every test pair asset (tUSDC, the test xStock, the test paired token).
+    let pairs = null; try { pairs = wallet.address ? wallet.pairOptions?.() : null; } catch {}
+    const faucets = Object.values(pairs ?? {}).flatMap(group => group.assets).filter(a => a.faucet && !a.faucet.href);
+    if (faucets.length) funds.append(h('div.wallet-choices', faucets.map(a => h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run(a.faucet.action, a.faucet.body); } catch (e) { fail(e); } } } }, icon('droplet'), a.faucet.label))),
+      h('p.hint', 'Test assets are free and have no value. TEST-STOCK is a simulated stock, not an issued xStock.'));
+    else if (wallet.usesTestToken && wallet.address) funds.append(h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('faucet', {}); } catch (e) { fail(e); } } } }, icon('droplet'), net.kind === 'solana' ? 'Get 25,000 Elpida tUSDC' : 'Get 1,000 Elpida tUSDC'));
+    const links = [...(net.gasFaucet ? [[`${net.nativeCurrency.symbol} faucet${net.kind === 'solana' ? ' (network fees and SOL-paired launches)' : ' for network fees'}`, net.gasFaucet]] : []), ...(net.quote?.faucet && !wallet.usesTestToken ? [['Circle test USDC faucet', net.quote.faucet]] : [])];
     funds.append(h('div.links', links.map(([label, href]) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, label, icon('external-link', 'icon-sm')))));
-    if (!wallet.address) funds.append(h('button.btn.btn-primary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { try { await connect(net.key); openTools(); } catch (e) { fail(e); } } } }, icon('wallet'), 'Connect wallet'));
-    else funds.append(h('p.small.muted', `Connected: ${wallet.address}`));
+    if (!wallet.address) funds.append(h('h4', 'Connect a wallet'), walletButtons(net, { onDone: () => openTools(), onError: fail }));
+    else funds.append(h('p.small.muted', `Connected${/^your/i.test(wallet.walletName ?? 'your') ? '' : ' with ' + wallet.walletName}: ${wallet.address}`), h('details.small', h('summary', 'Use a different wallet'), walletButtons(net, { onDone: () => openTools(), onError: fail })));
     if (net.kind !== 'solana') {
       const deployed = !!wallet.deployment;
       funds.append(h('div.tools-section', h('h4', 'Launchpad on this network'),
         h('p.small.muted', deployed ? `${wallet.deployment.shared ? 'Shared team' : 'Your'} launchpad: ${short(wallet.deployment.factory)}.${wallet.needsMetadataUpgrade ? ' A newer version with shared token metadata is available.' : ''}` : 'Each public testnet needs a one-time launchpad setup from your wallet before the first token.'),
-        (!deployed || wallet.needsMetadataUpgrade) && wallet.address ? h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('deploy', {}); openTools(); } catch (e) { fail(e); } } } }, deployed ? 'Set up the newer launchpad' : 'Set up launchpad') : null));
+        (!deployed || wallet.needsMetadataUpgrade) && wallet.address ? h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('deploy', {}); openTools(); } catch (e) { fail(e); } } } }, deployed ? 'Set up the newer launchpad' : 'Set up launchpad') : null,
+        deployed && wallet.dex && wallet.address && pairs && (pairs.xstock.unavailable || pairs.token.unavailable) ? h('div.stack', h('p.small.muted', 'xStock and paired-token launches need approved assets. The launchpad owner can deploy the labelled test assets (TEST-STOCK and TEST-MEME) and approve them: six confirmations, gas only.'),
+          h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('setup-pairs', {}); openTools(); } catch (e) { fail(e); } } } }, 'Add test xStock and token pairs')) : null));
     } else funds.append(h('p.small.muted', wallet.deployment ? `Solana program: ${short(wallet.deployment.programId)}.` : 'The Solana program is not deployed. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.'));
   }
   body.replaceChildren(envSection, funds, error);
@@ -286,8 +314,10 @@ async function init() {
   if (previous) {
     let trusted = false;
     try {
-      if (previous.kind === 'solana') { const provider = window.phantom?.solana ?? window.solflare ?? window.backpack ?? window.solana; trusted = !!provider && !!(await Promise.race([provider.connect({ onlyIfTrusted: true }), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 2500))])); }
-      else trusted = ((await window.ethereum?.request({ method: 'eth_accounts' })) ?? []).length > 0;
+      // Give EIP-6963 wallets a moment to announce themselves before asking the chosen one.
+      await new Promise(resolve => setTimeout(resolve, 150));
+      if (previous.kind === 'solana') { const provider = solWallet.provider; trusted = !!provider && (provider.isConnected && !!provider.publicKey || !!(await Promise.race([provider.connect({ onlyIfTrusted: true }), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 2500))]))); }
+      else trusted = ((await Promise.race([evmWallet.eth?.request({ method: 'eth_accounts' }), new Promise(resolve => setTimeout(() => resolve([]), 2500))])) ?? []).length > 0;
     } catch {}
     if (trusted) { try { await connect(previous.key); } catch { trusted = false; } }
     if (!trusted) { wallet = previous.kind === 'solana' ? solWallet : evmWallet; toast(`Showing the local simulation. Use Connect wallet to return to ${previous.name}.`, { kind: 'info' }); }

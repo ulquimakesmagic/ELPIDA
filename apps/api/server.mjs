@@ -21,6 +21,7 @@ const vendorFiles = new Map([
   ['/vendor/ethers.js', ethersFile],
   ['/vendor/solana-web3.js', fileURLToPath(new URL('../../node_modules/@solana/web3.js/lib/index.iife.min.js', import.meta.url))],
   ['/elpida-solana.mjs', fileURLToPath(new URL('../../packages/solana/client.mjs', import.meta.url))],
+  ['/pairs.mjs', fileURLToPath(new URL('../../packages/core/pairs.mjs', import.meta.url))],
 ]);
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -35,7 +36,7 @@ export function solanaConfig() {
     if (existsSync(file)) {
       try {
         const record = JSON.parse(readFileSync(file, 'utf8'));
-        if (base58.test(record.programId) && record.cluster === net.cluster) deployment = { programId: record.programId, shared: false };
+        if (base58.test(record.programId) && record.cluster === net.cluster) deployment = { programId: record.programId, shared: false, pairs: Array.isArray(record.pairs) ? record.pairs.filter(p => p && base58.test(p.config ?? '') && base58.test(p.mint ?? '') && ['native', 'usdc', 'xstock', 'token'].includes(p.kind)).map(({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test, wsol, faucet }) => ({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test: !!test, wsol: !!wsol, faucet: faucet ?? null })) : null };
       } catch {}
     }
   }

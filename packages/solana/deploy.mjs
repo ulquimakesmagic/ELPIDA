@@ -1,7 +1,7 @@
 // Node-only helpers that deploy and initialize the Elpida Solana program over RPC.
 // Used by scripts/solana-deploy.mjs and tests/solana.test.mjs.
 import * as web3 from '@solana/web3.js';
-import { createElpidaSolana, loaderV3, splTestMint, curveParams, LOADER_V3 } from './client.mjs';
+import { createElpidaSolana, loaderV3, splTestMint, curveParams, LOADER_V3, WSOL_MINT, TOKEN_PROGRAM, TOKEN_2022_PROGRAM } from './client.mjs';
 
 const { Keypair, PublicKey, Transaction, SystemProgram } = web3;
 const CHUNK = 950;
@@ -263,6 +263,44 @@ export async function ensureTestUsdc({ connection, payer, programId, treasury, p
     created = true;
   }
   return { mint, config: { address: configAddress, ...client.decodeConfig((await connection.getAccountInfo(configAddress)).data) }, created };
+}
+
+/**
+ * Test networks only: one curve config per pair template (packages/core/pairs.mjs SOLANA_TEST_PAIRS).
+ * Native SOL uses the wrapped-SOL mint. Test assets are new mints whose only minter is the program's
+ * faucet PDA; the simulated xStock is a Token-2022 mint with an issuer permanent delegate, like xStocks.
+ * `saved` maps template keys to mints from an earlier run so re-runs reuse them. Returns pair records.
+ */
+export async function ensurePairConfigs({ connection, payer, programId, treasury, templates, saved = {}, overrides = {}, onProgress = () => {} }) {
+  const client = createElpidaSolana(web3, programId);
+  const spl = splTestMint(web3);
+  const pairs = [];
+  for (const t of templates) {
+    let mint = t.wsol ? new PublicKey(WSOL_MINT) : saved[t.key] ? new PublicKey(saved[t.key]) : null;
+    if (mint && !t.wsol && !await connection.getAccountInfo(mint)) mint = null;
+    if (!mint) {
+      const kp = Keypair.generate();
+      onProgress(`Creating ${t.symbol} test mint ${kp.publicKey.toBase58()}…`);
+      const ixs = t.token2022
+        ? await spl.createMint2022Ixs(connection, payer.publicKey, kp.publicKey, t.decimals, client.faucetAuthority, t.permanentDelegate === false ? null : payer.publicKey)
+        : await spl.createMintIxs(connection, payer.publicKey, kp.publicKey, t.decimals, client.faucetAuthority);
+      await send(connection, payer, ixs, [kp]);
+      mint = kp.publicKey;
+    }
+    const info = await connection.getAccountInfo(mint);
+    const quoteTokenProgram = info.owner;
+    const address = client.configFor(mint);
+    let created = false;
+    if (!await connection.getAccountInfo(address)) {
+      onProgress(`Creating the ${t.symbol} pair config…`);
+      await send(connection, payer, [client.addCurveConfig({ authority: payer.publicKey, quoteMint: mint, treasury: new PublicKey(treasury), quoteTokenProgram,
+        params: curveParams({ startFdv: t.startFdv, endFdv: t.endFdv, quoteDecimals: t.decimals, launchFee: t.launchFee, ...overrides }) })]);
+      created = true;
+    }
+    pairs.push({ kind: t.kind, key: t.key, symbol: t.symbol, name: t.name, mint: mint.toBase58(), config: address.toBase58(), decimals: t.decimals,
+      tokenProgram: quoteTokenProgram.toBase58(), test: !t.wsol, wsol: !!t.wsol, testSized: true, faucet: t.faucet ?? null, created });
+  }
+  return pairs;
 }
 
 /** Localnet only: a 6-decimal stand-in for USDC, with balances minted to `recipients`. */

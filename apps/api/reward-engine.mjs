@@ -10,7 +10,7 @@ export class RewardEngine {
   this.stockArtifact=compiled['tests/fixtures/MockRewardStock.sol'].MockRewardStock;this.records=new Map();this.challenges=new Map();this.events=[];this.xVerification=new XVerification();this.dnsResolver=resolveTxt;
  }
  async init(){this.stock=await new ContractFactory(this.stockArtifact.abi,this.stockArtifact.evm.bytecode.object,this.executor).deploy(this.quote.target);await this.stock.waitForDeployment();}
- assets(){return [...this.tokens.map(t=>({address:t.address,symbol:t.symbol,kind:'elpida',pair:t.pair,pairEligible:t.pair==='usdc'&&t.graduated===true,quoteAddress:t.quoteAddress||this.quote.target})),{address:this.stock.target,symbol:'TEST-STOCK · simulated xStock',kind:'simulation',pair:'usdc',pairEligible:true,quoteAddress:this.quote.target}];}
+ assets(){return [...this.tokens.map(t=>({address:t.address,symbol:t.symbol,pairKind:'token',kind:'elpida',pair:t.pair,pairEligible:t.pair==='usdc'&&t.graduated===true,quoteAddress:t.quoteAddress||this.quote.target})),{address:this.stock.target,symbol:'TEST-STOCK',name:'Simulated stock (test only, not an issued xStock)',pairKind:'xstock',kind:'simulation',pair:'usdc',pairEligible:true,quoteAddress:this.quote.target}];}
  async prepare(input,owner,pair,source=this.quote.target){
   const policy=normalizeRewardPolicy(input,'local');
   if(policy.mode==='paired'){

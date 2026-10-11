@@ -320,6 +320,15 @@ details.tech .kv dd { font-weight: 500; word-break: break-all; }
 .connection { display: grid; gap: var(--space-3); padding: var(--space-4); border-radius: var(--radius-md); background: var(--surface); border: 1px solid var(--line); }
 .connection-row { display: flex; align-items: center; gap: var(--space-3); flex-wrap: wrap; }
 .connection-row .grow { flex: 1; min-width: 200px; }
+/* Trading pairs: the same four kinds on every network, two by two. */
+.pair-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.choice .choice-title .chip { margin-left: auto; font-weight: 500; }
+.choice[data-unavailable] p { color: var(--ink-3, var(--ink-2)); }
+/* Wallet picker: one button per installed wallet. */
+.wallet-choices { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+.wallet-icon { width: 18px; height: 18px; border-radius: 4px; flex: none; }
+details.small summary { cursor: pointer; color: var(--primary); margin-block: var(--space-2); }
+@media (max-width: 560px) { .pair-grid { grid-template-columns: 1fr; } }
 .alloc { display: grid; gap: var(--space-2); }
 .alloc-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) 110px 36px; gap: var(--space-2); align-items: center; }
 .alloc-row .input-affix .input { padding-right: 32px; }

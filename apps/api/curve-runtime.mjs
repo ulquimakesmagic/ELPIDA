@@ -41,7 +41,7 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
     model:dex?'curve-dex-v5':'curve-beta-v4',dex:dex?v3.config:null,publicDex:baseSepoliaDex,nativeTemplates:{'base-sepolia':'0.02','ethereum-sepolia':'2.133333333333333333','bnb-testnet':'8.888888888888888888','robinhood-testnet':'2.133333333333333333'},local:{chainId:31337,name:'Local devnet',nativeSymbol:'ETH',factory:await factory.getAddress(),usdc:await quote.getAddress(),treasury:addresses[2]},
     accounts:addresses.slice(0,2).map((address,i) => ({id:String(i),address,name:i?'Trader':'Creator'})),testnets:evmTestnets,
     plannedTestnets:testnets.filter(n => !n.enabled).map(({key,name,note}) => ({key,name,note})),
-    contracts:{...(dex?{dexPool:{abi:v3Artifacts.pool.abi},router:{abi:v3Artifacts.router.abi},quoter:{abi:v3Artifacts.quoter.abi},locker:{abi:artifact('ElpidaV3FeeLocker').abi},splitter:{abi:artifact('ElpidaFeeSplitter').abi}}:{}),dexFactory:{abi:artifact('ElpidaDexFactory').abi,bytecode:'0x'+artifact('ElpidaDexFactory').evm.bytecode.object},dexCurve:{abi:artifact('ElpidaDexCurve').abi},adapter:{abi:artifact('ElpidaV3MigrationAdapter').abi,bytecode:'0x'+artifact('ElpidaV3MigrationAdapter').evm.bytecode.object},legacyFactory:{abi:artifact('ElpidaBetaFactory').abi,bytecode:'0x'+artifact('ElpidaBetaFactory').evm.bytecode.object},legacyCurve:{abi:artifact('ElpidaBetaCurve').abi},factory:{abi:fa.abi,bytecode:`0x${fa.evm.bytecode.object}`},token:{abi:artifact('ElpidaToken').abi},curve:{abi:artifact(dex?'ElpidaDexCurve':'ElpidaBetaCurve').abi},pool:{abi:artifact('ElpidaLockedPool').abi},quote:{abi:mock.abi},testUsdc:{abi:testUsdc.abi,bytecode:`0x${testUsdc.evm.bytecode.object}`}},
+    contracts:{...(dex?{dexPool:{abi:v3Artifacts.pool.abi},router:{abi:v3Artifacts.router.abi},quoter:{abi:v3Artifacts.quoter.abi},locker:{abi:artifact('ElpidaV3FeeLocker').abi},splitter:{abi:artifact('ElpidaFeeSplitter').abi}}:{}),dexFactory:{abi:artifact('ElpidaDexFactory').abi,bytecode:'0x'+artifact('ElpidaDexFactory').evm.bytecode.object},dexCurve:{abi:artifact('ElpidaDexCurve').abi},adapter:{abi:artifact('ElpidaV3MigrationAdapter').abi,bytecode:'0x'+artifact('ElpidaV3MigrationAdapter').evm.bytecode.object},legacyFactory:{abi:artifact('ElpidaBetaFactory').abi,bytecode:'0x'+artifact('ElpidaBetaFactory').evm.bytecode.object},legacyCurve:{abi:artifact('ElpidaBetaCurve').abi},factory:{abi:fa.abi,bytecode:`0x${fa.evm.bytecode.object}`},token:{abi:artifact('ElpidaToken').abi},curve:{abi:artifact(dex?'ElpidaDexCurve':'ElpidaBetaCurve').abi},pool:{abi:artifact('ElpidaLockedPool').abi},quote:{abi:mock.abi},testUsdc:{abi:testUsdc.abi,bytecode:`0x${testUsdc.evm.bytecode.object}`},testAsset:{abi:compiled['contracts/evm/testnet/ElpidaTestAsset.sol'].ElpidaTestAsset.abi,bytecode:'0x'+compiled['contracts/evm/testnet/ElpidaTestAsset.sol'].ElpidaTestAsset.evm.bytecode.object}},
   };
   const indexer = new EvmIndexer({provider,factory:await factory.getAddress(),contracts:config.contracts,path:indexerPath,fromBlock:(await factory.deploymentTransaction().wait()).blockNumber});
   const signerFor = account => { if (account !== '0' && account !== '1') throw new Error('Choose a local demo account.'); return signers[Number(account)]; };
@@ -63,12 +63,14 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
       const details = normalizeMetadata(body);
       const name = String(body.name ?? '').trim(), symbol = String(body.symbol ?? '').trim().toUpperCase();
       if (!name || name.length > 40 || !/^[A-Z0-9]{1,10}$/.test(symbol)) throw new Error('Check the token name and symbol.');
-      const pair = body.pair ?? 'usdc'; if (!['usdc','native','token'].includes(pair)) throw new Error('Choose an approved trading pair.');
+      const pair = body.pair ?? 'usdc'; if (!['usdc','native','token','xstock'].includes(pair)) throw new Error('Choose an approved trading pair.');
+      const paired = pair==='token'||pair==='xstock';
       let pairAsset=quote.target,pairDecimals=6,pairSymbol='USDC',pairVirtual;
-      if(pair==='token'){
-        if(!dex)throw new Error('Custom pairing requires the DEX test environment.');
+      if(paired){
+        if(!dex)throw new Error('xStock and paired-token launches need the DEX test environment.');
         const selectedAsset=rewards.assets().find(a=>a.address.toLowerCase()===String(body.quoteToken).toLowerCase());
         if(!selectedAsset||!selectedAsset.pairEligible)throw new Error('Choose an approved USDC-backed Elpida token or simulated stock.');
+        if((pair==='xstock')!==(selectedAsset.kind==='simulation'))throw new Error(pair==='xstock'?'Choose the simulated stock for an xStock pair.':'Choose a graduated Elpida token for a paired-token launch.');
         pairAsset=selectedAsset.address;pairDecimals=18;pairSymbol=selectedAsset.symbol;
         const existing=await factory.approvedQuotes(pairAsset);
         if(existing.adapter===ZeroAddress){
@@ -81,17 +83,17 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
       }
       const buy = amount(body.firstBuy,pair === 'native' ? 18 : pairDecimals);
       if(await quote.balanceOf(owner)<await factory.LAUNCH_FEE()+(pair==='usdc'?buy:0n))throw new Error('Not enough test USDC for the creation fee and first buy.');
-      if(pair==='token'&&await new Contract(pairAsset,config.contracts.quote.abi,provider).balanceOf(owner)<buy)throw new Error(`Not enough ${pairSymbol} for the first buy. Buy the paired token first, or use the simulated-stock test-funds button.`);
+      if(paired&&await new Contract(pairAsset,config.contracts.quote.abi,provider).balanceOf(owner)<buy)throw new Error(`Not enough ${pairSymbol} for the first buy. Buy the paired token first, or use the simulated-stock test-funds button.`);
       const prepared = body.rewardPolicy ? await rewards.prepare(body.rewardPolicy,body.reward||owner,pair,pair==='native'?ZeroAddress:pairAsset) : null;
       const reward = prepared?.vault.target || body.reward || owner;
       if (!isAddress(reward) || reward === ZeroAddress) throw new Error('Enter a valid reward wallet.');
-      const v = pair==='token'?pairVirtual:pair === 'native' ? await factory.NATIVE_VIRTUAL_QUOTE() : await factory.VIRTUAL_QUOTE();
+      const v = paired?pairVirtual:pair === 'native' ? await factory.NATIVE_VIRTUAL_QUOTE() : await factory.VIRTUAL_QUOTE();
       const net = buy - buy*125n/10000n, out = await factory.VIRTUAL_TOKEN()*net/(v+net);
       const published=dex&&metadataStore&&Object.values(details).some(Boolean)?await metadataStore.publish({name,symbol,...details}):null;
       await mined(quote.connect(s).approve(await factory.getAddress(),await factory.LAUNCH_FEE()+(pair === 'usdc'?buy:0n)));
-      if(pair==='token')await mined(new Contract(pairAsset,config.contracts.quote.abi,s).approve(factory.target,buy));
+      if(paired)await mined(new Contract(pairAsset,config.contracts.quote.abi,s).approve(factory.target,buy));
       const args=[name,symbol,pair === 'native',buy,out*9950n/10000n,reward];
-      const tx = pair==='token'?(published?await factory.connect(s).launchPairedWithMetadata(name,symbol,pairAsset,buy,out*9950n/10000n,reward,published.uri):await factory.connect(s).launchPaired(name,symbol,pairAsset,buy,out*9950n/10000n,reward)):published?await factory.connect(s).launchWithMetadata(...args,published.uri,{value:pair==='native'?buy:0n}):await factory.connect(s).launch(...args,{value:pair === 'native'?buy:0n});
+      const tx = paired?(published?await factory.connect(s).launchPairedWithMetadata(name,symbol,pairAsset,buy,out*9950n/10000n,reward,published.uri):await factory.connect(s).launchPaired(name,symbol,pairAsset,buy,out*9950n/10000n,reward)):published?await factory.connect(s).launchWithMetadata(...args,published.uri,{value:pair==='native'?buy:0n}):await factory.connect(s).launch(...args,{value:pair === 'native'?buy:0n});
       const receipt = await tx.wait();
       const event = receipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(l => l?.name === 'Launched');
       const r = {address:event.args.token.toLowerCase(),curve:event.args.curve,creator:owner,reward,name,symbol,pair,quoteAddress:pair==='native'?ZeroAddress:pairAsset,quoteSymbol:pair === 'native'?'ETH':pairSymbol,quoteDecimals:pair === 'native'?18:pairDecimals,created:Date.now(),hash:tx.hash};

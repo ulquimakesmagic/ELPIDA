@@ -5,6 +5,7 @@ import { normalizeMetadata, MAX_IMAGE_BYTES, IMAGE_TYPES, IMAGE_FORMATS } from '
 import { normalizeRewardPolicy } from './reward-policy.mjs';
 import { launchProfile } from './launch-capabilities.mjs';
 import { STRATEGIES } from './rewards-view.mjs';
+import { PAIR_KINDS, PAIR_INFO } from '/pairs.mjs';
 
 const DRAFT_KEY = 'elpida:launch-draft';
 const STEPS = [
@@ -21,10 +22,12 @@ const STRATEGY_TEXT = {
   buyback: 'At the threshold, creator fees buy back your token and vest it to eligible holders over a period you set.',
   exclusive: 'Fees are allocated by percentage to wallets, X accounts or websites. X and website shares stay in the treasury until ownership is verified.',
 };
-const blankDraft = () => ({ name: '', symbol: '', description: '', image: '', imageUrl: '', website: '', twitter: '', telegram: '', discord: '', chain: '', pair: 'usdc', quoteToken: '', rewardMode: 'creator', recipients: [{ kind: 'wallet', target: '', percent: '100' }], threshold: '1', minimumHolding: '1000', vestingDays: '30', rewardToken: '', firstBuy: '25' });
+const blankDraft = () => ({ name: '', symbol: '', description: '', image: '', imageUrl: '', website: '', twitter: '', telegram: '', discord: '', chain: '', pair: 'usdc', quoteAsset: '', rewardMode: 'creator', recipients: [{ kind: 'wallet', target: '', percent: '100' }], threshold: '1', minimumHolding: '1000', vestingDays: '30', rewardToken: '', firstBuy: '25' });
 
 export function renderLaunch(ctx) {
   const draft = { ...blankDraft(), ...(storage.get(DRAFT_KEY) ?? {}) };
+  if (draft.quoteToken && !draft.quoteAsset) draft.quoteAsset = draft.quoteToken; // drafts saved before pair kinds
+  delete draft.quoteToken;
   if (!draft.chain) draft.chain = ctx.currentChain();
   let step = 0, maxStep = 0, rewardData = null, phase = 'edit', result = null, statusState = null, networkError = '';
   // Large base64 logos exceed browser session-storage quotas. Keep the other draft fields;
@@ -42,15 +45,37 @@ export function renderLaunch(ctx) {
   const connected = () => !!draft.chain && ctx.currentChain() === draft.chain && (draft.chain === 'local' || !!ctx.wallet.address);
   const ready = () => connected() && (draft.chain === 'local' || !!ctx.wallet.deployment);
   const nativeSymbol = () => draft.chain === 'local' ? 'ETH' : net()?.nativeCurrency.symbol ?? 'ETH';
-  const usdcLabel = () => solana() ? (connected() && ctx.wallet.usesTestToken ? 'Elpida tUSDC' : 'USDC') : (net() && !net().quote?.address ? 'Elpida test USDC' : 'USDC');
-  const quoteAsset = () => rewardData?.assets.find(a => a.address.toLowerCase() === draft.quoteToken.toLowerCase());
-  const pairSymbol = () => draft.pair === 'native' ? nativeSymbol() : draft.pair === 'token' ? (quoteAsset()?.symbol ?? 'paired token') : usdcLabel();
-  const feeSymbol = () => solana() && connected() && ctx.wallet.usesTestToken ? 'tUSDC' : 'test USDC';
+  /** Same structure on every chain: { native, usdc, xstock, token } → { assets, unavailable }. Null until known. */
+  const pairOptions = () => {
+    if (!draft.chain) return null;
+    if (draft.chain === 'local') return localPairs();
+    if (!connected()) return null;
+    try { return ctx.wallet.pairOptions?.() ?? null; } catch { return null; }
+  };
+  function localPairs() {
+    const fee = { feeAmount: '10', feeSymbol: 'test USDC' };
+    const usdcToken = ctx.state?.tokens.find(t => t.pair === 'usdc' && t.virtualQuote);
+    const usdcCurve = usdcToken ? { vq: Number(usdcToken.virtualQuote) / 1e6, vt: Number(usdcToken.virtualToken) / 1e18, cap: Number(usdcToken.saleCap ?? 8e8), feeBps: 125 } : { vq: 5333.333333, vt: 1066666666.6667, cap: 8e8, feeBps: 125 };
+    const assets = rewardData?.assets ?? [];
+    const loading = rewardData ? null : 'Loading the approved assets…';
+    const paired = (list, empty) => !ctx.config.dex ? { assets: [], unavailable: 'Needs the local DEX environment, which graduates into Uniswap v3.' } : list.length ? { assets: list } : { assets: [], unavailable: loading ?? empty };
+    return {
+      native: { assets: [{ id: 'native', symbol: 'ETH', name: 'Local test ETH', decimals: 18, ...fee }] },
+      usdc: { assets: [{ id: 'usdc', symbol: 'USDC', name: 'Local test USDC', decimals: 6, curve: usdcCurve, ...fee, faucet: { label: 'Add 1,000 test USDC', action: 'faucet', body: {} } }] },
+      xstock: paired(assets.filter(a => a.kind === 'simulation').map(a => ({ id: a.address, symbol: 'TEST-STOCK', name: 'Simulated stock (test only, not an issued xStock)', decimals: 18, test: true, ...fee, faucet: { label: 'Get 1 TEST-STOCK for 120 test USDC', action: 'reward-stock-faucet', body: {} } })), 'The simulated stock is not available.'),
+      token: paired(assets.filter(a => a.kind === 'elpida' && a.pairEligible).map(a => ({ id: a.address, symbol: a.symbol, name: `${a.symbol}, a graduated Elpida token`, decimals: 18, ...fee })), 'No graduated USDC-paired Elpida token yet. Graduate one first, and it can become a pair.'),
+    };
+  }
+  const selectedAsset = () => { const group = pairOptions()?.[draft.pair]; return group?.assets.find(a => a.id === draft.quoteAsset) ?? group?.assets[0] ?? null; };
+  const pairSymbol = () => selectedAsset()?.symbol ?? (draft.pair === 'native' ? nativeSymbol() : PAIR_INFO[draft.pair]?.title ?? 'USDC');
+  const feeAmount = () => Number(selectedAsset()?.feeAmount ?? 10);
+  const feeSymbol = () => selectedAsset()?.feeSymbol ?? 'test USDC';
+  const assetDecimals = () => selectedAsset()?.decimals ?? (draft.pair === 'native' ? 18 : 6);
   const dexName = () => !draft.chain ? 'DEX' : solana() ? 'PumpSwap' : draft.chain === 'local' ? (ctx.config.dex ? 'Uniswap v3' : 'test') : draft.chain === 'base-sepolia' ? 'Uniswap v3' : 'test';
 
   async function loadRewards() {
     if (rewardData || ctx.mode !== 'local') return;
-    try { rewardData = await ctx.api('rewards'); if (!draft.rewardToken && rewardData.assets[0]) draft.rewardToken = rewardData.assets[0].address; if (!draft.quoteToken) draft.quoteToken = rewardData.assets.find(a => a.pairEligible)?.address ?? ''; draw(); } catch {}
+    try { rewardData = await ctx.api('rewards'); if (!draft.rewardToken && rewardData.assets[0]) draft.rewardToken = rewardData.assets[0].address; draw(); } catch {}
   }
 
   /* ---------- Stepper and preview ---------- */
@@ -68,22 +93,28 @@ export function renderLaunch(ctx) {
         h('p.desc', draft.description || 'Your description appears here.'), links,
         h('div.chips', { class: 'links' }, h('span.chip', draft.chain ? (draft.chain === 'local' ? 'Local simulation' : net()?.name ?? draft.chain) : 'Network not chosen'), h('span.chip', `Pair: ${pairSymbol()}`))),
       h('div.summary-card', h('h4', 'Launch summary'), h('dl.kv',
-        h('dt', 'Creation fee'), h('dd', `10 ${feeSymbol()}`),
+        h('dt', 'Creation fee'), h('dd', `${number(feeAmount(), 6)} ${feeSymbol()}`),
         h('dt', 'First purchase'), h('dd', `${number(draft.firstBuy, 6)} ${pairSymbol()}`),
         h('dt', 'Estimated tokens'), h('dd', est ? `${compact(est.tokens)}` : '—'),
         h('dt', 'Creator rewards'), h('dd', strategy),
-        h('dt.total', 'You pay'), h('dd.total', draft.pair === 'usdc' && pairSymbol() !== 'paired token' ? `${number(Number(draft.firstBuy || 0) + 10, 6)} ${feeSymbol()}` : `10 ${feeSymbol()} + ${number(draft.firstBuy, 6)} ${pairSymbol()}`)),
+        h('dt.total', 'You pay'), h('dd.total', youPay())),
         h('p.hint', { text: `Plus the network fee. Fixed supply of 1,000,000,000 ${draft.symbol ? draft.symbol.toUpperCase() : 'tokens'}.` })));
   }
+  function youPay() {
+    const buy = Number(draft.firstBuy || 0);
+    return feeSymbol() === pairSymbol() ? `${number(buy + feeAmount(), 6)} ${pairSymbol()}` : `${number(feeAmount(), 6)} ${feeSymbol()} + ${number(buy, 6)} ${pairSymbol()}`;
+  }
   function estimate() {
-    const buy = Number(draft.firstBuy);
-    if (!(buy > 0) || draft.pair !== 'usdc') return null;
-    // Same virtual-reserve curve the contracts use: tokens = Vt × net / (Vq + net), net of the 1.25% fee.
-    let vq = 5333.333333, vt = 1066666666.6667, cap = 800000000;
-    if (solana()) { vq = 5555.555556; vt = 1111111111.1111; cap = 759746926.65; }
-    else { const t = ctx.state?.tokens.find(x => x.pair === 'usdc' && x.virtualQuote); if (t) { vq = Number(t.virtualQuote) / 1e6; vt = Number(t.virtualToken) / 1e18; cap = Number(t.saleCap ?? cap); } }
-    const net = buy * (1 - 0.0125), tokens = vt * net / (vq + net);
-    return { tokens: Math.min(tokens, cap), completes: tokens >= cap, share: Math.min(tokens, cap) / 1e9 * 100 };
+    const buy = Number(draft.firstBuy), curve = selectedAsset()?.curve;
+    if (!(buy > 0) || !curve) return null;
+    // Same virtual-reserve curve the contracts use: tokens = Vt × net / (Vq + net), net of the base fee.
+    const net = buy * (1 - (curve.feeBps ?? 125) / 10000), tokens = curve.vt * net / (curve.vq + net);
+    return { tokens: Math.min(tokens, curve.cap), completes: tokens >= curve.cap, share: Math.min(tokens, curve.cap) / 1e9 * 100 };
+  }
+  /** A first purchase of about 0.5% of the starting FDV, rounded to two significant figures. */
+  function defaultBuy(kind, asset) {
+    if (asset?.curve) { const v = asset.curve.vq * 1e9 / asset.curve.vt * 0.005; const p = 10 ** (Math.floor(Math.log10(v)) - 1); return String(Number((Math.round(v / p) * p).toPrecision(2))); }
+    return { native: '0.01', usdc: '25', xstock: '1', token: '100' }[kind];
   }
 
   /* ---------- Steps ---------- */
@@ -137,12 +168,11 @@ export function renderLaunch(ctx) {
   function networkStep() {
     const error = h('p.error-text', { role: 'alert' }, networkError);
     const options = [{ key: 'local', name: 'Local simulation', note: 'Private test chain with simulated funds. Supports every reward strategy and trading pair.', env: 'sim', wallet: 'Demo accounts' },
-      ...ctx.networks().map(n => ({ key: n.key, name: n.name, note: n.kind === 'solana' ? 'Public testnet. USDC pair; graduates into a locked PumpSwap pool.' : n.key === 'base-sepolia' ? 'Public testnet. Graduates into a locked Uniswap v3 pool.' : 'Public testnet. Graduates into a locked test pool.', env: 'testnet', wallet: n.kind === 'solana' ? 'Phantom, Solflare or Backpack' : 'Browser wallet such as MetaMask' }))];
+      ...ctx.networks().map(n => ({ key: n.key, name: n.name, note: n.kind === 'solana' ? 'Public testnet. SOL, USDC and token pairs; graduates into a locked PumpSwap pool.' : n.key === 'base-sepolia' ? 'Public testnet. Graduates into a locked Uniswap v3 pool.' : 'Public testnet. Graduates into a locked test pool.', env: 'testnet', wallet: n.kind === 'solana' ? 'Phantom, Solflare or Backpack' : 'Browser wallet such as MetaMask' }))];
     const choose = async key => {
-      draft.chain = key; networkError = ''; error.textContent = '';
-      const p = launchProfile(key);
-      if (!p.pairs.includes(draft.pair) && !(key === 'local' && draft.pair === 'token')) draft.pair = 'usdc';
-      if (key !== 'local' && draft.pair === 'token') draft.pair = 'usdc';
+      networkError = ''; error.textContent = '';
+      if (key !== draft.chain) { draft.pair = 'usdc'; draft.quoteAsset = ''; draft.firstBuy = '25'; }
+      draft.chain = key;
       if (key !== 'local') { draft.rewardMode = 'creator'; draft.recipients = [{ kind: 'wallet', target: '', percent: '100' }]; }
       save();
       if (key === 'local' && ctx.mode !== 'local') { try { await ctx.useLocal(); } catch (e) { networkError = errorText(e); } }
@@ -155,35 +185,44 @@ export function renderLaunch(ctx) {
     else if (draft.chain === 'local') connection.append(h('div.connection-row', icon('flask-conical'), h('div.grow', h('strong', 'Local simulation ready'), h('p.small.muted', `Using the demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()} account with simulated test USDC.`))));
     else {
       const n = net();
-      if (!connected()) connection.append(h('div.connection-row', icon('wallet'), h('div.grow', h('strong', `Connect your wallet to ${n.name}`), h('p.small.muted', `${n.kind === 'solana' ? 'Phantom, Solflare or Backpack' : 'Your browser wallet'} will ask you to approve the connection${n.kind === 'solana' ? '' : ' and switch networks if needed'}.`)),
-        h('button.btn.btn-primary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { networkError = ''; error.textContent = ''; try { await ctx.connect(draft.chain); toast(`Connected to ${n.name}.`, { kind: 'success' }); } catch (e) { networkError = `${errorText(e)} Check that your wallet is unlocked and set to ${n.name}, then try again.`; } draw(); } } }, 'Connect wallet')));
+      if (!connected()) connection.append(h('div.connection-row', icon('wallet'), h('div.grow', h('strong', `Connect your wallet to ${n.name}`), h('p.small.muted', `Choose the wallet to use. It asks you to approve the connection${n.kind === 'solana' ? '' : ' and to switch to ' + n.name + ' if needed'}.`)),
+        ctx.walletButtons(n, { onDone: () => { networkError = ''; draw(); }, onError: e => { networkError = errorText(e); draw(); } })));
       else {
-        connection.append(h('div.connection-row', icon('circle-check'), h('div.grow', h('strong', `Connected to ${n.name}`), h('p.small.muted', ctx.wallet.address)), h('button.btn.btn-ghost.btn-sm', { type: 'button', on: { click: async () => { networkError = ''; try { await ctx.connect(draft.chain); } catch (e) { networkError = errorText(e); } draw(); } } }, 'Reconnect')));
+        connection.append(h('div.connection-row', icon('circle-check'), h('div.grow', h('strong', `Connected to ${n.name}${/^your/i.test(ctx.wallet.walletName ?? 'your') ? '' : ' with ' + ctx.wallet.walletName}`), h('p.small.muted', ctx.wallet.address)), h('button.btn.btn-ghost.btn-sm', { type: 'button', on: { click: async () => { networkError = ''; try { await ctx.connect(draft.chain); } catch (e) { networkError = errorText(e); } draw(); } } }, 'Reconnect')));
         if (!ctx.wallet.deployment) connection.append(n.kind === 'solana'
           ? callout('warn', 'triangle-alert', 'The Elpida program is not deployed on this network. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.')
           : h('div.connection-row', callout('warn', 'triangle-alert', `${n.name} needs a one-time launchpad setup from your wallet before the first token. It takes ${ctx.wallet.usesTestToken ? 'two confirmations and deploys Elpida test USDC' : 'one confirmation'} and costs only gas.`),
             h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { networkError = ''; error.textContent = ''; try { await ctx.run('deploy', {}); } catch (e) { networkError = errorText(e); } draw(); } } }, 'Set up launchpad')));
       }
     }
-    const p = profile(), local = draft.chain === 'local';
-    const pairs = [
-      { key: 'native', title: `${nativeSymbol()}`, glyph: 'coins', note: `Buyers pay in ${nativeSymbol()}, the network’s native asset.`, disabled: !draft.chain || !p.pairs.includes('native') ? (solana() ? 'Solana launches use a USDC pair.' : 'Choose a network first.') : null },
-      { key: 'usdc', title: usdcLabel(), glyph: 'coins', note: solana() && ctx.wallet.usesTestToken && connected() ? 'Buyers pay in Elpida tUSDC, a free test token, so curves can complete on devnet.' : 'Buyers pay in USDC. Prices are shown in dollars.', disabled: !draft.chain ? 'Choose a network first.' : null },
-      { key: 'token', title: 'Approved token', glyph: 'layers', note: 'Pair with an approved same-network asset, such as a graduated Elpida token or the simulated stock.', disabled: !local ? 'Available in the local simulation only.' : null },
-    ];
-    const pairGrid = h('div.choice-grid', { role: 'radiogroup', 'aria-label': 'Trading pair' }, pairs.map(o => h('label.choice', h('input', { type: 'radio', name: 'pair', value: o.key, checked: draft.pair === o.key, disabled: !!o.disabled, on: { change: () => { draft.pair = o.key; draft.firstBuy = o.key === 'native' || o.key === 'token' && quoteAsset()?.kind === 'simulation' ? '0.01' : '25'; save(); draw(); } } }),
-      h('span.choice-title', icon(o.glyph), o.title), h('p', o.disabled ?? o.note))));
-    const quoteSelect = draft.pair === 'token' && local ? h('div.reveal.stack', field({ label: 'Paired token', control: h('select.select', { on: { change: e => { draft.quoteToken = e.target.value; save(); draw(); } } }, (rewardData?.assets ?? []).filter(a => a.pairEligible).map(a => h('option', { value: a.address, selected: a.address === draft.quoteToken }, a.symbol))), hint: 'Approved same-network assets only. The creation fee stays 10 test USDC; the first purchase, trades and graduation use this token.' }),
-      quoteAsset()?.kind === 'simulation' ? callout('warn', 'flask-conical', 'TEST-STOCK is a simulated asset for local testing. It is not an issued xStock and has no real-world backing. ', h('button.link-button', { type: 'button', on: { click: async () => { try { await ctx.run('reward-stock-faucet', {}); } catch (e) { error.textContent = errorText(e); } } } }, 'Get 1 TEST-STOCK for 120 test USDC')) : null) : null;
+    const pairs = pairOptions();
+    const pairGrid = h('div.choice-grid', { class: 'pair-grid', role: 'radiogroup', 'aria-label': 'Trading pair' }, PAIR_KINDS.map(kind => {
+      const info = PAIR_INFO[kind], group = pairs?.[kind];
+      const reason = !draft.chain ? 'Choose a network first.' : !pairs ? 'Connect your wallet to see the assets on this network.' : group?.unavailable ?? (group?.assets.length ? null : 'Not available on this network.');
+      const symbols = group?.assets.map(a => a.symbol).join(', ');
+      return h('label.choice', { 'data-unavailable': reason ? 'true' : undefined }, h('input', { type: 'radio', name: 'pair', value: kind, checked: draft.pair === kind, disabled: !!reason, on: { change: () => { draft.pair = kind; draft.quoteAsset = group.assets[0].id; draft.firstBuy = defaultBuy(kind, group.assets[0]); save(); draw(); } } }),
+        h('span.choice-title', icon(info.glyph), info.title, symbols ? h('span.chip', symbols) : null), h('p', reason ?? info.note(kind === 'native' ? group.assets[0].symbol : '')));
+    }));
+    const asset = selectedAsset(), group = pairs?.[draft.pair];
+    const balanceOf = a => ctx.state?.pairBalances?.[a.id] ?? (draft.pair === 'native' ? ctx.state?.nativeBalance : draft.pair === 'usdc' && a.id === 'usdc' ? ctx.state?.balance : null);
+    const fund = a => !a?.faucet ? null : a.faucet.href ? h('a.btn.btn-secondary.btn-sm', { href: a.faucet.href, target: '_blank', rel: 'noopener noreferrer' }, icon('droplet', 'icon-sm'), a.faucet.label, icon('external-link', 'icon-sm'))
+      : h('button.btn.btn-secondary.btn-sm', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await ctx.run(a.faucet.action, a.faucet.body); draw(); } catch (e) { error.textContent = errorText(e); } } } }, icon('droplet', 'icon-sm'), a.faucet.label);
+    const assetBox = asset && group?.assets.length ? h('div.reveal.stack',
+      group.assets.length > 1 ? field({ label: `${PAIR_INFO[draft.pair].title} asset`, control: h('select.select', { on: { change: e => { draft.quoteAsset = e.target.value; draft.firstBuy = defaultBuy(draft.pair, selectedAsset()); save(); draw(); } } }, group.assets.map(a => h('option', { value: a.id, selected: a.id === asset.id }, `${a.symbol} · ${a.name}`))) }) : null,
+      h('div.connection-row', icon(PAIR_INFO[draft.pair].glyph), h('div.grow', h('strong', asset.symbol), h('p.small.muted', [asset.name, balanceOf(asset) != null ? `Balance: ${number(balanceOf(asset), 4)} ${asset.symbol}` : null, `Creation fee: ${number(Number(asset.feeAmount ?? 10), 6)} ${asset.feeSymbol ?? 'USDC'}`].filter(Boolean).join(' · '))), fund(asset)),
+      asset.test && draft.pair === 'xstock' ? callout('warn', 'flask-conical', `${asset.symbol} is a simulated stock for testing. It is not an issued xStock and has no real-world backing.`) : null,
+      asset.wsol ? callout('', 'info', 'You pay and receive plain SOL. Elpida wraps it for each trade and unwraps what is left in the same transaction.') : null) : null;
     return { body: [
       h('div.stack', h('h3', 'Network'), netGrid), connection,
-      h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'The trading pair is the asset buyers pay with. It builds the trading reserve and stays the same after graduation. The reward asset is chosen separately in the next step.'), pairGrid, quoteSelect),
+      h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'The asset buyers pay with: the network’s own coin, USDC, an xStock or another approved token. It builds the trading reserve and stays the same after graduation. The reward asset is chosen separately in the next step.'), pairGrid, assetBox),
       error,
     ], validate: () => {
       if (!draft.chain) { error.textContent = 'Choose a network.'; return false; }
       if (!connected()) { error.textContent = draft.chain === 'local' ? 'The local simulation is not running.' : 'Connect your wallet to continue.'; return false; }
       if (!ready()) { error.textContent = 'Complete the one-time setup for this network first.'; return false; }
-      if (draft.pair === 'token' && !quoteAsset()) { error.textContent = 'Choose a paired token.'; return false; }
+      const group = pairOptions()?.[draft.pair];
+      if (!group?.assets.length) { error.textContent = group?.unavailable ?? 'Choose a trading pair.'; return false; }
+      if (!group.assets.some(a => a.id === draft.quoteAsset)) { draft.quoteAsset = group.assets[0].id; save(); }
       return true;
     } };
   }
@@ -244,13 +283,13 @@ export function renderLaunch(ctx) {
     const est = estimate();
     const amount = input('firstBuy', { type: 'number', min: '0.000001', step: 'any', inputmode: 'decimal', onInput: e => { draft.firstBuy = e.target.value; drawEstimate(); } });
     const estBox = h('div');
-    const balance = () => !connected() ? null : draft.pair === 'native' ? `${number(ctx.state?.nativeBalance ?? 0, 6)} ${nativeSymbol()}` : draft.pair === 'usdc' ? `${number(ctx.state?.balance ?? 0, 4)} ${ctx.state?.balanceSymbol ?? 'USDC'}` : null;
+    const balance = () => { if (!connected()) return null; const a = selectedAsset(); const v = a ? ctx.state?.pairBalances?.[a.id] ?? (draft.pair === 'native' ? ctx.state?.nativeBalance : draft.pair === 'usdc' ? ctx.state?.balance : null) : null; return v == null ? null : `${number(v, 6)} ${pairSymbol()}`; };
     const drawEstimate = () => {
       const e = estimate();
-      estBox.replaceChildren(...[h('dl.kv', h('dt', 'Creation fee'), h('dd', `10 ${feeSymbol()}`), h('dt', 'First purchase'), h('dd', `${number(draft.firstBuy, 6)} ${pairSymbol()}`), h('dt', 'Trading fee included'), h('dd', `${number(Number(draft.firstBuy || 0) * 0.0125, 6)} ${pairSymbol()}`),
+      estBox.replaceChildren(...[h('dl.kv', h('dt', 'Creation fee'), h('dd', `${number(feeAmount(), 6)} ${feeSymbol()}`), h('dt', 'First purchase'), h('dd', `${number(draft.firstBuy, 6)} ${pairSymbol()}`), h('dt', 'Trading fee included'), h('dd', `${number(Number(draft.firstBuy || 0) * 0.0125, 6)} ${pairSymbol()}`),
         h('dt', 'Estimated tokens'), h('dd', e ? `${compact(e.tokens)} (${number(e.share, 2)}% of supply)` : 'Shown after launch'), balance() ? [h('dt', 'Available balance'), h('dd', balance())] : null),
         e?.completes ? callout('warn', 'triangle-alert', 'This amount would buy the whole curve. Only the amount needed is charged, and the token is ready to graduate immediately.') : null,
-        !e ? h('p.hint', draft.pair === 'native' ? `Native-pair estimates depend on the network’s ${nativeSymbol()} price template, so the exact amount appears on the token page after launch.` : 'The estimate appears once a paired-token price is available.') : null].filter(Boolean));
+        !e ? h('p.hint', 'This network does not publish the curve for this pair before launch, so the exact amount appears on the token page.') : null].filter(Boolean));
       drawPreview();
     };
     drawEstimate();
@@ -261,8 +300,8 @@ export function renderLaunch(ctx) {
     ], validate: () => {
       const control = amount;
       if (!(Number(draft.firstBuy) > 0)) { setError(control, 'Enter an amount greater than zero.'); control.focus(); return false; }
-      const decimals = draft.pair === 'usdc' ? 6 : 18;
-      if (!(new RegExp(`^\\d+(\\.\\d{0,${decimals}})?$`)).test(draft.firstBuy)) { setError(control, `Use at most ${decimals} decimal places.`); return false; }
+      const places = assetDecimals();
+      if (!new RegExp(`^\\d+(\\.\\d{0,${places}})?$`).test(draft.firstBuy)) { setError(control, `Use at most ${places} decimal places.`); return false; }
       return true;
     } };
   }
@@ -276,9 +315,9 @@ export function renderLaunch(ctx) {
     return { body: [
       h('div.review',
         block('Token', 0, row('Name', draft.name), row('Symbol', `$${draft.symbol.toUpperCase()}`), row('Description', draft.description), row('Logo', draft.image ? (draft.image.startsWith('data:') ? 'Uploaded image' : draft.image) : '—'), row('Links', ['website', 'twitter', 'telegram', 'discord'].filter(k => draft[k]).map(k => ({ website: 'Website', twitter: 'X', telegram: 'Telegram', discord: 'Discord' })[k]).join(', ') || 'None')),
-        block('Network and trading pair', 1, row('Network', draft.chain === 'local' ? 'Local simulation' : net()?.name ?? '—'), row('Wallet', draft.chain === 'local' ? `Demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()}` : short(ctx.wallet.address)), row('Trading pair', pairSymbol()), row('Graduates into', `A locked ${dexName()} pool`)),
+        block('Network and trading pair', 1, row('Network', draft.chain === 'local' ? 'Local simulation' : net()?.name ?? '—'), row('Wallet', draft.chain === 'local' ? `Demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()}` : short(ctx.wallet.address)), row('Trading pair', `${PAIR_INFO[draft.pair]?.title ?? ''} · ${pairSymbol()}`), row('Graduates into', `A locked ${dexName()} pool`)),
         block('Creator rewards', 2, row('Strategy', STRATEGIES[draft.rewardMode].name), ...(['holders', 'paired', 'buyback'].includes(draft.rewardMode) ? [row('Distribution threshold', `${draft.threshold} ${pairSymbol()}`), row('Minimum token holding', `${number(draft.minimumHolding, 0)} ${draft.symbol.toUpperCase()}`)] : [row('Recipients', recipients)]), draft.rewardMode === 'paired' ? row('Reward asset', rewardData?.assets.find(a => a.address === draft.rewardToken)?.symbol ?? '—') : null, draft.rewardMode === 'buyback' ? row('Vesting', `${draft.vestingDays} days`) : null),
-        block('First purchase and costs', 3, row('Creation fee', `10 ${feeSymbol()}`), row('First purchase', `${number(draft.firstBuy, 6)} ${pairSymbol()}`), row('Estimated tokens', estimate() ? compact(estimate().tokens) : 'Shown after launch'), row('Network fee', 'Paid separately'))),
+        block('First purchase and costs', 3, row('Creation fee', `${number(feeAmount(), 6)} ${feeSymbol()}`), row('First purchase', `${number(draft.firstBuy, 6)} ${pairSymbol()}`), row('Estimated tokens', estimate() ? compact(estimate().tokens) : 'Shown after launch'), row('Network fee', 'Paid separately'))),
       h('section.summary-card', h('h4', 'Fixed after launch'), h('ul.fixed-list', h('li', 'Name, symbol and the 1,000,000,000 fixed supply'), h('li', `Trading pair (${pairSymbol()})`), h('li', 'Creator reward strategy, recipients and percentages'), h('li', `Graduation into a ${dexName()} pool with permanently locked liquidity`))),
       policy ? null : callout('error', 'circle-alert', 'The reward settings need attention before you can create this token.'),
     ], validate: () => !!policy };
@@ -287,7 +326,7 @@ export function renderLaunch(ctx) {
   /* ---------- Submission ---------- */
   const STATUS_STEPS = () => ctx.mode === 'local'
     ? [['submit', 'Create on the local simulation', 'Simulated funds, no wallet needed'], ['confirm', 'Confirmed', 'Your token is live']]
-    : [...(!solana() ? [['approve', 'Approve the USDC payment if needed', draft.pair === 'native' ? 'Allows payment of the USDC creation fee; the first purchase uses the native asset' : 'Allows payment of the creation fee and first purchase']] : []), ['wallet', 'Confirm in your wallet', 'Creates the token and makes your first purchase'], ['submit', 'Submitted', 'Waiting for the network to confirm'], ['confirm', 'Confirmed', 'Your token is live']];
+    : [...(!solana() ? [['approve', 'Approve the payment if needed', draft.pair === 'usdc' ? 'Allows the launchpad to take the USDC creation fee and first purchase' : draft.pair === 'native' ? 'Allows the launchpad to take the USDC creation fee' : `Allows the launchpad to take the USDC creation fee and the ${pairSymbol()} first purchase`]] : []), ['wallet', 'Confirm in your wallet', 'Creates the token and makes your first purchase'], ['submit', 'Submitted', 'Waiting for the network to confirm'], ['confirm', 'Confirmed', 'Your token is live']];
   function statusView() {
     const steps = STATUS_STEPS();
     const at = steps.findIndex(s => s[0] === statusState.step);
@@ -298,8 +337,8 @@ export function renderLaunch(ctx) {
   }
   async function create() {
     const policy = buildPolicy();
-    const body = { ...normalizeMetadata(draft), name: draft.name.trim(), symbol: draft.symbol.trim().toUpperCase(), pair: draft.pair, firstBuy: String(draft.firstBuy), reward: ctx.state?.wallet ?? '' };
-    if (draft.pair === 'token') body.quoteToken = draft.quoteToken;
+    const body = { ...normalizeMetadata(draft), name: draft.name.trim(), symbol: draft.symbol.trim().toUpperCase(), pair: draft.pair, quoteAsset: selectedAsset()?.id ?? draft.quoteAsset, firstBuy: String(draft.firstBuy), reward: ctx.state?.wallet ?? '' };
+    if (draft.chain === 'local' && (draft.pair === 'token' || draft.pair === 'xstock')) body.quoteToken = body.quoteAsset;
     if (draft.chain === 'local') body.rewardPolicy = policy;
     else body.reward = policy.recipients[0].target || ctx.wallet.address;
     phase = 'submitting'; statusState = { step: ctx.mode === 'local' ? 'submit' : STATUS_STEPS()[0][0], error: null, done: false }; draw();
