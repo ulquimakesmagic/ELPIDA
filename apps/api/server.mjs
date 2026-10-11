@@ -151,7 +151,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       const action = url.pathname.slice('/api/'.length);
       if(action==='public/metadata/prepare')return send(200,{message:publicIndex.metadataMessage(body).message});
       if(action==='public/metadata/save')return send(200,publicIndex.saveMetadata(body));
-      if(action==='client-error'){if(Date.now()-diagnosticWindow>=60000){diagnosticWindow=Date.now();diagnosticCount=0;}if(++diagnosticCount>60)return send(429,{error:'Diagnostics request limit reached.'});const stage=String(body.stage??'unknown').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40),code=String(body.code??'UNKNOWN').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40);console.error(JSON.stringify({event:'client_error',requestId,stage,code}));return send(200,{recorded:true,requestId});}
+      if(action==='client-error'){if(Date.now()-diagnosticWindow>=60000){diagnosticWindow=Date.now();diagnosticCount=0;}if(++diagnosticCount>60)return send(429,{error:'Diagnostics request limit reached.'});const stage=String(body.stage??'unknown').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40),code=String(body.code??'UNKNOWN').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40),rpcMethod=/^eth_[a-zA-Z]{1,40}$/.test(body.rpcMethod??'')?body.rpcMethod:undefined,rpcCode=Number.isSafeInteger(body.rpcCode)?body.rpcCode:undefined;console.error(JSON.stringify({event:'client_error',requestId,stage,code,rpcMethod,rpcCode}));return send(200,{recorded:true,requestId});}
       if (action === 'circle/funding') {
         try { return send(200, await circle.execute(req.headers.authorization, body)); }
         catch (error) { return send(error.status ?? 502, { error: error.message }); }
