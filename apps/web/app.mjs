@@ -46,7 +46,12 @@ async function refresh({ preserveInput = false } = {}) {
   if(mode==='local'){try{const c=await api('config');config.local=c.local;config.pricing=c.pricing;}catch{}}
   let next;
   if (mode === 'testnet' && !wallet.address) next = { balance: '0', nativeBalance:'0', tokens: wallet.net.kind==='evm'?await api('public/tokens?network='+encodeURIComponent(currentChain())):[], activity: [], disconnected: true };
-  else next = mode === 'local' ? await api(`state?account=${account}`) : await wallet.state();
+  else if(mode==='local')next=await api(`state?account=${account}`);
+  else{try{next=await wallet.state();}catch(error){
+    if(wallet.net.kind!=='evm'||!wallet.net.shared?.factory)throw error;
+    api('client-error',{stage:'wallet-state',code:error.code??error.name??'UNKNOWN'}).catch(()=>{});
+    next={balance:'0',nativeBalance:'0',tokens:await api('public/tokens?network='+encodeURIComponent(currentChain())),activity:[],disconnected:true,walletReadError:true};
+  }}
   if (revision !== refreshRevision) return state;
   const reference=mode==='testnet'&&wallet.price?wallet.price:config.prices?.[currentChain()];
   for(const t of next.tokens??[])if(t.pair==='native')t.usdReference=reference;
@@ -355,7 +360,7 @@ async function init() {
       else trusted = ((await Promise.race([evmWallet.eth?.request({ method: 'eth_accounts' }), new Promise(resolve => setTimeout(() => resolve([]), 2500))])) ?? []).length > 0;
     } catch {}
     if (trusted) { try { await connect(previous.key); } catch { trusted = false; } }
-    if (!trusted) { wallet = previous.kind === 'solana' ? solWallet : evmWallet; mode='testnet';toast(`Browsing ${previous.name}. Connect your wallet to trade.`, { kind: 'info' }); }
+    if (!trusted) { wallet = previous.kind === 'solana' ? solWallet : evmWallet; mode='testnet';state=null;toast(`Browsing ${previous.name}. Connect your wallet to trade.`, { kind: 'info' }); }
   }
   try { if (!state) await refresh(); }
   catch (error) { $('#view').replaceChildren(h('div.page-head', h('div', h('h1', 'Elpida'))), callout('error', 'circle-alert', h('strong', 'The launchpad could not load. '), errorText(error), ' ', h('button.link-button', { type: 'button', on: { click: () => location.reload() } }, 'Try again'))); }

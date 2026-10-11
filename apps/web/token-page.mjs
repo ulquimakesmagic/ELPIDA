@@ -151,7 +151,7 @@ function marketActivity(ctx,token,q){
 
 function tradePanel(ctx, token, { dex, solana }) {
   const q = token.quoteSymbol ?? ctx.state?.nativeSymbol ?? 'ETH';
-  if(ctx.state.disconnected)return h('section.panel.trade-panel',h('h2','Trade'),h('p.muted',`Connect your wallet on ${ctx.wallet.net.name} to buy or sell ${token.symbol}. Market data remains available without connecting.`),ctx.walletButtons(ctx.wallet.net,{onDone:()=>ctx.refresh(),onError:e=>toast(errorText(e),{kind:'error'})}));
+  if(ctx.state.disconnected)return h('section.panel.trade-panel',h('h2','Trade'),h('p.muted',ctx.state.walletReadError?'Your wallet connection could not read this network. Reconnect to trade; indexed market data is still available.':`Connect your wallet on ${ctx.wallet.net.name} to buy or sell ${token.symbol}. Market data remains available without connecting.`),ctx.walletButtons(ctx.wallet.net,{onDone:()=>ctx.refresh(),onError:e=>toast(errorText(e),{kind:'error'})}));
   if (token.graduated && token.venue === 'PumpSwap') {
     return h('section.panel.trade-panel', h('h2', 'Trade'), h('p.muted', `${token.symbol} now trades on PumpSwap. Its liquidity is locked permanently, and its LP fees are harvested 50/50 to Elpida and the creator.`),
       token.dexUrl ? h('a.btn.btn-primary.btn-block', { href: token.dexUrl, target: '_blank', rel: 'noopener noreferrer', style: undefined }, 'Open the PumpSwap pool', icon('external-link', 'icon-sm')) : null);
