@@ -34,6 +34,7 @@ async function run(action, body = {}, { quiet = false, onProgress } = {}) {
     if (!quiet) toast(result.message ?? 'Done.', { kind: 'success', link: txLink(result.hash) });
     try { await refresh(); } catch {}
     return result;
+  } catch(error){api('client-error',{stage:action,code:error.code??error.name??'UNKNOWN'}).catch(()=>{});throw error;
   } finally { busy = false; delete document.body.dataset.busy; progressHook = null; updateChrome(); }
 }
 /** Same as run, but reports errors as notifications (for one-click actions). */
@@ -44,7 +45,7 @@ async function refresh({ preserveInput = false } = {}) {
   try{const latest=await api('prices');config.prices=latest;}catch{}
   if(mode==='local'){try{const c=await api('config');config.local=c.local;config.pricing=c.pricing;}catch{}}
   let next;
-  if (mode === 'testnet' && !wallet.address) next = { balance: '0', tokens: [], activity: [], disconnected: true };
+  if (mode === 'testnet' && !wallet.address) next = { balance: '0', nativeBalance:'0', tokens: wallet.net.kind==='evm'?await api('public/tokens?network='+encodeURIComponent(currentChain())):[], activity: [], disconnected: true };
   else next = mode === 'local' ? await api(`state?account=${account}`) : await wallet.state();
   if (revision !== refreshRevision) return state;
   const reference=mode==='testnet'&&wallet.price?wallet.price:config.prices?.[currentChain()];
@@ -333,6 +334,8 @@ async function init() {
   wallet = evmWallet;
   let saved = null; try { saved = localStorage.getItem('elpida:network'); } catch {}
   if (saved === config.solana.key) wallet = solWallet; else if (saved && saved !== 'local') { try { evmWallet.select(saved); } catch {} }
+  // Public markets can be browsed without granting wallet access.
+  if(saved!=='local'){mode='testnet';}
   if (location.pathname === '/launch') history.replaceState({}, '', '/#/launch');
   $$('dialog').forEach(d => { closeOnBackdrop(d); d.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => d.close())); });
   $('#env-button').addEventListener('click', openTools);
@@ -352,7 +355,7 @@ async function init() {
       else trusted = ((await Promise.race([evmWallet.eth?.request({ method: 'eth_accounts' }), new Promise(resolve => setTimeout(() => resolve([]), 2500))])) ?? []).length > 0;
     } catch {}
     if (trusted) { try { await connect(previous.key); } catch { trusted = false; } }
-    if (!trusted) { wallet = previous.kind === 'solana' ? solWallet : evmWallet; toast(`Showing the local simulation. Use Connect wallet to return to ${previous.name}.`, { kind: 'info' }); }
+    if (!trusted) { wallet = previous.kind === 'solana' ? solWallet : evmWallet; mode='testnet';toast(`Browsing ${previous.name}. Connect your wallet to trade.`, { kind: 'info' }); }
   }
   try { if (!state) await refresh(); }
   catch (error) { $('#view').replaceChildren(h('div.page-head', h('div', h('h1', 'Elpida'))), callout('error', 'circle-alert', h('strong', 'The launchpad could not load. '), errorText(error), ' ', h('button.link-button', { type: 'button', on: { click: () => location.reload() } }, 'Try again'))); }

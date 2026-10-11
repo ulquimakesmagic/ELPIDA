@@ -84,9 +84,10 @@ export class TestnetWallet {
   }
 
   get deployment() {
+    // Team deployment is authoritative across visitors; saved private deployments remain intact.
+    if (this.net.shared?.factory && this.net.shared.model === modelOf(this.net.chainId)) return { ...this.net.shared, shared: true };
     const saved=read(deploymentKey(this.net.chainId));
     if(saved)return saved;
-    if (this.net.shared?.factory && this.net.shared.model === modelOf(this.net.chainId)) return { ...this.net.shared, shared: true };
     return null;
   }
   get eth() { return this._eth ?? evmProvider(); }
@@ -258,14 +259,22 @@ export class TestnetWallet {
     const factory = await this.verifyFactory();
     if(this.dex){try{this.needsMetadataUpgrade=await factory.METADATA_VERSION()!==1n;}catch{this.needsMetadataUpgrade=true;}}
     const latest = await this.provider.getBlockNumber();
+    if(this.net.shared?.factory.toLowerCase()===this.deployment.factory.toLowerCase()){
+      try{
+        const [response,statusResponse]=await Promise.all([fetch('/api/public/tokens?network='+encodeURIComponent(this.net.key)),fetch('/api/public/status')]);
+        if(response.ok&&statusResponse.ok){const entries=await response.json(),status=(await statusResponse.json()).networks[this.net.key];
+          if(status.enabled&&status.indexedBlock!==null){this.launches.clear();for(const item of entries)this.launches.set(item.address.toLowerCase(),{...item});this.scannedBlock=status.indexedBlock;}
+        }
+      }catch{/* RPC scanning still recovers recent launches if the index API is offline. */}
+    }
     const start = this.scannedBlock === undefined ? this.deployment.block : this.scannedBlock + 1;
     if (latest - start > 100_000) throw new Error('This deployment needs a dedicated indexer to load its history.');
     for (let block = start; block <= latest; block += 2000) {
       const to = Math.min(block + 1999, latest);
       const events = await factory.queryFilter(factory.filters.Launched(), block, to);
-      for (const event of events) this.launches.set(event.args.token, { address: event.args.token, curve: event.args.curve, pair: event.args.nativePair ? 'native' : 'token', creator: event.args.creator, hash: event.transactionHash, created: event.blockNumber });
-      if(this.dex)for(const event of await factory.queryFilter(factory.filters.MetadataPublished(),block,to)){const item=this.launches.get(event.args.token);if(item)item.metadataURI=event.args.uri;}
-      if(this.dex)for(const event of await factory.queryFilter(factory.filters.CustomPair(),block,to)){const item=this.launches.get(event.args.token);if(item)item.quoteAddress=event.args.quote;}
+      for (const event of events) this.launches.set(event.args.token.toLowerCase(), { address: event.args.token, curve: event.args.curve, pair: event.args.nativePair ? 'native' : 'token', creator: event.args.creator, hash: event.transactionHash, created: event.blockNumber });
+      if(this.dex)for(const event of await factory.queryFilter(factory.filters.MetadataPublished(),block,to)){const item=this.launches.get(event.args.token.toLowerCase());if(item)item.metadataURI=event.args.uri;}
+      if(this.dex)for(const event of await factory.queryFilter(factory.filters.CustomPair(),block,to)){const item=this.launches.get(event.args.token.toLowerCase());if(item)item.quoteAddress=event.args.quote;}
       this.scannedBlock = to;
     }
     await this.loadPairs(factory);
@@ -275,7 +284,7 @@ export class TestnetWallet {
       Object.assign(item, asset ? { pair: asset.kind, quoteSymbol: asset.symbol, quoteDecimals: asset.decimals } : { pair: 'token', quoteSymbol: 'paired token', quoteDecimals: 18 });
     }
     const tokens = await Promise.all([...this.launches.values()].reverse().map(async item => {
-      item = {...item,metadata:await readMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,item.address)) ?? {}};
+      item = {...item,metadata:await readMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,item.address)) ?? item.metadata ?? {}};
       if(item.metadataURI){try{const response=await fetch('/api/metadata/resolve?uri='+encodeURIComponent(item.metadataURI));if(!response.ok)throw new Error('unavailable');item.metadata=normalizeMetadata(await response.json());item.metadataStatus='published';}catch{item.metadataStatus='unavailable';}}
       const d = this.qd(item);
       const token = new Contract(item.address, this.config.contracts.token.abi, this.provider);
@@ -324,7 +333,7 @@ export class TestnetWallet {
   }
   async getQuote({ token, side, amount }) {
     await this.checkNetwork();
-    const item = this.launches.get(token);
+    const item = this.launches.get(token.toLowerCase());
     if (!item) throw new Error('Token not found. Refresh the launchpad.');
     const curve = await this.market(item);
     const d = this.qd(item);
@@ -397,7 +406,7 @@ export class TestnetWallet {
       metadataSaved = !!event && await writeMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,event.args.token),published?.metadata??details);
       if(published){metadataSaved=true;metadataPublished=true;}
     } else {
-      const item = this.launches.get(body.token);
+      const item = this.launches.get(body.token.toLowerCase());
       if (!item) throw new Error('Token not found.');
       const curve = await this.market(item, this.signer);
       const original = new Contract(item.curve, this.artifacts.curve.abi, this.signer);

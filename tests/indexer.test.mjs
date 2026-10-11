@@ -18,6 +18,9 @@ test('durable indexer captures initial buy, replay, restart, reorg and migration
  const saved=i.snapshot(token);await i.sync();assert.deepEqual(i.snapshot(token),saved);assert.equal(i.trades(token).length,1);
  const replay=new EvmIndexer({provider:runtime.provider,factory:runtime.config.local.factory,contracts:runtime.config.contracts,fromBlock:i.fromBlock});
  await replay.sync();assert.deepEqual(replay.snapshot(token),saved);assert.deepEqual(replay.trades(token),i.trades(token));await replay.close();
+ const batched=new EvmIndexer({provider:runtime.provider,factory:runtime.config.local.factory,contracts:runtime.config.contracts,fromBlock:i.fromBlock,batchSize:100});
+ await batched.sync();assert.deepEqual(batched.trades(token),i.trades(token));assert.equal(batched.holders(token)[0].address,launched.creator?.toLowerCase()??runtime.config.accounts[0].address.toLowerCase());
+ assert.ok(Number(batched.holders(token)[0].balance)>0);await batched.close();
  const reopened=new EvmIndexer({provider:runtime.provider,factory:runtime.config.local.factory,contracts:runtime.config.contracts,path,fromBlock:i.fromBlock});
  assert.deepEqual(reopened.snapshot(token),saved);await reopened.close();
  const snap=await runtime.provider.send('evm_snapshot',[]);
@@ -34,4 +37,6 @@ test('durable indexer captures initial buy, replay, restart, reorg and migration
  assert.equal(i.trades(token)[0].venue,'pool');assert.equal(i.trades(token)[0].side,'sell');
  assert.ok(i.candles(token).length>0);assert.equal(i.candles(token).reduce((n,c)=>n+c.trades,0),3);
  assert.equal(i.status().lag,0);
+ const rangeReplay=new EvmIndexer({provider:runtime.provider,factory:runtime.config.local.factory,contracts:runtime.config.contracts,fromBlock:i.fromBlock,batchSize:100});
+ await rangeReplay.sync();assert.deepEqual(rangeReplay.trades(token),i.trades(token),'range backfill discovers pools and their later trades');assert.deepEqual(rangeReplay.snapshot(token),i.snapshot(token));await rangeReplay.close();
 });

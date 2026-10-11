@@ -1,4 +1,5 @@
 import { PriceKeeper } from './price-keeper.mjs';
+import { PublicIndexer } from './public-indexer.mjs';
 import { createCircleFunding } from './circle-test-wallets.mjs';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
@@ -78,9 +79,13 @@ export function createRpcProxy(target, { perSecond = 15, burst = 60 } = {}) {
 
 export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1', circleFunding = null } = {}) {
   const dataPrefix=port===3000||process.env.RAILWAY_ENVIRONMENT_NAME?'':`preview-${port}-`;
-  const circle = circleFunding ?? createCircleFunding({ path: port === 0 ? null : fileURLToPath(new URL('../../local-data/' + dataPrefix + 'circle-test-wallets.json', import.meta.url)) });
-  const metadataStore=new MetadataStore({path:port===0?null:fileURLToPath(new URL('../../local-data/'+dataPrefix+'ipfs-content',import.meta.url))});
-  const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:fileURLToPath(new URL('../../local-data/'+dataPrefix+'token-metadata.json',import.meta.url)), dex:port!==0, indexerPath:port===0?":memory:":fileURLToPath(new URL('../../local-data/'+dataPrefix+'curve-dex-usd-v9-index.sqlite',import.meta.url)) });
+  const dataDir=resolve(process.env.ELPIDA_DATA_DIR??process.env.RAILWAY_VOLUME_MOUNT_PATH??fileURLToPath(new URL('../../local-data/',import.meta.url)));
+  const dataFile=name=>resolve(dataDir,dataPrefix+name);
+  const circle = circleFunding ?? createCircleFunding({ path: port === 0 ? null : dataFile('circle-test-wallets.json') });
+  const metadataStore=new MetadataStore({path:port===0?null:dataFile('ipfs-content')});
+  const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:dataFile('token-metadata.json'), dex:port!==0, indexerPath:port===0?":memory:":dataFile('curve-dex-usd-v9-index.sqlite') });
+  const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore}).start();
+  console.log(JSON.stringify({event:'storage_ready',durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),publicNetworks:[...publicIndex.entries.keys()],simulation:'resets on process restart'}));
   const priceKeeper=new PriceKeeper();
   const updatePrices=async()=>{await priceKeeper.refresh();const prices=priceKeeper.snapshot();const p=[prices.local,prices['base-sepolia'],prices['ethereum-sepolia']].find(p=>p.status==='fresh');if(p)await runtime.updatePrice(p.usd);};
   const priceTimer=port===0?null:setInterval(()=>updatePrices().catch(()=>{}),60000);priceTimer?.unref();
@@ -88,12 +93,14 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const priceSnapshot=()=>({...priceKeeper.snapshot(),local:runtime.config.local.price});
   const cookieSecurity = publicUrl ? '; Secure' : '';
   const csrf = randomBytes(24).toString('hex');
+  let diagnosticWindow=Date.now(),diagnosticCount=0;
   const solana = solanaConfig();
   const connectSources = [...evmTestnets.map(net => net.rpcUrl), solana.rpcUrl, solana.wsUrl].filter(url => /^(https?|wss?):/.test(url ?? '')).join(' ');
   const rpcProxy = solana.mainnet ? createRpcProxy(process.env.SOLANA_RPC_URL) : null;
   const server = createServer(async (req, res) => {
     const actualPort = server.address().port;
-    const send = (code, data) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
+    const requestId=randomBytes(8).toString('hex');res.setHeader('X-Request-Id',requestId);
+    const send = (code, data) => { if(code>=400)console.error(JSON.stringify({event:'request_failed',requestId,status:code,method:req.method,path:String(req.url).split('?')[0].slice(0,160)}));res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -108,6 +115,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         }
         if (url.pathname === '/api/rewards') return send(200,await runtime.rewards.dashboard());
         if(url.pathname==='/api/prices')return send(200,priceSnapshot());
+        if(url.pathname==='/api/public/status')return send(200,{storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),simulationEphemeral:true},networks:Object.fromEntries(evmTestnets.map(n=>[n.key,publicIndex.status(n.key)]))});
+        const publicMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?)?$/);
+        if(publicMatch){const key=url.searchParams.get('network')??'base-sepolia';if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown public network.'});if(!publicMatch[1])return send(200,publicIndex.listings(key));const data=publicIndex.detail(key,publicMatch[1],publicMatch[2],Number(url.searchParams.get('interval')??60));return data===null?send(404,{error:'Token not indexed yet. Check indexer status and retry.'}):send(200,data);}
         if (url.pathname === '/api/config') return send(200, { ...runtime.config, circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), csrf });
         if(url.pathname==='/api/metadata/resolve')return send(200,await metadataStore.resolve(url.searchParams.get('uri')));
         if(url.pathname.startsWith('/api/content/')){const record=metadataStore.get(url.pathname.slice('/api/content/'.length));if(!record)return send(404,{error:'Content not found.'});res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}
@@ -134,11 +144,14 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if (req.headers['x-elpida-token'] !== csrf || req.headers['content-type'] !== 'application/json') return send(403, { error: 'Refresh this page before submitting.' });
       const chunks = [];
       let size = 0;
-      for await (const chunk of req) { size += chunk.length; if (size > (['/api/launch','/api/metadata/publish'].includes(url.pathname) ? MAX_METADATA_REQUEST_BYTES : 8192)) { send(413, { error: 'Request too large.' }); return; } chunks.push(chunk); }
+      for await (const chunk of req) { size += chunk.length; if (size > (['/api/launch','/api/metadata/publish','/api/public/metadata/prepare','/api/public/metadata/save'].includes(url.pathname) ? MAX_METADATA_REQUEST_BYTES : 8192)) { send(413, { error: 'Request too large.' }); return; } chunks.push(chunk); }
       let body;
       try { body = JSON.parse(Buffer.concat(chunks).toString()); } catch { return send(400, { error: 'Invalid request.' }); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) return send(400, { error: 'Invalid request.' });
       const action = url.pathname.slice('/api/'.length);
+      if(action==='public/metadata/prepare')return send(200,{message:publicIndex.metadataMessage(body).message});
+      if(action==='public/metadata/save')return send(200,publicIndex.saveMetadata(body));
+      if(action==='client-error'){if(Date.now()-diagnosticWindow>=60000){diagnosticWindow=Date.now();diagnosticCount=0;}if(++diagnosticCount>60)return send(429,{error:'Diagnostics request limit reached.'});const stage=String(body.stage??'unknown').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40),code=String(body.code??'UNKNOWN').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40);console.error(JSON.stringify({event:'client_error',requestId,stage,code}));return send(200,{recorded:true,requestId});}
       if (action === 'circle/funding') {
         try { return send(200, await circle.execute(req.headers.authorization, body)); }
         catch (error) { return send(error.status ?? 502, { error: error.message }); }
@@ -150,16 +163,17 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       return send(200, await runtime.transact(action, body));
     } catch (error) {
       const message = error.reason ?? error.shortMessage ?? error.message ?? 'Request failed.';
+      console.error(JSON.stringify({event:'request_error',requestId,code:String(error.code??error.name??'UNKNOWN').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40),reason:error.reason?'Contract reverted':'Request rejected'}));
       return send(400, { error: String(message).slice(0, 250) });
     }
   });
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
-  return { url: `http://localhost:${server.address().port}`, runtime, async close() {clearInterval(priceTimer);clearInterval(rewardTimer); await new Promise(done => server.close(done)); await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, async close() {clearInterval(priceTimer);clearInterval(rewardTimer); await new Promise(done => server.close(done)); await publicIndex.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  console.log('Starting Elpida local chain and deploying demo contracts…');
+  console.log('Starting Elpida API, private simulation and public chain indexer…');
   let app;
   try { app = await startServer(); }
   catch (error) {
@@ -172,6 +186,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.exit(1);
   }
   console.log(`Elpida is ready: ${app.url}`);
-  console.log('Local demo balances and launches reset when this process restarts.');
+  console.log('Private simulation resets on restart. Public token history is indexed from chain and stored in SQLite.');
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { await app.close(); process.exit(0); });
 }

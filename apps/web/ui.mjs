@@ -54,7 +54,9 @@ export function pricing(token) {
   const supply = Number(token.supply), sold = Number(token.sold), reserve = Number(token.reserve);
   const price = token.spotPrice ?? (supply - sold > 0 ? reserve / (supply - sold) : 0);
   const circulating = Number(token.circulatingSupply ?? token.sold);
-  return { price, fdv: price * supply, marketCap: price * circulating, circulating, supply };
+  // Launchpad headline capitalization includes the minted supply in the curve/pool.
+  // Free-float capitalization remains available as a separately named measure.
+  return { price, fdv: price * supply, marketCap: price * supply, freeFloatCap: price * circulating, circulating, supply };
 }
 export function usdRate(token) {
   const p=token.usdReference;

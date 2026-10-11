@@ -1,6 +1,6 @@
 // Token detail page: market figures with plain definitions, bonding-curve progress, trade panel,
 // graduation actions, creator-fee summary and technical details.
-import { h, icon, short, number, compact, avatar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, metadataLinks, copyButton, callout, errorText, toast } from './ui.mjs';
+import { h, icon, short, number, compact, avatar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, metadataLinks, copyButton, callout, errorText, toast, usdRate } from './ui.mjs';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 // Compare decimal amounts without rounding away the last token/native-asset unit.
@@ -51,17 +51,17 @@ export function renderToken(ctx, address) {
   const head = h('div.token-head', avatar(token, 'avatar-lg'),
     h('div', h('h1', token.name, h('span.sym', `$${token.symbol}`)),
       h('div.chips', h(`span.chip${life.chip ? '.' + life.chip : ''}`, life.label), h(`span.chip.${ctx.mode === 'local' ? 'chip-sim' : 'chip-testnet'}`, ctx.envLabel()), h('span.chip', `Trading pair: ${q}`))),
-    h('div.head-actions', copyButton(token.address, `Token ${short(token.address)}`)));
+    h('div.head-actions',h('div.market-headline',h('span.meta','Market cap · FDV'),h('strong',fmtValue(p.marketCap,token)),h('span.meta',`${fmtPrice(token)} per token`)), copyButton(token.address, `Token ${short(token.address)}`)));
 
   const metric = (label, value, note) => h('div.metric', h('span', label), h('strong', value), note ? h('small', note) : null);
   const figures = h('section.panel', { 'aria-labelledby': 'market-title' },
     h('div.panel-head', h('div', h('h2#market-title', 'Market'), h('p', token.usdReference?.status==='fresh'?`USD reference via ${token.usdReference.source} · Updated ${new Date(token.usdReference.updatedAt*1000).toLocaleTimeString()}. Trades settle in ${q}.`:`USD conversion unavailable or stale. Values are shown in ${q}.`))),
     h('div.metrics',
       metric('Price', fmtPrice(token), token.graduated ? `${dex} pool price` : 'Current bonding-curve price'),
-      metric('Market cap', fmtValue(p.marketCap, token), 'Price × circulating supply'),
-      metric('Fully diluted value', fmtValue(p.fdv, token), 'Price × total supply'),
+      metric('Market cap · FDV', fmtValue(p.marketCap, token), 'Price × full minted supply, including curve and pool inventory'),
+      metric('Curve sold', number(pct,1)+'%', 'Progress toward locked DEX liquidity'),
       metric('Total supply', compact(token.supply), 'Fixed at launch, never minted again'),
-      metric('Circulating supply', compact(p.circulating), 'Held outside the curve and pool'),
+      metric('Tokens held by wallets', compact(p.circulating), 'Free-float estimate; excludes curve, pool and burn inventory'),
       metric('Trading reserve', `${number(token.reserve, 4)} ${q}`, token.graduated ? 'Moved into the locked DEX pool' : 'Real funds held by the curve')));
 
   let curveText;
@@ -76,6 +76,10 @@ export function renderToken(ctx, address) {
     h('p', { class: 'section-text' }, token.metadata?.description || 'The creator has not added a description.'), metadataLinks(token.metadata),
     token.metadataURI ? h('p.small.muted', token.metadataStatus === 'unavailable' ? 'Published metadata is temporarily unavailable.' : 'Metadata reference recorded on-chain.') : null);
   about.querySelector('.section-text').style.margin = '12px 0';
+  if(ctx.mode==='testnet'&&!token.metadataURI&&token.metadataStatus!=='creator-signed'&&token.creator?.toLowerCase()===state.wallet?.toLowerCase()&&(token.metadata?.image||token.metadata?.description)){
+    const publish=h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:async()=>{publish.disabled=true;try{const body={network:ctx.currentChain(),token:token.address,metadata:token.metadata,expires:Math.floor(Date.now()/1000)+240};const prepared=await ctx.api('public/metadata/prepare',body);const signature=await ctx.wallet.signer.signMessage(prepared.message);await ctx.api('public/metadata/save',{...body,signature});toast('Token details saved to the public server.',{kind:'success'});await ctx.refresh();}catch(e){toast(errorText(e),{kind:'error'});}finally{publish.disabled=false;}}}},'Publish saved token details');
+    about.append(h('p.small.muted','These older token details are saved in this browser. Publish them with a creator signature so other visitors can see them. Railway storage must be persistent to retain the signed fallback.'),publish);
+  }
 
   const fees = h('section.panel', { 'aria-labelledby': 'fees-title' }, h('h2#fees-title', 'Creator fees'),
     h('p.muted.small', { text: token.rewardVault ? 'Creator fees go to this token’s reward treasury and follow the strategy chosen at launch.' : `Each curve trade pays 1.25%: half to Elpida, half to the creator wallet ${short(token.reward)}.` }),
@@ -93,36 +97,61 @@ export function renderToken(ctx, address) {
     token.pumpPool ? [h('dt', 'PumpSwap pool'), h('dd', token.pumpPool)] : null,
     token.quoteAddress ? [h('dt', `${q} address`), h('dd', token.quoteAddress)] : null,
     h('dt', 'Creator'), h('dd', token.creator), h('dt', 'Creator fee wallet'), h('dd', token.reward),
+    h('dt','Free-float capitalization'),h('dd',fmtValue(p.freeFloatCap,token)),h('dt','Capitalization convention'),h('dd','Headline market cap equals FDV: price × minted supply. Free-float capitalization counts tokens outside curve/pool and burn inventory.'),
     token.metadataURI ? [h('dt', 'Metadata URI'), h('dd', token.metadataURI)] : null,
     token.url ? [h('dt', 'Explorer'), h('dd', h('a', { href: token.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open in explorer'))] : null));
 
   return h('div', h('a.back-link', { href: '#/' }, icon('arrow-left', 'icon-sm'), 'All tokens'), head,
-    h('div.token-layout', h('div.stack', figures, priceHistory(ctx,token,q), curve, about, fees, activityPanel, tech), h('aside', tradePanel(ctx, token, { dex, solana }))));
+    h('div.token-layout', h('div.stack', priceHistory(ctx,token,q), figures, marketActivity(ctx,token,q), curve, about, fees, activityPanel, tech), h('aside', tradePanel(ctx, token, { dex, solana }))));
 }
 
 function priceHistory(ctx,token,q){
+  let interval=60,basis='cap',style='candles',revision=0;
   const content=h('div',h('p.muted.small','Loading indexed price history…'));
-  const panel=h('section.panel.price-history',{'aria-label':'Trade price history'},h('div.panel-head',h('div',h('h2','Price history'),h('p.small.muted',`1-minute closing execution prices in ${q}. USD conversion above uses the latest reference price.`))),content);
-  if(ctx.mode!=='local'){content.replaceChildren(h('p.muted.small','Historical charts are available in simulation. This network needs a public indexer before its history can be shown.'));return panel;}
+  const explanation=h('p.small.muted');
+  const controls=h('div.chart-controls');
+  const panel=h('section.panel.price-history',{'aria-label':'Trade price history'},h('div.panel-head',h('div',h('h2','Market chart'),explanation)),controls,content);
+  const endpoint=ctx.mode==='local'?`tokens/${token.address}`:`public/tokens/${token.address}`;
+  const network=ctx.mode==='local'?'':`&network=${encodeURIComponent(ctx.currentChain())}`;
+  const buttons=(label,values,current,update)=>h('div.chart-options',{role:'group','aria-label':label},values.map(([value,text])=>h('button.btn.btn-secondary.btn-sm',{type:'button','aria-pressed':String(value===current),on:{click:()=>{update(value);drawControls();load();}}},text)));
+  function drawControls(){controls.replaceChildren(buttons('Chart value',[['cap','Market cap'],['price','Price']],basis,v=>basis=v),buttons('Chart interval',[[60,'1m'],[300,'5m'],[3600,'1h'],[86400,'1D']],interval,v=>interval=v),buttons('Chart style',[['candles','Candles'],['line','Line']],style,v=>style=v));}
   const load=async()=>{
+    const request=++revision;content.setAttribute('aria-busy','true');
     try{
-      const data=await ctx.api(`tokens/${token.address}/candles?interval=60`);
-      if(!panel.isConnected)return;
+      const data=await ctx.api(`${endpoint}/candles?interval=${interval}${network}`);
+      if(!panel.isConnected||request!==revision)return;
       const points=data.filter(p=>Number.isFinite(Number(p.close))&&Number(p.close)>0&&Number.isSafeInteger(p.timestamp)).slice(-100);
       if(!points.length){content.replaceChildren(h('p.muted.small','No indexed trades yet. The chart appears after the first trade.'));return;}
-      const values=points.map(p=>Number(p.close)),low=Math.min(...values),high=Math.max(...values),span=high-low||high*.02;
-      const x=i=>24+i*592/Math.max(1,points.length-1),y=v=>164-(v-low)*128/span;
-      const plot=svg('svg',{viewBox:'0 0 640 192',role:'img','aria-label':`${points.length} recorded price intervals. First ${values[0]} ${q}; latest ${values.at(-1)} ${q}.`});
-      for(const yy of [36,100,164])plot.append(svg('line',{x1:'24',x2:'616',y1:String(yy),y2:String(yy),class:'chart-grid'}));
-      plot.append(svg('polyline',{points:values.map((v,i)=>`${x(i)},${y(v)}`).join(' '),class:'chart-line',fill:'none'}));
-      plot.append(svg('circle',{cx:String(x(values.length-1)),cy:String(y(values.at(-1))),r:'4',class:'chart-dot'}));
-      content.replaceChildren(plot,h('div.chart-caption',h('span',new Date(points[0].timestamp*1000).toLocaleTimeString()),h('span',points.length===1?'First trade recorded':`${points.length} intervals`),h('span',new Date(points.at(-1).timestamp*1000).toLocaleTimeString())));
-    }catch{content.replaceChildren(h('p.muted.small','Price history is temporarily unavailable.'),h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:load}},'Retry chart'));}
-  };load();return panel;
+      const rate=usdRate(token),multiplier=(basis==='cap'?Number(token.supply):1)*(rate??1),unit=rate===null?q:'USD';
+      explanation.textContent=`Indexed execution ${basis==='cap'?'market cap (price × total supply)':'price'} · ${unit}. ${rate===null?'':'Historical trades use the current USD reference, not historical exchange rates.'}`;
+      const bars=points.map(p=>({...p,open:Number(p.open)*multiplier,high:Number(p.high)*multiplier,low:Number(p.low)*multiplier,close:Number(p.close)*multiplier}));
+      const low=Math.min(...bars.map(p=>p.low)),high=Math.max(...bars.map(p=>p.high)),span=high-low||high*.02;
+      const first=points[0].timestamp,last=points.at(-1).timestamp,x=i=>first===last?300:24+(points[i].timestamp-first)*530/(last-first),y=v=>200-(v-low)*160/span;
+      const plot=svg('svg',{viewBox:'0 0 640 240',role:'img','aria-label':`${points.length} indexed intervals. Latest ${basis==='cap'?'market cap':'price'} ${bars.at(-1).close} ${unit}.`});
+      for(const yy of [40,120,200]){plot.append(svg('line',{x1:'24',x2:'555',y1:String(yy),y2:String(yy),class:'chart-grid'}));const label=svg('text',{x:'565',y:String(yy+4),class:'chart-axis'});label.textContent=(rate===null?'':'$')+compact(low+(200-yy)*span/160);plot.append(label);}
+      if(style==='line')plot.append(svg('polyline',{points:bars.map((v,i)=>`${x(i)},${y(v.close)}`).join(' '),class:'chart-line',fill:'none'}));
+      else for(const [i,b]of bars.entries()){const width=Math.max(2,Math.min(12,360/bars.length)),cls=b.close>=b.open?'candle-up':'candle-down';plot.append(svg('line',{x1:String(x(i)),x2:String(x(i)),y1:String(y(b.high)),y2:String(y(b.low)),class:cls}),svg('rect',{x:String(x(i)-width/2),y:String(Math.min(y(b.open),y(b.close))),width:String(width),height:String(Math.max(2,Math.abs(y(b.open)-y(b.close)))),class:cls}));}
+      content.replaceChildren(plot,h('div.chart-caption',h('span',new Date(first*1000).toLocaleString()),h('span',`${points.length} traded intervals`),h('span',new Date(last*1000).toLocaleTimeString())));
+    }catch{if(request===revision)content.replaceChildren(h('p.muted.small','Price history is temporarily unavailable or still indexing.'),h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:load}},'Retry chart'));}
+    finally{if(request===revision)content.setAttribute('aria-busy','false');}
+  };drawControls();load();return panel;
+}
+
+function marketActivity(ctx,token,q){
+  const content=h('div',h('p.muted','Loading indexed activity…')),tabs=h('div.chart-options',{role:'group','aria-label':'Market activity'}),panel=h('section.panel',h('div.panel-head',h('h2','Market activity'),tabs),content);let selected='trades',revision=0;
+  async function load(){const current=++revision;tabs.replaceChildren(...['trades','holders'].map(kind=>h('button.btn.btn-secondary.btn-sm',{type:'button','aria-pressed':String(selected===kind),on:{click:()=>{selected=kind;load();}}},kind==='trades'?'Trades':'Holders')));
+    if(ctx.mode==='local'){content.replaceChildren(h('p.muted.small','Public trades and holder history appear here on indexed testnets.'));return;}
+    try{const rows=await ctx.api(`public/tokens/${token.address}/${selected}?network=${encodeURIComponent(ctx.currentChain())}`);if(current!==revision||!panel.isConnected)return;
+      const explorer=ctx.wallet.net.explorer;
+      const table=h('table.market-table',h('thead',h('tr',...(selected==='trades'?['Side','Amount','Wallet / recipient','Time']:['Wallet','Balance','Supply share']).map(label=>h('th',{scope:'col'},label)))),h('tbody',rows.map(row=>selected==='trades'?h('tr',h('td',{class:row.side==='buy'?'trade-buy':'trade-sell'},row.side==='buy'?'Buy':'Sell'),h('td',h('strong',`${number(row.quoteAmount,6)} ${q}`),h('small',`${compact(row.tokenAmount)} ${token.symbol}`)),h('td',h('a',{href:explorer+'/address/'+row.account,target:'_blank',rel:'noopener noreferrer'},short(row.account))),h('td',h('a',{href:explorer+'/tx/'+row.hash,target:'_blank',rel:'noopener noreferrer'},new Date(row.timestamp*1000).toLocaleTimeString()))):h('tr',h('td',h('a',{href:explorer+'/address/'+row.address,target:'_blank',rel:'noopener noreferrer'},short(row.address))),h('td',compact(row.balance)),h('td',number(Number(row.supplyShare)*100,4)+'%')))));
+      content.replaceChildren(rows.length?h('div.table-scroll',table):h('p.muted.small','No indexed activity yet.'),h('p.meta',selected==='holders'?'Top wallets from token transfers. Curve, pool and known burn addresses are excluded. Percentages use full token supply.':'Confirmed on-chain trades. DEX recipients can be routers; they are not necessarily the payer.'));
+    }catch{content.replaceChildren(h('p.muted.small','Activity is still indexing or unavailable.'),h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:load}},'Retry'));}
+  }load();return panel;
 }
 
 function tradePanel(ctx, token, { dex, solana }) {
   const q = token.quoteSymbol ?? ctx.state?.nativeSymbol ?? 'ETH';
+  if(ctx.state.disconnected)return h('section.panel.trade-panel',h('h2','Trade'),h('p.muted',`Connect your wallet on ${ctx.wallet.net.name} to buy or sell ${token.symbol}. Market data remains available without connecting.`),ctx.walletButtons(ctx.wallet.net,{onDone:()=>ctx.refresh(),onError:e=>toast(errorText(e),{kind:'error'})}));
   if (token.graduated && token.venue === 'PumpSwap') {
     return h('section.panel.trade-panel', h('h2', 'Trade'), h('p.muted', `${token.symbol} now trades on PumpSwap. Its liquidity is locked permanently, and its LP fees are harvested 50/50 to Elpida and the creator.`),
       token.dexUrl ? h('a.btn.btn-primary.btn-block', { href: token.dexUrl, target: '_blank', rel: 'noopener noreferrer', style: undefined }, 'Open the PumpSwap pool', icon('external-link', 'icon-sm')) : null);

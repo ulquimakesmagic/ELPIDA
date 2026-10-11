@@ -1,7 +1,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { Contract, Interface, ZeroAddress, formatUnits } from 'ethers';
+import { Contract, Interface, ZeroAddress, formatUnits, parseUnits } from 'ethers';
 
 const dead = '0x000000000000000000000000000000000000dead';
 const json = value => JSON.stringify(value, (_, v) => typeof v === 'bigint' ? v.toString() : v);
@@ -14,11 +14,12 @@ export function ratio(numerator, denominator, digits = 24) {
 
 /** Durable Elpida EVM indexer. Protocol adapters currently cover curves and custom test pools only. */
 export class EvmIndexer {
-  constructor({provider, factory, contracts, path = ':memory:', chainId = 31337, fromBlock = 0, confirmations = 0, nativeSymbol = 'ETH'}) {
+  constructor({provider, factory, contracts, path = ':memory:', chainId = 31337, fromBlock = 0, confirmations = 0, nativeSymbol = 'ETH', batchSize = 1}) {
     if (path !== ':memory:') mkdirSync(dirname(path), {recursive:true});
     this.db = new DatabaseSync(path); this.provider = provider; this.factory = factory.toLowerCase();
     this.chainId = chainId; this.fromBlock = fromBlock; this.confirmations = confirmations; this.nativeSymbol = nativeSymbol;
     this.contracts = contracts; this.interfaces = Object.fromEntries(['factory','curve','pool','token',...(contracts.dexPool?['dexPool']:[])].map(k=>[k,new Interface(contracts[k].abi)]));
+    this.batchSize = Math.max(1, Math.min(500, batchSize));
     this.db.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS blocks (height INTEGER PRIMARY KEY, hash TEXT NOT NULL, parent TEXT NOT NULL, timestamp INTEGER NOT NULL);
@@ -48,20 +49,36 @@ export class EvmIndexer {
   }
   async scan() {
     const head = Number(await this.provider.send('eth_blockNumber',[])), target = head - this.confirmations;
+    this.head=head;
     let tip = this.tip();
     while(tip) {
       const current = await this.provider.getBlock(tip.height);
       if (current?.hash === tip.hash && tip.height <= target) break;
       this.rollback(tip.height-1);tip=this.tip();
     }
-    for(let height = tip ? tip.height+1 : this.fromBlock; height<=target; height++) await this.scanBlock(height);
+    for(let height = tip ? tip.height+1 : this.fromBlock; height<=target; height+=this.batchSize) {
+      const end=Math.min(target,height+this.batchSize-1);
+      if(this.batchSize===1){await this.scanBlock(height);continue;}
+      // Watch creation, transfers, curve trades and pool swaps in bounded ranges.
+      // Fetch new markets too: a token may launch and trade several times in one range.
+      const known=this.tokens(), watched=new Set([this.factory,...known.flatMap(t=>[t.address,t.curve,...(this.snapshot(t.address)?.graduated?[this.snapshot(t.address).pool]:[])])]);
+      const logs=await this.provider.getLogs({address:[...watched],fromBlock:height,toBlock:end});
+      const fresh=[];
+      for(const l of logs){const e=this.parse('factory',l);if(l.address.toLowerCase()===this.factory&&e?.name==='Launched')fresh.push(e.args.token,e.args.curve);}
+      if(fresh.length)logs.push(...await this.provider.getLogs({address:[...new Set(fresh)],fromBlock:height,toBlock:end}));
+      const pools=[];
+      for(const l of logs){const e=this.parse('curve',l);if(e?.name==='Graduated'&&!watched.has(e.args.pool.toLowerCase()))pools.push(e.args.pool);}
+      if(pools.length)logs.push(...await this.provider.getLogs({address:[...new Set(pools)],fromBlock:height,toBlock:end}));
+      const heights=[...new Set([...logs.map(l=>l.blockNumber),end])].sort((a,b)=>a-b);
+      for(const h of heights)await this.scanBlock(h);
+    }
     this.head=head;this.lastError=null;
     return this.status();
   }
   async scanBlock(height) {
     const block = await this.provider.getBlock(height);
     if(!block) throw new Error('Block unavailable; retry indexing.');
-    const tip=this.tip(); if(tip && block.parentHash!==tip.hash) throw new Error('Chain changed during indexing; retry.');
+    const tip=this.tip(); if(tip && (height===tip.height+1?block.parentHash!==tip.hash:(await this.provider.getBlock(tip.height))?.hash!==tip.hash)) throw new Error('Chain changed during indexing; retry.');
     const call={blockTag:height};
     const launches=await this.provider.getLogs({address:this.factory,fromBlock:height,toBlock:height});
     const metadataURIs=new Map(launches.map(log=>this.parse('factory',log)).filter(e=>e?.name==='MetadataPublished').map(e=>[e.args.token.toLowerCase(),e.args.uri]));
@@ -90,7 +107,7 @@ export class EvmIndexer {
     for(const l of logs) {
       const info=addressMap.get(l.address.toLowerCase());
       const e=this.parse(info.kind,l);
-      if(e?.name==='Graduated' && !addressMap.has(e.args.pool.toLowerCase())) {addressMap.set(e.args.pool.toLowerCase(),{r:info.r,kind:'pool'});newPools.push(e.args.pool);}
+      if(e?.name==='Graduated' && !addressMap.has(e.args.pool.toLowerCase())) {addressMap.set(e.args.pool.toLowerCase(),{r:info.r,kind:this.contracts.dexPool?'dexPool':'pool'});newPools.push(e.args.pool);}
     }
     if(newPools.length) logs.push(...await this.provider.getLogs({address:newPools,fromBlock:height,toBlock:height}));
     const snapshots=[];
@@ -148,6 +165,16 @@ export class EvmIndexer {
     return {pool,graduated:true,complete,liquidityLocked:locked,locker:lockerAddress,feeSplitter:splitterAddress,positionId:positionId.toString(),venue:'Uniswap v3',feeBps:Number(fee)/100,tokenFirst,quoteAsset,liquidity:liquidity.toString(),reserve:formatUnits(reserve,d),reserveBasis:'actual DEX quote balance, including uncollected fees',sold:formatUnits(sold,18),supply:formatUnits(supply,18),circulatingSupply:formatUnits(circulating,18),deadSupply:formatUnits(deadBalance,18),saleCap:formatUnits(BigInt(r.saleCapRaw),18),spotPrice:price,fdvQuote:ratio(n*supply,den*10n**BigInt(d)),circulatingMarketCapQuote:ratio(n*circulating,den*10n**BigInt(d)),supplyPolicy:'exclude curve/pool inventory and known dead address v1',priceUsd:null,usdBasis:null,protocolFees:formatUnits(cp,d),creatorFees:formatUnits(cc,d),dexRewards:rewards,rewardsBasis:'collected fees available to claim; collect the position to settle more',remainingBuy:'0',indexedBlock:height,indexedBlockHash:block.hash,priceTimestamp:block.timestamp};
   }
   trades(address,limit=100){return this.db.prepare('SELECT data FROM trades WHERE address=? ORDER BY height DESC,idx DESC LIMIT ?').all(address.toLowerCase(),Math.max(1,Math.min(500,limit))).map(r=>decode(r.data));}
+  holders(address,limit=50){
+    const balances=new Map(),token=this.tokens().find(t=>t.address===address.toLowerCase());if(!token)return [];
+    for(const row of this.db.prepare('SELECT data FROM events ORDER BY height,idx').all()){
+      const e=decode(row.data);if(e.address.toLowerCase()!==token.address||e.kind!=='token'||e.name!=='Transfer')continue;
+      const [from,to,value]=e.args,n=BigInt(value);for(const [a,delta]of [[from,-n],[to,n]]){const key=a.toLowerCase();balances.set(key,(balances.get(key)??0n)+delta);}
+    }
+    const excluded=new Set([ZeroAddress,dead,token.curve,this.snapshot(token.address)?.pool].filter(Boolean).map(a=>a.toLowerCase()));
+    const supply=parseUnits(this.snapshot(token.address)?.supply??'0',18);
+    return [...balances].filter(([a,n])=>n>0n&&!excluded.has(a)).sort((a,b)=>a[1]>b[1]?-1:a[1]<b[1]?1:0).slice(0,limit).map(([address,n])=>({address,balance:formatUnits(n,18),supplyShare:ratio(n,supply,12)}));
+  }
   candles(address,interval=60,limit=100) {
     if(![60,300,3600,86400].includes(interval))throw new Error('Unsupported candle interval.');
     const rows=this.db.prepare('SELECT data FROM trades WHERE address=? ORDER BY height,idx').all(address.toLowerCase()),buckets=new Map();
