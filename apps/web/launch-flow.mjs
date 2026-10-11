@@ -1,7 +1,7 @@
 // Guided token creation: details → network and trading pair → creator rewards → first purchase →
 // review. The draft survives step changes, failed requests and page reloads (session storage).
 import { h, icon, short, number, compact, avatar, metadataLinks, callout, field, setError, errorText, storage, safeImage, toast } from './ui.mjs';
-import { normalizeMetadata } from './metadata.mjs';
+import { normalizeMetadata, MAX_IMAGE_BYTES, IMAGE_TYPES, IMAGE_FORMATS } from './metadata.mjs';
 import { normalizeRewardPolicy } from './reward-policy.mjs';
 import { launchProfile } from './launch-capabilities.mjs';
 import { STRATEGIES } from './rewards-view.mjs';
@@ -27,7 +27,9 @@ export function renderLaunch(ctx) {
   const draft = { ...blankDraft(), ...(storage.get(DRAFT_KEY) ?? {}) };
   if (!draft.chain) draft.chain = ctx.currentChain();
   let step = 0, maxStep = 0, rewardData = null, phase = 'edit', result = null, statusState = null, networkError = '';
-  const save = () => storage.set(DRAFT_KEY, draft);
+  // Large base64 logos exceed browser session-storage quotas. Keep the other draft fields;
+  // the image remains in memory throughout the flow and must be reselected after a reload.
+  const save = () => storage.set(DRAFT_KEY, {...draft,image:draft.image.startsWith('data:') && draft.image.length > 349528 ? '' : draft.image});
   const stepper = h('ol.stepper', { 'aria-label': 'Create token steps' });
   const panel = h('section.step-panel', { 'aria-live': 'polite' });
   const preview = h('aside.preview', { 'aria-label': 'Live preview' });
@@ -94,7 +96,7 @@ export function renderLaunch(ctx) {
     const counter = h('span.hint');
     const description = input('description', { multiline: true, maxLength: 1000, rows: 4, placeholder: 'What is your token about, and who is it for?', onInput: e => { counter.textContent = `${e.target.value.length} / 1,000`; } });
     counter.textContent = `${draft.description.length} / 1,000`;
-    const file = h('input#logo-file', { type: 'file', accept: 'image/png,image/jpeg,image/webp', 'aria-describedby': 'logo-hint logo-error' });
+    const file = h('input#logo-file', { type: 'file', accept: IMAGE_TYPES.join(','), 'aria-describedby': 'logo-hint logo-error' });
     const url = input('imageUrl', { type: 'url', placeholder: 'https://example.com/logo.png', onInput: e => { draft.image = e.target.value.trim(); save(); logoPreview(); drawPreview(); } });
     const logoBox = h('div');
     const logoError = h('p.error-text#logo-error', { role: 'alert' });
@@ -103,8 +105,8 @@ export function renderLaunch(ctx) {
     file.addEventListener('change', async () => {
       logoError.textContent = ''; const f = file.files[0]; if (!f) return;
       try {
-        if (!['image/png', 'image/jpeg', 'image/webp'].includes(f.type)) throw new Error('Use a PNG, JPG or WebP image.');
-        if (f.size > 262144) throw new Error(`This image is ${Math.round(f.size / 1024)} KB. Use one under 256 KB.`);
+        if (!IMAGE_TYPES.includes(f.type)) throw new Error(`Use a ${IMAGE_FORMATS} image.`);
+        if (f.size > MAX_IMAGE_BYTES) throw new Error(`This image is ${(f.size / 1024 / 1024).toFixed(2)} MB. Use one up to 5 MB.`);
         const data = await new Promise((done, fail) => { const r = new FileReader(); r.onload = () => done(r.result); r.onerror = () => fail(new Error('The image could not be read.')); r.readAsDataURL(f); });
         normalizeMetadata({ image: data });
         draft.image = data; draft.imageUrl = ''; url.value = ''; save(); logoPreview(); drawPreview();
@@ -114,7 +116,7 @@ export function renderLaunch(ctx) {
     return { body: [
       h('div.row-2', field({ label: 'Token name', control: name, hint: `Up to ${profile().maxNameBytes} characters.` }), field({ label: 'Symbol', control: symbol, hint: '1–10 letters or numbers, shown in capitals.' })),
       h('div.field', h('label', { for: description.id = 'f-description' }, 'Description', counter), description, h('p.error-text#f-description-error', { role: 'alert' })),
-      h('div.field', h('span.field-label', 'Logo'), h('div.logo-drop', logoBox, h('div.stack', h('label.field-label', { for: 'logo-file' }, 'Upload an image'), file, h('p.hint#logo-hint', 'Square PNG, JPG or WebP, up to 256 KB. It is shown at 44 px in lists, so keep it simple.'), draft.image ? remove : null)), logoError),
+      h('div.field', h('span.field-label', 'Logo'), h('div.logo-drop', logoBox, h('div.stack', h('label.field-label', { for: 'logo-file' }, 'Upload an image'), file, h('p.hint#logo-hint', `Square ${IMAGE_FORMATS}, up to 5 MB on every network. Keep logos simple. Reselect large uploads if you reload the page.`), draft.image ? remove : null)), logoError),
       field({ label: 'Or use a hosted logo URL', optional: true, control: url, hint: 'A public HTTPS image address. Uploading is more reliable.' }),
       h('fieldset', { class: 'stack' }, h('legend.field-label', 'Community links ', h('span.opt', 'Optional')),
         h('div.row-2', field({ label: 'Website', control: input('website', { type: 'url', placeholder: 'https://yourproject.com' }) }), field({ label: 'X', control: input('twitter', { type: 'url', placeholder: 'https://x.com/yourproject' }) })),

@@ -75,7 +75,7 @@ The badge opens one panel for the environment, demo accounts, test funds, faucet
 
 The flow has five steps, with a stepper you can revisit, Back and Continue buttons, and a live preview and cost summary beside it.
 
-1. **Token details.** Inline validation for each field. Logo upload is limited to PNG, JPG or WebP up to 256 KB. Links are optional.
+1. **Token details.** Inline validation for each field. Logo upload is limited to PNG, JPG, WebP, GIF, AVIF or BMP up to 5 MB on every supported chain. Links are optional.
 2. **Network and trading pair.** The wallet is requested only after a public testnet is chosen, and only through an explicit Connect wallet button. Setup and reconnect states are shown in place.
    - Unsupported pairs are disabled with a reason: Solana uses USDC only, and approved-token pairs are local only.
    - The trading pair is explained separately from the reward asset.

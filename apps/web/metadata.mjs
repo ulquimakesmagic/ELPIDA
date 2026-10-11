@@ -1,5 +1,10 @@
 // Shared by the form, local API and browser-wallet flow. Metadata is off-chain.
 export const metadataFields = ['description', 'image', 'website', 'twitter', 'telegram', 'discord'];
+export const MAX_IMAGE_BYTES = 5 * 1024 * 1024;
+export const IMAGE_TYPES = ['image/png', 'image/jpeg', 'image/webp', 'image/gif', 'image/avif', 'image/bmp'];
+export const IMAGE_FORMATS = 'PNG, JPG, WebP, GIF, AVIF or BMP';
+// JSON carries base64 (4/3 of the original bytes), plus token/reward metadata.
+export const MAX_METADATA_REQUEST_BYTES = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 64 * 1024;
 export function normalizeMetadata(body = {}) {
   const result = {};
   for (const field of metadataFields) {
@@ -12,11 +17,20 @@ export function normalizeMetadata(body = {}) {
     if (!value) { result[field] = ''; continue; }
     if (field === 'image' && /^\/api\/content\/(b[a-z2-7]{30,100}|Qm[1-9A-HJ-NP-Za-km-z]{44})$/.test(value)) { result[field]=value; continue; }
     if (field === 'image' && value.startsWith('data:')) {
-      const match = value.match(/^data:image\/(png|jpeg|webp);base64,([A-Za-z0-9+/]+={0,2})$/);
-      if (!match || match[2].length > 349528 || match[2].length % 4) throw new Error('Use a PNG, JPG or WebP logo under 256 KB.');
+      const match = value.match(/^data:image\/(png|jpeg|webp|gif|avif|bmp);base64,([A-Za-z0-9+/]+={0,2})$/);
+      const padding = match ? (match[2].endsWith('==') ? 2 : match[2].endsWith('=') ? 1 : 0) : 0;
+      if (!match || match[2].length % 4 || match[2].length / 4 * 3 - padding > MAX_IMAGE_BYTES) throw new Error(`Use a ${IMAGE_FORMATS} logo up to 5 MB.`);
       // Reject disguised SVG/HTML payloads before exposing them as images.
-      const prefix = atob(match[2].slice(0, 32));
-      const valid = match[1] === 'png' ? prefix.startsWith('\x89PNG\r\n\x1a\n') : match[1] === 'jpeg' ? prefix.startsWith('\xff\xd8\xff') : prefix.startsWith('RIFF') && prefix.slice(8,12) === 'WEBP';
+      const prefix = atob(match[2].slice(0, 96));
+      const signatures = {
+        png: prefix.startsWith('\x89PNG\r\n\x1a\n'),
+        jpeg: prefix.startsWith('\xff\xd8\xff'),
+        webp: prefix.startsWith('RIFF') && prefix.slice(8,12) === 'WEBP',
+        gif: prefix.startsWith('GIF87a') || prefix.startsWith('GIF89a'),
+        bmp: prefix.startsWith('BM'),
+        avif: prefix.slice(4,8) === 'ftyp' && [prefix.slice(8,12), ...Array.from({length:Math.max(0,Math.floor((prefix.length-16)/4))},(_,i)=>prefix.slice(16+i*4,20+i*4))].some(brand=>brand==='avif'||brand==='avis'),
+      };
+      const valid = signatures[match[1]];
       if (!valid) throw new Error('The logo contents do not match its image type.');
       result[field] = value; continue;
     }

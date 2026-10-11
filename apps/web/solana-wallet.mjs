@@ -1,7 +1,8 @@
 import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_FEES, TEST_USDC_FAUCET_MAX, harvestNow, withdrawOut } from '/elpida-solana.mjs';
 import {normalizeMetadata} from './metadata.mjs';
+import {readMetadataCache,writeMetadataCache} from './metadata-cache.mjs';
 const metadataKey=(program,mint)=>`elpida:solana-metadata:${program}:${mint}`;
-const readMetadata=key=>{try{return normalizeMetadata(JSON.parse(localStorage.getItem(key))??{});}catch{return {};}};
+const readMetadata=async key=>{try{return normalizeMetadata(await readMetadataCache(key)??{});}catch{return {};}};
 
 const web3 = globalThis.solanaWeb3;
 
@@ -91,7 +92,7 @@ export class SolanaWallet {
     this.launches.clear();
     const now = chainNow();
     const migrated = await this.pumpStates(pools.filter(pool => pool.status === STATUS_MIGRATED));
-    const tokens = pools.map((pool, index) => {
+    const tokens = await Promise.all(pools.map(async (pool, index) => {
       const address = pool.mint.toBase58();
       this.launches.set(address, pool);
       const config = this.configOf(pool), d = config.quoteDecimals;
@@ -102,7 +103,7 @@ export class SolanaWallet {
       const remainingBuy = complete ? 0n : quoteBuy(pool, MAX_U64, config.baseFeeBps, config.baseFeeBps).gross;
       const token = {
         address, pool: pool.pubkey.toBase58(), name: pool.name, symbol: pool.symbol, creator: pool.creator.toBase58(), reward: pool.reward.toBase58(),
-        created: Number(pool.createdAt)*1000, metadata:readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair:'usdc', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: 'PumpSwap',
+        created: Number(pool.createdAt)*1000, metadata:await readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair:'usdc', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: 'PumpSwap',
         reserve: formatAmount(pool.realQuote, d), liquidityBonus: formatAmount(pool.liquidityBonus, d), lockedLiquidity: formatAmount(stats.lockedLiquidity, d),
         sold: formatAmount(pool.sold, TOKEN_DECIMALS), circulatingSupply: formatAmount(pool.sold, TOKEN_DECIMALS), saleCap: formatAmount(pool.curveSupply, TOKEN_DECIMALS),
         supply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS), balance: formatAmount(this.client.tokenAmount(holdings[index]?.data), TOKEN_DECIMALS),
@@ -125,7 +126,7 @@ export class SolanaWallet {
         });
       }
       return token;
-    });
+    }));
     const [balance, treasury] = await Promise.all([this.quoteBalance(), this.quoteBalance(launchConfig.treasury)]);
     return { wallet: this.address, balance: formatAmount(balance, launchConfig.quoteDecimals), balanceSymbol: launchConfig.symbol, tokens, activity: [], treasuryBalance: formatAmount(treasury, launchConfig.quoteDecimals) };
   }
@@ -221,7 +222,7 @@ export class SolanaWallet {
         this.client.computeBudget(),
         this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward }),
       ], [mint], 'Confirm your token launch in your wallet…');
-      let saved=true;try{localStorage.setItem(metadataKey(this.deployment.programId,mint.publicKey.toBase58()),JSON.stringify(metadata));}catch{saved=false;}
+      const saved=await writeMetadataCache(metadataKey(this.deployment.programId,mint.publicKey.toBase58()),metadata);
       return { hash: signature, token: mint.publicKey.toBase58(), message: `Your token is live on ${this.net.name}.${saved?' Metadata saved in this browser.':' Metadata could not be saved in this browser.'}` };
     }
     const { mint, pool } = await this.freshPool(body.token);

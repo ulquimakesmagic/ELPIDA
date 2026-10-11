@@ -4,8 +4,18 @@ import {mkdtempSync,rmSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {MetadataStore,rawCid} from '../apps/api/metadata-store.mjs';
+import {MAX_IMAGE_BYTES} from '../apps/web/metadata.mjs';
 const png='data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+jRZkAAAAASUVORK5CYII=';
 const body={name:'Shared Garden',symbol:'GARDEN',description:'A shared community 🌱',image:png,website:'https://example.com'};
+test('a 5 MB logo is published and resolved without embedding it in the metadata document',async()=>{
+ const bytes=Buffer.alloc(MAX_IMAGE_BYTES);Buffer.from(png.split(',')[1],'base64').copy(bytes);
+ const store=new MetadataStore({jwt:null});
+ const result=await store.publish({...body,image:'data:image/png;base64,'+bytes.toString('base64')});
+ const image=store.get(result.metadata.image.split('/').at(-1));
+ assert.equal(Buffer.from(image.data,'base64').length,MAX_IMAGE_BYTES);
+ assert.equal(image.type,'image/png');
+ assert.ok(Buffer.from(store.get(result.uri.slice(7)).data,'base64').length<20000);
+});
 test('content addressed logo and metadata survive a new reader with no creator browser state',async t=>{
  const path=mkdtempSync(join(tmpdir(),'elpida-metadata-'));t.after(()=>rmSync(path,{recursive:true}));
  const writer=new MetadataStore({path,jwt:null}),published=await writer.publish(body);

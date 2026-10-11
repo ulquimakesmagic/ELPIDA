@@ -1,6 +1,7 @@
 import { BrowserProvider, Contract, ContractFactory, parseUnits, formatUnits, isAddress, ZeroAddress } from '/vendor/ethers.js';
 
 import { normalizeMetadata } from './metadata.mjs';
+import { readMetadataCache, writeMetadataCache } from './metadata-cache.mjs';
 import {publishForLaunch} from './launch-capabilities.mjs';
 const metadataKey = (chain, factory, token) => `elpida:metadata:${chain}:${factory.toLowerCase()}:${token.toLowerCase()}`;
 const deploymentKey = chainId => `elpida:${chainId===84532?"curve-dex-v5":"curve-beta-v4"}:deployment:${chainId}`;
@@ -163,7 +164,7 @@ export class TestnetWallet {
       this.scannedBlock = to;
     }
     const tokens = await Promise.all([...this.launches.values()].reverse().map(async item => {
-      item = {...item,metadata:read(metadataKey(this.net.chainId,this.deployment.factory,item.address)) ?? {}};
+      item = {...item,metadata:await readMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,item.address)) ?? {}};
       if(item.metadataURI){try{const response=await fetch('/api/metadata/resolve?uri='+encodeURIComponent(item.metadataURI));if(!response.ok)throw new Error('unavailable');item.metadata=normalizeMetadata(await response.json());item.metadataStatus='published';}catch{item.metadataStatus='unavailable';}}
       const d = item.pair === 'native' ? 18 : this.decimals;
       const token = new Contract(item.address, this.config.contracts.token.abi, this.provider);
@@ -252,7 +253,7 @@ export class TestnetWallet {
       const launchArgs=[name,symbol,nativePair,firstBuy,out*9950n/10000n,reward];
       result = await this.wait(published?factory.launchWithMetadata(...launchArgs,published.uri,{value:nativePair?firstBuy:0n}):factory.launch(...launchArgs,{value:nativePair?firstBuy:0n}), 'Confirm the token launch and first buy…');
       const event = result.receipt.logs.map(log => {try{return factory.interface.parseLog(log);}catch{return null;}}).find(log => log?.name === 'Launched');
-      metadataSaved = !!event && write(metadataKey(this.net.chainId,this.deployment.factory,event.args.token),published?.metadata??details);
+      metadataSaved = !!event && await writeMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,event.args.token),published?.metadata??details);
       if(published){metadataSaved=true;metadataPublished=true;}
     } else {
       const item = this.launches.get(body.token);

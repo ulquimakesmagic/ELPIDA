@@ -7,6 +7,7 @@ import { resolve } from 'node:path';
 import { createRuntime } from './curve-runtime.mjs';
 import {MetadataStore} from './metadata-store.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
+import { MAX_METADATA_REQUEST_BYTES } from '../web/metadata.mjs';
 import { evmTestnets, solanaDevnet, solanaLocalnet } from '../../packages/core/networks.mjs';
 
 const webRoot = fileURLToPath(new URL('../web/', import.meta.url));
@@ -14,6 +15,7 @@ const ethersFile = fileURLToPath(new URL('../../node_modules/ethers/dist/ethers.
 const resources = new Map([['/', ['index.html', 'text/html']], ['/launch', ['index.html', 'text/html']], ['/reward-policy.mjs', ['reward-policy.mjs', 'text/javascript']], ['/reward-ui.mjs', ['reward-ui.mjs', 'text/javascript']], ['/metadata.mjs', ['metadata.mjs', 'text/javascript']], ['/launch-capabilities.mjs', ['launch-capabilities.mjs', 'text/javascript']], ['/styles.css', ['styles.css', 'text/css']], ['/app.mjs', ['app.mjs', 'text/javascript']], ['/wallet.mjs', ['wallet.mjs', 'text/javascript']], ['/solana-wallet.mjs', ['solana-wallet.mjs', 'text/javascript']], ['/ui.mjs', ['ui.mjs', 'text/javascript']], ['/launch-flow.mjs', ['launch-flow.mjs', 'text/javascript']], ['/token-page.mjs', ['token-page.mjs', 'text/javascript']], ['/rewards-view.mjs', ['rewards-view.mjs', 'text/javascript']]]);
 // Static design assets (brand, fonts, icon sprite): only these extensions, only inside apps/web/assets.
 const assetRoot = fileURLToPath(new URL('../web/assets/', import.meta.url));
+resources.set('/metadata-cache.mjs', ['metadata-cache.mjs', 'text/javascript']);
 const assetTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8' };
 const vendorFiles = new Map([
   ['/vendor/ethers.js', ethersFile],
@@ -88,7 +90,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if (req.headers['x-elpida-token'] !== csrf || req.headers['content-type'] !== 'application/json') return send(403, { error: 'Refresh this page before submitting.' });
       const chunks = [];
       let size = 0;
-      for await (const chunk of req) { size += chunk.length; if (size > (['/api/launch','/api/metadata/publish'].includes(url.pathname) ? 400000 : 8192)) { send(413, { error: 'Request too large.' }); return; } chunks.push(chunk); }
+      for await (const chunk of req) { size += chunk.length; if (size > (['/api/launch','/api/metadata/publish'].includes(url.pathname) ? MAX_METADATA_REQUEST_BYTES : 8192)) { send(413, { error: 'Request too large.' }); return; } chunks.push(chunk); }
       let body;
       try { body = JSON.parse(Buffer.concat(chunks).toString()); } catch { return send(400, { error: 'Invalid request.' }); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) return send(400, { error: 'Invalid request.' });

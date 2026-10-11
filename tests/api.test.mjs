@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
 import { startServer } from '../apps/api/server.mjs';
+import {MAX_IMAGE_BYTES} from '../apps/web/metadata.mjs';
 
 test('localhost API exercises launch, trading, fee payout and request protection', async t => {
   const app = await startServer({ port: 0, seed: false, publicUrl: 'https://elpida-preview.up.railway.app' });
@@ -19,6 +20,7 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.match(await page.text(), /Start something new/);
     assert.equal((await fetch(`${base}/launch`)).status,200);
     assert.equal((await fetch(`${base}/metadata.mjs`)).status,200);
+    assert.equal((await fetch(`${base}/metadata-cache.mjs`)).status,200);
     assert.equal((await fetch(`${base}/launch-capabilities.mjs`)).status,200);
     assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
     assert.equal((await request('faucet', {}, { 'X-Elpida-Token': 'wrong' })).status, 403);
@@ -38,6 +40,9 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal(await hostedStatus('/health', {Host:'healthcheck.railway.app'}), 200);
     assert.equal(await hostedStatus('/api/config', {Host:'healthcheck.railway.app'}), 403);
     assert.equal((await state()).balance, '10000.0');
+    const bytes=Buffer.alloc(MAX_IMAGE_BYTES);bytes.write('GIF89a');
+    const large=await request('launch',{name:'Upload boundary',symbol:'INVALID!',firstBuy:'25',image:'data:image/gif;base64,'+bytes.toString('base64')});
+    assert.equal(large.status,400); // Valid body size reaches launch validation rather than HTTP 413.
   });
   let address;
   await t.test('launches with a mandatory first buy and rejects invalid input', async () => {
