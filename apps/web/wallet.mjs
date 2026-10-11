@@ -1,4 +1,4 @@
-import { BrowserProvider, Contract, ContractFactory, parseUnits, formatUnits, isAddress, ZeroAddress } from '/vendor/ethers.js';
+import { BrowserProvider, JsonRpcProvider, Contract, ContractFactory, parseUnits, formatUnits, isAddress, ZeroAddress } from '/vendor/ethers.js';
 
 import { normalizeMetadata } from './metadata.mjs';
 import { readMetadataCache, writeMetadataCache } from './metadata-cache.mjs';
@@ -113,8 +113,12 @@ export class TestnetWallet {
       }
     } catch (error) { const text = walletErrorText(error, name); if (text) throw Object.assign(new Error(text), { code: error.code }); throw error; }
     this.provider?.destroy();
-    this.provider = new BrowserProvider(eth, undefined, { cacheTimeout: -1 });
-    this.signer = await this.provider.getSigner();
+    this.signerProvider?.destroy();
+    this.signerProvider = new BrowserProvider(eth, undefined, { cacheTimeout: -1 });
+    this.signer = await this.signerProvider.getSigner();
+    // Wallet RPCs often restrict historical logs. Read from the registry's chain RPC;
+    // signatures and transaction submissions always stay with the selected wallet.
+    this.provider = new JsonRpcProvider(net.rpcUrl, net.chainId, { cacheTimeout: -1, batchMaxCount: 1 });
     this.address = await this.signer.getAddress();
     await this.checkNetwork();
     return this.address;
