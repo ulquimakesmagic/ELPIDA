@@ -40,6 +40,9 @@ On test networks the SOL pair is test sized (0.5 → 5 SOL FDV, 0.01 SOL creatio
 | `migrate_to_pumpswap` | Anyone, once the curve is complete | Creates the PumpSwap pool. The caller advances 0.05 SOL; about 0.017 SOL is used for rent and the rest is refunded in the same transaction |
 | `add_curve_config(params)` | Program upgrade authority | A trading pair: an extra config for another quote mint (classic SPL or Token-2022) at `["curve-config", quote_mint]`; unsupported token extensions are rejected; pools always trade through the config they launched with |
 | `create_test_usdc` / `test_usdc_faucet(amount)` | Upgrade authority / anyone | **Test networks only.** Elpida tUSDC, a valueless 6-decimal mint at `["test-usdc"]` that only the faucet can mint. The same faucet mints any test asset whose mint authority is its PDA (TEST-MEME), up to 10,000,000 whole units per call. It exists so curves can be completed and migrated on devnet. Never create it on mainnet |
+| `set_beta_gate(authority, enabled)` | Program upgrade authority | Mainnet beta: while enabled, only allowlisted creators can launch. Trading is never gated. `authority` is the beta admin who manages the allowlist |
+| `allow_beta_creator(creator)` / `revoke_beta_creator` | Beta admin | Adds or removes a creator (PDA `["beta-creator", creator]`) |
+| `test_build_check` | Anyone | Succeeds only on the test build; lets scripts confirm a cluster runs the mainnet build |
 | `harvest_lp_fees` | Anyone, after migration | Withdraws LP fee growth and splits it 50/50; destination token accounts must exist (the client adds idempotent creation) |
 
 **Accounts:**
@@ -53,12 +56,19 @@ There is no admin, rescue or reserve withdrawal. Error codes 6000+ are listed in
 
 ## Build
 
-The compiled program ships in `build/elpida_launchpad.so`, so deploying needs no Rust. To rebuild (Linux, macOS or WSL) with the Solana CLI 2.3.x:
+Two builds ship in `build/`, so deploying needs no Rust:
+
+- `elpida_launchpad.so`, the **test build** (`--features testnet`). It is used for devnet and localnet, and its tUSDC and test-asset faucet work.
+- `elpida_launchpad-mainnet.so`, the **mainnet build**. Test-only instructions fail with `TestNetworksOnly` (6022), so it can never mint test assets. The mainnet deploy script confirms this on-chain (`test_build_check`) before configuring anything.
+
+To rebuild (Linux, macOS or WSL) with the Solana CLI 2.3.x:
 
 ```bash
 cd contracts/solana
-cargo-build-sbf --manifest-path programs/elpida_launchpad/Cargo.toml --sbf-out-dir build
-rm -f build/elpida_launchpad-keypair.json   # the real program keypair lives in keys/
+cargo-build-sbf --manifest-path programs/elpida_launchpad/Cargo.toml --features testnet --sbf-out-dir /tmp/sbf-test
+cp /tmp/sbf-test/elpida_launchpad.so build/elpida_launchpad.so
+cargo-build-sbf --manifest-path programs/elpida_launchpad/Cargo.toml --sbf-out-dir /tmp/sbf-main
+cp /tmp/sbf-main/elpida_launchpad.so build/elpida_launchpad-mainnet.so
 ```
 
 `Cargo.lock` pins dependencies compatible with the Solana toolchain's Rust 1.84 (for example `blake3` 1.5.5). The program ID is fixed by `declare_id!` and `keys/elpida_launchpad-keypair.json` (private, git-ignored).

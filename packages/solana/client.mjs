@@ -55,6 +55,12 @@ export const DISCRIMINATORS = {
   testUsdcFaucet: [56, 199, 170, 120, 34, 36, 125, 29],
   harvestLpFees: [153, 236, 19, 193, 135, 211, 138, 173],
   PumpMigration: [234, 227, 47, 135, 5, 201, 199, 146],
+  testBuildCheck: [135,  170,  99,  137,  166,  97,  12,  254],
+  setBetaGate: [173, 164, 104, 88, 207, 75, 214, 143],
+  allowBetaCreator: [85, 38, 209, 94, 146, 252, 6, 98],
+  revokeBetaCreator: [225, 1, 249, 74, 23, 63, 36, 199],
+  BetaGate: [157, 14, 100, 165, 88, 97, 119, 83],
+  BetaCreator: [196, 152, 244, 127, 100, 59, 189, 139],
 };
 
 // sha256("event:<Name>")[0..8] and field layouts (32-byte keys or little-endian u64s after the
@@ -137,6 +143,8 @@ export const PROGRAM_ERRORS = [
   'Unexpected PumpSwap account.',
   'Harvest would reduce the locked liquidity.',
   'This token cannot be a trading pair: PumpSwap or the curve cannot handle its token extensions (for example a transfer fee or an issuer permanent delegate, as xStocks have).',
+  'This instruction exists only on test networks.',
+  'Launches are invite-only during the beta. Ask the Elpida team to add your wallet.',
 ];
 
 /** Turns a Solana/Anchor error into a readable message. */
@@ -338,6 +346,8 @@ export function createElpidaSolana(web3, programIdInput) {
   const pumpProgram = new PublicKey(PUMP_AMM_PROGRAM);
   const token2022 = new PublicKey(TOKEN_2022_PROGRAM);
   const lpAuthorityPda = mint => PublicKey.findProgramAddressSync([enc('pump-lp'), key(mint).toBytes()], programId)[0];
+  const betaGatePda = PublicKey.findProgramAddressSync([enc('beta-gate')], programId)[0];
+  const betaCreatorPda = creator => PublicKey.findProgramAddressSync([enc('beta-creator'), key(creator).toBytes()], programId)[0];
   const migrationPda = mint => PublicKey.findProgramAddressSync([enc('pump-migration'), key(mint).toBytes()], programId)[0];
   const ataWith = (owner, mint, program) => PublicKey.findProgramAddressSync([key(owner).toBytes(), key(program).toBytes(), key(mint).toBytes()], ataProgram)[0];
   /** PumpSwap accounts for the pool Elpida creates for `mint` (index 0, creator = LP-authority PDA). */
@@ -357,7 +367,7 @@ export function createElpidaSolana(web3, programIdInput) {
   };
 
   return {
-    programId, configPda, configFor, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, wsol,
+    programId, configPda, configFor, betaGatePda, betaCreatorPda, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, wsol,
     computeBudget: (units = LAUNCH_COMPUTE_UNITS) => ComputeBudgetProgram.setComputeUnitLimit({ units }),
     createAtaIdempotent(payer, owner, mint, program = tokenProgram) {
       return new TransactionInstruction({ programId: ataProgram, data: data([1]), keys: [meta(payer, true, true), meta(ata(owner, mint, program), true), meta(owner), meta(mint), meta(SystemProgram.programId), meta(program)] });
@@ -394,7 +404,28 @@ export function createElpidaSolana(web3, programIdInput) {
         meta(creator, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(config.treasury), meta(qata(config.treasury, config), true),
         meta(mint, true, true), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true),
         meta(qata(creator, config), true), meta(ata(creator, mint), true), meta(tokenProgram), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId),
+        meta(betaGatePda), meta(betaCreatorPda(creator)),
       ], concat(DISCRIMINATORS.launch, str(name), str(symbol), u64(firstBuy), u64(minTokensOut), key(reward).toBytes()));
+    },
+    /** Succeeds only on the test build; the mainnet build fails with TestNetworksOnly (6022). */
+    testBuildCheck: () => ix([], DISCRIMINATORS.testBuildCheck),
+    /** Upgrade authority: creates or updates the beta gate; `gateAuthority` then manages the allowlist. */
+    setBetaGate({ authority, gateAuthority, enabled }) {
+      return ix([meta(authority, true, true), meta(betaGatePda, true), meta(programId), meta(programDataAddress), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.setBetaGate, key(gateAuthority).toBytes(), [enabled ? 1 : 0]));
+    },
+    allowBetaCreator({ authority, creator }) {
+      return ix([meta(authority, true, true), meta(betaGatePda), meta(betaCreatorPda(creator), true), meta(SystemProgram.programId)], concat(DISCRIMINATORS.allowBetaCreator, key(creator).toBytes()));
+    },
+    revokeBetaCreator({ authority, creator }) {
+      return ix([meta(authority, true, true), meta(betaGatePda), meta(betaCreatorPda(creator), true)], DISCRIMINATORS.revokeBetaCreator);
+    },
+    /** Beta gate state, or null when no gate exists (launches open). */
+    decodeBetaGate(raw) {
+      if (!raw) return null;
+      const bytes = new Uint8Array(raw);
+      if (bytes.length < 42 || !sameBytes(bytes, DISCRIMINATORS.BetaGate)) return null;
+      return { authority: new PublicKey(bytes.subarray(8, 40)), enabled: bytes[40] === 1 };
     },
     buy: ({ buyer, config, mint, grossIn, minTokensOut }) => trade(buyer, config, mint, concat(DISCRIMINATORS.buy, u64(grossIn), u64(minTokensOut))),
     sell: ({ seller, config, mint, tokensIn, minQuoteOut }) => trade(seller, config, mint, concat(DISCRIMINATORS.sell, u64(tokensIn), u64(minQuoteOut))),
@@ -501,6 +532,12 @@ export function loaderV3(web3) {
         { pubkey: spill, isSigner: false, isWritable: true }, { pubkey: SYSVAR_RENT_PUBKEY, isSigner: false, isWritable: false }, { pubkey: SYSVAR_CLOCK_PUBKEY, isSigner: false, isWritable: false },
         { pubkey: authority, isSigner: true, isWritable: false },
       ],
+    }),
+    // SetAuthority (4): hands a buffer (account = buffer) or a program (account = its programdata) to
+    // `newAuthority`, for example a Squads multisig vault. Omitting `newAuthority` makes a program immutable.
+    setAuthority: ({ account, authority, newAuthority }) => new TransactionInstruction({
+      programId: loader, data: data(u32(4)),
+      keys: [{ pubkey: account, isSigner: false, isWritable: true }, { pubkey: authority, isSigner: true, isWritable: false }, ...(newAuthority ? [{ pubkey: newAuthority, isSigner: false, isWritable: false }] : [])],
     }),
     // Close (5): returns a buffer's lamports to `recipient`. Used to reclaim stale buffers.
     close: ({ account, recipient, authority }) => new TransactionInstruction({

@@ -62,6 +62,16 @@ export const solanaLocalnet = {
   rpcUrl: 'http://127.0.0.1:8899', wsUrl: 'ws://127.0.0.1:8900', explorer: 'https://explorer.solana.com',
   quote: { address: null, label: 'Local test USDC', faucet: null }, gasFaucet: null, shared: null,
 };
+// Mainnet beta (start the server with ELPIDA_SOLANA_CLUSTER=mainnet and SOLANA_RPC_URL set). The browser
+// talks to Solana through the server's /api/solana-rpc proxy, so the RPC key never reaches the page.
+export const solanaMainnet = {
+  key: 'solana-mainnet', name: 'Solana', short: 'SOLANA', kind: 'solana', enabled: true, cluster: 'mainnet', mainnet: true,
+  rpcUrl: '/api/solana-rpc', wsUrl: null, explorer: 'https://explorer.solana.com',
+  nativeCurrency: { name: 'SOL', symbol: 'SOL', decimals: 9 },
+  quote: { address: 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v', label: 'USDC', faucet: null },
+  gasFaucet: null,
+  shared: null,
+};
 testnets.push(solanaDevnet);
 
 export const evmTestnets = testnets.filter(net => net.kind === 'evm' && net.enabled);

@@ -42,7 +42,8 @@ export class SolanaWallet {
     this.config = config; this.net = config.solana; this.onProgress = onProgress;
     this.usesTestToken = false;
     this.launches = new Map();
-    this.connection = web3 ? new web3.Connection(this.net.rpcUrl, 'confirmed') : null;
+    // Mainnet uses the server's RPC proxy (a relative URL), so the provider key stays server-side.
+    this.connection = web3 ? new web3.Connection(new URL(this.net.rpcUrl, location.origin).href, 'confirmed') : null;
   }
   select(key) {
     if (key !== this.net.key) throw new Error('That Solana network is not available.');
@@ -57,7 +58,14 @@ export class SolanaWallet {
   }
   txUrl(signature) { return `${this.net.explorer}/tx/${signature}${this.clusterQuery}`; }
   addressUrl(address) { return `${this.net.explorer}/address/${address}${this.clusterQuery}`; }
-  get clusterQuery() { return this.net.cluster === 'localnet' ? `?cluster=custom&customUrl=${encodeURIComponent(this.net.rpcUrl)}` : `?cluster=${this.net.cluster}`; }
+  get clusterQuery() { return this.net.cluster === 'localnet' ? `?cluster=custom&customUrl=${encodeURIComponent(this.net.rpcUrl)}` : this.net.mainnet ? '' : `?cluster=${this.net.cluster}`; }
+  /** Beta launch gate for the connected wallet: { enabled, allowed }. Launches are open without a gate. */
+  async loadBeta() {
+    const [gate, entry] = await this.connection.getMultipleAccountsInfo([this.client.betaGatePda, this.client.betaCreatorPda(this.publicKey)]);
+    const state = this.client.decodeBetaGate(gate?.owner.equals(this.client.programId) ? gate.data : null);
+    this.beta = { enabled: !!state?.enabled, allowed: !state?.enabled || !!entry?.owner.equals(this.client.programId) };
+    return this.beta;
+  }
 
   /** Connects with the chosen Solana wallet (`walletId`), remembered for next time. */
   async connect(walletId) {
@@ -129,7 +137,7 @@ export class SolanaWallet {
     const group = kind => {
       const assets = all.filter(cfg => cfg.kind === kind).sort((a, b) => Number(b.test) - Number(a.test)).map(asset);
       if (assets.length) return { assets };
-      return { assets: [], unavailable: PAIR_LIMITS.solana[kind] ?? (this.deployment ? `Not set up on ${this.net.name} yet. Run solana-upgrade.cmd to add the SOL and test-token pairs.` : 'The Solana program is not deployed yet.') };
+      return { assets: [], unavailable: PAIR_LIMITS.solana[kind] ?? (!this.deployment ? 'The Solana program is not deployed yet.' : this.net.mainnet ? `No ${kind === 'token' ? 'paired token' : 'asset of this kind'} is approved on mainnet yet.` : `Not set up on ${this.net.name} yet. Run solana-upgrade.cmd to add the SOL and test-token pairs.`) };
     };
     return { native: group('native'), usdc: group('usdc'), xstock: group('xstock'), token: group('token') };
   }
@@ -154,6 +162,7 @@ export class SolanaWallet {
     this.checkWallet();
     if (!this.deployment) return { wallet: this.address, balance: '0', tokens: [], activity: [], treasuryBalance: '0', undeployed: true };
     const launchConfig = await this.loadConfig();
+    await this.loadBeta();
     const accounts = await this.connection.getProgramAccounts(this.client.programId, { filters: [{ dataSize: POOL_SIZE }] });
     const pools = accounts.filter(({ account }) => this.client.isPool(account.data)).map(({ pubkey, account }) => ({ pubkey, ...this.client.decodePool(account.data) })).filter(pool => this.configOf(pool));
     const holdings = pools.length ? await this.connection.getMultipleAccountsInfo(pools.map(pool => this.client.ata(this.publicKey, pool.mint))) : [];
@@ -278,6 +287,7 @@ export class SolanaWallet {
       return { hash: signature, message: `Minted ${Number(formatAmount(amount, target.quoteDecimals)).toLocaleString()} ${target.symbol} (test asset, no value).` };
     }
     if (action === 'launch') {
+      if (!(await this.loadBeta()).allowed) throw new Error('Launches are invite-only during the beta, and this wallet is not on the list yet. Ask the Elpida team to add it.');
       const kind = body.pair ?? 'usdc';
       const options = this.pairOptions()[kind];
       if (!options) throw new Error('Choose a trading pair.');

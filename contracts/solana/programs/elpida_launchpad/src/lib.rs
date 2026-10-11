@@ -97,12 +97,13 @@ pub mod elpida_launchpad {
     /// TEST NETWORKS ONLY (devnet / localnet): creates "Elpida tUSDC", a valueless 6-decimal stand-in
     /// for USDC at PDA ["test-usdc"] whose only minter is `test_usdc_faucet`. Never create on mainnet.
     pub fn create_test_usdc(_ctx: Context<CreateTestUsdc>) -> Result<()> {
-        Ok(())
+        test_networks_only()
     }
 
     /// TEST NETWORKS ONLY: mints a test asset to the caller. Works only for mints whose mint authority
     /// is the faucet PDA (Elpida tUSDC and the labelled test assets created by the deploy script).
     pub fn test_usdc_faucet(ctx: Context<TestUsdcFaucet>, amount: u64) -> Result<()> {
+        test_networks_only()?;
         let max = TEST_FAUCET_MAX_WHOLE.checked_mul(10u64.pow(ctx.accounts.test_mint.decimals as u32)).ok_or(ElpidaError::MathOverflow)?;
         require!(amount > 0 && amount <= max, ElpidaError::InvalidParams);
         let seeds: &[&[u8]] = &[b"test-usdc-authority", &[ctx.bumps.faucet_authority]];
@@ -112,7 +113,41 @@ pub mod elpida_launchpad {
         )
     }
 
+    /// Succeeds only on the test build. Lets deploy scripts confirm, without any state, that the program
+    /// on a cluster is the mainnet build (it fails with TestNetworksOnly).
+    pub fn test_build_check(_ctx: Context<TestBuildCheck>) -> Result<()> {
+        test_networks_only()
+    }
+
+    /// Upgrade authority: creates or updates the beta launch gate. While `enabled`, only creators on the
+    /// allowlist can launch; `authority` (for example a beta admin key) manages that allowlist.
+    pub fn set_beta_gate(ctx: Context<SetBetaGate>, authority: Pubkey, enabled: bool) -> Result<()> {
+        require!(authority != Pubkey::default(), ElpidaError::InvalidParams);
+        let gate = &mut ctx.accounts.beta_gate;
+        gate.authority = authority;
+        gate.enabled = enabled;
+        gate.bump = ctx.bumps.beta_gate;
+        emit!(BetaGateSet { authority, enabled });
+        Ok(())
+    }
+
+    /// Beta gate authority: lets `creator` launch while the gate is enabled.
+    pub fn allow_beta_creator(ctx: Context<AllowBetaCreator>, creator: Pubkey) -> Result<()> {
+        let entry = &mut ctx.accounts.beta_creator;
+        entry.creator = creator;
+        entry.bump = ctx.bumps.beta_creator;
+        emit!(BetaCreatorSet { creator, allowed: true });
+        Ok(())
+    }
+
+    /// Beta gate authority: removes `creator` from the allowlist (rent returns to the authority).
+    pub fn revoke_beta_creator(ctx: Context<RevokeBetaCreator>) -> Result<()> {
+        emit!(BetaCreatorSet { creator: ctx.accounts.beta_creator.creator, allowed: false });
+        Ok(())
+    }
+
     pub fn launch(ctx: Context<Launch>, name: String, symbol: String, first_buy: u64, min_tokens_out: u64, reward: Pubkey) -> Result<()> {
+        check_beta(&ctx.accounts.beta_gate.to_account_info(), &ctx.accounts.beta_creator.to_account_info())?;
         let name = name.trim().to_string();
         require!(!name.is_empty() && name.len() <= MAX_NAME, ElpidaError::InvalidName);
         require!(
@@ -500,6 +535,25 @@ pub fn harvestable_lp(lp: u64, principal: u128, state: &PumpState) -> Result<u64
     Ok((lp as u128).saturating_sub(keep).min(u64::MAX as u128) as u64)
 }
 
+/// Test-only instructions exist in every build but succeed only when compiled with `--features testnet`.
+/// The mainnet build (`build/elpida_launchpad-mainnet.so`) rejects them, so it can never mint test assets.
+fn test_networks_only() -> Result<()> {
+    require!(cfg!(feature = "testnet"), ElpidaError::TestNetworksOnly);
+    Ok(())
+}
+
+/// Launches are open unless the beta gate exists and is enabled; then the creator must be allowlisted.
+/// Both accounts are seed-checked PDAs, so a caller cannot substitute others.
+#[inline(never)]
+fn check_beta(gate: &AccountInfo, creator: &AccountInfo) -> Result<()> {
+    if *gate.owner != crate::ID || gate.data_is_empty() { return Ok(()); }
+    let state = BetaGate::try_deserialize(&mut &gate.try_borrow_data()?[..])?;
+    if !state.enabled { return Ok(()); }
+    require!(*creator.owner == crate::ID && !creator.data_is_empty(), ElpidaError::BetaClosed);
+    BetaCreator::try_deserialize(&mut &creator.try_borrow_data()?[..])?;
+    Ok(())
+}
+
 /// Moves quote tokens with `transfer_checked`, which works for classic SPL and Token-2022 mints.
 #[allow(clippy::too_many_arguments)]
 fn quote_transfer<'info>(program: &Interface<'info, TokenInterface>, mint: &InterfaceAccount<'info, QuoteMint>, from: AccountInfo<'info>, to: AccountInfo<'info>, authority: AccountInfo<'info>, amount: u64, decimals: u8, seeds: &[&[&[u8]]]) -> Result<()> {
@@ -790,6 +844,66 @@ pub struct Launch<'info> {
     pub quote_token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
     pub system_program: Program<'info, System>,
+    /// CHECK: PDA ["beta-gate"]; launches are open while it does not exist or is disabled.
+    #[account(seeds = [b"beta-gate"], bump)]
+    pub beta_gate: UncheckedAccount<'info>,
+    /// CHECK: PDA ["beta-creator", creator]; must exist while the beta gate is enabled.
+    #[account(seeds = [b"beta-creator", creator.key().as_ref()], bump)]
+    pub beta_creator: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct TestBuildCheck {}
+
+/// Mainnet beta: when enabled, only allowlisted creators can launch.
+#[account]
+#[derive(InitSpace)]
+pub struct BetaGate {
+    pub authority: Pubkey,
+    pub enabled: bool,
+    pub bump: u8,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct BetaCreator {
+    pub creator: Pubkey,
+    pub bump: u8,
+}
+
+#[derive(Accounts)]
+pub struct SetBetaGate<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(init_if_needed, payer = authority, space = 8 + BetaGate::INIT_SPACE, seeds = [b"beta-gate"], bump)]
+    pub beta_gate: Box<Account<'info, BetaGate>>,
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ ElpidaError::Unauthorized)]
+    pub program: Program<'info, crate::program::ElpidaLaunchpad>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ ElpidaError::Unauthorized)]
+    pub program_data: Box<Account<'info, ProgramData>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(creator: Pubkey)]
+pub struct AllowBetaCreator<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(seeds = [b"beta-gate"], bump = beta_gate.bump, has_one = authority @ ElpidaError::Unauthorized)]
+    pub beta_gate: Box<Account<'info, BetaGate>>,
+    #[account(init_if_needed, payer = authority, space = 8 + BetaCreator::INIT_SPACE, seeds = [b"beta-creator", creator.as_ref()], bump)]
+    pub beta_creator: Box<Account<'info, BetaCreator>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct RevokeBetaCreator<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(seeds = [b"beta-gate"], bump = beta_gate.bump, has_one = authority @ ElpidaError::Unauthorized)]
+    pub beta_gate: Box<Account<'info, BetaGate>>,
+    #[account(mut, close = authority, seeds = [b"beta-creator", beta_creator.creator.as_ref()], bump = beta_creator.bump)]
+    pub beta_creator: Box<Account<'info, BetaCreator>>,
 }
 
 #[derive(Accounts)]
@@ -1014,6 +1128,10 @@ impl<'info> HarvestLpFees<'info> {
 // Trade events carry post-trade state so an indexer can derive price
 // ((virtual_quote) / token_reserve), market cap and candles from events alone.
 #[event]
+pub struct BetaGateSet { pub authority: Pubkey, pub enabled: bool }
+#[event]
+pub struct BetaCreatorSet { pub creator: Pubkey, pub allowed: bool }
+#[event]
 pub struct CurveLaunched { pub creator: Pubkey, pub mint: Pubkey, pub pool: Pubkey, pub quote_in: u64, pub tokens_out: u64, pub fee: u64, pub real_quote: u64, pub virtual_quote: u64, pub token_reserve: u64, pub sold: u64 }
 #[event]
 pub struct CurveBought { pub pool: Pubkey, pub buyer: Pubkey, pub quote_in: u64, pub tokens_out: u64, pub fee: u64, pub anti_snipe_fee: u64, pub real_quote: u64, pub virtual_quote: u64, pub token_reserve: u64, pub sold: u64 }
@@ -1052,4 +1170,6 @@ pub enum ElpidaError {
     #[msg("Unexpected PumpSwap account")] PumpAccount,
     #[msg("Harvest would reduce the locked liquidity")] PrincipalBreached,
     #[msg("This token cannot be a trading pair: PumpSwap or the curve cannot handle its token extensions")] UnsupportedQuote,
+    #[msg("This instruction exists only on test networks")] TestNetworksOnly,
+    #[msg("Launches are invite-only during the beta")] BetaClosed,
 }

@@ -94,7 +94,7 @@ const ctx = {
   envLabel, isCreatorOf: token => !!state?.wallet && [token.creator, token.reward].some(a => a?.toLowerCase() === state.wallet.toLowerCase()),
 };
 
-function envLabel() { return mode === 'local' ? (config?.hostedSimulation ? 'Shared simulation' : 'Local simulation') : `${wallet.net.name} · testnet`; }
+function envLabel() { return mode === 'local' ? (config?.hostedSimulation ? 'Shared simulation' : 'Local simulation') : `${wallet.net.name} · ${wallet.net.mainnet ? 'mainnet beta' : 'testnet'}`; }
 function updateChrome() {
   const envButton = $('#env-button');
   envButton.dataset.env = mode; $('#env-label').textContent = envLabel();
@@ -107,7 +107,9 @@ function envBanner() {
   const local = mode === 'local';
   const text = local
     ? `${config?.hostedSimulation ? 'Shared simulation. Visitors share demo accounts and launches.' : 'Local simulation.'} Contracts run on a private test chain with simulated balances. Everything resets when the server restarts.`
-    : wallet.net.kind === 'solana'
+    : wallet.net.mainnet
+      ? `${wallet.net.name} mainnet beta. Real funds: your wallet signs every transaction and pays network fees in SOL. The contracts are new; launch and trade only what you can afford to lose.${wallet.beta?.enabled ? ' Launching is invite-only during the beta.' : ''}`
+      : wallet.net.kind === 'solana'
       ? `${wallet.net.name} public testnet. Your wallet signs every transaction and pays network fees in devnet SOL.${wallet.usesTestToken ? ' New launches use Elpida tUSDC, a free test token with no value.' : ''}`
       : `${wallet.net.name} public testnet. Your wallet signs every transaction and pays gas in test ${wallet.net.nativeCurrency.symbol}.`;
   return h('div.env-banner', { 'data-env': mode }, icon(local ? 'flask-conical' : 'globe'), h('span', text),
@@ -257,9 +259,9 @@ function openTools() {
   const local = mode === 'local';
   const envSection = h('section.tools-section', h('h4', 'Environment'),
     h('p.small.muted', 'Local simulation uses simulated balances on a private test chain. Public testnets use your own wallet and free test funds.'),
-    h('div.choice-grid', [{ key: 'local', name: 'Local simulation', note: 'Demo accounts, instant test funds', env: 'sim' }, ...networks().map(net => ({ key: net.key, name: net.name, note: net.kind === 'solana' ? 'Phantom, Solflare or Backpack' : 'Browser wallet such as MetaMask', env: 'testnet' }))].map(item =>
+    h('div.choice-grid', [{ key: 'local', name: 'Local simulation', note: 'Demo accounts, instant test funds', env: 'sim' }, ...networks().map(net => ({ key: net.key, name: net.name, note: net.kind === 'solana' ? 'Phantom, Solflare or Backpack' : 'Browser wallet such as MetaMask', env: 'testnet', mainnet: !!net.mainnet }))].map(item =>
       h('button.choice', { type: 'button', 'data-busy-disable': '', 'aria-pressed': String(currentChain() === item.key), on: { click: async () => { error.textContent = ''; try { if (item.key === 'local') await useLocal(); else await connect(item.key); $('#tools-dialog').close(); toast(`Switched to ${item.key === 'local' ? 'the local simulation' : item.name}.`, { kind: 'success' }); } catch (e) { fail(e); } } } },
-        h('span.choice-title', item.name, currentChain() === item.key ? h('span.chip.chip-positive', 'Current') : null), h('p', item.note), h(`span.chip.chip-${item.env}`, item.env === 'sim' ? 'Simulated funds' : 'Public testnet')))));
+        h('span.choice-title', item.name, currentChain() === item.key ? h('span.chip.chip-positive', 'Current') : null), h('p', item.note), h(`span.chip.chip-${item.env}`, item.env === 'sim' ? 'Simulated funds' : item.mainnet ? 'Mainnet beta · real funds' : 'Public testnet')))));
   const funds = h('section.tools-section', h('h4', 'Test funds'));
   if (local) {
     funds.append(h('div.field', h('label', { for: 'demo-account' }, 'Demo account'),
@@ -296,6 +298,10 @@ function openTools() {
 /* ---------- Start ---------- */
 async function init() {
   config = await api('config');
+  if (config.solana?.mainnet) {
+    $('#footer-note').textContent = 'Solana mainnet beta: real funds, new contracts. Other networks are test networks with no monetary value.';
+    $('#how-network-note').textContent = 'Solana runs as a mainnet beta with real funds and new, unaudited contracts; launching is invite-only while the beta gate is on. The other networks are test networks.';
+  }
   evmWallet = new TestnetWallet(config, onWalletProgress);
   solWallet = new SolanaWallet(config, onWalletProgress);
   wallet = evmWallet;

@@ -8,7 +8,7 @@ import { createRuntime } from './curve-runtime.mjs';
 import {MetadataStore} from './metadata-store.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
 import { MAX_METADATA_REQUEST_BYTES } from '../web/metadata.mjs';
-import { evmTestnets, solanaDevnet, solanaLocalnet } from '../../packages/core/networks.mjs';
+import { evmTestnets, solanaDevnet, solanaLocalnet, solanaMainnet } from '../../packages/core/networks.mjs';
 
 const webRoot = fileURLToPath(new URL('../web/', import.meta.url));
 const ethersFile = fileURLToPath(new URL('../../node_modules/ethers/dist/ethers.min.js', import.meta.url));
@@ -28,7 +28,8 @@ const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 // Solana Devnet by default; ELPIDA_SOLANA_CLUSTER=localnet targets a local solana-test-validator.
 // The deployment comes from networks.mjs `shared`, else from `npm run solana:deploy` output.
 export function solanaConfig() {
-  const net = process.env.ELPIDA_SOLANA_CLUSTER === 'localnet' ? solanaLocalnet : solanaDevnet;
+  const cluster = process.env.ELPIDA_SOLANA_CLUSTER;
+  const net = cluster === 'localnet' ? solanaLocalnet : cluster === 'mainnet' ? solanaMainnet : solanaDevnet;
   let deployment = null;
   if (net.shared?.programId && base58.test(net.shared.programId)) deployment = { programId: net.shared.programId, shared: true };
   else {
@@ -36,11 +37,39 @@ export function solanaConfig() {
     if (existsSync(file)) {
       try {
         const record = JSON.parse(readFileSync(file, 'utf8'));
-        if (base58.test(record.programId) && record.cluster === net.cluster) deployment = { programId: record.programId, shared: false, pairs: Array.isArray(record.pairs) ? record.pairs.filter(p => p && base58.test(p.config ?? '') && base58.test(p.mint ?? '') && ['native', 'usdc', 'xstock', 'token'].includes(p.kind)).map(({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test, wsol, faucet }) => ({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test: !!test, wsol: !!wsol, faucet: faucet ?? null })) : null };
+        if (base58.test(record.programId) && record.cluster === net.cluster) deployment = { programId: record.programId, shared: false, build: record.build ?? 'testnet', pairs: Array.isArray(record.pairs) ? record.pairs.filter(p => p && base58.test(p.config ?? '') && base58.test(p.mint ?? '') && ['native', 'usdc', 'xstock', 'token'].includes(p.kind)).map(({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test, wsol, faucet }) => ({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test: !!test, wsol: !!wsol, faucet: faucet ?? null })) : null };
       } catch {}
     }
   }
   return { ...net, deployment };
+}
+
+/**
+ * Mainnet: forwards the browser's Solana JSON-RPC calls to SOLANA_RPC_URL (for example a Helius URL with
+ * its API key), so the key stays on the server. Only the read, simulate and send methods the app uses are
+ * allowed, one call per request, with a per-address rate limit.
+ */
+export const RPC_METHODS = new Set(['getAccountInfo', 'getMultipleAccounts', 'getProgramAccounts', 'getBalance', 'getLatestBlockhash', 'getBlockHeight', 'getSlot', 'getBlockTime', 'getSignatureStatuses', 'simulateTransaction', 'sendTransaction', 'getMinimumBalanceForRentExemption', 'getTransaction', 'getEpochInfo', 'getVersion', 'getGenesisHash', 'getFeeForMessage', 'isBlockhashValid', 'getTokenAccountBalance']);
+export function createRpcProxy(target, { perSecond = 15, burst = 60 } = {}) {
+  // https only, except a local validator used to rehearse a mainnet deployment.
+  if (!target || !/^https:\/\/|^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(target)) { console.warn('Solana mainnet needs SOLANA_RPC_URL (https) for the RPC proxy.'); return null; }
+  const buckets = new Map();
+  return async (req, res, send) => {
+    const ip = req.socket.remoteAddress ?? 'unknown', now = Date.now();
+    const bucket = buckets.get(ip) ?? { tokens: burst, at: now };
+    bucket.tokens = Math.min(burst, bucket.tokens + (now - bucket.at) / 1000 * perSecond); bucket.at = now; buckets.set(ip, bucket);
+    if (buckets.size > 10_000) buckets.clear();
+    if (bucket.tokens < 1) return send(429, { jsonrpc: '2.0', error: { code: 429, message: 'Too many requests. Slow down.' }, id: null });
+    bucket.tokens -= 1;
+    const chunks = []; let size = 0;
+    for await (const chunk of req) { size += chunk.length; if (size > 65_536) return send(413, { jsonrpc: '2.0', error: { code: 413, message: 'Request too large.' }, id: null }); chunks.push(chunk); }
+    let body; try { body = JSON.parse(Buffer.concat(chunks).toString()); } catch { return send(400, { jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null }); }
+    if (!body || Array.isArray(body) || !RPC_METHODS.has(body.method)) return send(400, { jsonrpc: '2.0', error: { code: -32601, message: 'Method not allowed' }, id: body?.id ?? null });
+    try {
+      const upstream = await fetch(target, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: body.id ?? 1, method: body.method, params: body.params ?? [] }), signal: AbortSignal.timeout(20_000) });
+      res.writeHead(upstream.status, { 'Content-Type': 'application/json' }); return res.end(await upstream.text());
+    } catch { return send(502, { jsonrpc: '2.0', error: { code: 502, message: 'Solana RPC unavailable' }, id: body.id ?? null }); }
+  };
 }
 
 export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1' } = {}) {
@@ -49,7 +78,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const cookieSecurity = publicUrl ? '; Secure' : '';
   const csrf = randomBytes(24).toString('hex');
   const solana = solanaConfig();
-  const connectSources = [...evmTestnets.map(net => net.rpcUrl), solana.rpcUrl, solana.wsUrl].join(' ');
+  const connectSources = [...evmTestnets.map(net => net.rpcUrl), solana.rpcUrl, solana.wsUrl].filter(url => /^(https?|wss?):/.test(url ?? '')).join(' ');
+  const rpcProxy = solana.mainnet ? createRpcProxy(process.env.SOLANA_RPC_URL) : null;
   const server = createServer(async (req, res) => {
     const actualPort = server.address().port;
     const send = (code, data) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
@@ -87,6 +117,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if (url.pathname === '/favicon.ico') { res.writeHead(302, { Location: '/assets/brand/favicon-32.png' }); return res.end(); }
         return send(404, { error: 'Not found.' });
       }
+      if (req.method === 'POST' && url.pathname === '/api/solana-rpc') return rpcProxy ? rpcProxy(req, res, send) : send(404, { error: 'Not found.' });
       if (req.method !== 'POST' || !url.pathname.startsWith('/api/')) return send(405, { error: 'Method not allowed.' });
       if (req.headers['x-elpida-token'] !== csrf || req.headers['content-type'] !== 'application/json') return send(403, { error: 'Refresh this page before submitting.' });
       const chunks = [];

@@ -298,9 +298,61 @@ export async function ensurePairConfigs({ connection, payer, programId, treasury
       created = true;
     }
     pairs.push({ kind: t.kind, key: t.key, symbol: t.symbol, name: t.name, mint: mint.toBase58(), config: address.toBase58(), decimals: t.decimals,
-      tokenProgram: quoteTokenProgram.toBase58(), test: !t.wsol, wsol: !!t.wsol, testSized: true, faucet: t.faucet ?? null, created });
+      tokenProgram: quoteTokenProgram.toBase58(), test: !t.wsol, wsol: !!t.wsol, testSized: !!t.testSized, faucet: t.faucet ?? null, created });
   }
   return pairs;
+}
+
+/**
+ * Creates or updates the beta launch gate (upgrade authority), then allowlists `allow` creators when the
+ * payer is also the gate authority. Returns the gate state.
+ */
+export async function ensureBetaGate({ connection, payer, programId, gateAuthority, enabled, allow = [], onProgress = () => {} }) {
+  const client = createElpidaSolana(web3, programId);
+  const current = client.decodeBetaGate((await connection.getAccountInfo(client.betaGatePda))?.data);
+  const authority = new PublicKey(gateAuthority);
+  if (!current || !current.authority.equals(authority) || current.enabled !== enabled) {
+    onProgress(`${current ? 'Updating' : 'Creating'} the beta launch gate (${enabled ? 'invite-only' : 'open'}, managed by ${authority.toBase58()})…`);
+    await send(connection, payer, [client.setBetaGate({ authority: payer.publicKey, gateAuthority: authority, enabled })]);
+  }
+  for (const creator of allow) {
+    if (!authority.equals(payer.publicKey)) throw new Error('Only the beta admin key can allowlist creators. Use scripts/solana-beta.mjs with that key.');
+    if (await connection.getAccountInfo(client.betaCreatorPda(creator))) continue;
+    onProgress(`Allowlisting creator ${creator}…`);
+    await send(connection, payer, [client.allowBetaCreator({ authority: payer.publicKey, creator: new PublicKey(creator) })]);
+  }
+  return client.decodeBetaGate((await connection.getAccountInfo(client.betaGatePda)).data);
+}
+
+/**
+ * True when the deployed program refuses test-only instructions (the mainnet build). Simulates the
+ * stateless test_build_check instruction: the mainnet build fails with TestNetworksOnly (6022).
+ */
+export async function rejectsTestInstructions({ connection, payer, programId }) {
+  const client = createElpidaSolana(web3, programId);
+  const { blockhash } = await connection.getLatestBlockhash('confirmed');
+  const tx = new Transaction({ feePayer: payer.publicKey, recentBlockhash: blockhash }).add(client.testBuildCheck());
+  tx.sign(payer);
+  const result = await connection.simulateTransaction(tx);
+  return JSON.stringify(result.value.err ?? '').includes('6022') || (result.value.logs ?? []).some(line => /TestNetworksOnly|0x1786/.test(line));
+}
+
+/** Hands the program's upgrade authority to `newAuthority` (for example a Squads vault). */
+export async function transferUpgradeAuthority({ connection, payer, programId, newAuthority }) {
+  const loader = loaderV3(web3);
+  const client = createElpidaSolana(web3, programId);
+  return send(connection, payer, [loader.setAuthority({ account: client.programDataAddress, authority: payer.publicKey, newAuthority: new PublicKey(newAuthority) })]);
+}
+
+/**
+ * Upgrades under a multisig: uploads the build to a buffer, then hands the buffer to the multisig so it
+ * can approve the upgrade (Squads: Programs → Upgrade, with this buffer). Returns the buffer address.
+ */
+export async function prepareUpgradeBuffer({ connection, payer, elf, multisig, ...uploadOptions }) {
+  const loader = loaderV3(web3);
+  const buffer = await uploadToBuffer({ connection, payer, elf, ...uploadOptions });
+  await send(connection, payer, [loader.setAuthority({ account: buffer, authority: payer.publicKey, newAuthority: new PublicKey(multisig) })]);
+  return buffer;
 }
 
 /** Localnet only: a 6-decimal stand-in for USDC, with balances minted to `recipients`. */

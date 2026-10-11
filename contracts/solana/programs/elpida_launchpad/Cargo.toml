@@ -12,6 +12,8 @@ name = "elpida_launchpad"
 
 [features]
 default = []
+# Test networks (devnet / localnet): enables the tUSDC and test-asset faucet. Never build mainnet with it.
+testnet = []
 cpi = ["no-entrypoint"]
 no-entrypoint = []
 no-idl = []

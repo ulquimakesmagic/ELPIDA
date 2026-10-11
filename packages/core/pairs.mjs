@@ -40,3 +40,18 @@ export const EVM_TEST_PAIRS = [
   { kind: 'xstock', key: 'test-stock', symbol: 'TEST-STOCK', name: 'Elpida test stock (simulated xStock, no value)', decimals: 18, startFdv: '20', faucet: '250' },
   { kind: 'token', key: 'test-meme', symbol: 'TEST-MEME', name: 'Elpida test paired token (no value)', decimals: 18, startFdv: '500000', faucet: '6000000' },
 ];
+
+/** Circle USDC on Solana mainnet. */
+export const MAINNET_USDC = 'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v';
+
+/**
+ * Solana mainnet pair templates. USDC is the program's default config ($5k → $50k FDV, 10 USDC fee);
+ * the SOL pair is priced the same in dollars at `solUsd` when it is created. Its parameters are fixed
+ * once created, so a later SOL price change moves its dollar FDV range.
+ */
+export function solanaMainnetPairs(solUsd) {
+  const price = Number(solUsd);
+  if (!(price > 0)) throw new Error('A positive SOL price is required.');
+  const sol = usd => (usd / price).toFixed(9).replace(/0+$/, '').replace(/\.$/, '');
+  return [{ kind: 'native', key: 'sol', symbol: 'SOL', name: 'SOL (wrapped automatically)', decimals: 9, wsol: true, startFdv: sol(5_000), endFdv: sol(50_000), launchFee: sol(10) }];
+}

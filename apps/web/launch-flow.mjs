@@ -168,7 +168,7 @@ export function renderLaunch(ctx) {
   function networkStep() {
     const error = h('p.error-text', { role: 'alert' }, networkError);
     const options = [{ key: 'local', name: 'Local simulation', note: 'Private test chain with simulated funds. Supports every reward strategy and trading pair.', env: 'sim', wallet: 'Demo accounts' },
-      ...ctx.networks().map(n => ({ key: n.key, name: n.name, note: n.kind === 'solana' ? 'Public testnet. SOL, USDC and token pairs; graduates into a locked PumpSwap pool.' : n.key === 'base-sepolia' ? 'Public testnet. Graduates into a locked Uniswap v3 pool.' : 'Public testnet. Graduates into a locked test pool.', env: 'testnet', wallet: n.kind === 'solana' ? 'Phantom, Solflare or Backpack' : 'Browser wallet such as MetaMask' }))];
+      ...ctx.networks().map(n => ({ key: n.key, name: n.name, note: n.mainnet ? 'Mainnet beta with real funds. SOL and USDC pairs; graduates into a locked PumpSwap pool.' : n.kind === 'solana' ? 'Public testnet. SOL, USDC and token pairs; graduates into a locked PumpSwap pool.' : n.key === 'base-sepolia' ? 'Public testnet. Graduates into a locked Uniswap v3 pool.' : 'Public testnet. Graduates into a locked test pool.', env: 'testnet', mainnet: !!n.mainnet, wallet: n.kind === 'solana' ? 'Phantom, Solflare or Backpack' : 'Browser wallet such as MetaMask' }))];
     const choose = async key => {
       networkError = ''; error.textContent = '';
       if (key !== draft.chain) { draft.pair = 'usdc'; draft.quoteAsset = ''; draft.firstBuy = '25'; }
@@ -179,7 +179,7 @@ export function renderLaunch(ctx) {
       draw();
     };
     const netGrid = h('div.choice-grid', { role: 'radiogroup', 'aria-label': 'Network' }, options.map(o => h('label.choice', h('input', { type: 'radio', name: 'network', value: o.key, checked: draft.chain === o.key, on: { change: () => choose(o.key) } }),
-      h('span.choice-title', o.name), h('p', o.note), h(`span.chip.chip-${o.env}`, o.env === 'sim' ? 'Simulated funds' : 'Public testnet'))));
+      h('span.choice-title', o.name), h('p', o.note), h(`span.chip.chip-${o.env}`, o.env === 'sim' ? 'Simulated funds' : o.mainnet ? 'Mainnet beta · real funds' : 'Public testnet'))));
     const connection = h('div.connection');
     if (!draft.chain) connection.append(h('p.muted', 'Choose a network to continue. You are asked to connect a wallet only after choosing a public testnet.'));
     else if (draft.chain === 'local') connection.append(h('div.connection-row', icon('flask-conical'), h('div.grow', h('strong', 'Local simulation ready'), h('p.small.muted', `Using the demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()} account with simulated test USDC.`))));
@@ -189,6 +189,8 @@ export function renderLaunch(ctx) {
         ctx.walletButtons(n, { onDone: () => { networkError = ''; draw(); }, onError: e => { networkError = errorText(e); draw(); } })));
       else {
         connection.append(h('div.connection-row', icon('circle-check'), h('div.grow', h('strong', `Connected to ${n.name}${/^your/i.test(ctx.wallet.walletName ?? 'your') ? '' : ' with ' + ctx.wallet.walletName}`), h('p.small.muted', ctx.wallet.address)), h('button.btn.btn-ghost.btn-sm', { type: 'button', on: { click: async () => { networkError = ''; try { await ctx.connect(draft.chain); } catch (e) { networkError = errorText(e); } draw(); } } }, 'Reconnect')));
+        if (ctx.wallet.beta?.enabled && !ctx.wallet.beta.allowed) connection.append(callout('warn', 'lock', 'Launching is invite-only during the mainnet beta, and this wallet is not on the list yet. You can still browse and trade; ask the Elpida team to add this wallet to launch.'));
+        else if (n.mainnet) connection.append(callout('warn', 'triangle-alert', 'Mainnet beta: this launch uses real funds and new, unaudited contracts.'));
         if (!ctx.wallet.deployment) connection.append(n.kind === 'solana'
           ? callout('warn', 'triangle-alert', 'The Elpida program is not deployed on this network. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.')
           : h('div.connection-row', callout('warn', 'triangle-alert', `${n.name} needs a one-time launchpad setup from your wallet before the first token. It takes ${ctx.wallet.usesTestToken ? 'two confirmations and deploys Elpida test USDC' : 'one confirmation'} and costs only gas.`),
@@ -220,6 +222,7 @@ export function renderLaunch(ctx) {
       if (!draft.chain) { error.textContent = 'Choose a network.'; return false; }
       if (!connected()) { error.textContent = draft.chain === 'local' ? 'The local simulation is not running.' : 'Connect your wallet to continue.'; return false; }
       if (!ready()) { error.textContent = 'Complete the one-time setup for this network first.'; return false; }
+      if (ctx.wallet.beta?.enabled && !ctx.wallet.beta.allowed) { error.textContent = 'This wallet is not on the beta launch list yet.'; return false; }
       const group = pairOptions()?.[draft.pair];
       if (!group?.assets.length) { error.textContent = group?.unavailable ?? 'Choose a trading pair.'; return false; }
       if (!group.assets.some(a => a.id === draft.quoteAsset)) { draft.quoteAsset = group.assets[0].id; save(); }

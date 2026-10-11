@@ -20,10 +20,11 @@ import {
   harvestableLp, harvestNow, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_USDC_FAUCET_MAX, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint,
 } from '../packages/solana/client.mjs';
 import { SOLANA_TEST_PAIRS } from '../packages/core/pairs.mjs';
-import { deployProgram, upgradeProgram, initializeConfig, createTestQuoteMint, ensureTestUsdc, ensurePairConfigs, send, airdrop } from '../packages/solana/deploy.mjs';
+import { deployProgram, upgradeProgram, initializeConfig, createTestQuoteMint, ensureTestUsdc, ensurePairConfigs, ensureBetaGate, rejectsTestInstructions, prepareUpgradeBuffer, transferUpgradeAuthority, send, airdrop } from '../packages/solana/deploy.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const elfPath = `${root}contracts/solana/build/elpida_launchpad.so`;
+const mainnetElfPath = `${root}contracts/solana/build/elpida_launchpad-mainnet.so`;
 const keyPath = `${root}contracts/solana/keys/elpida_launchpad-keypair.json`;
 const validatorBin = process.env.SOLANA_TEST_VALIDATOR ?? 'solana-test-validator';
 let skip = false;
@@ -104,7 +105,7 @@ async function invariant(mint) {
 
 test('Solana client discriminators, curve parameters and error decoding', () => {
   const disc = name => [...createHash('sha256').update(name).digest().subarray(0, 8)];
-  for (const [key, name] of [['initializeCurve', 'global:initialize_curve'], ['launch', 'global:launch'], ['buy', 'global:buy'], ['sell', 'global:sell'], ['withdrawFees', 'global:withdraw_fees'], ['CurveConfig', 'account:CurveConfig'], ['CurvePool', 'account:CurvePool'], ['migrateToPumpswap', 'global:migrate_to_pumpswap'], ['harvestLpFees', 'global:harvest_lp_fees'], ['PumpMigration', 'account:PumpMigration']]) {
+  for (const [key, name] of [['initializeCurve', 'global:initialize_curve'], ['launch', 'global:launch'], ['buy', 'global:buy'], ['sell', 'global:sell'], ['withdrawFees', 'global:withdraw_fees'], ['CurveConfig', 'account:CurveConfig'], ['CurvePool', 'account:CurvePool'], ['migrateToPumpswap', 'global:migrate_to_pumpswap'], ['harvestLpFees', 'global:harvest_lp_fees'], ['PumpMigration', 'account:PumpMigration'], ['setBetaGate', 'global:set_beta_gate'], ['allowBetaCreator', 'global:allow_beta_creator'], ['revokeBetaCreator', 'global:revoke_beta_creator'], ['BetaGate', 'account:BetaGate'], ['BetaCreator', 'account:BetaCreator'], ['testBuildCheck', 'global:test_build_check']]) {
     assert.deepEqual(DISCRIMINATORS[key], disc(name), key);
   }
   for (const [name, { discriminator }] of [...Object.entries(EVENTS), ...Object.entries(LEGACY_EVENTS)]) assert.deepEqual(discriminator, disc(`event:${name}`), name);
@@ -552,6 +553,63 @@ test('Solana pairs reject quote tokens that would break the curve or never gradu
     await failsWith(send(f.connection, f.authority, [f.client.addCurveConfig({ authority: f.authority.publicKey, quoteMint: mint.publicKey, treasury: f.treasury, quoteTokenProgram: t22, params: PARAMS })], [], 1), /0x1785/);
   }
   assert.match(explainError(new Error('custom program error: 0x1785')), /permanent delegate/);
+});
+
+test('Solana beta gate: invite-only launches, allowlist managed by the beta admin, then open again', { skip }, async () => {
+  const programId = f.programKeypair.publicKey;
+  const admin = Keypair.generate(), outsider = Keypair.generate();
+  for (const kp of [admin, outsider]) await airdrop(f.connection, kp.publicKey, 2 * web3.LAMPORTS_PER_SOL);
+  // Only the upgrade authority creates or changes the gate.
+  await failsWith(send(f.connection, f.outsider, [f.client.setBetaGate({ authority: f.outsider.publicKey, gateAuthority: f.outsider.publicKey, enabled: true })], [], 1), /0x1770/);
+  const gate = await ensureBetaGate({ connection: f.connection, payer: f.authority, programId, gateAuthority: admin.publicKey, enabled: true });
+  assert.equal(gate.enabled, true); assert.equal(gate.authority.toBase58(), admin.publicKey.toBase58());
+  await failsWith(launch({ symbol: 'GATED' }), /0x1787/);
+  assert.match(explainError(new Error('custom program error: 0x1787')), /invite-only/);
+  // Only the beta admin manages the allowlist.
+  await failsWith(send(f.connection, outsider, [f.client.allowBetaCreator({ authority: outsider.publicKey, creator: f.creator.publicKey })], [], 1), /0x1770/);
+  await send(f.connection, admin, [f.client.allowBetaCreator({ authority: admin.publicKey, creator: f.creator.publicKey })]);
+  const { mint } = await launch({ symbol: 'INVITED' });
+  assert.equal((await pool(mint)).creator.toBase58(), f.creator.publicKey.toBase58());
+  // Trading stays open to everyone during the beta.
+  await afterSnipeWindow(mint);
+  await buy(f.trader, mint, 5n * USDC, 1n);
+  const before = await f.connection.getBalance(admin.publicKey);
+  await send(f.connection, admin, [f.client.revokeBetaCreator({ authority: admin.publicKey, creator: f.creator.publicKey })]);
+  assert.ok(await f.connection.getBalance(admin.publicKey) > before, 'allowlist rent returns to the admin');
+  await failsWith(launch({ symbol: 'REVOKED' }), /0x1787/);
+  // Opening launches again needs only the gate switch.
+  await ensureBetaGate({ connection: f.connection, payer: f.authority, programId, gateAuthority: admin.publicKey, enabled: false });
+  await launch({ symbol: 'OPEN' });
+});
+
+test('Solana mainnet build rejects test instructions; the upgrade authority can move to a multisig', { skip }, async () => {
+  if (!existsSync(mainnetElfPath)) return;
+  const programId = f.programKeypair.publicKey;
+  assert.equal(await rejectsTestInstructions({ connection: f.connection, payer: f.authority, programId }), false, 'the test build accepts them');
+  await upgradeProgram({ connection: f.connection, payer: f.authority, programId, elf: readFileSync(mainnetElfPath), sendsPerSecond: 200 });
+  assert.equal(await rejectsTestInstructions({ connection: f.connection, payer: f.authority, programId }), true, 'the mainnet build rejects them');
+  const user = Keypair.generate(); await airdrop(f.connection, user.publicKey, web3.LAMPORTS_PER_SOL);
+  await failsWith(send(f.connection, user, [f.client.testUsdcFaucet({ user: user.publicKey })], [], 1), /0x1786/);
+  // Normal trading still works on the mainnet build.
+  const { mint } = await launch({ symbol: 'MAINB' });
+  await afterSnipeWindow(mint);
+  await buy(f.trader, mint, 2n * USDC, 1n);
+  // Multisig flow: a buffer handed to the multisig, then the program's upgrade authority itself.
+  const multisig = Keypair.generate();
+  await airdrop(f.connection, multisig.publicKey, 10 * web3.LAMPORTS_PER_SOL);
+  const testElf = readFileSync(elfPath);
+  const buffer = await prepareUpgradeBuffer({ connection: f.connection, payer: f.authority, elf: testElf, multisig: multisig.publicKey, sendsPerSecond: 200 });
+  const bufferInfo = await f.connection.getAccountInfo(buffer);
+  assert.equal(new PublicKey(bufferInfo.data.subarray(5, 37)).toBase58(), multisig.publicKey.toBase58(), 'buffer belongs to the multisig');
+  await transferUpgradeAuthority({ connection: f.connection, payer: f.authority, programId, newAuthority: multisig.publicKey });
+  await assert.rejects(upgradeProgram({ connection: f.connection, payer: f.authority, programId, elf: testElf }), /upgrade authority/);
+  // The multisig approves the upgrade with the prepared buffer (Squads does this on mainnet).
+  const { loaderV3 } = await import('../packages/solana/client.mjs');
+  await send(f.connection, multisig, [loaderV3(web3).upgrade({ programData: f.client.programDataAddress, program: programId, buffer, spill: multisig.publicKey, authority: multisig.publicKey })]);
+  await f.connection.getSlot(); await sleep(1000);
+  assert.equal(await rejectsTestInstructions({ connection: f.connection, payer: f.authority, programId }), false, 'back on the test build');
+  // Hand authority back so the remaining tests can upgrade.
+  await transferUpgradeAuthority({ connection: f.connection, payer: multisig, programId, newAuthority: f.authority.publicKey });
 });
 
 test('Solana upgrade is a no-op when the deployed program already matches the build', { skip }, async () => {
