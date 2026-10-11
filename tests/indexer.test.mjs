@@ -1,0 +1,37 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {mkdtempSync,rmSync} from 'node:fs';
+import {tmpdir} from 'node:os';
+import {join} from 'node:path';
+import {createRuntime} from '../apps/api/curve-runtime.mjs';
+import {EvmIndexer} from '../packages/indexer/evm-indexer.mjs';
+
+test('durable indexer captures initial buy, replay, restart, reorg and migration into pool',async t=>{
+ const dir=mkdtempSync(join(tmpdir(),'elpida-index-')),path=join(dir,'index.sqlite');
+ const runtime=await createRuntime({seed:false,indexerPath:path});
+ t.after(async()=>{await runtime.close();rmSync(dir,{recursive:true,force:true});});
+ const launched=await runtime.transact('launch',{name:'Indexed Garden',symbol:'INDEX',pair:'native',firstBuy:'0.01'});
+ const token=launched.token.toLowerCase(),i=runtime.indexer;
+ assert.equal(i.trades(token).length,1,'creation block first buy indexed');
+ assert.equal(i.trades(token)[0].quoteAmount,'0.01');
+ assert.equal(i.snapshot(token).priceUsd,null,'no invented ETH dollar price');
+ const saved=i.snapshot(token);await i.sync();assert.deepEqual(i.snapshot(token),saved);assert.equal(i.trades(token).length,1);
+ const replay=new EvmIndexer({provider:runtime.provider,factory:runtime.config.local.factory,contracts:runtime.config.contracts,fromBlock:i.fromBlock});
+ await replay.sync();assert.deepEqual(replay.snapshot(token),saved);assert.deepEqual(replay.trades(token),i.trades(token));await replay.close();
+ const reopened=new EvmIndexer({provider:runtime.provider,factory:runtime.config.local.factory,contracts:runtime.config.contracts,path,fromBlock:i.fromBlock});
+ assert.deepEqual(reopened.snapshot(token),saved);await reopened.close();
+ const snap=await runtime.provider.send('evm_snapshot',[]);
+ await runtime.transact('buy',{token,amount:'0.02',account:'1'});assert.equal(i.trades(token).length,2);
+ assert.equal(await runtime.provider.send('evm_revert',[snap]),true);await i.sync();
+ assert.equal(i.trades(token).length,1,'orphan trade removed');assert.deepEqual(i.snapshot(token),saved);
+ const completion=i.snapshot(token).remainingBuy;
+ await runtime.transact('buy',{token,amount:completion,account:'0'});
+ const end=i.snapshot(token),price=Number(end.spotPrice);assert.equal(end.complete,true);
+ await runtime.transact('graduate',{token});const graduated=i.snapshot(token);
+ assert.equal(graduated.graduated,true);assert.ok(Math.abs(Number(graduated.spotPrice)/price-1)<1e-9);
+ assert.ok(Number(graduated.deadSupply)<1,'rounding dust only');
+ await runtime.transact('sell',{token,amount:'1000000',account:'0'});
+ assert.equal(i.trades(token)[0].venue,'pool');assert.equal(i.trades(token)[0].side,'sell');
+ assert.ok(i.candles(token).length>0);assert.equal(i.candles(token).reduce((n,c)=>n+c.trades,0),3);
+ assert.equal(i.status().lag,0);
+});

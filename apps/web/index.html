@@ -1,0 +1,86 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="description" content="Create a token, choose its network and creator rewards, and trade it on a fair bonding curve. Elpida runs on a local simulation and public testnets.">
+  <meta name="theme-color" content="#080B09">
+  <title>Elpida · Create a token</title>
+  <link rel="icon" href="/assets/brand/favicon.svg?v=green-20261011" type="image/svg+xml">
+  <link rel="icon" href="/assets/brand/favicon-32.png?v=green-20261011" sizes="32x32" type="image/png">
+  <link rel="icon" href="/assets/brand/favicon-16.png?v=green-20261011" sizes="16x16" type="image/png">
+  <link rel="apple-touch-icon" href="/assets/brand/apple-touch-icon.png?v=green-20261011">
+  <link rel="manifest" href="/assets/brand/site.webmanifest?v=green-20261011">
+  <link rel="preload" href="/assets/fonts/bricolage-grotesque-wght.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/assets/fonts/ibm-plex-sans-400.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/styles.css">
+  <script defer src="/vendor/solana-web3.js"></script>
+  <script type="module" src="/app.mjs"></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <header class="topbar">
+    <div class="topbar-inner">
+      <a class="brand" href="#/" aria-label="Elpida home">
+        <img class="brand-light" src="/assets/brand/elpida-wordmark.svg?v=green-20261011" alt="Elpida" width="120" height="32">
+        <img class="brand-dark" src="/assets/brand/elpida-wordmark-dark.svg?v=green-20261011" alt="Elpida" width="120" height="32">
+      </a>
+      <nav class="main-nav" aria-label="Main">
+        <a href="#/" data-nav="explore">Explore</a>
+        <a href="#/portfolio" data-nav="portfolio">Portfolio</a>
+        <a href="#/rewards" data-nav="rewards">Rewards</a>
+      </nav>
+      <div class="top-actions">
+        <button type="button" class="env-button" id="env-button" aria-haspopup="dialog" data-env="local"><span class="dot" aria-hidden="true"></span><span class="label" id="env-label">Local simulation</span></button>
+        <button type="button" class="btn btn-secondary btn-sm account-button" id="account-button"><svg class="icon icon-sm" aria-hidden="true"><use href="/assets/icons.svg#i-wallet"/></svg><span class="label" id="account-label">Demo creator</span></button>
+        <a class="btn btn-primary btn-sm create-top" href="#/launch"><svg class="icon icon-sm" aria-hidden="true"><use href="/assets/icons.svg#i-plus"/></svg>Create token</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" tabindex="-1">
+    <div id="view" aria-live="polite" aria-busy="true">
+      <!-- Heading kept in the static page for crawlers and the API smoke test. -->
+      <div class="page-head"><div><h1>Create a token. Start something new.</h1><p class="muted">Loading the launchpad…</p></div></div>
+    </div>
+  </main>
+
+  <footer class="site-footer">
+    <span class="brand footer-brand"><img class="brand-light" src="/assets/brand/elpida-wordmark.svg?v=green-20261011" alt="Elpida" width="90" height="24"><img class="brand-dark" src="/assets/brand/elpida-wordmark-dark.svg?v=green-20261011" alt="Elpida" width="90" height="24"></span>
+    <span>Prototype on test networks. Test tokens have no monetary value.</span>
+    <button type="button" class="link-button" id="how-button">How Elpida works</button>
+  </footer>
+
+  <nav class="tabbar" aria-label="Main">
+    <a href="#/" data-nav="explore"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-compass"/></svg>Explore</a>
+    <a href="#/launch" data-nav="launch"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-plus"/></svg>Create</a>
+    <a href="#/portfolio" data-nav="portfolio"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-briefcase"/></svg>Portfolio</a>
+    <a href="#/rewards" data-nav="rewards"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-gift"/></svg>Rewards</a>
+  </nav>
+
+  <dialog id="tools-dialog" aria-labelledby="tools-title">
+    <div class="dialog-head"><div><h2 id="tools-title">Network and test funds</h2><p id="tools-intro">Choose a network when you create a token. Use these tools to switch accounts and get test funds.</p></div><button type="button" class="icon-button" data-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-x"/></svg></button></div>
+    <div class="dialog-body" id="tools-body"></div>
+  </dialog>
+
+  <dialog id="verify-dialog" aria-labelledby="verify-title">
+    <div class="dialog-head"><div><h2 id="verify-title">Verify ownership</h2><p id="verify-intro"></p></div><button type="button" class="icon-button" data-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-x"/></svg></button></div>
+    <div class="dialog-body" id="verify-body"></div>
+  </dialog>
+
+  <dialog id="how-dialog" aria-labelledby="how-title">
+    <div class="dialog-head"><div><h2 id="how-title">How Elpida works</h2></div><button type="button" class="icon-button" data-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-x"/></svg></button></div>
+    <div class="dialog-body">
+      <ol class="verify-steps">
+        <li><div><h4>Create a token</h4><p class="small muted">Every token has a fixed supply of 1,000,000,000. You pay a 10 test USDC creation fee and make the first purchase in the same transaction. There is no liquidity deposit.</p></div></li>
+        <li><div><h4>Trade on the bonding curve</h4><p class="small muted">The price comes from a virtual bonding curve. It is not a funded pool at launch: purchases build a trading reserve, and sales are paid from that reserve. Each trade pays a 1.25% fee, split equally between Elpida and the creator.</p></div></li>
+        <li><div><h4>Graduate to a DEX</h4><p class="small muted">When the curve sells out, its trading reserve and the remaining tokens open a DEX pool at the final curve price: Uniswap v3 on EVM networks, PumpSwap on Solana. That liquidity is locked permanently.</p></div></li>
+        <li><div><h4>Earn creator fees</h4><p class="small muted">Creator fees follow the reward settings chosen at launch: creator wallets, holder distributions, a reward-token purchase, a buyback with vesting, or allocations to wallets, X accounts and websites.</p></div></li>
+      </ol>
+      <p class="callout"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-flask-conical"/></svg><span>Elpida currently runs on a local simulation and public testnets only. No mainnet launch is available.</span></p>
+    </div>
+  </dialog>
+
+  <div class="toasts" id="toasts" role="status" aria-live="polite"></div>
+</body>
+</html>

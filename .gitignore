@@ -1,0 +1,11 @@
+node_modules/
+artifacts/
+.env
+.env.*
+!.env.example
+coverage/
+backups/
+local-data/
+contracts/solana/target/
+# Program deploy keypair: private key material, keep local.
+contracts/solana/keys/

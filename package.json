@@ -1,0 +1,40 @@
+{
+  "name": "elpida-v1",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "test": "node --test tests/*.test.mjs",
+    "test:math": "node --test tests/economics.test.mjs",
+    "test:evm": "node --test tests/evm.test.mjs tests/locked-pool.test.mjs tests/curve-pairs.test.mjs tests/beta-curve.test.mjs tests/post-migration-fees.test.mjs",
+    "compile": "node scripts/compile.mjs",
+    "dev": "node --env-file-if-exists=.env apps/api/server.mjs",
+    "test:ui": "node --test tests/api.test.mjs",
+    "test:solana": "node --test tests/solana.test.mjs",
+    "solana:deploy": "node scripts/solana-deploy.mjs",
+    "indexer": "node scripts/indexer.mjs",
+    "test:indexer": "node --test tests/indexer.test.mjs",
+    "test:dex": "node --test --test-concurrency=1 tests/dex-migration.test.mjs tests/dex-runtime.test.mjs"
+  },
+  "devDependencies": {
+    "@openzeppelin/contracts": "^5.4.0",
+    "@solana/web3.js": "1.98.4",
+    "@uniswap/v3-core": "^1.0.1",
+    "@uniswap/v3-periphery": "^1.4.4",
+    "ethers": "6.17.0",
+    "hardhat": "3.19.0",
+    "solc": "0.8.24"
+  },
+  "overrides": {
+    "solc": {
+      "tmp": "0.2.7"
+    },
+    "jayson": {
+      "uuid": "11.1.1",
+      "stream-json": "3.7.0"
+    }
+  },
+  "engines": {
+    "node": ">=22.13.0"
+  }
+}
