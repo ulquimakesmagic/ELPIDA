@@ -3,6 +3,18 @@
 import { h, icon, short, number, compact, avatar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, metadataLinks, copyButton, callout, errorText, toast } from './ui.mjs';
 
 const SVGNS = 'http://www.w3.org/2000/svg';
+// Compare decimal amounts without rounding away the last token/native-asset unit.
+export function exceedsRemaining(amount, remaining) {
+  const decimal = value => {
+    const match = String(value).match(/^(\d+)(?:\.(\d*))?$/);
+    return match && {whole:match[1],fraction:match[2] ?? ''};
+  };
+  const a = decimal(amount), b = decimal(remaining);
+  if (!a || !b) return false;
+  const places = Math.max(a.fraction.length,b.fraction.length);
+  const units = value => BigInt(value.whole + value.fraction.padEnd(places,'0'));
+  return units(a) > units(b);
+}
 function svg(tag, attrs) { const n = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; }
 
 /** Curve progress drawn as a rising arc over the horizon, echoing the Elpida mark. */
@@ -100,7 +112,7 @@ function tradePanel(ctx, token, { dex, solana }) {
     return h('section.panel.trade-panel', h('h2', 'Curve complete'), h('p.muted', `Curve trading has stopped. ${label} to open the DEX pool. ${solana ? 'You advance about 0.05 SOL of account rent; the unused part is refunded in the same transaction.' : 'You pay the network fee.'}`),
       h('button.btn.btn-primary.btn-block', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await ctx.run('graduate', { token: token.address }); } catch (e) { error.textContent = errorText(e); } } } }, label), error);
   }
-  let side = 'buy', revision = 0, timer;
+  let side = 'buy', revision = 0, timer, quoteReady = false, submitting = false;
   const amount = h('input.input#trade-amount', { type: 'number', min: '0', step: 'any', inputmode: 'decimal', placeholder: '0.00', required: true, 'aria-describedby': 'trade-balance' });
   const unit = h('span.affix');
   const balance = h('p.hint#trade-balance');
@@ -108,11 +120,16 @@ function tradePanel(ctx, token, { dex, solana }) {
   const out = h('strong', 'Enter an amount'), fee = h('strong', '—'), feeNote = h('p.hint');
   const error = h('p.error-text', { role: 'alert' });
   const slippage = h('select.select#trade-slippage', [['0.5', '0.5%'], ['1', '1%'], ['3', '3%'], ['5', '5%']].map(([v, l]) => h('option', { value: v, selected: v === '1' }, l)));
-  const submit = h('button.btn.btn-block.btn-lg', { type: 'submit', 'data-busy-disable': '' });
+  const submit = h('button.btn.btn-block.btn-lg', { type: 'submit', disabled:true });
+  const updateSubmit = () => { submit.disabled = !quoteReady || submitting; };
+  const remaining = !token.complete && !token.graduated && Number(token.remainingBuy) > 0;
+  const remainingHint = h('p.hint', remaining ? `About ${number(token.remainingBuy,8)} ${q} remains to complete the curve. Further trading continues after graduation into the locked pool.` : '');
+  const useRemaining = h('button.btn.btn-secondary.btn-sm.curve-limit-action', {type:'button',hidden:true,on:{click:()=>{amount.value=token.remainingBuy;quote();}}}, 'Use remaining amount');
   const tabs = h('div.segmented', { role: 'tablist', 'aria-label': 'Trade side' }, ['buy', 'sell'].map(s => h('button', { type: 'button', role: 'tab', 'data-side': s, 'aria-selected': String(s === side), on: { click: () => setSide(s) } }, s === 'buy' ? 'Buy' : 'Sell')));
   const quoteBalance = () => token.pair === 'native' ? `${number(ctx.state.nativeBalance ?? 0, 6)} ${q}` : token.quoteAddress && ctx.state.balanceSymbol && ctx.state.balanceSymbol !== q ? null : `${number(ctx.state.balance, 4)} ${ctx.state.balanceSymbol ?? q}`;
   function setSide(next) {
     side = next; revision++; clearTimeout(timer);
+    quoteReady = false; updateSubmit(); useRemaining.hidden = true; remainingHint.hidden = side !== 'buy';
     tabs.querySelectorAll('button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.side === side)));
     unit.textContent = side === 'buy' ? q : token.symbol;
     submit.textContent = `${side === 'buy' ? 'Buy' : 'Sell'} ${token.symbol}`;
@@ -136,29 +153,40 @@ function tradePanel(ctx, token, { dex, solana }) {
   }
   function quote() {
     const value = amount.value, rev = ++revision; clearTimeout(timer); error.textContent = '';
+    quoteReady = false; updateSubmit(); useRemaining.hidden = true;
     if (!(Number(value) > 0)) { out.textContent = 'Enter an amount'; fee.textContent = '—'; feeNote.textContent = ''; return; }
+    if (side === 'buy' && remaining && exceedsRemaining(value,token.remainingBuy) && !solana) {
+      out.textContent = 'Amount exceeds the curve limit'; fee.textContent = '—'; feeNote.textContent = '';
+      error.textContent = `About ${number(token.remainingBuy,8)} ${q} remains on the bonding curve. Use the remaining-amount button to fill the exact limit, then graduate to the locked pool.`;
+      useRemaining.hidden = false; return;
+    }
+    fee.textContent = '—'; feeNote.textContent = '';
     out.textContent = 'Getting quote…';
     timer = setTimeout(async () => {
       try {
         const result = ctx.mode === 'local' ? await ctx.api('quote', { token: token.address, side, amount: value }) : await ctx.wallet.getQuote({ token: token.address, side, amount: value });
         if (rev !== revision) return;
+        quoteReady = true; updateSubmit();
         out.textContent = `${number(result.out, side === 'buy' ? 2 : 6)} ${side === 'buy' ? token.symbol : q}`;
         fee.textContent = `${number(result.fee, 6)} ${result.feeSymbol ?? q}`;
         feeNote.textContent = result.antiSnipeActive ? `Launch protection is active: the fee is ${number(result.feeBps / 100, 2)}% for the first minute and falls to 1.25%. The amount above 1.25% is added to the token's locked liquidity.` : result.completesCurve ? `This purchase completes the curve. Only ${number(result.spend, 4)} ${q} will be charged.` : '';
-      } catch (e) { if (rev !== revision) return; out.textContent = 'Quote unavailable'; error.textContent = errorText(e); }
+      } catch (e) { if (rev !== revision) return; out.textContent = 'Quote unavailable'; fee.textContent = '—'; error.textContent = errorText(e); }
     }, 300);
   }
   amount.addEventListener('input', quote);
   const form = h('form', { class: 'stack', on: { submit: async event => {
     event.preventDefault(); error.textContent = '';
     if (!(Number(amount.value) > 0)) { error.textContent = 'Enter an amount greater than zero.'; amount.focus(); return; }
+    if (!quoteReady || submitting) { quote(); return; }
     if (ctx.mode === 'testnet' && !ctx.wallet.address) { error.textContent = 'Connect your wallet first.'; return; }
+    submitting = true; updateSubmit();
     try { await ctx.run(side, { token: token.address, amount: amount.value, slippage: slippage.value }); }
     catch (e) { error.textContent = errorText(e); }
+    finally { submitting = false; updateSubmit(); }
   } } },
     tabs,
     h('div.field', h('label', { for: 'trade-amount' }, side === 'buy' ? 'You pay' : 'You sell'), h('div.input-affix', amount, unit), balance),
-    shortcuts,
+    shortcuts, remainingHint, useRemaining,
     h('div.field', h('label', { for: 'trade-slippage' }, 'Slippage tolerance'), slippage, h('p.hint', 'The trade fails instead of filling at a worse price than this.')),
     h('div.quote', h('div', h('span', 'You receive (estimate)'), out), h('div', h('span', 'Trading fee included'), fee)),
     feeNote, error, submit);

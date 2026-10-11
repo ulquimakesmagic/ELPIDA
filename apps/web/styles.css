@@ -5,6 +5,7 @@
 @font-face { font-family: 'IBM Plex Sans'; src: url('/assets/fonts/ibm-plex-sans-500.woff2') format('woff2'); font-weight: 500; font-display: swap; }
 @font-face { font-family: 'IBM Plex Sans'; src: url('/assets/fonts/ibm-plex-sans-600.woff2') format('woff2'); font-weight: 600; font-display: swap; }
 
+.curve-limit-action[hidden] { display: none; }
 :root {
   color-scheme: dark;
   /* Black surfaces and a clear green accent, independent of the system theme. */
