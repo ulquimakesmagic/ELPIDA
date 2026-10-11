@@ -156,8 +156,8 @@ export class TestnetWallet {
     if (!this.dex || !this.deployment) { this.approvedQuotes = []; return; }
     const latest = await this.provider.getBlockNumber();
     this.approvedQuotes ??= []; let from = this.pairsScanned === undefined ? this.deployment.block : this.pairsScanned + 1;
-    for (; from <= latest; from += 2000) {
-      const to = Math.min(from + 1999, latest);
+    for (; from <= latest; from += 100) {
+      const to = Math.min(from + 99, latest);
       for (const event of await factory.queryFilter(factory.filters.QuoteApproved(), from, to)) {
         const address = event.args.asset, asset = new Contract(address, ['function symbol() view returns(string)', 'function name() view returns(string)', 'function decimals() view returns(uint8)', 'function pairKind() view returns(string)', 'function FAUCET_LIMIT() view returns(uint256)'], this.provider);
         const [symbol, name, decimals] = await Promise.all([asset.symbol(), asset.name(), asset.decimals()]);
@@ -305,6 +305,10 @@ export class TestnetWallet {
     // Live factory pricing and freshness are authoritative for creation.
     const pricing = { verified:true,price:this.price,launchFee: this.launchFee===undefined?'Unavailable':formatUnits(this.launchFee, 18), startFdv: this.nativeVirtualQuote===undefined?'Unavailable':formatUnits(this.nativeVirtualQuote * 15n / 16n, 18), symbol: native, matches:true, owner: treasury.toLowerCase() === this.address.toLowerCase() };
     return { wallet: this.address, balance, balanceSymbol: native, pairBalances, nativeBalance: balance, nativeSymbol: native, wrappedNativeBalance:this.dex?formatUnits(await new Contract(this.dex.weth,this.config.contracts.quote.abi,this.provider).balanceOf(this.address),18):undefined, tokens, activity: [], pricing, treasuryBalance: formatUnits(await this.provider.getBalance(treasury), 18) };
+  }
+  async publicTokens(){
+    const response=await fetch('/api/public/tokens?network='+encodeURIComponent(this.net.key));if(!response.ok)throw new Error('Public token discovery is unavailable.');
+    const entries=await response.json();return Promise.all(entries.map(async item=>({...item,metadata:this.deployment?await readMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,item.address))??item.metadata:item.metadata})));
   }
   async dexState(item,token,curve,pool,d){
     const market=new Contract(pool,this.config.contracts.dexPool.abi,this.provider),[slot,a,b,name,symbol,supply,sold,held,reward,cp,cc,locker,splitter]=await Promise.all([market.slot0(),market.token0(),market.token1(),token.name(),token.symbol(),token.totalSupply(),curve.sold(),token.balanceOf(this.address),curve.creatorRewardVault(),curve.protocolFees(),curve.creatorFees(),curve.locker(),curve.feeSplitter()]);

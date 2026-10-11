@@ -45,12 +45,12 @@ async function refresh({ preserveInput = false } = {}) {
   try{const latest=await api('prices');config.prices=latest;}catch{}
   if(mode==='local'){try{const c=await api('config');config.local=c.local;config.pricing=c.pricing;}catch{}}
   let next;
-  if (mode === 'testnet' && !wallet.address) next = { balance: '0', nativeBalance:'0', tokens: wallet.net.kind==='evm'?await api('public/tokens?network='+encodeURIComponent(currentChain())):[], activity: [], disconnected: true };
+  if (mode === 'testnet' && !wallet.address) next = { balance: '0', nativeBalance:'0', tokens: wallet.net.kind==='evm'?await wallet.publicTokens():[], activity: [], disconnected: true };
   else if(mode==='local')next=await api(`state?account=${account}`);
   else{try{next=await wallet.state();}catch(error){
     if(wallet.net.kind!=='evm'||!wallet.net.shared?.factory)throw error;
     api('client-error',{stage:'wallet-state',code:error.code??error.name??'UNKNOWN'}).catch(()=>{});
-    next={balance:'0',nativeBalance:'0',tokens:await api('public/tokens?network='+encodeURIComponent(currentChain())),activity:[],disconnected:true,walletReadError:true};
+    next={wallet:wallet.address,balance:'0',nativeBalance:'0',tokens:await wallet.publicTokens(),activity:[],disconnected:true,walletReadError:true};
   }}
   if (revision !== refreshRevision) return state;
   const reference=mode==='testnet'&&wallet.price?wallet.price:config.prices?.[currentChain()];
