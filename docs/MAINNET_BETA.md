@@ -5,7 +5,7 @@ How to run Elpida on Solana mainnet as a guarded beta. It uses real funds, and t
 ## What the beta gives you
 
 - **A mainnet build without test code.** `build/elpida_launchpad-mainnet.so` refuses the tUSDC and test faucet instructions. The deploy script checks this on-chain and stops if the wrong build is deployed.
-- **Invite-only launches.** The beta gate is on by default: only creators on the allowlist can launch. Anyone can trade. A separate beta admin key manages the list, and turning the gate off opens launches to everyone.
+- **Open launches, with an invite-only switch.** Launches are open by default while only the team is testing. The beta gate is created but off; add `--invite-only` at deploy time, or switch it on later, so that only creators on the allowlist can launch. Anyone can always trade, and a separate beta admin key manages the list.
 - **Real pairs:**
   - USDC (Circle mainnet USDC), from $5k to $50k FDV with a 10 USDC creation fee.
   - SOL, priced in dollars at the SOL price you give at deploy time (`--sol-usd`).
@@ -34,15 +34,15 @@ Run these from `elpida-v1`. The deployer keypair is created at `local-data/solan
    node scripts/solana-deploy.mjs --cluster mainnet --rpc <helius url> --treasury <vault or wallet> --sol-usd <price> --beta-admin <admin wallet>
    ```
 
-2. **Deploy.** Add `--yes`, and optionally `--allow <creator>` for each first creator if the beta admin is the deployer:
+2. **Deploy.** Add `--yes`. Launches stay open. Add `--invite-only` to start with the gate on, plus `--allow <creator>` for each first creator if the beta admin is the deployer:
 
    ```
    node scripts/solana-deploy.mjs --cluster mainnet --rpc <helius url> --treasury <vault> --sol-usd <price> --beta-admin <admin wallet> --yes
    ```
 
-   This deploys the mainnet build, confirms it rejects test instructions, creates the USDC and SOL pairs and turns on the beta gate. It writes `local-data/solana-mainnet.json`.
+   This deploys the mainnet build, confirms it rejects test instructions, creates the USDC and SOL pairs, and creates the beta gate (off unless `--invite-only`). It writes `local-data/solana-mainnet.json`.
 
-3. **Allowlist creators.** Sign with the beta admin key:
+3. **Allowlist creators (only matters while the gate is on).** Sign with the beta admin key:
 
    ```
    node scripts/solana-beta.mjs allow <creator wallet> --keypair <admin key file> --rpc <helius url>
@@ -72,7 +72,7 @@ The app then shows **Solana · mainnet beta**. It warns about real funds at laun
 |---|---|
 | See the gate, the admin and the allowlist | `solana-beta.mjs status` |
 | Add or remove a creator | `solana-beta.mjs allow <wallet>` / `revoke <wallet>` (beta admin key) |
-| Open launches to everyone, or change the admin | `solana-beta.mjs set-gate --admin <wallet> --enabled false --export`, then approve the printed instruction in Squads |
+| Turn invite-only on or off, or change the admin | `solana-beta.mjs set-gate --admin <wallet> --enabled true` (or `false`). Once the upgrade authority is a multisig, add `--export` and approve the printed instruction in Squads. |
 | Upgrade the program | `solana-beta.mjs prepare-upgrade --multisig <vault>`. This uploads the new mainnet build to a buffer owned by the vault; then in Squads go to Programs, choose Upgrade and use that buffer. |
 
 ## Not in this beta

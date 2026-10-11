@@ -8,7 +8,7 @@
 //   npm run solana:deploy -- --cluster mainnet --treasury <wallet or Squads vault> --sol-usd 150 \
 //     [--beta-admin <wallet>] [--allow <creator> ...] [--transfer-authority <Squads vault>] --yes
 // Mainnet uses build/elpida_launchpad-mainnet.so (no test instructions), real USDC and a SOL pair priced
-// at $5k → $50k FDV from --sol-usd. Launches start invite-only (beta gate) unless --open-launches.
+// at $5k → $50k FDV from --sol-usd. Launches are open; --invite-only turns on the beta gate (allowlist).
 //
 // The deployer keypair is created at local-data/solana-deployer.json on first run (never share it).
 // It pays rent (~5.8 SOL on devnet, mostly returned only if the program is closed) and becomes the
@@ -34,7 +34,7 @@ const { values: args } = parseArgs({ options: {
   'sol-usd': { type: 'string' }, // mainnet: SOL price in USD used to price the SOL pair at $5k → $50k FDV
   'beta-admin': { type: 'string' }, // wallet that manages the beta allowlist (default: the deployer)
   allow: { type: 'string', multiple: true, default: [] }, // creators allowed to launch during the beta
-  'open-launches': { type: 'boolean', default: false }, // disable the beta gate (anyone can launch)
+  'invite-only': { type: 'boolean', default: false }, // turn on the beta gate: only allowlisted creators can launch
   'transfer-authority': { type: 'string' }, // hand the upgrade authority to this address (Squads vault) at the end
   yes: { type: 'boolean', default: false }, // required on mainnet: confirms spending real SOL
 } });
@@ -74,7 +74,7 @@ if (mainnet && !args.yes) {
   const need = await deploymentCost(connection, elf.length);
   console.log(`\nMainnet deployment spends real SOL: about ${sol(need)} SOL (program rent, most of it locked while the program exists, plus a temporary upload buffer).`);
   console.log('Treasury:  ' + args.treasury);
-  console.log(`SOL pair:  priced at $${solUsd} per SOL. Launches: ${args['open-launches'] ? 'open to everyone' : 'invite-only beta'}.`);
+  console.log(`SOL pair:  priced at $${solUsd} per SOL. Launches: ${args['invite-only'] ? 'invite-only beta' : 'open to everyone'}.`);
   console.log('Run again with --yes to proceed.');
   process.exit(0);
 }
@@ -167,10 +167,11 @@ if (mainnet) {
   writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
   for (const p of pairs) console.log(`${p.symbol} pair config ${p.created ? 'created' : 'already exists'} (${p.kind}, mint ${p.mint}).`);
 }
-// Beta launch gate: on by default on mainnet; on test networks only when asked for.
+// Beta launch gate: created on mainnet (off unless --invite-only), so it can be switched on later and the
+// allowlist prepared in advance; on test networks only when asked for.
 let betaGate = null;
-if (mainnet || args['beta-admin'] || args['open-launches'] || args.allow.length) {
-  betaGate = await ensureBetaGate({ connection, payer, programId: programKeypair.publicKey, gateAuthority: args['beta-admin'] ?? payer.publicKey.toBase58(), enabled: !args['open-launches'], allow: args.allow, onProgress: message => console.log(message) });
+if (mainnet || args['beta-admin'] || args['invite-only'] || args.allow.length) {
+  betaGate = await ensureBetaGate({ connection, payer, programId: programKeypair.publicKey, gateAuthority: args['beta-admin'] ?? payer.publicKey.toBase58(), enabled: args['invite-only'], allow: args.allow, onProgress: message => console.log(message) });
   console.log(`Launches: ${betaGate.enabled ? 'invite-only (beta gate on)' : 'open to everyone'}; allowlist managed by ${betaGate.authority.toBase58()}.`);
 }
 const startStats = poolStats({ ...config, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 }, config.quoteDecimals);
