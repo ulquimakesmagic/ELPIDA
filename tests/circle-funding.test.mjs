@@ -86,5 +86,25 @@ test('uncertain transfers reuse their idempotency key and existing wallet sets r
   };
   const body = { action: 'send', asset: 'ETH', amount: '0.02', destination: '0x0000000000000000000000000000000000000002', requestId: randomUUID() };
   await assert.rejects(f.run(body), e => e.status === 502);
+  f.client.getWalletTokenBalance = async () => ({ data: { tokenBalances: [] } });
   await f.run(body); assert.deepEqual(keys, [body.requestId, body.requestId]);
+});
+test('unfunded wallets and whole-balance sends fail before submitting or recording a transfer', async () => {
+  const f = fixture(); await f.run({ action: 'prepare' });
+  const body = { action: 'send', asset: 'ETH', amount: '0.02', destination: '0x0000000000000000000000000000000000000002', requestId: randomUUID() };
+  await assert.rejects(f.run({ ...body, amount: '0.1' }), e => e.status === 400 && /entire balance/.test(e.message));
+  await assert.rejects(f.run({ ...body, asset: 'USDC', amount: '21' }), e => e.status === 400 && /balance is 20 USDC/.test(e.message));
+  const original = f.client.getWalletTokenBalance;
+  f.client.getWalletTokenBalance = async () => ({ data: { tokenBalances: [] } });
+  await assert.rejects(f.run(body), e => e.status === 400 && /no test ETH/.test(e.message));
+  assert.equal(f.calls.filter(c => c[0] === 'send').length, 0);
+  f.client.getWalletTokenBalance = original; await f.run({ ...body, amount: '0.03' });
+  assert.equal(f.calls.filter(c => c[0] === 'send').length, 1, 'rejected preflight did not lock the request details');
+});
+test('Circle SDK status errors are mapped without leaking API details', async () => {
+  const f = fixture(); await f.run({ action: 'prepare' });
+  for (const [status, expectedStatus, message] of [[429,429,/request limit/],[401,502,/denied access/],[400,502,/code 155101/]]) {
+    f.client.getWalletTokenBalance = async () => { throw Object.assign(new Error(env.CIRCLE_API_KEY), { status, code: 155101 }); };
+    await assert.rejects(f.run({ action: 'balance' }), e => e.status === expectedStatus && message.test(e.message) && !e.message.includes(env.CIRCLE_API_KEY));
+  }
 });

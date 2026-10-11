@@ -86,6 +86,18 @@ export function createCircleFunding({ env = process.env, path = null, clientFact
     const previous = store.transfers[body.requestId];
     if (previous && previous.fingerprint !== fingerprint) reject(409, 'This request ID belongs to different transfer details.');
     if (previous?.id) return { transaction: { id: previous.id, state: 'SUBMITTED' } };
+    // Only preflight a new request. An uncertain request must retain its key and be retried unchanged,
+    // even if its original transfer has already reduced the current balance.
+    if (!previous) {
+      const balances = (await client.getWalletTokenBalance({ id: w.id, includeAll: true, pageSize: 50 })).data?.tokenBalances ?? [];
+      const native = balances.find(b => b.token?.blockchain === net.blockchain && b.token.isNative);
+      const usdc = balances.find(b => b.token?.blockchain === net.blockchain && b.token.tokenAddress?.toLowerCase() === net.usdc.toLowerCase());
+      const nativeAmount = parseUnits(native?.amount ?? '0', 18);
+      if (!nativeAmount) reject(400, 'The Circle wallet has no test ETH for gas. Click Request test ETH + USDC, then refresh Circle balances until funds arrive.');
+      const available = body.asset === 'ETH' ? nativeAmount : parseUnits(usdc?.amount ?? '0', 6);
+      if (amount > available) reject(400, `Circle wallet balance is ${body.asset === 'ETH' ? native.amount : usdc?.amount ?? '0'} ${body.asset}. Request test funds first or lower the amount.`);
+      if (body.asset === 'ETH' && amount === nativeAmount) reject(400, 'Leave some test ETH in the Circle wallet for transfer gas. Lower the amount instead of sending its entire balance.');
+    }
     store.transfers[body.requestId] = { fingerprint, network: body.network }; await save();
     const result = await client.createTransaction({ walletAddress: w.address, blockchain: net.blockchain, tokenAddress: body.asset === 'USDC' ? net.usdc : '', destinationAddress: destination, amount: [body.amount], fee: { type: 'level', config: { feeLevel: 'MEDIUM' } }, idempotencyKey: body.requestId });
     if (!result.data?.id) reject(502, 'Transfer response is uncertain. Retry with the same request ID.');
@@ -102,8 +114,11 @@ export function createCircleFunding({ env = process.env, path = null, clientFact
     const task = queue.then(() => perform(body)); queue = task.catch(() => {});
     try { return await task; } catch (error) {
       if (error instanceof FundingError) throw error;
-      const statusCode = error.response?.status;
-      reject(statusCode === 429 ? 429 : 502, statusCode === 429 ? 'Circle faucet limit reached. Wait before requesting again.' : 'Circle could not complete this request. Check server credentials and wallet balances. For an uncertain transfer, retry with the same request ID.');
+      const statusCode = error.status ?? error.response?.status;
+      if (statusCode === 429) reject(429, 'Circle request limit reached. Wait before requesting again.');
+      if ([401, 403].includes(statusCode)) reject(502, 'Circle denied access. Check the test API key, its Wallets permissions and IP restrictions on the server.');
+      if (statusCode === 400) reject(502, `Circle rejected the request${Number.isInteger(error.code) ? ' (code ' + error.code + ')' : ''}. Check Circle Console for details. If this was a transfer, keep the same request ID when retrying.`);
+      reject(502, 'Circle could not complete this request. Check server credentials and wallet balances. For an uncertain transfer, retry with the same request ID.');
     }
   }
   return { status, execute };

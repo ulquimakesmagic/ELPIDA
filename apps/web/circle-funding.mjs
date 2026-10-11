@@ -18,7 +18,7 @@ export function circleFundingPanel({ config, csrf, connected }) {
   const buttons = []; let prepared = false, pendingTransfer = null, transactionId = null;
   async function request(body) {
     const response = await fetch('/api/circle/funding', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': csrf, Authorization: 'Bearer ' + code.value }, body: JSON.stringify({ network: network.value, ...body }) });
-    const result = await response.json(); if (!response.ok) throw new Error(result.error ?? 'Circle request failed.'); return result;
+    const result = await response.json(); if (!response.ok) { const error = new Error(result.error ?? 'Circle request failed.'); error.status = response.status; throw error; } return result;
   }
   function button(label, action) {
     const b = h('button.btn.btn-secondary', { type: 'button', on: { click: async () => {
@@ -33,7 +33,7 @@ export function circleFundingPanel({ config, csrf, connected }) {
   });
   const drip = button('Request test ETH + USDC', async () => { if (!prepared) throw new Error('Prepare the Circle wallet first.'); output.textContent = (await request({ action: 'drip' })).message; });
   const balance = button('Refresh Circle balances', async () => {
-    const result = await request({ action: 'balance' }); output.textContent = result.balances.map(b => `${b.amount} ${b.symbol}`).join(' · ') || 'No settled test funds yet. Try again shortly.';
+    const result = await request({ action: 'balance' }); output.textContent = result.balances.map(b => `${b.amount} ${b.symbol}`).join(' · ') || '0 ETH · 0 USDC. Click Request test ETH + USDC, then refresh after the faucet transfers settle.';
   });
   const send = button('Send test funds to this address', async () => {
     if (!prepared) throw new Error('Prepare the Circle wallet first.');
@@ -41,7 +41,10 @@ export function circleFundingPanel({ config, csrf, connected }) {
     const details = { network: network.value, asset: asset.value, amount: amount.value.trim(), destination: recipient.value.trim() };
     if (pendingTransfer && JSON.stringify(details) !== JSON.stringify(pendingTransfer.details)) throw new Error('Check the previous transfer status before changing its details. Retry unchanged details if its response was uncertain.');
     pendingTransfer ??= { details, requestId: crypto.randomUUID() };
-    const result = await request({ action: 'send', ...details, requestId: pendingTransfer.requestId }); transactionId = result.transaction.id;
+    let result;
+    try { result = await request({ action: 'send', ...details, requestId: pendingTransfer.requestId }); }
+    catch (error) { if (error.status === 400) pendingTransfer = null; throw error; }
+    transactionId = result.transaction.id;
     output.textContent = `Transfer ${result.transaction.state}: ${transactionId}. Check status before sending again.`;
   });
   const check = button('Check transfer status', async () => {
