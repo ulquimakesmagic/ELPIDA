@@ -64,3 +64,5 @@ For the dependency-free reference-math checks alone, run `npm run test:math`. Fo
 Run `npm run dev` from this repository (in Windows PowerShell use `npm.cmd run dev`, or double-click `start-elpida.cmd` in the ELPIDA folder) and open http://localhost:3000. Local demo accounts can launch, buy, sell and distribute creator fees without a wallet. The network menu also connects your browser wallet to Base Sepolia, Ethereum Sepolia, BNB Chain Testnet or Robinhood Chain Testnet to deploy and use a testnet launchpad, or Phantom/Solflare to Solana Devnet after a one-time `npm run solana:deploy`. See [localhost and testnet instructions](docs/LOCALHOST_AND_TESTNET.md) for faucets and setup.
 
 Do not use real assets with this code.
+
+For official test USDC and a protected Circle test-wallet helper that supplies test ETH and USDC to your browser wallet, see [Circle test funding setup](docs/CIRCLE_TEST_FUNDING.md).

@@ -1,4 +1,5 @@
 import { PriceKeeper } from './price-keeper.mjs';
+import { createCircleFunding } from './circle-test-wallets.mjs';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -17,6 +18,7 @@ const resources = new Map([['/', ['index.html', 'text/html']], ['/launch', ['ind
 // Static design assets (brand, fonts, icon sprite): only these extensions, only inside apps/web/assets.
 const assetRoot = fileURLToPath(new URL('../web/assets/', import.meta.url));
 resources.set('/metadata-cache.mjs', ['metadata-cache.mjs', 'text/javascript']);
+resources.set('/circle-funding.mjs', ['circle-funding.mjs', 'text/javascript']);
 const assetTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8' };
 const vendorFiles = new Map([
   ['/vendor/ethers.js', ethersFile],
@@ -74,8 +76,9 @@ export function createRpcProxy(target, { perSecond = 15, burst = 60 } = {}) {
   };
 }
 
-export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1' } = {}) {
+export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1', circleFunding = null } = {}) {
   const dataPrefix=port===3000||process.env.RAILWAY_ENVIRONMENT_NAME?'':`preview-${port}-`;
+  const circle = circleFunding ?? createCircleFunding({ path: port === 0 ? null : fileURLToPath(new URL('../../local-data/' + dataPrefix + 'circle-test-wallets.json', import.meta.url)) });
   const metadataStore=new MetadataStore({path:port===0?null:fileURLToPath(new URL('../../local-data/'+dataPrefix+'ipfs-content',import.meta.url))});
   const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:fileURLToPath(new URL('../../local-data/'+dataPrefix+'token-metadata.json',import.meta.url)), dex:port!==0, indexerPath:port===0?":memory:":fileURLToPath(new URL('../../local-data/'+dataPrefix+'curve-dex-usd-v9-index.sqlite',import.meta.url)) });
   const priceKeeper=new PriceKeeper();
@@ -105,7 +108,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         }
         if (url.pathname === '/api/rewards') return send(200,await runtime.rewards.dashboard());
         if(url.pathname==='/api/prices')return send(200,priceSnapshot());
-        if (url.pathname === '/api/config') return send(200, { ...runtime.config, prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), csrf });
+        if (url.pathname === '/api/config') return send(200, { ...runtime.config, circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), csrf });
         if(url.pathname==='/api/metadata/resolve')return send(200,await metadataStore.resolve(url.searchParams.get('uri')));
         if(url.pathname.startsWith('/api/content/')){const record=metadataStore.get(url.pathname.slice('/api/content/'.length));if(!record)return send(404,{error:'Content not found.'});res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}
         if (url.pathname === '/api/indexer/status') { await runtime.indexer.sync(); return send(200,runtime.indexer.status()); }
@@ -136,6 +139,10 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       try { body = JSON.parse(Buffer.concat(chunks).toString()); } catch { return send(400, { error: 'Invalid request.' }); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) return send(400, { error: 'Invalid request.' });
       const action = url.pathname.slice('/api/'.length);
+      if (action === 'circle/funding') {
+        try { return send(200, await circle.execute(req.headers.authorization, body)); }
+        catch (error) { return send(error.status ?? 502, { error: error.message }); }
+      }
       if(action==='metadata/publish')return send(200,await metadataStore.publish(body,true));
       if(action==='reward-x-start'){const result=await runtime.transact(action,body);res.setHeader('Set-Cookie',`elpida_x=${result.cookie}; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=600${cookieSecurity}`);return send(200,{url:result.url});}
       if (action === 'quote') return send(200, await runtime.getQuote(body));

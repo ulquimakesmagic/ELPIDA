@@ -7,6 +7,7 @@ import { $, $$, h, icon, short, number, compact, avatar, bar, pricing, fmtPrice,
 import { renderLaunch } from './launch-flow.mjs';
 import { renderToken } from './token-page.mjs';
 import { renderRewards } from './rewards-view.mjs';
+import { circleFundingPanel } from './circle-funding.mjs';
 
 let config, evmWallet, solWallet, wallet;
 let mode = 'local', account = '0', state = null, busy = false, refreshRevision = 0, progressHook = null;
@@ -313,7 +314,7 @@ function openTools() {
           h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('setup-pairs', {}); openTools(); } catch (e) { fail(e); } } } }, 'Add test xStock and token pairs')) : null));
     } else funds.append(h('p.small.muted', wallet.deployment ? `Solana program: ${short(wallet.deployment.programId)}.${state?.pricing ? ` Creation fee ${number(state.pricing.launchFee, 6)} SOL. New USD-priced launches are pending a verified-oracle program upgrade.` : ''}` : 'The Solana program is not deployed. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.'));
   }
-  body.replaceChildren(envSection, funds, error);
+  body.replaceChildren(envSection, funds, circleFundingPanel({ config: config.circle, csrf: config.csrf, connected: mode === 'testnet' ? { address: wallet.address, network: wallet.net.key } : null }), error);
   $('#tools-intro').textContent = local ? 'You are using the local simulation. Choose a network when you create a token, or switch here.' : `You are connected to ${wallet.net.name}.`;
   updateChrome();
   if (!$('#tools-dialog').open) $('#tools-dialog').showModal();

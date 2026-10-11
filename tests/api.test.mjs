@@ -25,7 +25,11 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.match(page.headers.get('content-security-policy'), /frame-ancestors 'none'/);
     assert.equal((await request('withdraw', {}, { 'X-Elpida-Token': 'wrong' })).status, 403);
     assert.equal((await request('withdraw', {}, { Origin: 'https://foreign.example' })).status, 403);
-    assert.equal((await request('faucet', {})).status, 404, 'no test-dollar faucet: pricing is native only');
+    assert.equal((await request('faucet', {})).status, 404, 'legacy faucet endpoint remains absent');
+    assert.equal((await fetch(`${base}/circle-funding.mjs`)).status, 200);
+    assert.deepEqual(config.circle.networks.map(n => n.key), ['base-sepolia', 'ethereum-sepolia']);
+    assert.equal((await request('circle/funding', { action: 'prepare', network: 'base-sepolia' }, { 'X-Elpida-Token': 'wrong' })).status, 403);
+    assert.ok([401, 503].includes((await request('circle/funding', { action: 'prepare', network: 'base-sepolia' })).status), 'Circle funding requires operator setup and authorization');
     assert.equal(config.local.launchFee, '0.004');
     assert.ok(config.oracles['base-sepolia'].available, 'verified oracle configuration is served to the browser');
     // Fetch normalizes Host, so send this header with the raw HTTP client.
