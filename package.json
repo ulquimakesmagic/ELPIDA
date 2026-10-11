@@ -9,6 +9,7 @@
     "test:math": "node --test tests/economics.test.mjs",
     "test:evm": "node --test tests/evm.test.mjs tests/locked-pool.test.mjs tests/curve-pairs.test.mjs tests/beta-curve.test.mjs tests/post-migration-fees.test.mjs",
     "compile": "node scripts/compile.mjs",
+    "circle:setup": "node scripts/circle-register-entity.mjs",
     "dev": "node --env-file-if-exists=.env apps/api/server.mjs",
     "test:ui": "node --test tests/api.test.mjs",
     "test:solana": "node --test tests/solana.test.mjs",

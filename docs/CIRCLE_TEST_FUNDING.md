@@ -4,6 +4,23 @@ Open **Network and test funds → Circle test funding**. The public USDC faucet 
 
 ## Enable the protected helper
 
+### Windows terminal setup
+
+The repository is `C:\Users\user\Desktop\OneForAll\ELPIDA\elpida-v1` (one level below `ELPIDA`). JavaScript from Circle's documentation must be saved in a script and run with Node; PowerShell cannot execute JavaScript pasted directly into its prompt. The SDK and module configuration are already installed in this repository. Do not reset Git or reinstall them to set up Circle.
+
+Put your test key into the ignored `elpida-v1/.env` as `CIRCLE_API_KEY=...`, then run:
+
+```powershell
+Set-Location 'C:\Users\user\Desktop\OneForAll\ELPIDA\elpida-v1'
+npm.cmd run circle:setup
+```
+
+This generates and registers the entity secret, saves it in `.env`, and saves recovery files under the ignored `local-data/circle-entity-setup/recovery/`. It preserves an existing configured entity secret and never prints secret values. A pending secret is saved before registration so an uncertain response cannot lose it. If you have already registered an entity secret in Circle Console, use that secret in `.env` instead of running registration again. After failure, check Circle Console before repeating the command; never replace a pending secret after an uncertain registration response.
+
+Copy the three private values from `.env` into Railway Variables yourself. Keep a separate secure copy of the recovery files. `npm.cmd run circle:setup -- --check` validates the prerequisites without creating or registering a secret.
+
+### Circle account and deployment
+
 1. In https://console.circle.com/, create a **test** API key and generate/register an entity secret following https://developers.circle.com/wallets/dev-controlled/create-your-first-wallet. Keep the entity-secret recovery file securely outside the repository.
 2. Put these variables in the ignored project `.env` for localhost, or Railway service **Variables** for the hosted app. Never paste credentials into chat, browser fields or Git:
    - `CIRCLE_API_KEY`: Circle test key beginning `TEST_API_KEY:`.
