@@ -107,4 +107,6 @@ test('Circle SDK status errors are mapped without leaking API details', async ()
     f.client.getWalletTokenBalance = async () => { throw Object.assign(new Error(env.CIRCLE_API_KEY), { status, code: 155101 }); };
     await assert.rejects(f.run({ action: 'balance' }), e => e.status === expectedStatus && message.test(e.message) && !e.message.includes(env.CIRCLE_API_KEY));
   }
+  f.client.requestTestnetTokens = async () => { throw Object.assign(new Error(env.CIRCLE_API_KEY), { status: 403, code: 3 }); };
+  await assert.rejects(f.run({ action: 'drip' }), e => e.status === 502 && /Console faucet with wallet ID wallet/.test(e.message) && !e.message.includes(env.CIRCLE_API_KEY));
 });

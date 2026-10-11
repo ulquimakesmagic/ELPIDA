@@ -116,7 +116,7 @@ export function createCircleFunding({ env = process.env, path = null, clientFact
       if (error instanceof FundingError) throw error;
       const statusCode = error.status ?? error.response?.status;
       if (statusCode === 429) reject(429, 'Circle request limit reached. Wait before requesting again.');
-      if ([401, 403].includes(statusCode)) reject(502, 'Circle denied access. Check the test API key, its Wallets permissions and IP restrictions on the server.');
+      if ([401, 403].includes(statusCode)) reject(502, body.action === 'drip' ? `Circle denied faucet API access. Use the Circle Console faucet with wallet ID ${store?.wallets?.[body.network] ?? '(prepare a wallet first)'}, then refresh balances here.` : 'Circle denied access. Check the test API key, its Wallets permissions and IP restrictions on the server.');
       if (statusCode === 400) reject(502, `Circle rejected the request${Number.isInteger(error.code) ? ' (code ' + error.code + ')' : ''}. Check Circle Console for details. If this was a transfer, keep the same request ID when retrying.`);
       reject(502, 'Circle could not complete this request. Check server credentials and wallet balances. For an uncertain transfer, retry with the same request ID.');
     }

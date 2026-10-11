@@ -14,6 +14,7 @@ export function circleFundingPanel({ config, csrf, connected }) {
   const recipient = h('input.input', { value: connected?.address ?? '', placeholder: '0x…', spellcheck: false });
   const asset = h('select.select', h('option', { value: 'USDC' }, 'Test USDC'), h('option', { value: 'ETH' }, 'Test ETH'));
   const amount = h('input.input', { value: '10', inputMode: 'decimal' });
+  const identity = h('div.stack');
   const output = h('div.stack', { role: 'status', 'aria-live': 'polite' });
   const buttons = []; let prepared = false, pendingTransfer = null, transactionId = null;
   async function request(body) {
@@ -29,7 +30,8 @@ export function circleFundingPanel({ config, csrf, connected }) {
   }
   const prepare = button('Prepare Circle test wallet', async () => {
     const result = await request({ action: 'prepare' }); prepared = true;
-    output.replaceChildren(h('p.small', `Circle wallet: ${result.wallet.address}`), h('p.hint', `Wallet set: ${result.walletSetId}. Save this as CIRCLE_WALLET_SET_ID on Railway.`));
+    identity.replaceChildren(h('p.small', `Circle wallet: ${result.wallet.address}`), h('p.small', `Wallet ID: ${result.wallet.id}`), h('p.hint', `Wallet set: ${result.walletSetId}. Save this as CIRCLE_WALLET_SET_ID on Railway.`));
+    output.textContent = 'Circle wallet ready. Request test funds, then refresh balances before sending.';
   });
   const drip = button('Request test ETH + USDC', async () => { if (!prepared) throw new Error('Prepare the Circle wallet first.'); output.textContent = (await request({ action: 'drip' })).message; });
   const balance = button('Refresh Circle balances', async () => {
@@ -53,11 +55,13 @@ export function circleFundingPanel({ config, csrf, connected }) {
     output.textContent = `Transfer ${tx.state}${tx.hash ? ': ' + tx.hash : ''}.`;
     if (['COMPLETE', 'FAILED', 'CANCELLED', 'DENIED'].includes(tx.state)) pendingTransfer = null;
   });
-  network.addEventListener('change', () => { prepared = false; output.textContent = 'Prepare the wallet for the selected network.'; });
-  asset.addEventListener('change', () => { amount.value = asset.value === 'ETH' ? '0.02' : '10'; });
+  network.addEventListener('change', () => { prepared = false; identity.replaceChildren(); output.textContent = 'Prepare the wallet for the selected network.'; });
+  asset.addEventListener('change', () => { amount.value = asset.value === 'ETH' ? '0.008' : '10'; });
   section.append(h('p.hint', 'Operator-only helper. Enter the Elpida funding access code, never your Circle API key or entity secret. Circle controls this test wallet; send its funds to your connected wallet to sign launches.'),
     field({ label: 'Circle test network', control: network }), field({ label: 'Funding access code', control: code }),
-    h('div.wallet-choices', prepare, drip, balance),
+    h('div.wallet-choices', prepare, drip, balance), identity,
+    h('a.link-button', { href: 'https://console.circle.com/faucet/circle-wallet', target: '_blank', rel: 'noopener noreferrer' }, 'Open Circle Console faucet'),
+    h('p.hint', 'If the faucet API is denied, paste the Wallet ID above into Circle Console. Its current offer is 20 USDC and 0.01 test ETH; complete any human verification there. A transfer must leave ETH for gas.'),
     field({ label: 'Destination wallet address', control: recipient, hint: 'Confirm the address and network before sending. Maximum 0.1 test ETH or 100 test USDC per transfer.' }),
     field({ label: 'Test asset', control: asset }), field({ label: 'Amount to send', control: amount }),
     h('div.wallet-choices', send, check), output);
