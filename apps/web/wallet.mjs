@@ -366,6 +366,7 @@ export class TestnetWallet {
       const out = await factory.VIRTUAL_TOKEN() * net / (virtualQuote + net);
       // Native fees include a refundable 1% cap; USDC approvals are exactly ten units.
       const inUsdc=body.feeCurrency==='usdc';
+      if(inUsdc && (await factory.treasury()).toLowerCase()===this.address.toLowerCase())throw new Error('This wallet is also the launchpad fee recipient. The contract cannot verify a USDC fee paid to the same wallet. Choose native payment for this test, or launch from a different funded wallet to test USDC fee collection. No launch was submitted.');
       const fee = await factory.launchFee(), value = (inUsdc?0n:(fee*101n+99n)/100n) + (nativePair ? firstBuy : 0n), native = this.net.nativeCurrency.symbol;
       if (await this.provider.getBalance(this.address) <= value) throw new Error(`You need more than ${formatUnits(value, 18)} ${native} for the creation fee${nativePair ? ' and first buy' : ''} plus network fees.`);
       const pairToken = paired ? new Contract(asset.address, this.config.contracts.quote.abi, this.signer) : null;
