@@ -9,7 +9,7 @@ import {deployLocalV3,v3Artifacts,baseSepoliaDex} from '../../packages/core/unis
 import { normalizeMetadata } from '../web/metadata.mjs';
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from 'node:fs';
 import { dirname } from 'node:path';
-import { loadPricing, evmPricing } from '../../packages/core/pricing.mjs';
+import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 export async function createRuntime({seed = true, dex = false, metadataStore = null, metadataPath = null, indexerPath = ":memory:"} = {}) {
   const compiled = compileContracts({includeMocks:true});
   const artifact = name => compiled[`contracts/evm/src/${name}.sol`][name];
@@ -17,15 +17,27 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   const provider = new BrowserProvider(connection.provider,undefined,{cacheTimeout:-1}); provider.pollingInterval = 10;
   const signers = await Promise.all([0,1,2,3].map(i => provider.getSigner(i)));
   const addresses = await Promise.all(signers.map(s => s.getAddress()));
-  // Generic ERC-20 ABI for paired assets (the mock is never deployed: pricing is native only).
+  // Local-only, labelled mock USDC fee currency; public networks use the verified address registry.
   const mock = compiled['tests/fixtures/MockUSDC.sol'].MockUSDC;
-  const pricing = loadPricing(), local = evmPricing('local',pricing);
+  const local={launchFee:'0.004',startFdv:'2'};
   const v3=dex?await deployLocalV3(signers[0],compiled['tests/fixtures/LocalWrappedETH.sol'].LocalWrappedETH):null;
   let adapter;
   // Native pairs graduate through an adapter whose ERC-20 side is WETH; the native path wraps on migration.
   if(dex){const a=artifact('ElpidaV3MigrationAdapter');adapter=await new ContractFactory(a.abi,a.evm.bytecode.object,signers[0]).deploy(v3.manager.target,v3.weth.target,10000);await adapter.waitForDeployment();}
   const fa = artifact(dex?'ElpidaDexFactory':'ElpidaBetaFactory');
-  const factory = await new ContractFactory(fa.abi,fa.evm.bytecode.object,signers[0]).deploy(addresses[2],local.launchFeeWei,local.virtualQuoteWei,...(dex?[adapter.target]:[])); await factory.waitForDeployment();
+  const factory = await new ContractFactory(fa.abi,fa.evm.bytecode.object,signers[0]).deploy(addresses[2],0n,1n,...(dex?[adapter.target]:[])); await factory.waitForDeployment();
+  const feedArtifact=compiled['tests/fixtures/MockUsdFeed.sol'].MockUsdFeed;
+  const usdFeed=await new ContractFactory(feedArtifact.abi,feedArtifact.evm.bytecode.object,signers[0]).deploy(2500n*10n**8n);await usdFeed.waitForDeployment();
+  const feeCoin=await new ContractFactory(mock.abi,mock.evm.bytecode.object,signers[0]).deploy();await feeCoin.waitForDeployment();
+  for(const a of addresses.slice(0,2))await(await feeCoin.mint(a,1000_000_000n)).wait();
+  await(await factory.connect(signers[2]).configureUsdPricing(usdFeed.target,86400,feeCoin.target)).wait();
+  async function updatePrice(usd){
+    if(!Number.isFinite(usd)||usd<=0)throw new Error('Invalid reference price');
+    const b=await provider.getBlock('latest'),r=await usdFeed.roundId()+1n;
+    await(await usdFeed.set(BigInt(Math.round(usd*1e8)),b.timestamp,r,r)).wait();
+    config.local.launchFee=formatUnits(await factory.launchFee(),18);config.pricing.local={launchFee:config.local.launchFee,startFdv:formatUnits(await factory.nativeVirtualQuote()*15n/16n,18)};
+    config.local.price={symbol:'ETH',usd,updatedAt:b.timestamp,source:'Simulated on-chain oracle',status:'fresh',maxAge:86400,simulation:true};
+  }
   const tokens = [], activity = [];
   const metadata = new Map(metadataPath && existsSync(metadataPath) ? Object.entries(JSON.parse(readFileSync(metadataPath,'utf8'))) : []);
   const listings = () => indexer.listings().map(r => ({...r,metadata:metadata.get(r.hash) ?? {}}));
@@ -38,7 +50,7 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   let queue = Promise.resolve();
   const config = {
     rewardAutomation:{localEnabled:true,publicEnabled:false},
-    model:dex?'curve-dex-v7':'curve-beta-v6',dex:dex?v3.config:null,publicDex:baseSepoliaDex,pricing:pricing.evm,local:{chainId:31337,name:'Local devnet',nativeSymbol:'ETH',factory:await factory.getAddress(),treasury:addresses[2],launchFee:local.launchFee},
+    oracles:usdOracles(),model:dex?'curve-dex-v9':'curve-beta-v8',dex:dex?v3.config:null,publicDex:baseSepoliaDex,pricing:{local:{launchFee:local.launchFee,startFdv:local.startFdv}},local:{chainId:31337,name:'Local devnet',nativeSymbol:'ETH',factory:await factory.getAddress(),treasury:addresses[2],launchFee:local.launchFee,feeUsdc:feeCoin.target,price:{usd:2500,updatedAt:(await provider.getBlock('latest')).timestamp,source:'Simulated on-chain oracle',status:'fresh',maxAge:86400,simulation:true}},
     accounts:addresses.slice(0,2).map((address,i) => ({id:String(i),address,name:i?'Trader':'Creator'})),testnets:evmTestnets,
     plannedTestnets:testnets.filter(n => !n.enabled).map(({key,name,note}) => ({key,name,note})),
     contracts:{...(dex?{dexPool:{abi:v3Artifacts.pool.abi},router:{abi:v3Artifacts.router.abi},quoter:{abi:v3Artifacts.quoter.abi},locker:{abi:artifact('ElpidaV3FeeLocker').abi},splitter:{abi:artifact('ElpidaFeeSplitter').abi}}:{}),dexFactory:{abi:artifact('ElpidaDexFactory').abi,bytecode:'0x'+artifact('ElpidaDexFactory').evm.bytecode.object},dexCurve:{abi:artifact('ElpidaDexCurve').abi},adapter:{abi:artifact('ElpidaV3MigrationAdapter').abi,bytecode:'0x'+artifact('ElpidaV3MigrationAdapter').evm.bytecode.object},legacyFactory:{abi:artifact('ElpidaBetaFactory').abi,bytecode:'0x'+artifact('ElpidaBetaFactory').evm.bytecode.object},legacyCurve:{abi:artifact('ElpidaBetaCurve').abi},factory:{abi:fa.abi,bytecode:`0x${fa.evm.bytecode.object}`},token:{abi:artifact('ElpidaToken').abi},curve:{abi:artifact(dex?'ElpidaDexCurve':'ElpidaBetaCurve').abi},pool:{abi:artifact('ElpidaLockedPool').abi},quote:{abi:mock.abi},testAsset:{abi:compiled['contracts/evm/testnet/ElpidaTestAsset.sol'].ElpidaTestAsset.abi,bytecode:'0x'+compiled['contracts/evm/testnet/ElpidaTestAsset.sol'].ElpidaTestAsset.evm.bytecode.object}},
@@ -59,6 +71,7 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
     const s = signerFor(body.account ?? '0'), owner = await s.getAddress();
     if(action==='reward-stock-faucet'){const price=await rewards.stock.PRICE();const tx=await mined(rewards.stock.connect(s).buy(price,parseUnits('1',18),{value:price}));return {hash:tx.hash,message:`Received 1 simulated TEST-STOCK for ${formatUnits(price,18)} local ETH. This is not an issued xStock.`};}
     if (action === 'launch') {
+      if(!['native','usdc'].includes(body.feeCurrency??'native'))throw new Error('Choose native currency or USDC for the launch fee.');
       const details = normalizeMetadata(body);
       const name = String(body.name ?? '').trim(), symbol = String(body.symbol ?? '').trim().toUpperCase();
       if (!name || name.length > 40 || !/^[A-Z0-9]{1,10}$/.test(symbol)) throw new Error('Check the token name and symbol.');
@@ -77,13 +90,14 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
           // Same starting FDV as a native launch, expressed in the paired asset (price in ETH per unit).
           let price;if(selectedAsset.kind==='simulation')price=Number(formatUnits(await rewards.stock.PRICE(),18));else {price=Number(indexer.snapshot(pairAsset)?.spotPrice);}
           if(!Number.isFinite(price)||price<=0)throw new Error('The quote asset cannot be priced.');
-          const quoteWhole=Number(local.startFdv)/price*Number(formatUnits(await factory.VIRTUAL_TOKEN(),18))/1e9;
+          const quoteWhole=Number(formatUnits(await factory.nativeVirtualQuote(),18))/price;
           pairVirtual=parseUnits(quoteWhole.toFixed(12),18);await mined(factory.connect(signers[2]).approveQuote(pairAsset,pairVirtual,customAdapter.target));
         }else pairVirtual=existing.virtualQuote;
       }
       const buy = amount(body.firstBuy,pair === 'native' ? 18 : pairDecimals);
-      const fee = await factory.launchFee();
-      if(await provider.getBalance(owner)<fee+(pair==='native'?buy:0n))throw new Error('Not enough ETH for the creation fee and first buy.');
+      const fee = await factory.launchFee(),inUsdc=body.feeCurrency==='usdc';
+      if(inUsdc)await mined(feeCoin.connect(s).approve(factory.target,10_000_000n));
+      if(await provider.getBalance(owner)<(inUsdc?0n:fee)+(pair==='native'?buy:0n))throw new Error('Not enough ETH for the creation fee and first buy.');
       if(paired&&await new Contract(pairAsset,config.contracts.quote.abi,provider).balanceOf(owner)<buy)throw new Error(`Not enough ${pairSymbol} for the first buy. Buy the paired token first, or use the simulated-stock test-funds button.`);
       const prepared = body.rewardPolicy ? await rewards.prepare(body.rewardPolicy,body.reward||owner,pair,pair==='native'?ZeroAddress:pairAsset) : null;
       const reward = prepared?.vault.target || body.reward || owner;
@@ -92,8 +106,7 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
       const net = buy - buy*125n/10000n, out = await factory.VIRTUAL_TOKEN()*net/(v+net);
       const published=dex&&metadataStore&&Object.values(details).some(Boolean)?await metadataStore.publish({name,symbol,...details}):null;
       if(paired)await mined(new Contract(pairAsset,config.contracts.quote.abi,s).approve(factory.target,buy));
-      const args=[name,symbol,buy,out*9950n/10000n,reward];
-      const tx = paired?(published?await factory.connect(s).launchPairedWithMetadata(name,symbol,pairAsset,buy,out*9950n/10000n,reward,published.uri,{value:fee}):await factory.connect(s).launchPaired(name,symbol,pairAsset,buy,out*9950n/10000n,reward,{value:fee})):published?await factory.connect(s).launchWithMetadata(...args,published.uri,{value:fee+buy}):await factory.connect(s).launch(...args,{value:fee+buy});
+      const tx = await factory.connect(s).launchWithPayment(name,symbol,pairAsset,buy,out*9950n/10000n,reward,published?.uri??'',inUsdc,{value:(inUsdc?0n:fee)+(paired?0n:buy)});
       const receipt = await tx.wait();
       const event = receipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(l => l?.name === 'Launched');
       const r = {address:event.args.token.toLowerCase(),curve:event.args.curve,creator:owner,reward,name,symbol,pair,quoteAddress:pair==='native'?ZeroAddress:pairAsset,quoteSymbol:pair === 'native'?'ETH':pairSymbol,quoteDecimals:pair === 'native'?18:pairDecimals,created:Date.now(),hash:tx.hash};
@@ -149,5 +162,5 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   }
   if (seed) for (const [name,symbol,firstBuy,pair,account] of [['Orbit Club','ORBIT','0.1','native','0'],['Pixel Party','PIXEL','0.05','native','1'],['Lucky Sprout','LUCK','0.03','native','0']]) await execute('launch',{name,symbol,firstBuy,pair,account});
   await indexer.sync();
-  return {config,state,getQuote,indexer,listings,provider,rewards,transact(action,body) { const result = queue.then(async () => { const result=action==='reward-x-finish'?await rewards.finishX(body):action==='reward-x-start'?await rewards.startX(body):action==='reward-claim'?await rewards.claim(body):action==='reward-verify'?await rewards.verify(body):action==='reward-challenge'?await rewards.challenge(body):action==='reward-process'?(await rewards.tick(),{message:'Reward treasuries processed.'}):await execute(action,body); if(['launch','buy','sell','withdraw','graduate'].includes(action))await rewards.tick(); try {await indexer.sync();} catch {result.message += " Indexing pending; refresh to retry.";} return result;}); queue = result.catch(() => {}); return result; },async close() {await queue; await indexer.close(); provider.destroy(); await connection.close();}};
+  return {updatePrice,config,state,getQuote,indexer,listings,provider,rewards,transact(action,body) { const result = queue.then(async () => { const result=action==='reward-x-finish'?await rewards.finishX(body):action==='reward-x-start'?await rewards.startX(body):action==='reward-claim'?await rewards.claim(body):action==='reward-verify'?await rewards.verify(body):action==='reward-challenge'?await rewards.challenge(body):action==='reward-process'?(await rewards.tick(),{message:'Reward treasuries processed.'}):await execute(action,body); if(['launch','buy','sell','withdraw','graduate'].includes(action))await rewards.tick(); try {await indexer.sync();} catch {result.message += " Indexing pending; refresh to retry.";} return result;}); queue = result.catch(() => {}); return result; },async close() {await queue; await indexer.close(); provider.destroy(); await connection.close();}};
 }

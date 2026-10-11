@@ -55,7 +55,7 @@ export function renderToken(ctx, address) {
 
   const metric = (label, value, note) => h('div.metric', h('span', label), h('strong', value), note ? h('small', note) : null);
   const figures = h('section.panel', { 'aria-labelledby': 'market-title' },
-    h('div.panel-head', h('div', h('h2#market-title', 'Market'), h('p', `Values shown in ${q}, the trading pair. No dollar conversion is assumed.`))),
+    h('div.panel-head', h('div', h('h2#market-title', 'Market'), h('p', token.usdReference?.status==='fresh'?`USD reference via ${token.usdReference.source} · Updated ${new Date(token.usdReference.updatedAt*1000).toLocaleTimeString()}. Trades settle in ${q}.`:`USD conversion unavailable or stale. Values are shown in ${q}.`))),
     h('div.metrics',
       metric('Price', fmtPrice(token), token.graduated ? `${dex} pool price` : 'Current bonding-curve price'),
       metric('Market cap', fmtValue(p.marketCap, token), 'Price × circulating supply'),
@@ -97,7 +97,28 @@ export function renderToken(ctx, address) {
     token.url ? [h('dt', 'Explorer'), h('dd', h('a', { href: token.url, target: '_blank', rel: 'noopener noreferrer' }, 'Open in explorer'))] : null));
 
   return h('div', h('a.back-link', { href: '#/' }, icon('arrow-left', 'icon-sm'), 'All tokens'), head,
-    h('div.token-layout', h('div.stack', figures, curve, about, fees, activityPanel, tech), h('aside', tradePanel(ctx, token, { dex, solana }))));
+    h('div.token-layout', h('div.stack', figures, priceHistory(ctx,token,q), curve, about, fees, activityPanel, tech), h('aside', tradePanel(ctx, token, { dex, solana }))));
+}
+
+function priceHistory(ctx,token,q){
+  const content=h('div',h('p.muted.small','Loading indexed price history…'));
+  const panel=h('section.panel.price-history',{'aria-label':'Trade price history'},h('div.panel-head',h('div',h('h2','Price history'),h('p.small.muted',`1-minute closing execution prices in ${q}. USD conversion above uses the latest reference price.`))),content);
+  if(ctx.mode!=='local'){content.replaceChildren(h('p.muted.small','Historical charts are available in simulation. This network needs a public indexer before its history can be shown.'));return panel;}
+  const load=async()=>{
+    try{
+      const data=await ctx.api(`tokens/${token.address}/candles?interval=60`);
+      if(!panel.isConnected)return;
+      const points=data.filter(p=>Number.isFinite(Number(p.close))&&Number(p.close)>0&&Number.isSafeInteger(p.timestamp)).slice(-100);
+      if(!points.length){content.replaceChildren(h('p.muted.small','No indexed trades yet. The chart appears after the first trade.'));return;}
+      const values=points.map(p=>Number(p.close)),low=Math.min(...values),high=Math.max(...values),span=high-low||high*.02;
+      const x=i=>24+i*592/Math.max(1,points.length-1),y=v=>164-(v-low)*128/span;
+      const plot=svg('svg',{viewBox:'0 0 640 192',role:'img','aria-label':`${points.length} recorded price intervals. First ${values[0]} ${q}; latest ${values.at(-1)} ${q}.`});
+      for(const yy of [36,100,164])plot.append(svg('line',{x1:'24',x2:'616',y1:String(yy),y2:String(yy),class:'chart-grid'}));
+      plot.append(svg('polyline',{points:values.map((v,i)=>`${x(i)},${y(v)}`).join(' '),class:'chart-line',fill:'none'}));
+      plot.append(svg('circle',{cx:String(x(values.length-1)),cy:String(y(values.at(-1))),r:'4',class:'chart-dot'}));
+      content.replaceChildren(plot,h('div.chart-caption',h('span',new Date(points[0].timestamp*1000).toLocaleTimeString()),h('span',points.length===1?'First trade recorded':`${points.length} intervals`),h('span',new Date(points.at(-1).timestamp*1000).toLocaleTimeString())));
+    }catch{content.replaceChildren(h('p.muted.small','Price history is temporarily unavailable.'),h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:load}},'Retry chart'));}
+  };load();return panel;
 }
 
 function tradePanel(ctx, token, { dex, solana }) {
@@ -130,7 +151,8 @@ function tradePanel(ctx, token, { dex, solana }) {
   function setSide(next) {
     side = next; revision++; clearTimeout(timer);
     quoteReady = false; updateSubmit(); useRemaining.hidden = true; remainingHint.hidden = side !== 'buy';
-    tabs.querySelectorAll('button').forEach(b => b.setAttribute('aria-selected', String(b.dataset.side === side)));
+    tabs.querySelectorAll('button').forEach(b => { b.setAttribute('aria-selected', String(b.dataset.side === side)); b.tabIndex = b.dataset.side === side ? 0 : -1; });
+    form?.querySelector('label[for=trade-amount]')?.replaceChildren(side === 'buy' ? 'You pay' : 'You sell');
     unit.textContent = side === 'buy' ? q : token.symbol;
     submit.textContent = `${side === 'buy' ? 'Buy' : 'Sell'} ${token.symbol}`;
     submit.className = `btn btn-block btn-lg ${side === 'buy' ? 'btn-buy' : 'btn-sell'}`;
@@ -192,6 +214,12 @@ function tradePanel(ctx, token, { dex, solana }) {
     feeNote, error, submit);
   form.querySelector('label[for=trade-amount]').dataset.dynamic = 'true';
   tabs.addEventListener('click', () => { form.querySelector('label[for=trade-amount]').textContent = side === 'buy' ? 'You pay' : 'You sell'; });
+  tabs.addEventListener('keydown', event => {
+    if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
+    event.preventDefault();
+    setSide(event.key === 'Home' ? 'buy' : event.key === 'End' ? 'sell' : side === 'buy' ? 'sell' : 'buy');
+    tabs.querySelector(`[data-side=${side}]`).focus();
+  });
   setSide('buy');
   return h('section.panel.trade-panel', { 'aria-labelledby': 'trade-title' }, h('h2#trade-title', 'Trade'),
     h('p.small.muted', token.graduated ? `Trades route through the locked ${dex} pool.` : 'Trades are priced by the bonding curve. Each trade pays a 1.25% fee.'),

@@ -289,6 +289,7 @@ export class SolanaWallet {
       return { hash: signature, message: `Minted ${Number(formatAmount(amount, target.quoteDecimals)).toLocaleString()} ${target.symbol} (test asset, no value).` };
     }
     if (action === 'launch') {
+      throw new Error('Solana USD-priced launches require the verified-oracle program upgrade. Existing tokens remain available; use simulation to test the launch flow.');
       if (!(await this.loadBeta()).allowed) throw new Error('Launches are invite-only during the beta, and this wallet is not on the list yet. Ask the Elpida team to add it.');
       const kind = body.pair ?? 'native';
       const options = this.pairOptions()[kind];

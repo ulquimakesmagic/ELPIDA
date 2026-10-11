@@ -26,8 +26,8 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal((await request('withdraw', {}, { 'X-Elpida-Token': 'wrong' })).status, 403);
     assert.equal((await request('withdraw', {}, { Origin: 'https://foreign.example' })).status, 403);
     assert.equal((await request('faucet', {})).status, 404, 'no test-dollar faucet: pricing is native only');
-    assert.equal(config.local.launchFee, '0.002');
-    assert.ok(config.pricing['base-sepolia'], 'EVM native pricing is served to the browser');
+    assert.equal(config.local.launchFee, '0.004');
+    assert.ok(config.oracles['base-sepolia'].available, 'verified oracle configuration is served to the browser');
     // Fetch normalizes Host, so send this header with the raw HTTP client.
     const foreignHostStatus = await new Promise((done, reject) => {
       const req = httpRequest(`${base}/api/state`, { headers: { Host: 'foreign.example' } }, response => { response.resume(); done(response.statusCode); });
@@ -63,8 +63,8 @@ test('localhost API exercises launch, trading, fee payout and request protection
     const snapshot = await state();
     assert.equal(snapshot.tokens.length, 1);
     const spent = Number(before.balance) - Number(snapshot.balance);
-    assert.ok(spent > 0.027 && spent < 0.1, 'creation fee 0.002 ETH + first buy 0.025 ETH + gas');
-    assert.ok(Math.abs(Number(snapshot.treasuryBalance) - treasuryBefore - 0.002) < 1e-9, 'treasury received the 0.002 ETH creation fee');
+    assert.ok(spent > 0.027 && spent < 0.1, 'creation fee 0.004 ETH + first buy 0.025 ETH + gas');
+    assert.ok(Math.abs(Number(snapshot.treasuryBalance) - treasuryBefore - 0.004) < 1e-9, 'treasury received the $10 / 2500 = 0.004 ETH creation fee');
     assert.equal(snapshot.tokens[0].reserve, '0.0246875');
     assert.equal(snapshot.tokens[0].quoteSymbol, 'ETH');
     assert.ok(Number(snapshot.tokens[0].balance) > 0);

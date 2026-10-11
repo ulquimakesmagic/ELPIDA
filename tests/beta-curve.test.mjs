@@ -8,13 +8,15 @@ import {compileContracts} from '../scripts/compile.mjs';
 const compiled=compileContracts({includeMocks:true});
 const artifact=n=>compiled[`contracts/evm/src/${n}.sol`][n];
 const mined=async p=>(await p).wait();
-const FEE=parseEther('0.002'),VQ=2133333333333333333n;
+const FEE=parseEther('0.004'),VQ=2133333333333333334n;
 async function setup(t) {
  const connection=await network.create('localTest'); const provider=new BrowserProvider(connection.provider,undefined,{cacheTimeout:-1});provider.pollingInterval=10;
  t.after(async()=>{provider.destroy();await connection.close();});
  const signers=await Promise.all([0,1,2,3].map(i=>provider.getSigner(i)));const addresses=await Promise.all(signers.map(s=>s.getAddress()));
  const a=artifact('ElpidaBetaFactory');const factory=await new ContractFactory(a.abi,a.evm.bytecode.object,signers[0]).deploy(addresses[2],FEE,VQ);await factory.waitForDeployment();
- return {provider,signers,addresses,factory};
+ const feedA=compiled['tests/fixtures/MockUsdFeed.sol'].MockUsdFeed,feed=await new ContractFactory(feedA.abi,feedA.evm.bytecode.object,signers[0]).deploy(2500n*10n**8n);await feed.waitForDeployment();
+ await mined(factory.connect(signers[2]).configureUsdPricing(feed.target,86400,ZeroAddress));
+ return {provider,signers,addresses,factory,feed};
 }
 async function launch(f,{buy=parseEther('0.01'),fee}={}) {
  fee??=await f.factory.launchFee();
@@ -37,8 +39,8 @@ test('Native launch pays the creation fee in the native coin and seeds nothing e
  assert.equal(await token.balanceOf(f.addresses[0]),await curve.sold());
  await backing(f,curve);
  // The exact fee plus first buy is required, so a fee change between signing and mining reverts.
- await assert.rejects(f.factory.launch.staticCall('X','X',buy,1n,f.addresses[3],{value:buy}),/native value/);
- await assert.rejects(f.factory.launch.staticCall('X','X',buy,1n,f.addresses[3],{value:FEE+buy+1n}),/native value/);
+ await assert.rejects(f.factory.launch.staticCall('X','X',buy,1n,f.addresses[3],{value:buy}),/FeeQuoteMoved/);
+ assert.ok(await f.factory.launch.staticCall('X','X',buy,1n,f.addresses[3],{value:FEE+buy+1n}),'excess fee is refunded');
  const held=await token.balanceOf(f.addresses[0]);await mined(token.approve(await curve.getAddress(),held));
  const [out]=await curve.quoteSell(held);await mined(curve.sell(held,out));
  assert.equal(await curve.sold(),0n);await backing(f,curve);
@@ -81,22 +83,12 @@ test('A failed first buy rolls back the native creation fee',async t=>{
  await assert.rejects(mined(f.factory.launch('Fail','FAIL',parseEther('1'),10n**40n,f.addresses[3],{value:FEE+parseEther('1'),gasLimit:12000000})),/revert/);
  assert.equal(await f.provider.getBalance(f.addresses[2]),before);
 });
-test('Only the treasury sets native pricing, and it applies to later launches only',async t=>{
+test('Manual repricing is disabled; feed updates affect new curves only',async t=>{
  const f=await setup(t),{curve:old}=await launch(f);
- await assert.rejects(f.factory.connect(f.signers[1]).setPricing.staticCall(1n,1n),/owner only/);
- await assert.rejects(f.factory.connect(f.signers[2]).setPricing.staticCall(1n,0n),/native template/);
- const fee=parseEther('0.005'),vq=VQ*2n;
- const receipt=await mined(f.factory.connect(f.signers[2]).setPricing(fee,vq));
- const set=receipt.logs.map(l=>{try{return f.factory.interface.parseLog(l);}catch{return null;}}).find(l=>l?.name==='PricingSet');
- assert.equal(set.args.launchFee,fee);assert.equal(set.args.nativeVirtualQuote,vq);
- assert.equal(await f.factory.launchFee(),fee);assert.equal(await f.factory.nativeVirtualQuote(),vq);
- assert.equal(await old.virtualQuote(),VQ,'live curves keep their own price');
- await assert.rejects(f.factory.launch.staticCall('Late','LATE',parseEther('0.01'),1n,f.addresses[3],{value:FEE+parseEther('0.01')}),/native value/);
- const before=await f.provider.getBalance(f.addresses[2]);
- const {curve}=await launch(f);
- assert.equal(await curve.virtualQuote(),vq);
- assert.equal(await f.provider.getBalance(f.addresses[2])-before,fee);
- // A zero fee is allowed (free launches) and charges nothing.
- await mined(f.factory.connect(f.signers[2]).setPricing(0n,VQ));
- const {buy}=await launch(f,{fee:0n});assert.ok(buy>0n);
+ await assert.rejects(f.factory.connect(f.signers[2]).setPricing.staticCall(1n,VQ),/PricingFixed/);
+ const b=await f.provider.getBlock('latest');await mined(f.feed.set(1250n*10n**8n,b.timestamp,2,2));
+ assert.equal(await f.factory.launchFee(),FEE*2n);
+ assert.equal(await old.virtualQuote(),VQ);
+ await assert.rejects(f.factory.launch.staticCall('Late','LATE',parseEther('0.01'),1n,f.addresses[3],{value:FEE+parseEther('0.01')}),/FeeQuoteMoved/);
+ const {curve}=await launch(f);assert.equal(await curve.virtualQuote(),4266666666666666667n);
 });

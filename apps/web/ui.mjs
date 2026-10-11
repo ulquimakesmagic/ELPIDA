@@ -56,8 +56,12 @@ export function pricing(token) {
   const circulating = Number(token.circulatingSupply ?? token.sold);
   return { price, fdv: price * supply, marketCap: price * circulating, circulating, supply };
 }
-export const fmtPrice = token => `${formatPrice(pricing(token).price, '')} ${token.quoteSymbol ?? ''}`.trim();
-export const fmtValue = (value, token) => `${compact(value)} ${token.quoteSymbol ?? ''}`.trim();
+export function usdRate(token) {
+  const p=token.usdReference;
+  return p?.status==='fresh'&&Number.isFinite(p.usd)&&p.usd>0&&Date.now()/1000-p.updatedAt<=(p.maxAge??180)?p.usd:null;
+}
+export const fmtPrice = token => usdRate(token)!==null ? formatPrice(pricing(token).price*usdRate(token)) : `${formatPrice(pricing(token).price, '')} ${token.quoteSymbol ?? ''}`.trim();
+export const fmtValue = (value, token) => usdRate(token)!==null ? '$'+compact(value*usdRate(token)) : `${compact(value)} ${token.quoteSymbol ?? ''}`.trim();
 export function progressOf(token) {
   const cap = Number(token.saleCap ?? token.supply);
   return Math.min(100, Math.max(0, cap > 0 ? Number(token.sold) / cap * 100 : 0));
@@ -117,6 +121,9 @@ export function setError(control, message) {
 export function errorText(error) {
   if (error?.code === 4001 || error?.code === 'ACTION_REJECTED' || /user rejected|rejected the request|denied/i.test(error?.message ?? '')) return 'You cancelled the request in your wallet. Nothing was submitted.';
   const text = error?.reason ?? error?.shortMessage ?? error?.message ?? 'Something went wrong. Try again.';
+  if(/StaleOraclePrice|stale oracle/i.test(text))return 'The launch price feed is stale. Wait for its next update, then refresh and retry.';
+  if(/FeeQuoteMoved/i.test(text))return 'The fee moved beyond your 1% cap. Refresh the quote and try again.';
+  if(/InvalidOracleRound|OracleUnavailable/i.test(text))return 'A verified launch price is unavailable. Refresh later; no launch was submitted.';
   if (/insufficient funds/i.test(text)) return 'Your wallet does not have enough funds for this transaction and its network fee.';
   return text;
 }

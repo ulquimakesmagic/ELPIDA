@@ -1,3 +1,4 @@
+import { PriceKeeper } from './price-keeper.mjs';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
@@ -74,8 +75,14 @@ export function createRpcProxy(target, { perSecond = 15, burst = 60 } = {}) {
 }
 
 export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1' } = {}) {
-  const metadataStore=new MetadataStore({path:port===0?null:fileURLToPath(new URL('../../local-data/ipfs-content',import.meta.url))});
-  const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:fileURLToPath(new URL("../../local-data/token-metadata.json",import.meta.url)), dex:port!==0, indexerPath:port===0?":memory:":fileURLToPath(new URL("../../local-data/curve-dex-v5-index.sqlite",import.meta.url)) });
+  const dataPrefix=port===3000||process.env.RAILWAY_ENVIRONMENT_NAME?'':`preview-${port}-`;
+  const metadataStore=new MetadataStore({path:port===0?null:fileURLToPath(new URL('../../local-data/'+dataPrefix+'ipfs-content',import.meta.url))});
+  const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:fileURLToPath(new URL('../../local-data/'+dataPrefix+'token-metadata.json',import.meta.url)), dex:port!==0, indexerPath:port===0?":memory:":fileURLToPath(new URL('../../local-data/'+dataPrefix+'curve-dex-usd-v9-index.sqlite',import.meta.url)) });
+  const priceKeeper=new PriceKeeper();
+  const updatePrices=async()=>{await priceKeeper.refresh();const prices=priceKeeper.snapshot();const p=[prices.local,prices['base-sepolia'],prices['ethereum-sepolia']].find(p=>p.status==='fresh');if(p)await runtime.updatePrice(p.usd);};
+  const priceTimer=port===0?null:setInterval(()=>updatePrices().catch(()=>{}),60000);priceTimer?.unref();
+  if(port!==0)updatePrices().catch(()=>{});
+  const priceSnapshot=()=>({...priceKeeper.snapshot(),local:runtime.config.local.price});
   const cookieSecurity = publicUrl ? '; Secure' : '';
   const csrf = randomBytes(24).toString('hex');
   const solana = solanaConfig();
@@ -97,7 +104,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           try{const cookie=String(req.headers.cookie??'').split(';').map(x=>x.trim()).find(x=>x.startsWith('elpida_x='))?.slice(9);await runtime.transact('reward-x-finish',{state:url.searchParams.get('state'),code:url.searchParams.get('code'),cookie});res.writeHead(200,{'Content-Type':'text/html','Set-Cookie':`elpida_x=; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=0${cookieSecurity}`});return res.end('<!doctype html><title>X verified</title><h1>X profile verified</h1><p>Your rewards are bound to the signed payout wallet. Return to Creator rewards and refresh to claim.</p><a href="/">Return to Elpida</a>');}catch{ return send(400,{error:'X verification failed or expired. Return to the dashboard and try again.'});}
         }
         if (url.pathname === '/api/rewards') return send(200,await runtime.rewards.dashboard());
-        if (url.pathname === '/api/config') return send(200, { ...runtime.config, hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), csrf });
+        if(url.pathname==='/api/prices')return send(200,priceSnapshot());
+        if (url.pathname === '/api/config') return send(200, { ...runtime.config, prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), csrf });
         if(url.pathname==='/api/metadata/resolve')return send(200,await metadataStore.resolve(url.searchParams.get('uri')));
         if(url.pathname.startsWith('/api/content/')){const record=metadataStore.get(url.pathname.slice('/api/content/'.length));if(!record)return send(404,{error:'Content not found.'});res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}
         if (url.pathname === '/api/indexer/status') { await runtime.indexer.sync(); return send(200,runtime.indexer.status()); }
@@ -140,7 +148,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   });
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
-  return { url: `http://localhost:${server.address().port}`, runtime, async close() {clearInterval(rewardTimer); await new Promise(done => server.close(done)); await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, async close() {clearInterval(priceTimer);clearInterval(rewardTimer); await new Promise(done => server.close(done)); await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

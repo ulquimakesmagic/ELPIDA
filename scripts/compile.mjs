@@ -17,7 +17,7 @@ export function compileContracts({ includeMocks = false } = {}) {
   const output = JSON.parse(solc.compile(JSON.stringify({
     language: 'Solidity', sources,
     settings: {
-      optimizer: { enabled: true, runs: 200 }, evmVersion: 'shanghai',
+      optimizer: { enabled: true, runs: 1 }, evmVersion: 'shanghai',
       outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object', 'evm.deployedBytecode.object'] } },
     },
   }), { import: path => {
@@ -28,6 +28,9 @@ export function compileContracts({ includeMocks = false } = {}) {
   const errors = (output.errors ?? []).filter(item => item.severity === 'error');
   if (errors.length) throw new Error(errors.map(item => item.formattedMessage).join('\n'));
   for (const warning of output.errors ?? []) console.warn(warning.formattedMessage);
+  for (const entries of Object.values(output.contracts)) for (const [name, artifact] of Object.entries(entries)) {
+    if (artifact.evm.deployedBytecode.object.length / 2 > 24576) throw new Error(`${name} exceeds the EVM contract size limit.`);
+  }
   return output.contracts;
 }
 

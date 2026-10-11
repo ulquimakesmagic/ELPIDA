@@ -1,0 +1,53 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {network} from 'hardhat';
+import {BrowserProvider,ContractFactory,Contract,parseEther,ZeroAddress} from 'ethers';
+import {compileContracts} from '../scripts/compile.mjs';
+const compiled=compileContracts({includeMocks:true});
+const art=n=>compiled[`contracts/evm/src/${n}.sol`][n];
+const mined=async p=>(await p).wait();
+test('USD fee enforcement, transaction-time movement, refunds, freshness and USDC',async t=>{
+ const connection=await network.create('localTest'),provider=new BrowserProvider(connection.provider,undefined,{cacheTimeout:-1});provider.pollingInterval=10;
+ t.after(async()=>{provider.destroy();await connection.close();});
+ const [creator,treasury,stranger]=await Promise.all([0,2,1].map(i=>provider.getSigner(i))),owner=await creator.getAddress(),payee=await treasury.getAddress();
+ const deploy=async(a,...args)=>{const c=await new ContractFactory(a.abi,a.evm.bytecode.object,creator).deploy(...args);await c.waitForDeployment();return c;};
+ for(const n of ['ElpidaBetaFactory','ElpidaDexFactory'])assert.ok(art(n).evm.deployedBytecode.object.length/2<=24576,n+' fits the EVM deployment limit');
+ const factory=await deploy(art('ElpidaBetaFactory'),payee,1n,1n),feed=await deploy(compiled['tests/fixtures/MockUsdFeed.sol'].MockUsdFeed,2500n*10n**8n),coin=await deploy(compiled['tests/fixtures/MockUSDC.sol'].MockUSDC);
+ const args=['Oracle garden','USD',ZeroAddress,parseEther('.01'),1n,owner,'',false];
+ await assert.rejects(factory.launchWithPayment.staticCall(...args,{value:parseEther('1')}),/OracleUnavailable/,'unconfigured factories cannot bypass the USD fee');
+ await assert.rejects(factory.connect(stranger).configureUsdPricing.staticCall(feed.target,180,coin.target),/PricingFixed/);
+ await mined(factory.connect(treasury).configureUsdPricing(feed.target,180,coin.target));
+ assert.equal(await factory.launchFee(),parseEther('.004'));
+ await assert.rejects(factory.connect(treasury).configureUsdPricing.staticCall(feed.target,180,coin.target),/PricingFixed/);
+ await assert.rejects(factory.connect(treasury).setPricing.staticCall(0n,1n),/PricingFixed/);
+ const now=async()=>(await provider.getBlock('latest')).timestamp;
+ const update=async(value,timestamp,round=2,answered=round)=>mined(feed.set(value,timestamp??await now(),round,answered));
+ // A displayed quote is not authoritative: the contract prices the fee again at execution.
+ const shown=await factory.launchFee();await update(1250n*10n**8n);
+ await assert.rejects(factory.launchWithPayment.staticCall(...args,{value:shown+parseEther('.01')}),/FeeQuoteMoved/);
+ const fee=await factory.launchFee(),before=await provider.getBalance(payee);
+ const receipt=await mined(factory.launchWithPayment(...args,{value:fee+parseEther('.01')+parseEther('.001')}));
+ assert.equal(await provider.getBalance(payee)-before,fee);
+ assert.equal(await provider.getBalance(factory.target),0n,'all excess native fee is refunded');
+ const events=receipt.logs.map(l=>{try{return factory.interface.parseLog(l);}catch{return null;}}),launched=events.find(e=>e?.name==='Launched');
+ assert.equal(events.find(e=>e?.name==='LaunchFeePaid').args.amount,fee);
+ const curve=new Contract(launched.args.curve,art('ElpidaBetaCurve').abi,provider);
+ assert.equal(await curve.realReserve(),parseEther('.009875'),'launch fee is separate from curve reserve and trading fee');
+ const oldVq=await curve.virtualQuote();await update(3n*10n**8n);
+ assert.equal(await factory.launchFee(),3333333333333333334n,'round native fee up to the smallest asset unit');
+ assert.equal(await curve.virtualQuote(),oldVq,'existing economics are never repriced');
+ for(const [value,timestamp,round,answered,reason]of [[0n,await now(),2,2,'InvalidOracleRound'],[-1n,await now(),2,2,'InvalidOracleRound'],[2500n*10n**8n,await now()-181,2,2,'StaleOraclePrice'],[2500n*10n**8n,await now()+1000,2,2,'InvalidOracleRound'],[2500n*10n**8n,await now(),3,2,'InvalidOracleRound']]){
+   await update(value,timestamp,round,answered);
+   await assert.rejects(factory.launchWithPayment.staticCall(...args,{value:parseEther('10')}),new RegExp(reason));
+ }
+ await update(2500n*10n**8n);
+ await mined(coin.mint(owner,100_000_000n));await mined(coin.approve(factory.target,10_000_000n));
+ const usdcBefore=await coin.balanceOf(payee),nativeBefore=await provider.getBalance(payee);
+ await mined(factory.launchWithPayment(...args.slice(0,-1),true,{value:parseEther('.01')}));
+ assert.equal(await coin.balanceOf(payee)-usdcBefore,10_000_000n);
+ assert.equal(await provider.getBalance(payee),nativeBefore,'USDC fee does not charge native fee as well');
+ assert.equal(await coin.allowance(owner,factory.target),0n,'only the exact authorized 10 USDC is spent');
+ const rollbackBefore=await coin.balanceOf(payee);await mined(coin.approve(factory.target,10_000_000n));
+ await assert.rejects(mined(factory.launchWithPayment('Rollback','ROLL',ZeroAddress,parseEther('.01'),10n**40n,owner,'',true,{value:parseEther('.01'),gasLimit:12_000_000})),/revert/);
+ assert.equal(await coin.balanceOf(payee),rollbackBefore,'a failed first buy rolls back the USDC fee');
+});

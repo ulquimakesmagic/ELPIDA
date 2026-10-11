@@ -42,7 +42,7 @@ export function walletErrorText(error, name = 'your wallet') {
 }
 const metadataKey = (chain, factory, token) => `elpida:metadata:${chain}:${factory.toLowerCase()}:${token.toLowerCase()}`;
 // Model 7 (DEX) and 6 (basic): native pricing. Older USDC-priced launchpads are not reused.
-const modelOf = chainId => chainId===84532?"curve-dex-v7":"curve-beta-v6";
+const modelOf = chainId => chainId===84532?"curve-dex-v9":"curve-beta-v8";
 const deploymentKey = chainId => `elpida:${modelOf(chainId)}:deployment:${chainId}`;
 /** Whole native coins (a decimal string) to wei. */
 const wei = text => parseUnits(String(text), 18);
@@ -69,11 +69,20 @@ export class TestnetWallet {
    * This network's native pricing from config/native-pricing.json (served by /api/config): creation fee
    * and starting FDV in the native coin. The EVM curve shape is fixed, so it completes at 16x startFdv.
    */
+  get oracle() { return this.config.oracles?.[this.net.key]; }
   get pricing() {
-    const p = this.config.pricing?.[this.net.key];
-    if (!p) throw new Error(`No native pricing is configured for ${this.net.name} (config/native-pricing.json).`);
-    return { ...p, launchFeeWei: wei(p.launchFee), virtualQuoteWei: wei(p.startFdv) * 16n / 15n };
+    const p=this.config.prices?.[this.net.key];
+    if(!p||p.status!=='fresh')return {launchFee:'Unavailable',startFdv:'Unavailable',launchFeeWei:0n,virtualQuoteWei:1n};
+    return {launchFee:String(10/p.usd),startFdv:String(5000/p.usd),launchFeeWei:BigInt(Math.ceil(10/p.usd*1e18)),virtualQuoteWei:BigInt(Math.ceil(5000/p.usd*16/15*1e18))};
   }
+  async oraclePrice() {
+    if(!this.oracle?.available)throw new Error('Verified USD launch pricing is not configured for '+this.net.name+'. Browsing remains available.');
+    const feed=new Contract(this.oracle.feed,['function decimals() view returns(uint8)','function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)'],this.provider);
+    const [r,d,b]=await Promise.all([feed.latestRoundData(),feed.decimals(),this.provider.getBlock('latest')]);
+    if(r[1]<=0n||r[0]===0n||r[4]<r[0]||r[3]<=0n||r[3]>BigInt(b.timestamp)||BigInt(b.timestamp)-r[3]>BigInt(this.oracle.maxAge)||d>18n)throw new Error('The launch oracle is stale or unavailable. Refresh later; no launch was sent.');
+    return {usd:Number(r[1])/10**Number(d),updatedAt:Number(r[3]),maxAge:this.oracle.maxAge,status:'fresh',source:'On-chain USD oracle',feed:this.oracle.feed};
+  }
+
   get deployment() {
     const saved=read(deploymentKey(this.net.chainId));
     if(saved)return saved;
@@ -196,7 +205,8 @@ export class TestnetWallet {
   async deploy() {
     await this.checkNetwork();
     if (this.deployment && !this.needsMetadataUpgrade) throw new Error(`This ${this.net.name} launchpad is already set up. Use it for your launches.`);
-    const previousDeployment=this.deployment, pricing=this.pricing;
+    const previousDeployment=this.deployment;
+    await this.oraclePrice();
     if (await this.provider.getBalance(this.address) === 0n) throw new Error(`Get ${this.net.nativeCurrency.symbol} on ${this.net.name} from a faucet to pay deployment gas.`);
     const artifact = this.artifacts.factory;
     let migrationAdapter;
@@ -210,8 +220,8 @@ export class TestnetWallet {
         if((await existing.manager()).toLowerCase()!==this.dex.manager.toLowerCase()||(await existing.usdc()).toLowerCase()!==this.dex.weth.toLowerCase()||await existing.fee()!==10000n)throw new Error('Saved adapter configuration mismatch.');migrationAdapter=saved;
       }else{this.onProgress('Step 1 of 2: confirm the Uniswap migration adapter deployment…');const a=this.config.contracts.adapter,c=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,this.dex.weth,10000);await c.waitForDeployment();migrationAdapter=c.target;write(key,migrationAdapter);}
     }
-    this.onProgress(`${this.dex ? 'Step 2 of 2: confirm' : 'Confirm'} the launchpad deployment (creation fee ${pricing.launchFee} ${this.net.nativeCurrency.symbol}, starting FDV ${pricing.startFdv} ${this.net.nativeCurrency.symbol})…`);
-    const contract = await new ContractFactory(artifact.abi, artifact.bytecode, this.signer).deploy(this.address, pricing.launchFeeWei, pricing.virtualQuoteWei, ...(this.dex?[migrationAdapter]:[]));
+    this.onProgress('Confirm the launchpad deployment. Oracle pricing will enforce the $10 launch fee and $5,000 starting FDV…');
+    const contract = await new ContractFactory(artifact.abi, artifact.bytecode, this.signer).deploy(this.address, 0n, 1n, ...(this.dex?[migrationAdapter]:[]));
     this.onProgress('Deployment submitted. Waiting for confirmation…');
     await contract.waitForDeployment();
     const receipt = await contract.deploymentTransaction().wait();
@@ -219,28 +229,26 @@ export class TestnetWallet {
     if(previousDeployment && !write('elpida:previous-factory:'+this.net.chainId+':'+previousDeployment.factory,previousDeployment))throw new Error('Factory deployed, but previous deployment could not be archived. Save the new factory '+record.factory+' manually.');
     this.launches.clear(); this.scannedBlock = undefined;
     if (!write(deploymentKey(this.net.chainId), record)) throw new Error(`Deployed, but this browser blocks storage. Save factory ${record.factory} (block ${record.block}) in packages/core/networks.mjs.`);
+    await this.wait(contract.configureUsdPricing(this.oracle.feed,this.oracle.maxAge,this.oracle.usdc??ZeroAddress),'Activate verified USD pricing. This fixes the oracle and enables launches…');
     this.needsMetadataUpgrade=false;
-    return { hash: receipt.hash, message: `Your ${this.net.name} launchpad is deployed, charging ${pricing.launchFee} ${this.net.nativeCurrency.symbol} per launch.` };
+    return { hash: receipt.hash, message: `Your ${this.net.name} launchpad is deployed, using the on-chain USD oracle for the $10 launch fee.` };
   }
-  async verifyFactory() {
-    const factory = this.factoryContract();
-    let fee, virtualQuote, version;
-    try { [fee, virtualQuote, version] = await Promise.all([factory.launchFee(), factory.nativeVirtualQuote(), factory.MODEL_VERSION()]); }
-    catch { throw new Error('This launchpad was deployed by an older Elpida version (priced in USDC) or is not a factory. Deploy the native-priced launchpad again from Network and funds.'); }
-    if (version !== (this.dex?7n:6n)) throw new Error('This launchpad does not match the native-priced configuration. Deploy it again from Network and funds.');
-    this.launchFee = fee; this.nativeVirtualQuote = virtualQuote;
+  async verifyFactory({launch=false}={}) {
+    const factory=this.factoryContract(),version=await factory.MODEL_VERSION();
+    if(version!==(this.dex?9n:8n))throw new Error('This launchpad needs the verified USD version. Set up a new launchpad from Network and funds.');
+    if(!this.oracle?.available||(await factory.usdFeed()).toLowerCase()!==this.oracle.feed.toLowerCase()||await factory.maxPriceAge()!==BigInt(this.oracle.maxAge)||(await factory.feeUsdc()).toLowerCase()!==(this.oracle.usdc??ZeroAddress).toLowerCase())throw new Error('Activate verified USD pricing from Network and funds before launching.');
+    this.feeUsdc=await factory.feeUsdc();
+    try{[this.launchFee,this.nativeVirtualQuote,this.price]=await Promise.all([factory.launchFee(),factory.nativeVirtualQuote(),this.oraclePrice()]);}
+    catch(error){this.launchFee=undefined;this.nativeVirtualQuote=undefined;this.price={...this.config.prices?.[this.net.key],status:'stale'};if(launch)throw error;}
     if(this.dex){try{this.needsMetadataUpgrade=await factory.METADATA_VERSION()!==1n;}catch{this.needsMetadataUpgrade=true;}}
     return factory;
   }
-  /** Treasury only: sets the factory's fee and starting FDV to config/native-pricing.json for future launches. */
+  /** Treasury only: activates the registry's verified oracle once, with no manual fee override. */
   async applyPricing() {
-    await this.checkNetwork();
-    const factory = (await this.verifyFactory()).connect(this.signer), pricing = this.pricing;
-    if ((await factory.treasury()).toLowerCase() !== this.address.toLowerCase()) throw new Error('Only the launchpad owner (its treasury wallet) can change pricing.');
-    if (this.launchFee === pricing.launchFeeWei && this.nativeVirtualQuote === pricing.virtualQuoteWei) return { message: `${this.net.name} already uses the configured pricing.` };
-    const result = await this.wait(factory.setPricing(pricing.launchFeeWei, pricing.virtualQuoteWei), `Confirm the new pricing: ${pricing.launchFee} ${this.net.nativeCurrency.symbol} creation fee, ${pricing.startFdv} ${this.net.nativeCurrency.symbol} starting FDV…`);
-    await this.verifyFactory();
-    return { hash: result.tx.hash, message: `New ${this.net.name} launches now cost ${pricing.launchFee} ${this.net.nativeCurrency.symbol} and start at ${pricing.startFdv} ${this.net.nativeCurrency.symbol} FDV. Existing tokens are unchanged.` };
+    await this.checkNetwork();await this.oraclePrice();
+    const factory=this.factoryContract().connect(this.signer);
+    if(await factory.usdFeed()!==ZeroAddress)throw new Error('Oracle pricing is already fixed. Manual pricing is disabled.');
+    return this.wait(factory.configureUsdPricing(this.oracle.feed,this.oracle.maxAge,this.oracle.usdc??ZeroAddress),'Activate verified USD pricing…');
   }
   async state() {
     await this.checkNetwork();
@@ -284,9 +292,9 @@ export class TestnetWallet {
     }));
     const pairBalances = {};
     for (const a of this.approvedQuotes ?? []) { try { pairBalances[a.id] = formatUnits(await new Contract(a.address, this.config.contracts.quote.abi, this.provider).balanceOf(this.address), a.decimals); } catch {} }
-    const treasury = await factory.treasury(), configured = this.pricing;
-    // Live factory pricing vs config/native-pricing.json; the owner can apply the file from Network and funds.
-    const pricing = { launchFee: formatUnits(this.launchFee, 18), startFdv: formatUnits(this.nativeVirtualQuote * 15n / 16n, 18), symbol: native, configured: { launchFee: configured.launchFee, startFdv: configured.startFdv }, matches: this.launchFee === configured.launchFeeWei && this.nativeVirtualQuote === configured.virtualQuoteWei, owner: treasury.toLowerCase() === this.address.toLowerCase() };
+    const treasury = await factory.treasury();
+    // Live factory pricing and freshness are authoritative for creation.
+    const pricing = { verified:true,price:this.price,launchFee: this.launchFee===undefined?'Unavailable':formatUnits(this.launchFee, 18), startFdv: this.nativeVirtualQuote===undefined?'Unavailable':formatUnits(this.nativeVirtualQuote * 15n / 16n, 18), symbol: native, matches:true, owner: treasury.toLowerCase() === this.address.toLowerCase() };
     return { wallet: this.address, balance, balanceSymbol: native, pairBalances, nativeBalance: balance, nativeSymbol: native, wrappedNativeBalance:this.dex?formatUnits(await new Contract(this.dex.weth,this.config.contracts.quote.abi,this.provider).balanceOf(this.address),18):undefined, tokens, activity: [], pricing, treasuryBalance: formatUnits(await this.provider.getBalance(treasury), 18) };
   }
   async dexState(item,token,curve,pool,d){
@@ -340,6 +348,8 @@ export class TestnetWallet {
     if (action === 'faucet') throw new Error(`Get test ${this.net.nativeCurrency.symbol} from the network faucet linked in Network and funds.`);
     let metadataSaved = true, metadataPublished = false;
     if (action === 'launch') {
+      if(!['native','usdc'].includes(body.feeCurrency??'native'))throw new Error('Choose native currency or USDC for the launch fee.');
+      await this.verifyFactory({launch:true});
       const details = normalizeMetadata(body);
       const kind = body.pair ?? 'native';
       if (!['native','xstock','token'].includes(kind)) throw new Error('Choose a trading pair.');
@@ -354,8 +364,9 @@ export class TestnetWallet {
       const net = firstBuy - firstBuy * 125n / 10000n;
       const virtualQuote = paired ? asset.virtualQuote : await factory.nativeVirtualQuote();
       const out = await factory.VIRTUAL_TOKEN() * net / (virtualQuote + net);
-      // The creation fee is paid in the native coin with the launch itself (exact value, no approval).
-      const fee = await factory.launchFee(), value = fee + (nativePair ? firstBuy : 0n), native = this.net.nativeCurrency.symbol;
+      // Native fees include a refundable 1% cap; USDC approvals are exactly ten units.
+      const inUsdc=body.feeCurrency==='usdc';
+      const fee = await factory.launchFee(), value = (inUsdc?0n:(fee*101n+99n)/100n) + (nativePair ? firstBuy : 0n), native = this.net.nativeCurrency.symbol;
       if (await this.provider.getBalance(this.address) <= value) throw new Error(`You need more than ${formatUnits(value, 18)} ${native} for the creation fee${nativePair ? ' and first buy' : ''} plus network fees.`);
       const pairToken = paired ? new Contract(asset.address, this.config.contracts.quote.abi, this.signer) : null;
       if (paired && await pairToken.balanceOf(this.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, asset.decimals)} ${asset.symbol} for the first buy.${asset.test ? ' Use its test faucet in Network and funds.' : ''}`);
@@ -368,9 +379,19 @@ export class TestnetWallet {
         await this.checkNetwork();
       }
       if (paired && await pairToken.allowance(this.address, await factory.getAddress()) < firstBuy) await this.wait(pairToken.approve(await factory.getAddress(), firstBuy), `Approve the ${asset.symbol} first buy…`);
-      const launchArgs=[name,symbol,firstBuy,out*9950n/10000n,reward];
-      const pairedArgs=[name,symbol,asset?.address,firstBuy,out*9950n/10000n,reward];
-      result = await this.wait(paired?(published?factory.launchPairedWithMetadata(...pairedArgs,published.uri,{value}):factory.launchPaired(...pairedArgs,{value})):published?factory.launchWithMetadata(...launchArgs,published.uri,{value}):factory.launch(...launchArgs,{value}), `Confirm the token launch (${formatUnits(fee, 18)} ${native} creation fee) and first buy…`);
+      if(inUsdc){
+        if(!this.feeUsdc||this.feeUsdc===ZeroAddress)throw new Error('USDC fee payment is unavailable on this network.');
+        const coin=new Contract(this.feeUsdc,this.config.contracts.quote.abi,this.signer);
+        if(await coin.balanceOf(this.address)<10_000_000n)throw new Error('Add 10 USDC on this network to pay the launch fee. Gas and first purchase are separate.');
+        if(await coin.allowance(this.address,factory.target)<10_000_000n)await this.wait(coin.approve(factory.target,10_000_000n),'Approve exactly 10 USDC for the launch fee…');
+      }
+      await this.oraclePrice();await this.checkNetwork();
+      const args=[name,symbol,asset?.address??ZeroAddress,firstBuy,out*9950n/10000n,reward,published?.uri??'',inUsdc];
+      const gas=await factory.launchWithPayment.estimateGas(...args,{value});
+      const gasPrice=(await this.provider.getFeeData()).maxFeePerGas??(await this.provider.getFeeData()).gasPrice??0n;
+      if(await this.provider.getBalance(this.address)<value+gas*gasPrice)throw new Error('Add '+native+' for the estimated network gas in addition to the fee and first purchase.');
+      const confirmation='Confirm the $10 launch fee, first purchase '+body.firstBuy+' '+this.qsym({pair:kind,quoteSymbol:asset?.symbol})+' and gas up to '+formatUnits(gas*gasPrice,18)+' '+native+'. Native fee cap includes 1%; unused fee is refunded.';
+      result=await this.wait(factory.launchWithPayment(...args,{value}),confirmation);
       const event = result.receipt.logs.map(log => {try{return factory.interface.parseLog(log);}catch{return null;}}).find(log => log?.name === 'Launched');
       metadataSaved = !!event && await writeMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,event.args.token),published?.metadata??details);
       if(published){metadataSaved=true;metadataPublished=true;}

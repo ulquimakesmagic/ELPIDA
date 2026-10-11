@@ -50,6 +50,8 @@ test('reward treasury runs wallet allocations, identity escrow, holder payouts, 
   assert.equal((await v.grants(0)).claimed,grant.total);assert.equal(await asset.balanceOf(creator)-before,grant.total);
   await r.transact('reward-claim',{token,grant:0});assert.equal(await asset.balanceOf(creator)-before,grant.total);
  });
+ // Time travel for vesting also expires the pricing feed; the simulated keeper must publish again.
+ await r.updatePrice(2500);
  await t.test('Elpida token rewards buy the selected same-source curve token',async()=>{
   const a=await r.transact('launch',{name:'Paired token',symbol:'PAIR',pair:'native',firstBuy:'0.025'}),asset=new Contract(a.token,r.config.contracts.token.abi,r.provider),before=await asset.balanceOf(creator);
   const b=await launch('PAIRHOLD',{mode:'paired',rewardToken:a.token,threshold:'0.001',minimumHolding:'1'});
