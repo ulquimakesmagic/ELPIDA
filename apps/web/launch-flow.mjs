@@ -229,7 +229,7 @@ export function renderLaunch(ctx) {
     ], validate: () => {
       if (!draft.chain) { error.textContent = 'Choose a network.'; return false; }
       if (!connected()) { error.textContent = draft.chain === 'local' ? 'The local simulation is not running.' : 'Connect your wallet to continue.'; return false; }
-      if (!ready()) { error.textContent = solana()?'USD-priced Solana launches are pending a verified-oracle program upgrade. Use simulation for now.':!ctx.config.oracles?.[draft.chain]?.available?'A verified USD feed has not been configured for this network.':'Complete USD oracle activation in Network and funds first.'; return false; }
+      if (!ready()) { error.textContent = solana()?'USD-priced Solana launches are pending a verified-oracle program upgrade. Use simulation for now.':!ctx.config.oracles?.[draft.chain]?.available?'A verified USD feed has not been configured for this network.':!ctx.wallet.deployment?'Fund your connected wallet with test ETH, then click Set up launchpad above. Approve the wallet confirmations before continuing.':'Click Activate price feed above, or in Network and test funds. You need test ETH for its network fee.'; return false; }
       if (ctx.wallet.beta?.enabled && !ctx.wallet.beta.allowed) { error.textContent = 'This wallet is not on the beta launch list yet.'; return false; }
       const group = pairOptions()?.[draft.pair];
       if (!group?.assets.length) { error.textContent = group?.unavailable ?? 'Choose a trading pair.'; return false; }
