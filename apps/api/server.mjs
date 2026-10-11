@@ -33,8 +33,9 @@ export function solanaConfig() {
   let deployment = null;
   if (net.shared?.programId && base58.test(net.shared.programId)) deployment = { programId: net.shared.programId, shared: true };
   else {
-    const file = fileURLToPath(new URL(`../../local-data/solana-${net.cluster}.json`, import.meta.url));
-    if (existsSync(file)) {
+    // This machine's own deploy record first, then the committed public copy (what Railway serves).
+    const file = [`../../local-data/solana-${net.cluster}.json`, `../../deployments/solana-${net.cluster}.json`].map(path => fileURLToPath(new URL(path, import.meta.url))).find(path => existsSync(path));
+    if (file) {
       try {
         const record = JSON.parse(readFileSync(file, 'utf8'));
         if (base58.test(record.programId) && record.cluster === net.cluster) deployment = { programId: record.programId, shared: false, build: record.build ?? 'testnet', pairs: Array.isArray(record.pairs) ? record.pairs.filter(p => p && base58.test(p.config ?? '') && base58.test(p.mint ?? '') && ['native', 'usdc', 'xstock', 'token'].includes(p.kind)).map(({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test, wsol, faucet }) => ({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test: !!test, wsol: !!wsol, faucet: faucet ?? null })) : null };

@@ -203,6 +203,13 @@ if (args['transfer-authority']) {
   console.log(`Upgrade authority transferred to ${args['transfer-authority']}.`);
 } else record.upgradeAuthority = payer.publicKey.toBase58();
 writeFileSync(outPath, `${JSON.stringify(record, null, 2)}\n`);
+// Public copy for hosted servers (Railway never sees local-data). Addresses and parameters only, no keys:
+// commit and push it so the hosted site finds this deployment.
+if (!localnet) {
+  mkdirSync(`${root}deployments`, { recursive: true });
+  writeFileSync(`${root}deployments/solana-${args.cluster}.json`, `${JSON.stringify(record, null, 2)}\n`);
+  console.log(`Wrote deployments/solana-${args.cluster}.json. Commit and push it so the hosted site (Railway) uses this deployment.`);
+}
 console.log(mainnet
   ? `\nSaved ${outPath}. To serve it: set ELPIDA_SOLANA_CLUSTER=mainnet and SOLANA_RPC_URL=<your Helius URL> in .env, restart, and pick Solana in the network menu.`
   : `\nSaved ${outPath}. Restart npm run dev and pick ${localnet ? 'Solana Localnet' : 'Solana Devnet'} in the network menu.`);

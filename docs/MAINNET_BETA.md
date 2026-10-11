@@ -26,6 +26,9 @@ How to run Elpida on Solana mainnet as a guarded beta. It uses real funds, and t
 
 ## Deploy
 
+**Easiest:** double-click `solana-mainnet-deploy.cmd` in the `ELPIDA` folder. It asks for the RPC URL, the treasury and the SOL price, shows the dry run, deploys only after you type YES, and can publish the deployment record so Railway uses it. The steps below are what it runs.
+
+
 Run these from `elpida-v1`. The deployer keypair is created at `local-data/solana-deployer-mainnet.json` on first run. Keep it private and fund it first.
 
 1. **Dry run.** Shows the cost and the settings without spending anything:
@@ -57,14 +60,16 @@ Run these from `elpida-v1`. The deployer keypair is created at `local-data/solan
 
 ## Serve it
 
-Add these lines to `.env` (locally or on Railway) and restart:
+The deploy writes `deployments/solana-mainnet.json`. This public record has addresses only and no keys. Commit and push it, because Railway never sees `local-data`.
+
+Then set these variables (in Railway: your service → Variables; locally: `.env`) and redeploy or restart:
 
 ```
 ELPIDA_SOLANA_CLUSTER=mainnet
 SOLANA_RPC_URL=<your Helius mainnet URL>
 ```
 
-The app then shows **Solana · mainnet beta**. It warns about real funds at launch, and tells non-allowlisted wallets that launching is invite-only.
+The app then shows **Solana · mainnet beta**. It warns about real funds at launch. If you turn invite-only on, wallets that aren't on the list are told launching is invite-only.
 
 ## Day to day
 
