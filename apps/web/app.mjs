@@ -75,7 +75,7 @@ const ctx = {
   envLabel, isCreatorOf: token => !!state?.wallet && [token.creator, token.reward].some(a => a?.toLowerCase() === state.wallet.toLowerCase()),
 };
 
-function envLabel() { return mode === 'local' ? 'Local simulation' : `${wallet.net.name} · testnet`; }
+function envLabel() { return mode === 'local' ? (config?.hostedSimulation ? 'Shared simulation' : 'Local simulation') : `${wallet.net.name} · testnet`; }
 function updateChrome() {
   const envButton = $('#env-button');
   envButton.dataset.env = mode; $('#env-label').textContent = envLabel();
@@ -87,7 +87,7 @@ function updateChrome() {
 function envBanner() {
   const local = mode === 'local';
   const text = local
-    ? 'Local simulation. Contracts run on a private test chain with simulated balances. Everything resets when the server restarts.'
+    ? `${config?.hostedSimulation ? 'Shared simulation. Visitors share demo accounts and launches.' : 'Local simulation.'} Contracts run on a private test chain with simulated balances. Everything resets when the server restarts.`
     : wallet.net.kind === 'solana'
       ? `${wallet.net.name} public testnet. Your wallet signs every transaction and pays network fees in devnet SOL.${wallet.usesTestToken ? ' New launches use Elpida tUSDC, a free test token with no value.' : ''}`
       : `${wallet.net.name} public testnet. Your wallet signs every transaction and pays gas in test ${wallet.net.nativeCurrency.symbol}.`;

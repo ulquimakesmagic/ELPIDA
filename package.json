@@ -4,6 +4,7 @@
   "version": "0.1.0",
   "type": "module",
   "scripts": {
+    "start": "node --env-file-if-exists=.env apps/api/server.mjs",
     "test": "node --test tests/*.test.mjs",
     "test:math": "node --test tests/economics.test.mjs",
     "test:evm": "node --test tests/evm.test.mjs tests/locked-pool.test.mjs tests/curve-pairs.test.mjs tests/beta-curve.test.mjs tests/post-migration-fees.test.mjs",

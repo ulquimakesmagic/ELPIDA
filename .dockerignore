@@ -1,0 +1,11 @@
+.git
+node_modules
+artifacts
+local-data
+backups
+coverage
+.env
+.env.*
+contracts/solana/target
+contracts/solana/keys
+docs/screenshots

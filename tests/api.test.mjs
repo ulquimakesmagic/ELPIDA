@@ -4,7 +4,7 @@ import { request as httpRequest } from 'node:http';
 import { startServer } from '../apps/api/server.mjs';
 
 test('localhost API exercises launch, trading, fee payout and request protection', async t => {
-  const app = await startServer({ port: 0, seed: false });
+  const app = await startServer({ port: 0, seed: false, publicUrl: 'https://elpida-preview.up.railway.app' });
   t.after(() => app.close());
   const base = app.url;
   const config = await (await fetch(`${base}/api/config`)).json();
@@ -29,6 +29,14 @@ test('localhost API exercises launch, trading, fee payout and request protection
       req.on('error', reject); req.end();
     });
     assert.equal(foreignHostStatus, 403);
+    const hostedStatus = async (path, headers) => new Promise((done, reject) => {
+      const req = httpRequest(`${base}${path}`, {headers}, response => {response.resume(); done(response.statusCode);});
+      req.on('error', reject); req.end();
+    });
+    assert.equal(await hostedStatus('/', {Host:'elpida-preview.up.railway.app',Origin:'https://elpida-preview.up.railway.app'}), 200);
+    assert.equal(await hostedStatus('/', {Host:'elpida-preview.up.railway.app',Origin:'https://foreign.example'}), 403);
+    assert.equal(await hostedStatus('/health', {Host:'healthcheck.railway.app'}), 200);
+    assert.equal(await hostedStatus('/api/config', {Host:'healthcheck.railway.app'}), 403);
     assert.equal((await state()).balance, '10000.0');
   });
   let address;

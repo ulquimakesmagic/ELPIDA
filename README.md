@@ -2,6 +2,8 @@
 
 **Status: development prototype; NOT production-ready, audited, or deployed.**
 
+For an online test preview, see [Railway setup](docs/RAILWAY_TESTING.md). The included Dockerfile serves the UI and API together; demo-chain state resets on restart.
+
 Independent multichain memecoin launchpad targeting Solana, Ethereum, Base, BNB Chain and Robinhood Chain. The default EVM UI uses a virtual curve with native-asset or USDC pairing, a separate 10 USDC creation fee, and graduation into a locked custom test pool. Production DEX integration and the corresponding Solana program update are pending.
 
 The localhost preview now uses model 5: about $5K initial / $80K graduation FDV for USDC pairs, then actual Uniswap v3 graduation with a permanently locked full-range position. The durable SQLite indexer reads both curve and DEX trades. Base Sepolia wallet deployment is prepared; it requires your signatures and test funds. Model 4 is preserved for other EVM previews. See [DEX testing guide](docs/BASE_SEPOLIA_DEX_TESTING.md).

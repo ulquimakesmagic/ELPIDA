@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { createRuntime } from './curve-runtime.mjs';
 import {MetadataStore} from './metadata-store.mjs';
+import { publicOrigin, acceptsRequest } from './network-policy.mjs';
 import { evmTestnets, solanaDevnet, solanaLocalnet } from '../../packages/core/networks.mjs';
 
 const webRoot = fileURLToPath(new URL('../web/', import.meta.url));
@@ -39,30 +40,30 @@ export function solanaConfig() {
   return { ...net, deployment };
 }
 
-export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true } = {}) {
+export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1' } = {}) {
   const metadataStore=new MetadataStore({path:port===0?null:fileURLToPath(new URL('../../local-data/ipfs-content',import.meta.url))});
   const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:fileURLToPath(new URL("../../local-data/token-metadata.json",import.meta.url)), dex:port!==0, indexerPath:port===0?":memory:":fileURLToPath(new URL("../../local-data/curve-dex-v5-index.sqlite",import.meta.url)) });
+  const cookieSecurity = publicUrl ? '; Secure' : '';
   const csrf = randomBytes(24).toString('hex');
   const solana = solanaConfig();
   const connectSources = [...evmTestnets.map(net => net.rpcUrl), solana.rpcUrl, solana.wsUrl].join(' ');
   const server = createServer(async (req, res) => {
     const actualPort = server.address().port;
-    const hosts = [`localhost:${actualPort}`, `127.0.0.1:${actualPort}`];
     const send = (code, data) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
     res.setHeader('Cache-Control', 'no-store');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' ${connectSources}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
-    if (!hosts.includes(req.headers.host)) return send(403, { error: 'Local access only.' });
-    if (req.headers.origin && !hosts.map(host => `http://${host}`).includes(req.headers.origin)) return send(403, { error: 'Origin not allowed.' });
+    if (!acceptsRequest({host:req.headers.host,origin:req.headers.origin,method:req.method,path:req.url,port:actualPort,publicUrl})) return send(403, { error: 'Host or origin not allowed.' });
+    if (req.method === 'GET' && req.url === '/health') return send(200, {status:'ok',mode:'simulation'});
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
       if (req.method === 'GET') {
         if(url.pathname==='/api/rewards/x/callback'){
-          try{const cookie=String(req.headers.cookie??'').split(';').map(x=>x.trim()).find(x=>x.startsWith('elpida_x='))?.slice(9);await runtime.transact('reward-x-finish',{state:url.searchParams.get('state'),code:url.searchParams.get('code'),cookie});res.writeHead(200,{'Content-Type':'text/html','Set-Cookie':'elpida_x=; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=0'});return res.end('<!doctype html><title>X verified</title><h1>X profile verified</h1><p>Your rewards are bound to the signed payout wallet. Return to Creator rewards and refresh to claim.</p><a href="/">Return to Elpida</a>');}catch{ return send(400,{error:'X verification failed or expired. Return to the dashboard and try again.'});}
+          try{const cookie=String(req.headers.cookie??'').split(';').map(x=>x.trim()).find(x=>x.startsWith('elpida_x='))?.slice(9);await runtime.transact('reward-x-finish',{state:url.searchParams.get('state'),code:url.searchParams.get('code'),cookie});res.writeHead(200,{'Content-Type':'text/html','Set-Cookie':`elpida_x=; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=0${cookieSecurity}`});return res.end('<!doctype html><title>X verified</title><h1>X profile verified</h1><p>Your rewards are bound to the signed payout wallet. Return to Creator rewards and refresh to claim.</p><a href="/">Return to Elpida</a>');}catch{ return send(400,{error:'X verification failed or expired. Return to the dashboard and try again.'});}
         }
         if (url.pathname === '/api/rewards') return send(200,await runtime.rewards.dashboard());
-        if (url.pathname === '/api/config') return send(200, { ...runtime.config, metadataPublishing:metadataStore.status(), solana: solanaConfig(), csrf });
+        if (url.pathname === '/api/config') return send(200, { ...runtime.config, hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), csrf });
         if(url.pathname==='/api/metadata/resolve')return send(200,await metadataStore.resolve(url.searchParams.get('uri')));
         if(url.pathname.startsWith('/api/content/')){const record=metadataStore.get(url.pathname.slice('/api/content/'.length));if(!record)return send(404,{error:'Content not found.'});res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}
         if (url.pathname === '/api/indexer/status') { await runtime.indexer.sync(); return send(200,runtime.indexer.status()); }
@@ -93,7 +94,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if (!body || typeof body !== 'object' || Array.isArray(body)) return send(400, { error: 'Invalid request.' });
       const action = url.pathname.slice('/api/'.length);
       if(action==='metadata/publish')return send(200,await metadataStore.publish(body,true));
-      if(action==='reward-x-start'){const result=await runtime.transact(action,body);res.setHeader('Set-Cookie',`elpida_x=${result.cookie}; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=600`);return send(200,{url:result.url});}
+      if(action==='reward-x-start'){const result=await runtime.transact(action,body);res.setHeader('Set-Cookie',`elpida_x=${result.cookie}; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=600${cookieSecurity}`);return send(200,{url:result.url});}
       if (action === 'quote') return send(200, await runtime.getQuote(body));
       if (!['launch', 'buy', 'sell', 'withdraw', 'faucet', 'graduate', 'reward-claim', 'reward-challenge', 'reward-verify', 'reward-process', 'reward-stock-faucet'].includes(action)) return send(404, { error: 'Action not found.' });
       return send(200, await runtime.transact(action, body));
@@ -103,7 +104,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     }
   });
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
-  await new Promise((done, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', done); });
+  await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
   return { url: `http://localhost:${server.address().port}`, runtime, async close() {clearInterval(rewardTimer); await new Promise(done => server.close(done)); await runtime.close(); } };
 }
 
