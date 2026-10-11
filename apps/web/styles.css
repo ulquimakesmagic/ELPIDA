@@ -509,6 +509,13 @@ button.link-button,.copy { min-height:44px; }
 
 .token-card .figures { grid-template-columns:repeat(3,minmax(0,1fr));gap:10px; }
 .token-card .figure strong { font-size:1rem;overflow-wrap:anywhere; }
+@media(max-width:600px) { .stepper button { min-height:44px; } }
+@media(max-width:380px) {
+  .stepper { display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:2px; }
+  .stepper li { min-width:0; }
+  .stepper button,.stepper button:not([aria-current]) { grid-template-columns:28px;justify-content:center;padding:8px 0; }
+  .stepper button span:last-child { display:none; }
+}
 
 .price-history svg {width:100%;height:auto;min-height:120px;}
 .chart-grid {stroke:var(--line);stroke-width:1;}
