@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {exceedsRemaining} from '../apps/web/token-page.mjs';
+import {exceedsRemaining} from '../apps/web/amounts.mjs';
 
 test('curve limits preserve exact ETH and token decimal precision',()=>{
  const remaining='1.471012658227848101';
