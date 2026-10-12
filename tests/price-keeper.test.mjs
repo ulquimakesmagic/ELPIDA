@@ -33,3 +33,7 @@ test('invalid Pyth identity, confidence or freshness falls back to timestamped C
   const k=new PriceKeeper({fetcher,now:()=>1000,pythApiKey:'test-only',oracles:{}});await k.refresh();assert.equal(k.snapshot().local.source,'CoinGecko');assert.equal(k.snapshot().local.updatedAt,1000);
  }
 });
+test('fresh Pyth display references take precedence without changing on-chain fee enforcement',()=>{
+ const k=new PriceKeeper({now:()=>1000,oracles:{}});k.values.ETH={usd:2500,updatedAt:1000,source:'Pyth Hermes'};k.chainValues['base-sepolia']={usd:2400,updatedAt:1000,source:'On-chain USD oracle'};
+ assert.equal(k.snapshot()['base-sepolia'].source,'Pyth Hermes');k.values.ETH.updatedAt=700;assert.equal(k.snapshot()['base-sepolia'].source,'On-chain USD oracle');
+});

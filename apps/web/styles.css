@@ -668,3 +668,23 @@ button.link-button,.copy { min-height:44px; }
 .step-body .input{min-width:0;width:100%}
 .logo-drop,.logo-drop>*,.field-label{min-width:0}
 .logo-drop input[type=file]{width:100%}
+.asset-icon { width:20px; height:20px; object-fit:contain; flex-shrink:0; display:inline-block; vertical-align:middle; }
+.chain-selector { position:relative; }
+#env-button { display:flex; align-items:center; gap:8px; min-height:44px; cursor:pointer; max-width:245px; }
+#env-button>span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.chain-options { position:absolute; right:0; top:calc(100% + 8px); z-index:60; min-width:290px; max-width:calc(100vw - 32px); padding:8px; border:1px solid var(--line); border-radius:14px; background:var(--surface); box-shadow:0 16px 40px #0008; }
+.chain-option { width:100%; display:flex; align-items:center; gap:12px; padding:12px; min-height:48px; background:transparent; color:var(--ink); border:0; border-radius:8px; text-align:left; cursor:pointer; }
+.chain-option small { margin-left:auto; color:var(--ink-3); font-size:11px; }
+.chain-option[aria-selected="true"],.chain-option:hover { background:var(--surface-2); color:var(--primary); }
+.chain-context,.card-change { display:flex; align-items:center; gap:8px; }
+.card-change { font-size:13px; margin:14px 0; color:var(--ink-3); }
+.card-change[data-direction="up"] { color:var(--primary); }
+.card-change[data-direction="down"] { color:#ff9f9f; }
+.price-ticker>span { display:flex; align-items:center; gap:8px; }
+.token-card .figures { grid-template-columns:repeat(2,minmax(0,1fr)); gap:14px; margin-bottom:12px; }
+.stage-filters button[aria-pressed="true"] { background:var(--surface-2); color:var(--primary); border-color:var(--primary); }
+@media(max-width:600px) { #env-button { max-width:190px; } .top-actions { justify-content:flex-end; } .chain-options { min-width:280px; } .token-card .figures strong { white-space:normal; overflow-wrap:anywhere; } }
+#env-button>small { font-size:10px; color:var(--ink-3); flex-shrink:0; }
+.price-sources { margin:0 0 24px; font-size:13px; color:var(--ink-3); }
+.price-sources summary { min-height:44px; display:flex; align-items:center; cursor:pointer; text-decoration:underline; text-underline-offset:4px; }
+@media(max-width:600px) { .tabbar { grid-template-columns:none; grid-auto-flow:column; grid-auto-columns:minmax(0,1fr); } }

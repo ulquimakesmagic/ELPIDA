@@ -1,3 +1,4 @@
+import { indexedChange } from '../web/discovery.mjs';
 import { protocolAnalytics } from './protocol-analytics.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
 import { PublicIndexer } from './public-indexer.mjs';
@@ -21,6 +22,8 @@ const ethersFile = fileURLToPath(new URL('../../node_modules/ethers/dist/ethers.
 const resources = new Map([['/', ['index.html', 'text/html']], ['/launch', ['index.html', 'text/html']], ['/reward-policy.mjs', ['reward-policy.mjs', 'text/javascript']], ['/reward-ui.mjs', ['reward-ui.mjs', 'text/javascript']], ['/metadata.mjs', ['metadata.mjs', 'text/javascript']], ['/launch-capabilities.mjs', ['launch-capabilities.mjs', 'text/javascript']], ['/styles.css', ['styles.css', 'text/css']], ['/app.mjs', ['app.mjs', 'text/javascript']], ['/wallet.mjs', ['wallet.mjs', 'text/javascript']], ['/solana-wallet.mjs', ['solana-wallet.mjs', 'text/javascript']], ['/ui.mjs', ['ui.mjs', 'text/javascript']], ['/launch-flow.mjs', ['launch-flow.mjs', 'text/javascript']], ['/token-page.mjs', ['token-page.mjs', 'text/javascript']], ['/amounts.mjs', ['amounts.mjs', 'text/javascript']], ['/rewards-view.mjs', ['rewards-view.mjs', 'text/javascript']]]);
 // Static design assets (brand, fonts, icon sprite): only these extensions, only inside apps/web/assets.
 const assetRoot = fileURLToPath(new URL('../web/assets/', import.meta.url));
+resources.set('/discovery.mjs', ['discovery.mjs','text/javascript']);
+resources.set('/chain-ui.mjs', ['chain-ui.mjs','text/javascript']);
 resources.set('/analytics', ['index.html', 'text/html']);
 resources.set('/analytics-view.mjs', ['analytics-view.mjs', 'text/javascript']);
 resources.set('/metadata-cache.mjs', ['metadata-cache.mjs', 'text/javascript']);
@@ -142,12 +145,12 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         const solanaMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/([1-9A-HJ-NP-Za-km-z]{32,44})(?:\/(trades|candles|holders))?)?$/);
         if(solanaMatch&&url.searchParams.get('network')?.startsWith('solana-')){
           if(!solanaIndex||url.searchParams.get('network')!==solanaIndex.network.key)return send(404,{error:'No public Solana index for this network.'});
-          if(!solanaMatch[1])return send(200,solanaIndex.listings());
+          if(!solanaMatch[1])return send(200,solanaIndex.listings().map(t=>({...t,priceChange24h:indexedChange(solanaIndex.db,t)})));
           const token=solanaIndex.token(solanaMatch[1]);if(!token)return send(404,{error:'Token not indexed yet. Check indexer status and retry.'});
           return send(200,solanaMatch[2]==='trades'?solanaIndex.trades(token.address):solanaMatch[2]==='candles'?solanaIndex.candles(token.address,Number(url.searchParams.get('interval')??60)):solanaMatch[2]==='holders'?await solanaIndex.holders(token.address):token);
         }
         const publicMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?)?$/);
-        if(publicMatch){const key=url.searchParams.get('network')??'base-sepolia';if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown public network.'});if(!publicMatch[1])return send(200,publicIndex.listings(key));const data=publicIndex.detail(key,publicMatch[1],publicMatch[2],Number(url.searchParams.get('interval')??60));return data===null?send(404,{error:'Token not indexed yet. Check indexer status and retry.'}):send(200,data);}
+        if(publicMatch){const key=url.searchParams.get('network')??'base-sepolia';if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown public network.'});if(!publicMatch[1])return send(200,publicIndex.listings(key).map(t=>({...t,priceChange24h:indexedChange(publicIndex.entries.get(key).index.db,t)})));const data=publicIndex.detail(key,publicMatch[1],publicMatch[2],Number(url.searchParams.get('interval')??60));return data===null?send(404,{error:'Token not indexed yet. Check indexer status and retry.'}):send(200,data);}
         if (url.pathname === '/api/config') return send(200, { ...runtime.config, circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), csrf });
         if(url.pathname==='/api/metadata/resolve')return send(200,await metadataStore.resolve(url.searchParams.get('uri')));
         if(url.pathname.startsWith('/api/content/')){const record=metadataStore.get(url.pathname.slice('/api/content/'.length));if(!record)return send(404,{error:'Content not found.'});res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}

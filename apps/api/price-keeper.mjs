@@ -52,7 +52,7 @@ export class PriceKeeper {
   }
   snapshot(){
     return Object.fromEntries(Object.entries(CHAIN_ASSET).map(([chain,symbol])=>{
-      const value=this.chainValues[chain]??this.values[symbol];let fresh=false;try{validatePrice(value,this.now());fresh=true;}catch{}
+      const pyth=this.values[symbol];let value=pyth;try{validatePrice(pyth,this.now());}catch{value=this.chainValues[chain]??pyth;}let fresh=false;try{validatePrice(value,this.now());fresh=true;}catch{}
       return [chain,{symbol,maxAge:PRICE_MAX_AGE,referenceOnly:true,...value,status:fresh?'fresh':value?'stale':'unavailable'}];
     }));
   }

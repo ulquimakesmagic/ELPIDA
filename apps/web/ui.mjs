@@ -69,8 +69,8 @@ export function progressOf(token) {
 }
 /** Lifecycle in plain words, shared by cards, the token page and the portfolio. */
 export function lifecycle(token) {
-  if (token.graduated) return { key: 'dex', label: `Trading on ${token.venue ?? token.dex ?? 'the DEX'}`, chip: 'chip-positive' };
-  if (token.complete) return { key: 'complete', label: 'Ready to graduate', chip: 'chip-dawn' };
+  if (token.graduated) return { key: 'dex', label: 'Graduated', chip: 'chip-positive' };
+  if (token.complete) return { key: 'complete', label: 'Migrating', chip: 'chip-dawn' };
   return { key: 'curve', label: 'On bonding curve', chip: '' };
 }
 export function bar(percent, done = false, label = 'Bonding curve progress') {

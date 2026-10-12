@@ -1,3 +1,4 @@
+import { assetIcon, chainIcon } from './chain-ui.mjs';
 // Token detail page: market figures with plain definitions, bonding-curve progress, trade panel,
 // graduation actions, creator-fee summary and technical details.
 import { h, icon, short, number, compact, avatar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, copyButton, errorText, toast, usdRate, formatPrice, bar } from './ui.mjs';
@@ -49,13 +50,13 @@ export function renderToken(ctx, address) {
   const byline = h('div.byline',
     token.creator ? h('span', 'by ', h('a.creator-link', { href: addressUrl(token.creator) ?? '#', target: '_blank', rel: 'noopener noreferrer' }, short(token.creator))) : null,
     created ? h('span', `${ago(created)} ago`) : null,
-    h('span', `${q} pair`),
+    h('span.chain-context',assetIcon(q),`${q} pair`),
     h('span.addr', short(token.address), copyButton(token.address, '')),
     external(token.url ?? addressUrl(token.address), 'Open in explorer'),
     ...[['twitter', 'X'], ['telegram', 'Telegram'], ['website', 'Website'], ['discord', 'Discord']].filter(([k]) => social[k]).map(([k, label]) => h('a.chip.chip-link', { href: social[k], target: '_blank', rel: 'noopener noreferrer' }, label)));
   const head = h('header.token-hero', avatar(token, 'avatar-lg'),
     h('div.token-identity', h('h1', token.name, h('span.sym', token.symbol)), byline,
-      h('div.chips', h(`span.chip${life.chip ? '.' + life.chip : ''}`, life.label), h(`span.chip.${ctx.mode === 'local' ? 'chip-sim' : 'chip-testnet'}`, ctx.envLabel()))),
+      h('div.chips', h(`span.chip${life.chip ? '.' + life.chip : ''}`, life.label), h(`span.chip.${ctx.mode === 'local' ? 'chip-sim' : 'chip-testnet'}`, chainIcon(token.network??ctx.wallet.net.key),ctx.envLabel()))),
     h('div.market-headline', h('span.meta', 'Market cap'), h('strong', fmtValue(p.marketCap, token)), h('span.meta', `${fmtPrice(token)} price`)));
 
   // Curve progress: real reserve raised toward the reserve that completes the curve (net of the fee).
