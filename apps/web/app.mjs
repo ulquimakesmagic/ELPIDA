@@ -11,6 +11,7 @@ import { circleFundingPanel } from './circle-funding.mjs';
 
 let config, evmWallet, solWallet, wallet;
 let mode = 'local', account = '0', state = null, busy = false, refreshRevision = 0, progressHook = null;
+let allTokens = [], discoveryErrors = [];
 const ui = { filter: 'all', query: '', sort: 'newest',stage:'all' };
 
 async function api(path, body, renewed = false) {
@@ -55,7 +56,11 @@ async function refresh({ preserveInput = false } = {}) {
   try{const latest=await api('prices');config.prices=latest;}catch{}
   if(mode==='local'){try{const c=await api('config');config.local=c.local;config.pricing=c.pricing;}catch{}}
   let next;
-  if (mode === 'testnet' && !wallet.address) next = { balance: '0', nativeBalance:'0', tokens: wallet.net.kind==='evm'?await wallet.publicTokens():[], activity: [], disconnected: true };
+  if (mode === 'testnet' && !wallet.address) {
+    let tokens=[],discoveryError=false;
+    try{tokens=await wallet.publicTokens();}catch{discoveryError=true;}
+    next = { balance: '0', nativeBalance:'0', tokens, activity: [], disconnected: true,discoveryError };
+  }
   else if(mode==='local')next=await api(`state?account=${account}`);
   else{try{next=await wallet.state();}catch(error){
     if(wallet.net.kind!=='evm'||!wallet.net.shared?.factory)throw error;
@@ -66,7 +71,29 @@ async function refresh({ preserveInput = false } = {}) {
   const reference=mode==='testnet'&&wallet.price?wallet.price:config.prices?.[currentChain()];
   for(const t of next.tokens??[])if(t.pair==='native')t.usdReference=reference;
   state = next; updateChrome(); rerender(preserveInput ? 'background' : 'data');
+  if(mode==='testnet'){
+    const results=await Promise.allSettled(config.testnets.map(async net=>(await api(`public/tokens?network=${encodeURIComponent(net.key)}`)).map(t=>({...t,network:net.key,usdReference:t.pair==='native'?config.prices?.[net.key]:t.usdReference}))));
+    if(revision!==refreshRevision)return state;
+    discoveryErrors=results.flatMap((r,i)=>r.status==='rejected'?[config.testnets[i].name]:[]);
+    if(next.discoveryError)discoveryErrors.push(wallet.net.name);
+    const indexed=results.flatMap(r=>r.status==='fulfilled'?r.value:[]);
+    const merged=new Map(indexed.map(t=>[`${t.network}:${t.address.toLowerCase()}`,t]));
+    for(const t of next.tokens??[])merged.set(`${currentChain()}:${t.address.toLowerCase()}`,{...t,network:currentChain()});
+    if(solWallet.deployment&&wallet!==solWallet){try{for(const t of await solWallet.publicTokens())merged.set(`${solWallet.net.key}:${t.address}`,{...t,network:solWallet.net.key});}catch{discoveryErrors.push(solWallet.net.name);}}
+    allTokens=[...merged.values()];
+    if(currentRoute.name==='explore')rerender('background');
+  }else allTokens=next.tokens;
   return state;
+}
+async function chooseChain(key){
+  if(busy)throw new Error('Wait for the current request to finish.');
+  if(key==='local')return useLocal();
+  if(mode==='testnet'&&currentChain()===key)return;
+  wallet=key===config.solana.key?solWallet:evmWallet;
+  wallet.select(key);wallet.address=null;wallet.signer=null;
+  mode='testnet';state=null;
+  try{localStorage.setItem('elpida:network',key);}catch{}
+  updateChrome();await refresh();
 }
 async function connect(key, walletId) {
   const previousWallet = wallet, previousKey = wallet.net.key;
@@ -118,10 +145,13 @@ const ctx = {
 function envLabel() { return mode === 'local' ? (config?.hostedSimulation ? 'Shared simulation' : 'Local simulation') : `${wallet.net.name} · ${wallet.net.mainnet ? 'mainnet beta' : 'testnet'}`; }
 function updateChrome() {
   const envButton = $('#env-button');
-  envButton.dataset.env = mode; $('#env-label').textContent = envLabel();
-  envButton.setAttribute('aria-label', `${envLabel()}. Open network and test funds.`);
+  envButton.dataset.env = mode;
+  if(!envButton.options.length&&config)envButton.replaceChildren(...networks().map(net=>h('option',{value:net.key},`${net.name} · ${net.mainnet?'mainnet beta':'testnet'}`)),h('option',{value:'local'},'Simulation'));
+  envButton.value=mode==='local'?'local':currentChain();
+  envButton.disabled=busy;
   $('#account-label').textContent = mode === 'local' ? (config?.accounts?.[Number(account)]?.name ? `Demo ${config.accounts[Number(account)].name.toLowerCase()}` : 'Demo account') : wallet.address ? short(wallet.address) : 'Connect wallet';
   $('#account-button').setAttribute('aria-label', `${$('#account-label').textContent}. Open account and network settings.`);
+  $$('[data-nav="portfolio"]').forEach(link=>{link.hidden=mode!=='testnet'||!wallet.address;});
   $$('[data-busy-disable]').forEach(button => { button.disabled = busy; });
 }
 function envBanner() {
@@ -140,14 +170,16 @@ function envBanner() {
 /* ---------- Routing ---------- */
 let currentRoute = { name: 'explore' };
 function parseRoute() {
-  const hash = location.hash.replace(/^#/, '') || '/';
+  const [hash,query] = (location.hash.replace(/^#/, '') || '/').split('?');
   const token = hash.match(/^\/token\/([A-Za-z0-9]{32,64})$/);
-  if (token) return { name: 'token', address: token[1] };
+  if (token) return { name: 'token', address: token[1],network:new URLSearchParams(query).get('network') };
   return { name: { '/': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch' }[hash] ?? 'explore' };
 }
 function route() {
   const next = parseRoute(); const changed = next.name !== currentRoute.name || next.address !== currentRoute.address;
   currentRoute = next;
+  if(next.name==='portfolio'&&(mode!=='testnet'||!wallet.address)){location.hash='#/';return;}
+  if(next.network&&networkByKey(next.network)&&next.network!==currentChain()){chooseChain(next.network).catch(e=>toast(errorText(e),{kind:'error'}));return;}
   $$('[data-nav]').forEach(link => { if (link.dataset.nav === next.name) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
   document.title = `Elpida · ${{ explore: 'Explore tokens', portfolio: 'Portfolio', rewards: 'Rewards', launch: 'Create a token', token: 'Token' }[next.name]}`;
   rerender('route');
@@ -191,22 +223,24 @@ function loadingView() { return h('div', h('div.page-head', h('div', h('h1', 'Ex
 /* ---------- Explore ---------- */
 function stats() {
   const totals = {};
-  for (const t of state.tokens) { const q = t.quoteSymbol ?? state.nativeSymbol ?? 'ETH'; totals[q] = (totals[q] ?? 0) + Number(t.reserve); }
+  const listings=mode==='local'?state.tokens:allTokens;
+  for (const t of listings) { const q = t.quoteSymbol ?? state.nativeSymbol ?? 'ETH'; totals[q] = (totals[q] ?? 0) + Number(t.reserve); }
   const solana = mode === 'testnet' && wallet === solWallet;
   const dex = mode === 'local' ? config.dex : wallet.dex;
   // Balances are in the network's native coin (pricing is native only).
   const balance = `${number(state.nativeBalance ?? state.balance, 4)} ${state.nativeSymbol ?? state.balanceSymbol ?? 'ETH'}`;
   return h('section.stats', { 'aria-label': 'Launchpad overview' },
-    h('div', h('span', 'Tokens launched'), h('strong', String(state.tokens.length))),
+    h('div', h('span', 'Tokens launched'), h('strong', String(listings.length))),
     h('div', h('span', 'Trading reserves'), h('strong', Object.entries(totals).map(([q, v]) => `${number(v, v < 1 ? 4 : 2)} ${q}`).join(' + ') || '0'), h('small', mode === 'local' ? 'Simulated assets held by curves and pools' : 'Test assets held by curves and pools')),
     h('div', h('span', mode === 'local' ? 'Your simulated balance' : 'Your balance'), h('strong', state.disconnected ? '—' : balance)),
     h('div', h('span', 'Trading fee'), h('strong', solana ? '1.25% → 0.30%' : dex ? '1.25% → 1%' : '1.25%'), h('small', solana ? 'Curve, then PumpSwap pool' : dex ? 'Curve, then Uniswap v3 pool' : 'Bonding curve')));
 }
 function tokenCard(token) {
   const life = lifecycle(token), pct = progressOf(token), p = pricing(token);
-  return h('a.token-card', { href: `#/token/${token.address}`, 'aria-label': `${token.name}, ${token.symbol}. ${life.label}.` },
+  const chain=networkByKey(token.network);
+  return h('a.token-card', { href: `#/token/${token.address}${token.network?'?network='+encodeURIComponent(token.network):''}`, 'aria-label': `${token.name}, ${token.symbol}. ${chain?.name??'Simulation'}. ${life.label}.` },
     h('div.token-card-head', avatar(token), h('div', h('h3', token.name), h('span.sym', `$${token.symbol}`))),
-    h('div.chips', h(`span.chip${life.chip ? '.' + life.chip : ''}`, life.label), h('span.chip', `${token.quoteSymbol ?? state.nativeSymbol ?? 'ETH'} pair`)),
+    h('div.chips', h('span.chip',icon('globe','icon-sm'),chain?.name??'Simulation'),h(`span.chip${life.chip ? '.' + life.chip : ''}`, life.label), h('span.chip', `${token.quoteSymbol ?? state.nativeSymbol ?? 'ETH'} pair`)),
     h('p.desc', token.metadata?.description || 'No description yet.'),
     // Market cap = price × the full 1B supply (all minted at launch), the same figure as FDV.
     h('div.figures', h('div.figure', h('span', 'Market cap'), h('strong', fmtValue(p.marketCap, token))), h('div.figure', h('span', 'Price'), h('strong.nowrap', fmtPrice(token)))),
@@ -226,7 +260,7 @@ function exploreView() {
   const grid = h('div.token-grid');
   const empty = h('div');
   const draw = () => {
-    const items = filtered([...state.tokens]);
+    const items = filtered([...(mode==='local'?state.tokens:allTokens)]);
     grid.replaceChildren(...items.map(tokenCard));
     empty.replaceChildren(items.length ? '' : emptyState());
     count.textContent = `${items.length} ${items.length === 1 ? 'token' : 'tokens'}`;
@@ -241,20 +275,21 @@ function exploreView() {
   const view = h('div',
     h('section.intro', h('div', h('h1', 'Create a token. Build your community.'), h('p', 'Launch with a fixed supply and a virtual bonding curve. Choose how creator fees are allocated, and follow your token from its first trade to graduation.')),
       h('div.intro-actions', h('a.btn.btn-primary.btn-lg', { href: '#/launch' }, icon('plus'), 'Create token'), h('button.btn.btn-secondary.btn-lg', { type: 'button', on: { click: () => $('#how-dialog').showModal() } }, 'How it works'))),
-    h('div', { class: 'section' }, envBanner()),
+    discoveryErrors.length?h('p.small.error-text',`Some networks could not load: ${discoveryErrors.join(', ')}. Refresh to retry.`):null,
     h('div.price-ticker',{'aria-label':'Native asset USD reference prices'}, ['ETH','BNB','SOL'].map(symbol=>{const p=Object.values(config.prices??{}).find(p=>p.symbol===symbol&&!p.simulation&&p.status==='fresh');return h('span',{title:p?.updatedAt?'Updated '+new Date(p.updatedAt*1000).toLocaleString():''},h('strong',symbol),p?.status==='fresh'?'$'+number(p.usd):'Price unavailable');})),
     stats(),
     h('section', { 'aria-labelledby': 'tokens-title' },
       h('div.page-head', h('div', h('h2#tokens-title', 'Tokens'), count), h('button.btn.btn-ghost.btn-sm', { type: 'button', on: { click: () => refresh().then(() => toast('Updated.')).catch(e => toast(errorText(e), { kind: 'error' })) } }, icon('refresh-cw', 'icon-sm'), 'Refresh')),
       h('div.toolbar', h('label.search', icon('search'), search), segmented, sort),stages, grid, empty),
-    activitySection());
+    );
   draw();
   return view;
 }
 function emptyState() {
-  const text = state.disconnected ? `Connect your wallet to see tokens on ${wallet.net.name}.` : state.undeployed ? 'Elpida is not set up on this network yet. Create a token to start the one-time setup.' : ui.query ? 'No tokens match your search. Try another name or symbol.' : ui.filter === 'held' ? 'You do not hold any tokens yet.' : ui.filter === 'created' ? 'You have not created a token on this network yet.' : 'No tokens yet. Be the first to create one.';
-  return h('div.empty', h('img', { src: '/assets/brand/elpida-mark.svg', alt: '' }), h('h3', state.disconnected ? 'Wallet not connected' : 'Nothing here yet'), h('p', text),
-    state.disconnected ? h('button.btn.btn-primary', { type: 'button', on: { click: () => connectCurrent() } }, icon('wallet'), 'Connect wallet') : h('a.btn.btn-primary', { href: '#/launch' }, icon('plus'), 'Create token'));
+  const text = ui.query ? 'No tokens match your search. Try another name or symbol.' : ui.filter !=='all'&&state.disconnected?'Connect your wallet to see your tokens.':ui.filter === 'held' ? 'You do not hold any tokens yet.' : ui.filter === 'created' ? 'You have not created a token yet.' : 'No indexed launches yet. Tokens across Elpida networks appear here.';
+  const needsWallet=state.disconnected&&ui.filter!=='all';
+  return h('div.empty', h('img', { src: '/assets/brand/elpida-mark.svg', alt: '' }), h('h3', needsWallet ? 'Wallet not connected' : 'Nothing here yet'), h('p', text),
+    needsWallet ? h('button.btn.btn-primary', { type: 'button', on: { click: () => connectCurrent() } }, icon('wallet'), 'Connect wallet') : h('a.btn.btn-primary', { href: '#/launch' }, icon('plus'), 'Create token'));
 }
 function activitySection() {
   const items = mode === 'local' ? state.activity ?? [] : state.tokens.map(t => ({ type: 'Launch', symbol: t.symbol, account: t.creator, hash: t.hash, url: t.hash ? wallet.txUrl(t.hash) : t.url, time: t.created }));
@@ -292,7 +327,11 @@ function portfolioView() {
 /* ---------- Network and test funds ---------- */
 async function connectCurrent() {
   const list = wallet.net.kind === 'solana' ? solanaWallets() : evmWallets();
-  if (list.length > 1 && !(wallet.net.kind === 'solana' ? chosenSolanaWallet() : chosenEvmWallet())) return openTools();
+  if (list.length > 1 && !(wallet.net.kind === 'solana' ? chosenSolanaWallet() : chosenEvmWallet())) {
+    const dialog=$('#tools-dialog'),error=h('p.error-text',{role:'alert'});
+    $('#tools-body').replaceChildren(h('h3',`Connect a wallet · ${wallet.net.name}`),walletButtons(wallet.net,{onDone:()=>dialog.close(),onError:e=>{error.textContent=errorText(e);}}),error);
+    dialog.showModal();return;
+  }
   try { await connect(wallet.net.key); toast(`Connected to ${wallet.net.name}.`, { kind: 'success' }); } catch (error) { toast(errorText(error), { kind: 'error' }); }
 }
 function openTools() {
@@ -354,7 +393,7 @@ async function init() {
   if(saved!=='local'){mode='testnet';}
   if (location.pathname === '/launch') history.replaceState({}, '', '/#/launch');
   $$('dialog').forEach(d => { closeOnBackdrop(d); d.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => d.close())); });
-  $('#env-button').addEventListener('click', openTools);
+  $('#env-button').addEventListener('change',event=>chooseChain(event.target.value).catch(e=>{toast(errorText(e),{kind:'error'});updateChrome();}));
   $('#account-button').addEventListener('click', () => (mode === 'testnet' && !wallet.address ? connectCurrent() : openTools()));
   $('#how-button').addEventListener('click', () => $('#how-dialog').showModal());
   window.addEventListener('hashchange', route);

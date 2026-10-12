@@ -444,7 +444,7 @@ dialog[open] { animation: dialog-in var(--base) var(--ease); }
   .site-footer { flex-direction: column; align-items: flex-start; padding-bottom: 96px; }
   .toasts { bottom: 84px; right: 16px; }
   .dawn-arc { grid-template-columns: 1fr; }
-  .account-button .label { display: none; }
+  .account-button .label { display: inline; }
   .env-button .label { max-width: 110px; overflow: hidden; text-overflow: ellipsis; }
 }
 @media (max-width: 420px) {
@@ -506,6 +506,10 @@ button.link-button,.copy { min-height:44px; }
 
 .btn-sm,.env-button,.icon-button,.segmented button { min-height:44px; }
 .icon-button,.account-button { min-width:44px; }
+[hidden] { display:none !important; }
+#env-button { max-width:230px; padding-right:28px; color:var(--testnet); }
+#env-button option { background:var(--paper); color:var(--ink); }
+@media(max-width:600px){#env-button{max-width:145px;font-size:12px;} .topbar-inner{gap:8px;flex-wrap:wrap;height:auto;min-height:64px;padding-top:8px;padding-bottom:8px;} .account-button{font-size:12px;} }
 
 .token-card .figures { grid-template-columns:repeat(3,minmax(0,1fr));gap:10px; }
 .token-card .figure strong { font-size:1rem;overflow-wrap:anywhere; }

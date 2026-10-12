@@ -190,15 +190,16 @@ export class SolanaWallet {
   }
   /** Rent and fees a SOL-pair transaction needs on top of the trade (new accounts, priority-free fee). */
   static SOL_HEADROOM = 30_000_000n;
-  async state() {
-    this.checkWallet();
+  async publicTokens(){return (await this.state({readOnly:true})).tokens;}
+  async state({readOnly=false}={}) {
+    if(!readOnly)this.checkWallet();
     if (!this.deployment) return { wallet: this.address, balance: '0', balanceSymbol: 'SOL', nativeSymbol: 'SOL', tokens: [], activity: [], treasuryBalance: '0', undeployed: true };
     const launchConfig = await this.loadConfig();
     await this.loadPrice().catch(() => { this.price = { status: 'unavailable', source: 'Pyth SOL/USD (on-chain)' }; });
-    await this.loadBeta();
+    if(!readOnly)await this.loadBeta();
     const accounts = await this.connection.getProgramAccounts(this.client.programId, { filters: [{ dataSize: POOL_SIZE }] });
     const pools = accounts.filter(({ account }) => this.client.isPool(account.data)).map(({ pubkey, account }) => ({ pubkey, ...this.client.decodePool(account.data) })).filter(pool => this.configOf(pool));
-    const holdings = pools.length ? await this.connection.getMultipleAccountsInfo(pools.map(pool => this.client.ata(this.publicKey, pool.mint))) : [];
+    const holdings = !readOnly&&pools.length ? await this.connection.getMultipleAccountsInfo(pools.map(pool => this.client.ata(this.publicKey, pool.mint))) : [];
     this.launches.clear();
     const now = chainNow();
     const migrated = await this.pumpStates(pools.filter(pool => pool.status === STATUS_MIGRATED));
@@ -237,6 +238,7 @@ export class SolanaWallet {
       }
       return token;
     }));
+    if(readOnly)return {tokens,balance:'0',nativeBalance:'0',disconnected:true};
     const [treasury, lamports] = await Promise.all([this.connection.getBalance(launchConfig.treasury), this.connection.getBalance(this.publicKey)]);
     const pairBalances = {};
     for (const cfg of this.configs.values()) pairBalances[cfg.address.toBase58()] = formatAmount(await this.quoteBalance(this.publicKey, cfg), cfg.quoteDecimals);
