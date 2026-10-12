@@ -449,7 +449,7 @@ dialog[open] { animation: dialog-in var(--base) var(--ease); }
 }
 @media (max-width: 420px) {
   .token-grid { grid-template-columns: 1fr; }
-  .logo-drop { grid-template-columns: 1fr; }
+  .logo-drop { grid-template-columns: minmax(0, 1fr); }
   .step-nav .btn { flex: 1; }
   .brand img { height: 26px; }
 }
@@ -661,3 +661,10 @@ button.link-button,.copy { min-height:44px; }
 @media(max-width:600px) { .analytics-controls { width:100%; } .analytics-filters { flex-wrap:wrap; } .analytics-section-head { flex-wrap:wrap; } .analytics-body .panel { padding:18px; } .analytics-metrics { gap:10px; } .analytics-controls select { max-width:100%; } .analytics-table { min-width:540px; } .tabbar { grid-template-columns:repeat(auto-fit,minmax(0,1fr)); } }
 .analytics-body .panel { margin:0; }
 .analytics-controls select { color:var(--ink); background:var(--surface); border:1px solid var(--line); border-radius:10px; min-height:44px; padding:10px 32px 10px 12px; }
+
+/* Narrow phones: grid tracks must not grow past the panel because of an input's intrinsic width. */
+.step-body{grid-template-columns:minmax(0,1fr)}
+.row-2>*,.step-body>*{min-width:0}
+.step-body .input{min-width:0;width:100%}
+.logo-drop,.logo-drop>*,.field-label{min-width:0}
+.logo-drop input[type=file]{width:100%}
