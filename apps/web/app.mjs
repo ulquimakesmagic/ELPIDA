@@ -107,14 +107,14 @@ async function chooseChain(key){
   try{localStorage.setItem('elpida:network',key);}catch{}
   updateChrome();await refresh();
 }
-async function connect(key, walletId) {
+async function connect(key, walletId, {silent=false}={}) {
   connecting=true;updateChrome();
   const previousWallet = wallet, previousKey = wallet.net.key;
   let connected = false;
   try {
     wallet = key === config.solana.key ? solWallet : evmWallet;
     wallet.select(key);
-    await wallet.connect(walletId); connected = true; mode = 'testnet';
+    await wallet.connect(walletId,{silent}); connected = true; mode = 'testnet';
     try { localStorage.setItem('elpida:network', key); } catch {}
     state = { wallet: wallet.address, balance: '0', tokens: [], activity: [] };
     await refresh({walletRead:true});
@@ -420,7 +420,7 @@ async function init() {
       if (previous.kind === 'solana') { const provider = solWallet.provider; trusted = !!provider && (provider.isConnected && !!provider.publicKey || !!(await Promise.race([provider.connect({ onlyIfTrusted: true }), new Promise((_, no) => setTimeout(() => no(new Error('timeout')), 2500))]))); }
       else trusted = ((await Promise.race([evmWallet.eth?.request({ method: 'eth_accounts' }), new Promise(resolve => setTimeout(() => resolve([]), 2500))])) ?? []).length > 0;
     } catch {}
-    if (trusted) { try { await connect(previous.key); } catch { trusted = false; } }
+    if (trusted) { try { await connect(previous.key,undefined,{silent:true}); } catch { trusted = false; } }
     if (!trusted) { wallet = previous.kind === 'solana' ? solWallet : evmWallet; mode='testnet';state=null;toast(`Browsing ${previous.name}. Connect your wallet to trade.`, { kind: 'info' }); }
   }
   try { if (!state) await refresh(); }

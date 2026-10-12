@@ -88,7 +88,7 @@ export class TestnetWallet {
   get eth() { return this._eth ?? evmProvider(); }
   get walletName() { const eth = this.eth; const entry = [...announced.values()].find(d => d.provider === eth); return entry?.info.name ?? (eth?.isMetaMask ? 'MetaMask' : 'your wallet'); }
   /** Connects with the chosen EVM wallet (`walletId`, an EIP-6963 rdns), remembered for next time. */
-  async connect(walletId) {
+  async connect(walletId, {silent=false}={}) {
     if (walletId) { try { localStorage.setItem(EVM_CHOICE, walletId); } catch {} }
     const eth = evmProvider(walletId ?? chosenEvmWallet());
     if (!eth) throw new Error('Open this app in a browser with MetaMask or another Ethereum wallet installed.');
@@ -98,8 +98,11 @@ export class TestnetWallet {
     const ask = args => withWalletTimeout(eth.request(args), name);
     try {
       // Accounts first: this request always opens the wallet, even when it is set to another chain.
-      await ask({ method: 'eth_requestAccounts' });
-      try { await ask({ method: 'wallet_switchEthereumChain', params: [{ chainId }] }); }
+      if(silent){
+        const accounts=await ask({method:'eth_accounts'});
+        if(!accounts.length||BigInt(await ask({method:'eth_chainId'}))!==BigInt(net.chainId))throw new Error('Reconnect your wallet to '+net.name+'.');
+      } else await ask({ method: 'eth_requestAccounts' });
+      if(!silent) try { await ask({ method: 'wallet_switchEthereumChain', params: [{ chainId }] }); }
       catch (error) {
         const code = error.code ?? error.data?.originalError?.code;
         if (code !== 4902 && !/unrecognized chain|not been added|unsupported chain/i.test(error.message ?? '')) throw error;

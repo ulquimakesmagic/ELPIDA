@@ -71,7 +71,7 @@ export class SolanaWallet {
   }
 
   /** Connects with the chosen Solana wallet (`walletId`), remembered for next time. */
-  async connect(walletId) {
+  async connect(walletId, {silent=false}={}) {
     if (!web3) throw new Error('The Solana library did not load. Refresh the page.');
     if (walletId) { try { localStorage.setItem(SOL_CHOICE, walletId); } catch {} }
     const provider = solanaProvider(walletId ?? chosenSolanaWallet(),this.net.mainnet?'solana:mainnet':'solana:devnet');
@@ -80,7 +80,7 @@ export class SolanaWallet {
     let result = null;
     // A wallet that is already connected to this site answers without a popup; asking again can stall.
     if (!(provider.isConnected && provider.publicKey)) {
-      try { result = await withWalletTimeout(provider.connect(), this.walletName); }
+      try { result = await withWalletTimeout(provider.connect(silent?{onlyIfTrusted:true}:undefined), this.walletName); }
       catch (error) { const text = walletErrorText(error, this.walletName); if (text) throw Object.assign(new Error(text), { code: error.code }); throw error; }
     }
     const key = result?.publicKey ?? provider.publicKey;
