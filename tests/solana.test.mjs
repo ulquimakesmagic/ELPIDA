@@ -733,3 +733,29 @@ test('Solana upgrade is a no-op when the deployed program already matches the bu
   assert.equal(result.upgraded, false);
   await assert.rejects(upgradeProgram({ connection: f.connection, payer: f.outsider, programId: f.programKeypair.publicKey, elf: readFileSync(elfPath) }), /upgrade authority/);
 });
+
+test('Solana public indexer: pools, launch/buy/sell trades, candles and holders from chain', { skip }, async () => {
+  const { SolanaIndexer } = await import('../packages/indexer/solana-indexer.mjs');
+  const index = new SolanaIndexer({ web3, connection: f.connection, deployment: { programId: f.programKeypair.publicKey.toBase58(), pairs: [] }, network: { key: 'solana-localnet', cluster: 'localnet', explorer: 'https://explorer.solana.com' }, spacingMs: 0, backfill: 5000 });
+  try {
+    await index.sync();
+    const listings = index.listings();
+    assert.ok(listings.length >= 5, `indexed ${listings.length} pools`);
+    const token = listings.find(t => t.symbol === 'SOLG');
+    assert.ok(token, 'the first launch is listed');
+    assert.equal(Number(token.supply), 1e9); assert.equal(Number(token.circulatingSupply), 1e9, 'circulating = full minted supply');
+    const trades = index.trades(token.address);
+    assert.ok(trades.some(t => t.launch && t.side === 'buy' && t.account === f.creator.publicKey.toBase58()), 'launch buy by the creator');
+    const all = listings.flatMap(t => index.trades(t.address));
+    assert.ok(all.some(t => t.side === 'sell'), 'sells are indexed');
+    assert.ok(index.candles(token.address, 60).length >= 1);
+    const holders = await index.holders(token.address);
+    assert.ok(holders.some(h => h.address === f.creator.publicKey.toBase58()), 'creator holds tokens');
+    assert.ok(!holders.some(h => h.address === token.pool), 'curve vault excluded');
+    // Idempotent: a second sync adds nothing new.
+    const before = index.status().trades;
+    await index.sync();
+    assert.equal(index.status().trades, before);
+    assert.equal(index.status().error, null);
+  } finally { index.close(); }
+});

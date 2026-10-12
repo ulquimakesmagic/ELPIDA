@@ -63,7 +63,7 @@ async function refresh({ preserveInput = false } = {}) {
   }
   else if(mode==='local')next=await api(`state?account=${account}`);
   else{try{next=await wallet.state();}catch(error){
-    if(wallet.net.kind!=='evm'||!wallet.net.shared?.factory)throw error;
+    if(wallet.net.kind==='evm'?!wallet.net.shared?.factory:!wallet.deployment)throw error;
     api('client-error',{stage:'wallet-state',code:error.code??error.name??'UNKNOWN',rpcMethod:error.payload?.method??error.info?.payload?.method,rpcCode:error.error?.code??error.info?.error?.code}).catch(()=>{});
     next={wallet:wallet.address,balance:'0',nativeBalance:'0',tokens:await wallet.publicTokens(),activity:[],disconnected:true,walletReadError:true};
   }}

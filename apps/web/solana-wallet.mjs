@@ -122,6 +122,13 @@ export class SolanaWallet {
     this.programConfig = launch; this.decimals = launch.quoteDecimals;
     return launch;
   }
+  /** Tokens from the server's public Solana indexer: browsable without a wallet, persistent across restarts. */
+  async indexedTokens() {
+    const response = await fetch('/api/public/tokens?network=' + encodeURIComponent(this.net.key));
+    if (!response.ok) throw new Error('Public Solana token discovery is unavailable.');
+    const entries = await response.json();
+    return Promise.all(entries.map(async item => ({ ...item, metadata: this.deployment ? await readMetadata(metadataKey(this.deployment.programId, item.address)) ?? item.metadata ?? {} : item.metadata ?? {} })));
+  }
   /** USDC mint accepted for the $10 fee, when the deployment's USD pricing offers it. */
   get feeUsdc() { return this.deployment?.usdPricing?.usdcMint ?? null; }
   /**
@@ -190,7 +197,11 @@ export class SolanaWallet {
   }
   /** Rent and fees a SOL-pair transaction needs on top of the trade (new accounts, priority-free fee). */
   static SOL_HEADROOM = 30_000_000n;
-  async publicTokens(){return (await this.state({readOnly:true})).tokens;}
+  /** Public discovery: the server's indexer first (persistent, with history), else a direct read-only chain scan. */
+  async publicTokens(){
+    try{const indexed=await this.indexedTokens();if(indexed.length)return indexed.map(t=>({...t,usdReference:t.pair==='native'?this.price:null}));}catch{}
+    return (await this.state({readOnly:true})).tokens;
+  }
   async state({readOnly=false}={}) {
     if(!readOnly)this.checkWallet();
     if (!this.deployment) return { wallet: this.address, balance: '0', balanceSymbol: 'SOL', nativeSymbol: 'SOL', tokens: [], activity: [], treasuryBalance: '0', undeployed: true };
