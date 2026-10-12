@@ -3,7 +3,7 @@ export function injectedEvmWallets(win, announced = []) {
   const result = [], seen = new Set();
   const add = (id, name, provider, icon = '') => {
     if (!provider?.request || seen.has(provider)) return;
-    seen.add(provider); result.push({id, name, provider, icon:icon||({MetaMask:'/assets/wallets/metamask.svg',Phantom:'/assets/wallets/phantom.svg'}[name]??'')});
+    seen.add(provider); result.push({id, name, provider, icon:(/^data:image\//.test(icon)?icon:null)||({MetaMask:'/assets/wallets/metamask.svg',Phantom:'/assets/wallets/phantom.svg'}[name]??'')});
   };
   for (const d of announced) add(d.info.rdns, d.info.name, d.provider, d.info.icon);
   const name = p => p.isRabby?'Rabby':p.isCoinbaseWallet?'Coinbase Wallet':p.isBraveWallet?'Brave Wallet':p.isTrust?'Trust Wallet':p.isOkxWallet?'OKX Wallet':p.isPhantom?'Phantom':p.isMetaMask?'MetaMask':'Browser wallet';
