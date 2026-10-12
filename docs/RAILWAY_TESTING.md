@@ -15,7 +15,7 @@ No build-time secrets are needed for simulation. For public metadata publishing,
 ## Limits and troubleshooting
 
 - This is a development prototype for online testing. The deployment does not publish production contracts or enable mainnet launches.
-- Demo rewards, balances, uploads and policies are temporary. Do not add a volume expecting it to persist the simulated blockchain. Persistent hosted simulation requires a separate state design.
+- Mount a volume at `/app/local-data`. The simulated chain is rebuilt at start by replaying `simulation-journal-v2.jsonl` from the volume, so launches, trades and rewards survive restarts and redeploys. Check `/api/public/status` → `storage.simulation.replayed`. Delete the journal file to start a fresh simulation. Errors and replay counts are written to the service log (`storage_ready`).
 - If the page returns 403, verify `RAILWAY_PUBLIC_DOMAIN` or `ELPIDA_PUBLIC_URL`, then redeploy. Avoid visiting an alternate domain that is not configured.
 - If deployment times out, inspect the service logs for compilation or runtime errors. `/health` is available only after the runtime has initialized.
 - Public testnets still require test funds and valid shared deployments. A hosted frontend cannot bypass wallet signatures or unavailable testnet contracts.

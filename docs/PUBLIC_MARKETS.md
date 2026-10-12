@@ -5,7 +5,7 @@ Base Sepolia uses the existing v9 factory `0xe605787F7260F5Dae2768d2F9E93E7F18EE
 Its bounded backfill starts at block 47994800 (before deployment). No wallet key is
 used by the indexer. Other EVM networks are enabled when their verified shared
 factory and start block are configured in `packages/core/networks.mjs`.
-Solana public event indexing is not implemented by this EVM worker.
+Solana pools and trades are indexed by a separate worker, `packages/indexer/solana-indexer.mjs` (see `USD_PRICING_AND_UX.md`).
 
 ## Storage
 
