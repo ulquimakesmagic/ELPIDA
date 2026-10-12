@@ -1,6 +1,9 @@
 // Token detail page: market figures with plain definitions, bonding-curve progress, trade panel,
 // graduation actions, creator-fee summary and technical details.
 import { h, icon, short, number, compact, avatar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, copyButton, errorText, toast, usdRate, formatPrice, bar } from './ui.mjs';
+import { withWalletTimeout, walletErrorText } from './wallet.mjs';
+
+const metadataRequests = new Map();
 
 const SVGNS = 'http://www.w3.org/2000/svg';
 // Compare decimal amounts without rounding away the last token/native-asset unit.
@@ -97,8 +100,29 @@ export function renderToken(ctx, address) {
     h('p.section-text', token.metadata?.description || 'The creator has not added a description.'),
     token.metadataURI ? h('p.small.muted', token.metadataStatus === 'unavailable' ? 'Published metadata is temporarily unavailable.' : 'Metadata reference recorded on-chain.') : null);
   if(ctx.mode==='testnet'&&!token.metadataURI&&token.metadataStatus!=='creator-signed'&&token.creator?.toLowerCase()===state.wallet?.toLowerCase()&&(token.metadata?.image||token.metadata?.description)){
-    const publish=h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:async()=>{publish.disabled=true;try{const body={network:ctx.currentChain(),token:token.address,metadata:token.metadata,expires:Math.floor(Date.now()/1000)+240};const prepared=await ctx.api('public/metadata/prepare',body);const signature=await ctx.wallet.signer.signMessage(prepared.message);await ctx.api('public/metadata/save',{...body,signature});toast('Token details saved to the public server.',{kind:'success'});await ctx.refresh();}catch(e){toast(errorText(e),{kind:'error'});}finally{publish.disabled=false;}}}},'Publish saved token details');
-    about.append(h('p.small.muted','These token details are saved only in this browser. Publish them with a creator signature so every visitor sees them.'),publish);
+    const key=`${ctx.currentChain()}:${token.address.toLowerCase()}`;
+    const request=metadataRequests.get(key) ?? {pending:false,message:''};
+    metadataRequests.set(key,request);
+    const status=h('p.small', {role:'status','aria-live':'polite'});
+    const publish=h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:async()=>{
+      if(request.pending)return;
+      const update=(message,pending=true)=>{request.message=message;request.pending=pending;request.draw?.();};
+      update('Preparing token details for your signature…');
+      try{
+        await ctx.wallet.checkNetwork();
+        const body={network:ctx.currentChain(),token:token.address,metadata:token.metadata,expires:Math.floor(Date.now()/1000)+240};
+        const prepared=await ctx.api('public/metadata/prepare',body);
+        update(`Waiting for ${ctx.wallet.walletName}. Open its Chrome extension and sign “Elpida public token metadata”. This publishes token details only; no gas or token transfer.`);
+        const signature=await withWalletTimeout(ctx.wallet.signer.signMessage(prepared.message),ctx.wallet.walletName);
+        update('Signature received. Saving token details…');
+        await ctx.api('public/metadata/save',{...body,signature});
+        update('Token details are published for every visitor.',false);
+        await ctx.refresh();
+      }catch(e){update(walletErrorText(e,ctx.wallet.walletName)??errorText(e),false);}
+    }}},'Publish saved token details');
+    request.draw=()=>{status.textContent=request.message;publish.disabled=request.pending;publish.textContent=request.pending?'Publishing token details…':'Publish saved token details';};
+    request.draw();
+    about.append(h('p.small.muted','These token details are saved only in this browser. Publish them with a creator signature so every visitor sees them.'),publish,status);
   }
 
   const tech = h('details.tech', h('summary', 'Technical details', icon('chevron-down', 'icon-sm')), h('dl.kv',

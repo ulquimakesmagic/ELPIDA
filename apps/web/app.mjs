@@ -13,9 +13,19 @@ let config, evmWallet, solWallet, wallet;
 let mode = 'local', account = '0', state = null, busy = false, refreshRevision = 0, progressHook = null;
 const ui = { filter: 'all', query: '', sort: 'newest',stage:'all' };
 
-async function api(path, body) {
+async function api(path, body, renewed = false) {
   const response = await fetch(`/api/${path}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': config.csrf }, body: JSON.stringify({ ...body, account }) } : {});
   let result = {}; try { result = await response.json(); } catch {}
+  // This rejection occurs before any operation is executed. Retry only this explicit
+  // session-expiry response, never an uncertain transaction or other server error.
+  if (body && !renewed && response.status === 403 && result.error === 'Refresh this page before submitting.') {
+    const fresh = await fetch('/api/config', { cache: 'no-store' });
+    if (fresh.ok) {
+      const settings = await fresh.json();
+      config.csrf = settings.csrf;
+      return api(path, body, true);
+    }
+  }
   if (!response.ok) throw new Error(result.error ?? 'The local launchpad did not respond. Check that npm run dev is running.');
   return result;
 }
