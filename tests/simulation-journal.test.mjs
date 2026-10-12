@@ -32,3 +32,17 @@ test('simulation journal replays launches and trades after a restart', async t =
   await second.transact('buy', { token: launched.token, amount: '0.005', account: '0', slippage: '1' });
   assert.equal(readFileSync(journalPath, 'utf8').trim().split('\n').length, 3);
 });
+
+test('seeded demo launches are journaled so replays keep every token address', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'elpida-journal-')), journalPath = join(dir, 'simulation-journal.jsonl');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const first = await createRuntime({ seed: true, journalPath });
+  const launched = await first.transact('launch', { name: 'After seed', symbol: 'AFTER', pair: 'native', firstBuy: '0.01', account: '0' });
+  const addresses = first.listings().map(t => t.address).sort();
+  await first.close();
+  const second = await createRuntime({ seed: true, journalPath });
+  t.after(() => second.close());
+  assert.equal(second.config.simulation.replayed, 4, 'three demo launches and one user launch');
+  assert.deepEqual(second.listings().map(t => t.address).sort(), addresses);
+  assert.ok(second.listings().some(t => t.address === launched.token));
+});

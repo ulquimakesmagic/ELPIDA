@@ -86,7 +86,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const circle = circleFunding ?? createCircleFunding({ path: port === 0 ? null : dataFile('circle-test-wallets.json') });
   const metadataStore=new MetadataStore({path:port===0?null:dataFile('ipfs-content')});
   // The simulation is rebuilt from its action journal on the data volume, so its index can stay in memory.
-  const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:dataFile('token-metadata.json'), dex:port!==0, indexerPath:":memory:", journalPath:port===0?null:dataFile('simulation-journal.jsonl'), log:console.log });
+  const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:dataFile('token-metadata.json'), dex:port!==0, indexerPath:":memory:", journalPath:port===0?null:dataFile('simulation-journal-v2.jsonl'), log:console.log });
   const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore}).start();
   // Solana public indexer: the deployed program's pools and trades, read-only, stored on the data volume.
   const solanaNet=solanaConfig(),solanaRpc=process.env.SOLANA_RPC_URL??(/^https?:\/\//.test(solanaNet.rpcUrl)?solanaNet.rpcUrl:null);

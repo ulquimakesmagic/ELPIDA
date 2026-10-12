@@ -189,9 +189,11 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
     const latest=(await provider.getBlock('latest')).timestamp,now=Math.floor(Date.now()/1000);
     if(now>latest)await provider.send('evm_mine',[now]);
     await updatePrice(config.local.price?.usd??2500);
-  }else if (seed) for (const [name,symbol,firstBuy,pair,account] of [['Orbit Club','ORBIT','0.1','native','0'],['Pixel Party','PIXEL','0.05','native','1'],['Lucky Sprout','LUCK','0.03','native','0']]) await execute('launch',{name,symbol,firstBuy,pair,account});
-  config.simulation={durable:Boolean(journalPath),replayed,skipped};
+  }
   const record=(action,body,at)=>{if(!journalPath||!JOURNALED_ACTIONS.includes(action))return;mkdirSync(dirname(journalPath),{recursive:true});appendFileSync(journalPath,JSON.stringify({action,body,at,usd:config.local.price?.usd??null})+'\n');};
+  // Demo launches on a fresh simulation are journaled like any other action, so replays keep every address.
+  if(!journal.length&&seed)for (const [name,symbol,firstBuy,pair,account] of [['Orbit Club','ORBIT','0.1','native','0'],['Pixel Party','PIXEL','0.05','native','1'],['Lucky Sprout','LUCK','0.03','native','0']]){const at=((await provider.getBlock('latest')).timestamp+1)*1000,body={name,symbol,firstBuy,pair,account};await apply('launch',body);record('launch',body,at);}
+  config.simulation={durable:Boolean(journalPath),replayed,skipped};
   await indexer.sync();
   return {updatePrice,config,state,getQuote,indexer,listings,provider,rewards,transact(action,body) { const result = queue.then(async () => { const started=((await provider.getBlock('latest')).timestamp+1)*1000; const result=action==='reward-x-finish'?await rewards.finishX(body):action==='reward-x-start'?await rewards.startX(body):action==='reward-verify'?await rewards.verify(body):action==='reward-challenge'?await rewards.challenge(body):action==='reward-process'?(await rewards.tick(),{message:'Reward treasuries processed.'}):await apply(action,body); record(action,body,started); try {await indexer.sync();} catch {result.message += " Indexing pending; refresh to retry.";} return result;}); queue = result.catch(() => {}); return result; },async close() {await queue; await indexer.close(); provider.destroy(); await connection.close();}};
 }
