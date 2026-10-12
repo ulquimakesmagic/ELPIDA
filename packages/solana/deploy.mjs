@@ -1,7 +1,7 @@
 // Node-only helpers that deploy and initialize the Elpida Solana program over RPC.
 // Used by scripts/solana-deploy.mjs and tests/solana.test.mjs.
 import * as web3 from '@solana/web3.js';
-import { createElpidaSolana, loaderV3, splTestMint, curveParams, LOADER_V3, WSOL_MINT, TOKEN_PROGRAM, TOKEN_2022_PROGRAM } from './client.mjs';
+import { createElpidaSolana, loaderV3, splTestMint, curveParams, LOADER_V3, WSOL_MINT, TOKEN_PROGRAM, TOKEN_2022_PROGRAM, PYTH_RECEIVER, parsePriceUpdate } from './client.mjs';
 
 const { Keypair, PublicKey, Transaction, SystemProgram } = web3;
 const CHUNK = 950;
@@ -362,6 +362,38 @@ export function base58(bytes) {
 
 /** An instruction in the form a multisig app (Squads transaction builder) takes: program, accounts, base58 data. */
 export const exportInstruction = instruction => ({ programId: instruction.programId.toBase58(), accounts: instruction.keys.map(k => ({ pubkey: k.pubkey.toBase58(), isSigner: k.isSigner, isWritable: k.isWritable })), data: base58(instruction.data) });
+
+/**
+ * Oracle pricing for a pair config: checks the Pyth account on-chain (owner, Full verification, feed id),
+ * creates the treasury's USDC account when a USDC fee is offered, then binds pricing with `set_pricing`.
+ * Re-running with the same settings sends nothing. Returns { pricing, created, updated, price }.
+ */
+export async function ensurePricing({ connection, payer, programId, config, oracle, onProgress = () => {} }) {
+  const client = createElpidaSolana(web3, programId);
+  const priceUpdate = new PublicKey(oracle.priceAccount);
+  const info = await connection.getAccountInfo(priceUpdate);
+  if (!info) throw new Error(`The Pyth price account ${oracle.priceAccount} does not exist on this cluster.`);
+  if (info.owner.toBase58() !== PYTH_RECEIVER) throw new Error(`${oracle.priceAccount} is not owned by the Pyth receiver program.`);
+  const price = parsePriceUpdate(info.data);
+  if (!price || price.feedId !== oracle.feedId.replace(/^0x/, '')) throw new Error(`${oracle.priceAccount} is not a fully verified update for feed ${oracle.feedId}.`);
+  const configKey = new PublicKey(config);
+  const current = client.decodePricing((await connection.getAccountInfo(client.pricingPda(configKey)))?.data);
+  const usdcMint = oracle.usdcMint ? new PublicKey(oracle.usdcMint) : null;
+  if (usdcMint) {
+    const cfg = client.decodeConfig((await connection.getAccountInfo(configKey)).data);
+    const mintInfo = await connection.getAccountInfo(usdcMint);
+    if (!mintInfo) throw new Error(`USDC mint ${oracle.usdcMint} not found on this cluster.`);
+    const owner = mintInfo.owner, treasuryUsdc = client.ata(cfg.treasury, usdcMint, owner);
+    if (!await connection.getAccountInfo(treasuryUsdc)) { onProgress('Creating the treasury USDC account for USDC fees…'); await send(connection, payer, [client.createAtaIdempotent(payer.publicKey, cfg.treasury, usdcMint, owner)]); }
+  }
+  const same = current && current.priceFeed.equals(priceUpdate) && current.feedId === oracle.feedId.replace(/^0x/, '') && current.maxAgeSecs === oracle.maxAgeSecs && current.maxConfBps === oracle.maxConfBps
+    && current.feeUsdE6 === BigInt(oracle.feeUsdE6) && current.startFdvUsdE6 === BigInt(oracle.startFdvUsdE6) && current.usdcMint.equals(usdcMint ?? PublicKey.default);
+  if (!same) {
+    onProgress(`${current ? 'Updating' : 'Turning on'} USD pricing ($${Number(oracle.feeUsdE6) / 1e6} fee, $${Number(oracle.startFdvUsdE6) / 1e6} starting FDV)…`);
+    await send(connection, payer, [client.setPricing({ authority: payer.publicKey, config: configKey, priceUpdate, feedId: oracle.feedId, maxAgeSecs: oracle.maxAgeSecs, maxConfBps: oracle.maxConfBps, feeUsdE6: BigInt(oracle.feeUsdE6), startFdvUsdE6: BigInt(oracle.startFdvUsdE6), usdcMint })]);
+  }
+  return { pricing: client.decodePricing((await connection.getAccountInfo(client.pricingPda(configKey))).data), created: !current, updated: !!current && !same, price };
+}
 
 /** Hands the program's upgrade authority to `newAuthority` (for example a Squads vault). */
 export async function transferUpgradeAuthority({ connection, payer, programId, newAuthority }) {

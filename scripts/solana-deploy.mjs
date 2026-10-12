@@ -24,8 +24,9 @@ import * as web3 from '@solana/web3.js';
 import { solanaDevnet } from '../packages/core/networks.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
+import { SOLANA_ORACLES } from '../packages/core/usd-oracles.mjs';
 import { createElpidaSolana, poolStats } from '../packages/solana/client.mjs';
-import { deployProgram, upgradeProgram, upgradeCost, programStatus, deploymentCost, airdrop, findExistingBuffer, closeStaleBuffers, ensurePairConfigs, ensureBetaGate, rejectsTestInstructions, transferUpgradeAuthority, upgradeAuthority } from '../packages/solana/deploy.mjs';
+import { deployProgram, upgradeProgram, upgradeCost, programStatus, deploymentCost, airdrop, findExistingBuffer, closeStaleBuffers, ensurePairConfigs, ensureBetaGate, rejectsTestInstructions, transferUpgradeAuthority, upgradeAuthority, ensurePricing } from '../packages/solana/deploy.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const { values: args } = parseArgs({ options: {
@@ -144,6 +145,21 @@ state.testAssets = Object.fromEntries(pairs.filter(p => p.test).map(p => [p.key,
 writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
 for (const p of pairs) console.log(`${p.symbol} pair config ${p.created ? 'created' : p.repriced ? 'repriced for future launches' : 'up to date'} (${p.kind}, mint ${p.mint}).`);
 const native = pairs.find(p => p.kind === 'native');
+// USD pricing on the SOL pair: the $10 fee (SOL or USDC) and the starting FDV come from the verified Pyth
+// SOL/USD account at each launch. Without it the fixed SOL fee from config/native-pricing.json applies.
+let usdPricing = null;
+const oracle = SOLANA_ORACLES[args.cluster];
+if (oracle && isAuthority) {
+  try {
+    const result = await ensurePricing({ connection, payer, programId: programKeypair.publicKey, config: native.config, oracle, onProgress: message => console.log(message) });
+    // Other pairs (for example TEST-MEME) pay the same $10 fee; their curves stay sized in the pair asset.
+    for (const pair of pairs.filter(p => p.kind !== 'native')) await ensurePricing({ connection, payer, programId: programKeypair.publicKey, config: pair.config, oracle: { ...oracle, startFdvUsdE6: '0' }, onProgress: message => console.log(`${pair.symbol}: ${message}`) });
+    usdPricing = { enabled: true, priceAccount: oracle.priceAccount, feedId: oracle.feedId, maxAgeSecs: oracle.maxAgeSecs, maxConfBps: oracle.maxConfBps, feeUsdE6: oracle.feeUsdE6, startFdvUsdE6: oracle.startFdvUsdE6, usdcMint: oracle.usdcMint };
+    console.log(`USD pricing ${result.created ? 'turned on' : result.updated ? 'updated' : 'already on'}: SOL/USD ${(Number(result.price.price) * 10 ** result.price.exponent).toFixed(2)} (published ${new Date(result.price.publishTime * 1000).toISOString()}).`);
+  } catch (error) {
+    console.log(`USD pricing not turned on: ${error.message} Launches keep the fixed SOL fee until it is.`);
+  }
+}
 const config = { address: native.config, ...client.decodeConfig((await connection.getAccountInfo(new web3.PublicKey(native.config))).data) };
 // Beta launch gate: created on mainnet (off unless --invite-only), so it can be switched on later and the
 // allowlist prepared in advance; on test networks only when asked for.
@@ -165,6 +181,7 @@ const record = {
   },
   // Every launchable pair: native SOL and, on test networks, the test paired token.
   pairs: pairs.map(({ created, repriced, ...p }) => p),
+  usdPricing,
   deployer: payer.publicKey.toBase58(), recordedAt: new Date().toISOString(),
   build: mainnet ? 'mainnet' : 'testnet',
   betaGate: betaGate ? { enabled: betaGate.enabled, authority: betaGate.authority.toBase58() } : null,

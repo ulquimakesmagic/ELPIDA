@@ -24,6 +24,15 @@ export const TEST_USDC_FAUCET_MAX = 25_000_000_000n;
 export const TEST_FAUCET_MAX_WHOLE = 10_000_000n;
 /** Wrapped SOL: the quote mint of native-SOL pairs. The client wraps and unwraps around each trade. */
 export const WSOL_MINT = 'So11111111111111111111111111111111111111112';
+// Pyth: verified PriceUpdateV2 accounts are owned by the Solana Receiver. The sponsored SOL/USD account is
+// the shard-0 PDA of the push-oracle program for the SOL/USD feed (same address on mainnet and devnet).
+export const PYTH_RECEIVER = 'rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ';
+export const PYTH_PUSH_ORACLE = 'pythWSnswVUd12oZpeFP8e9CVaEqJg25g1Vtc2biRsT';
+export const SOL_USD_FEED_ID = 'ef0d8b6fda2ceba41da15d4095d1da392a0d2f8ed0c6c7bc0f4cfac8c280b56d';
+export const SOL_USD_PRICE_ACCOUNT = '7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE';
+export const PRICE_UPDATE_SIZE = 134;
+/** USD launch economics: $10 fee (SOL or USDC) and a $5,000 starting FDV for SOL pairs, 6-decimal USD. */
+export const USD_PRICING = { feeUsdE6: 10_000_000n, startFdvUsdE6: 5_000_000_000n, maxAgeSecs: 120, maxConfBps: 200 };
 export const MIGRATE_COMPUTE_UNITS = 600_000;
 export const HARVEST_COMPUTE_UNITS = 400_000;
 
@@ -63,6 +72,9 @@ export const DISCRIMINATORS = {
   BetaGate: [157, 14, 100, 165, 88, 97, 119, 83],
   BetaCreator: [196, 152, 244, 127, 100, 59, 189, 139],
   updateCurveConfig: [23, 123, 231, 253, 103, 196, 100, 218],
+  setPricing: [52, 200, 157, 192, 18, 134, 57, 123],
+  PricingConfig: [126, 131, 53, 131, 89, 154, 123, 85],
+  PriceUpdateV2: [34, 241, 35, 99, 157, 126, 244, 205],
 };
 
 // sha256("event:<Name>")[0..8] and field layouts (32-byte keys or little-endian u64s after the
@@ -76,6 +88,9 @@ export const EVENTS = {
   FeesWithdrawn: { discriminator: [234, 15, 0, 119, 148, 241, 40, 21], fields: [['pool', 'key'], ['recipient', 'key'], ['amount', 'u64']] },
   CurveMigrated: { discriminator: [73, 99, 54, 46, 71, 35, 47, 242], fields: [['pool', 'key'], ['mint', 'key'], ['pumpPool', 'key'], ['lpMint', 'key'], ['baseAmount', 'u64'], ['quoteAmount', 'u64'], ['lpLocked', 'u64']] },
   // Native repricing by the upgrade authority (the trailing u16 max_creator_buy_bps is not decoded).
+  // Leading key/u64 fields only (price is a positive i64, so it decodes as u64; exponent is not decoded).
+  PricingConfigSet: { discriminator: [119, 27, 79, 254, 28, 84, 0, 183], fields: [['config', 'key'], ['priceFeed', 'key'], ['feeUsdE6', 'u64'], ['startFdvUsdE6', 'u64'], ['usdcMint', 'key'], ['oraclePrice', 'u64']] },
+  LaunchFeePaid: { discriminator: [64, 129, 156, 243, 251, 34, 72, 120], fields: [['mint', 'key'], ['payer', 'key'], ['asset', 'key'], ['amount', 'u64'], ['oraclePrice', 'u64']] },
   CurveConfigUpdated: { discriminator: [15, 223, 121, 188, 171, 123, 126, 224], fields: [['config', 'key'], ['quoteMint', 'key'], ['virtualQuote', 'u64'], ['virtualToken', 'u64'], ['curveSupply', 'u64'], ['launchFee', 'u64']] },
   LpFeesHarvested: { discriminator: [230, 156, 123, 178, 68, 124, 167, 67], fields: [['pool', 'key'], ['pumpPool', 'key'], ['lpBurned', 'u64'], ['baseOut', 'u64'], ['quoteOut', 'u64'], ['protocolBase', 'u64'], ['protocolQuote', 'u64'], ['lpLocked', 'u64']] },
 };
@@ -150,6 +165,11 @@ export const PROGRAM_ERRORS = [
   'This instruction exists only on test networks.',
   'Launches are invite-only during the beta. Ask the Elpida team to add your wallet.',
   'The fee schedule of an existing pair cannot change, because live pools read it on every trade.',
+  'The SOL/USD price is unavailable right now, or the wrong price account was used. Try again shortly.',
+  'The SOL/USD price is too old to price the $10 fee. Try again in a moment.',
+  'The SOL/USD price is too uncertain right now (market moving fast). Try again shortly.',
+  'The $10 fee in SOL rose above the amount you approved because the price moved. Refresh the quote and confirm again.',
+  'Paying the fee in USDC is not available for this pair.',
 ];
 
 /** Turns a Solana/Anchor error into a readable message. */
@@ -199,6 +219,28 @@ export function curveParams({ startFdv = DEFAULT_CURVE.startFdv, endFdv = DEFAUL
   // The creation fee is always charged in SOL, so it is encoded in lamports whatever the pair.
   const fee = Number(launchFee) === 0 ? 0n : parseAmount(launchFee, 9);
   return { virtualQuote, virtualToken, curveSupply, baseFeeBps, snipeStartBps, snipeWindowSecs, maxCreatorBuyBps, launchFee: fee };
+}
+
+/**
+ * Parses a Pyth PriceUpdateV2 account (verification must be Full). Returns null when it is not one.
+ * Mirrors `read_price`, so the browser can show the conversion the program will apply.
+ */
+export function parsePriceUpdate(raw) {
+  const bytes = raw ? new Uint8Array(raw) : null;
+  if (!bytes || bytes.length < 101 || !DISCRIMINATORS.PriceUpdateV2.every((b, i) => bytes[i] === b) || bytes[40] !== 1) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const hex = [...bytes.subarray(41, 73)].map(b => b.toString(16).padStart(2, '0')).join('');
+  return { feedId: hex, price: view.getBigInt64(73, true), conf: view.getBigUint64(81, true), exponent: view.getInt32(89, true), publishTime: Number(view.getBigInt64(93, true)) };
+}
+/** USD (6 decimals) to quote base units at an oracle price, rounded up like the program's `usd_to_quote`. */
+export function usdToQuote(usdE6, { price, exponent }, decimals = 9) {
+  const num = BigInt(usdE6) * 10n ** BigInt(decimals - exponent), den = BigInt(price) * 1_000_000n;
+  return (num + den - 1n) / den;
+}
+/** Oracle-sized virtual SOL reserve for a $startFdv curve: ceil(fdvLamports x virtualToken / supply). */
+export function virtualQuoteForFdv(startFdvUsdE6, oracle, virtualToken) {
+  const fdv = usdToQuote(startFdvUsdE6, oracle, 9);
+  return (fdv * BigInt(virtualToken) + TOKEN_SUPPLY - 1n) / TOKEN_SUPPLY;
 }
 
 /** Mirrors `current_fee_bps`: linear decay from the snipe fee at launch to the base fee. Times in seconds. */
@@ -354,6 +396,7 @@ export function createElpidaSolana(web3, programIdInput) {
   const lpAuthorityPda = mint => PublicKey.findProgramAddressSync([enc('pump-lp'), key(mint).toBytes()], programId)[0];
   const betaGatePda = PublicKey.findProgramAddressSync([enc('beta-gate')], programId)[0];
   const betaCreatorPda = creator => PublicKey.findProgramAddressSync([enc('beta-creator'), key(creator).toBytes()], programId)[0];
+  const pricingPda = config => PublicKey.findProgramAddressSync([enc('pricing'), key(config).toBytes()], programId)[0];
   const migrationPda = mint => PublicKey.findProgramAddressSync([enc('pump-migration'), key(mint).toBytes()], programId)[0];
   const ataWith = (owner, mint, program) => PublicKey.findProgramAddressSync([key(owner).toBytes(), key(program).toBytes(), key(mint).toBytes()], ataProgram)[0];
   /** PumpSwap accounts for the pool Elpida creates for `mint` (index 0, creator = LP-authority PDA). */
@@ -373,7 +416,7 @@ export function createElpidaSolana(web3, programIdInput) {
   };
 
   return {
-    programId, configPda, configFor, betaGatePda, betaCreatorPda, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, wsol,
+    programId, configPda, configFor, betaGatePda, betaCreatorPda, pricingPda, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, wsol,
     computeBudget: (units = LAUNCH_COMPUTE_UNITS) => ComputeBudgetProgram.setComputeUnitLimit({ units }),
     createAtaIdempotent(payer, owner, mint, program = tokenProgram) {
       return new TransactionInstruction({ programId: ataProgram, data: data([1]), keys: [meta(payer, true, true), meta(ata(owner, mint, program), true), meta(owner), meta(mint), meta(SystemProgram.programId), meta(program)] });
@@ -404,16 +447,37 @@ export function createElpidaSolana(web3, programIdInput) {
     testUsdcFaucet({ user, amount = TEST_USDC_FAUCET_MAX, mint = testUsdcMint, tokenProgram: program = tokenProgram }) {
       return ix([meta(user, true, true), meta(mint, true), meta(faucetAuthority), meta(ata(user, mint, program), true), meta(program), meta(ataProgram), meta(SystemProgram.programId)], concat(DISCRIMINATORS.testUsdcFaucet, u64(amount)));
     },
-    launch({ creator, config, mint, name, symbol, firstBuy, minTokensOut, reward }) {
-      const pool = poolPda(mint);
+    /**
+     * `priceUpdate`: the Pyth account bound in the config's pricing (omit when pricing is off).
+     * `maxFee`: lamport cap for the SOL fee (quote plus a margin). `usdc`: { mint, tokenProgram } to pay the
+     * USD fee in USDC from the creator's associated account to the treasury's.
+     */
+    launch({ creator, config, mint, name, symbol, firstBuy, minTokensOut, reward, priceUpdate = null, maxFee = (1n << 64n) - 1n, usdc = null }) {
+      const pool = poolPda(mint), cfg = config.address ?? configPda;
+      const usdcMetas = usdc ? [meta(usdc.mint), meta(ata(creator, usdc.mint, usdc.tokenProgram ?? tokenProgram), true), meta(ata(config.treasury, usdc.mint, usdc.tokenProgram ?? tokenProgram), true), meta(usdc.tokenProgram ?? tokenProgram)] : [];
       return ix([
         meta(creator, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(config.treasury, true),
         meta(mint, true, true), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true),
         meta(qata(creator, config), true), meta(ata(creator, mint), true), meta(tokenProgram), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId),
-        meta(betaGatePda), meta(betaCreatorPda(creator)),
-      ], concat(DISCRIMINATORS.launch, str(name), str(symbol), u64(firstBuy), u64(minTokensOut), key(reward).toBytes()));
+        meta(betaGatePda), meta(betaCreatorPda(creator)), meta(pricingPda(cfg)), meta(priceUpdate ?? SystemProgram.programId), ...usdcMetas,
+      ], concat(DISCRIMINATORS.launch, str(name), str(symbol), u64(firstBuy), u64(minTokensOut), key(reward).toBytes(), u64(maxFee), [usdc ? 1 : 0]));
     },
     /** Upgrade authority: reprices a config for future launches. The fee schedule must stay the same. */
+    /** Upgrade authority: oracle pricing for a config, bound to `priceUpdate` (a Pyth PriceUpdateV2 account). */
+    setPricing({ authority, config, priceUpdate, feedId = SOL_USD_FEED_ID, maxAgeSecs = USD_PRICING.maxAgeSecs, maxConfBps = USD_PRICING.maxConfBps, feeUsdE6 = USD_PRICING.feeUsdE6, startFdvUsdE6 = USD_PRICING.startFdvUsdE6, usdcMint = null }) {
+      const feed = Uint8Array.from(String(feedId).replace(/^0x/, '').match(/../g).map(b => parseInt(b, 16)));
+      if (feed.length !== 32) throw new Error('feedId must be 32 bytes of hex.');
+      return ix([meta(authority, true, true), meta(config), meta(pricingPda(config), true), meta(priceUpdate), meta(programId), meta(programDataAddress), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.setPricing, feed, u32(maxAgeSecs), u16(maxConfBps), u64(feeUsdE6), u64(startFdvUsdE6), key(usdcMint ?? PublicKey.default).toBytes()));
+    },
+    /** Decodes a PricingConfig account, or null when the bytes are not one. */
+    decodePricing(raw) {
+      const bytes = raw ? new Uint8Array(raw) : null;
+      if (!bytes || bytes.length < 8 + 32 + 32 + 32 + 4 + 2 + 8 + 8 + 32 + 1 || !sameBytes(bytes, DISCRIMINATORS.PricingConfig)) return null;
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      return { config: new PublicKey(bytes.subarray(8, 40)), priceFeed: new PublicKey(bytes.subarray(40, 72)), feedId: [...bytes.subarray(72, 104)].map(b => b.toString(16).padStart(2, '0')).join(''),
+        maxAgeSecs: view.getUint32(104, true), maxConfBps: view.getUint16(108, true), feeUsdE6: view.getBigUint64(110, true), startFdvUsdE6: view.getBigUint64(118, true), usdcMint: new PublicKey(bytes.subarray(126, 158)) };
+    },
     updateCurveConfig({ authority, config = configPda, params }) {
       return ix([meta(authority, false, true), meta(config, true), meta(programId), meta(programDataAddress)], concat(DISCRIMINATORS.updateCurveConfig, encodeCurveParams(params)));
     },

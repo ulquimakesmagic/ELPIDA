@@ -9,7 +9,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { spawn, spawnSync } from 'node:child_process';
-import { readFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { readFileSync, existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -17,11 +17,11 @@ import * as web3 from '@solana/web3.js';
 import {
   createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, curveParams, poolStats, encodeCurveParams,
   DISCRIMINATORS, EVENTS, LEGACY_EVENTS, TOKEN_SUPPLY, STATUS_GRADUATED, STATUS_MIGRATED, BPS, explainError, decodeEvents,
-  harvestableLp, harvestNow, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint,
+  harvestableLp, harvestNow, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint, PYTH_RECEIVER, SOL_USD_FEED_ID, SOL_USD_PRICE_ACCOUNT, parsePriceUpdate, usdToQuote, virtualQuoteForFdv,
 } from '../packages/solana/client.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
-import { deployProgram, upgradeProgram, ensurePairConfigs, pricingUpdates, ensureBetaGate, rejectsTestInstructions, prepareUpgradeBuffer, transferUpgradeAuthority, send, airdrop } from '../packages/solana/deploy.mjs';
+import { deployProgram, upgradeProgram, ensurePairConfigs, pricingUpdates, ensurePricing, ensureBetaGate, rejectsTestInstructions, prepareUpgradeBuffer, transferUpgradeAuthority, send, airdrop } from '../packages/solana/deploy.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const elfPath = `${root}contracts/solana/build/elpida_launchpad.so`;
@@ -41,12 +41,31 @@ const PARAMS = curveParams({ startFdv: 5_000, endFdv: 50_000, quoteDecimals: 6, 
 const BASE = BigInt(PARAMS.baseFeeBps);
 const f = {};
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+/** A Full-verification Pyth PriceUpdateV2 account (133 bytes) as solana-test-validator --account JSON. */
+function priceUpdate({ publishTime, price = 11_106_000_000n, conf = 5_000_000n, exponent = -8, feedId = SOL_USD_FEED_ID, owner = PYTH_RECEIVER }) {
+  const data = Buffer.alloc(133); let o = 0;
+  Buffer.from(DISCRIMINATORS.PriceUpdateV2).copy(data, o); o += 8 + 32; data[o++] = 1;
+  Buffer.from(feedId, 'hex').copy(data, o); o += 32;
+  data.writeBigInt64LE(price, o); o += 8; data.writeBigUInt64LE(conf, o); o += 8; data.writeInt32LE(exponent, o); o += 4;
+  data.writeBigInt64LE(BigInt(publishTime), o); o += 8; data.writeBigInt64LE(BigInt(publishTime - 1), o); o += 8;
+  data.writeBigInt64LE(price, o); o += 8; data.writeBigUInt64LE(conf, o); o += 8; data.writeBigUInt64LE(1n, o);
+  return { lamports: 2_000_000, data: [data.toString('base64'), 'base64'], owner, executable: false, rentEpoch: 0, space: 133 };
+}
 
 test.before(async () => {
   if (skip) return;
   const port = 20000 + Math.floor(Math.random() * 20000);
   f.ledger = mkdtempSync(join(tmpdir(), 'elpida-ledger-'));
-  f.validator = spawn(validatorBin, ['--reset', '--quiet', '--ledger', f.ledger, '--rpc-port', String(port), '--faucet-port', String(port + 2), '--dynamic-port-range', `${port + 10}-${port + 60}`, '--gossip-port', String(port + 3),
+  // Crafted Pyth PriceUpdateV2 accounts (owned by the Pyth receiver): a fresh SOL/USD price at the sponsored
+  // account address, and stale, wide-confidence, wrong-feed and wrong-owner variants.
+  f.oracleStart = Math.floor(Date.now() / 1000);
+  f.oracleDir = mkdtempSync(join(tmpdir(), 'elpida-oracles-'));
+  f.oracles = { fresh: new PublicKey(SOL_USD_PRICE_ACCOUNT), stale: Keypair.generate().publicKey, wide: Keypair.generate().publicKey, otherFeed: Keypair.generate().publicKey, notPyth: Keypair.generate().publicKey };
+  const oracleArgs = Object.entries({
+    fresh: priceUpdate({ publishTime: f.oracleStart }), stale: priceUpdate({ publishTime: f.oracleStart - 7200 }), wide: priceUpdate({ publishTime: f.oracleStart, conf: 555_300_000n }),
+    otherFeed: priceUpdate({ publishTime: f.oracleStart, feedId: 'e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43' }), notPyth: priceUpdate({ publishTime: f.oracleStart, owner: '11111111111111111111111111111111' }),
+  }).flatMap(([name, account]) => { const file = join(f.oracleDir, `${name}.json`); writeFileSync(file, JSON.stringify({ pubkey: f.oracles[name].toBase58(), account })); return ['--account', f.oracles[name].toBase58(), file]; });
+  f.validator = spawn(validatorBin, [...oracleArgs, '--reset', '--quiet', '--ledger', f.ledger, '--rpc-port', String(port), '--faucet-port', String(port + 2), '--dynamic-port-range', `${port + 10}-${port + 60}`, '--gossip-port', String(port + 3),
     ...(pumpSkip ? [] : ['--bpf-program', PUMP_AMM_PROGRAM, `${fixtures}pump_amm.so`, '--account', PUMP_GLOBAL_CONFIG, `${fixtures}pumpswap_global_config.json`])], { stdio: 'ignore' });
   f.connection = new web3.Connection(`http://127.0.0.1:${port}`, 'confirmed');
   for (let i = 0; ; i++) {
@@ -69,6 +88,7 @@ test.before(async () => {
 test.after(() => {
   f.validator?.kill('SIGKILL');
   if (f.ledger) rmSync(f.ledger, { recursive: true, force: true });
+  if (f.oracleDir) rmSync(f.oracleDir, { recursive: true, force: true });
 });
 
 const balance = async address => f.client.tokenAmount((await f.connection.getAccountInfo(address))?.data);
@@ -574,6 +594,69 @@ test('Solana pairs: SOL, a paired token and a Token-2022 token each launch, trad
     assert.ok(m1.harvestedQuote > 0n && m1.lpLocked < m0.lpLocked, `${pair.symbol} harvest`);
     assert.equal(await amountOf(user.publicKey, cfg) - rewardBefore, m1.harvestedQuote - m1.harvestedQuote / 2n, 'creator half of the quote');
   }
+});
+
+test('Solana USD pricing: Pyth-verified $10 fee in SOL or USDC and a $5,000 starting FDV', { skip: pumpSkip }, async () => {
+  const programId = f.programKeypair.publicKey, sol = new PublicKey(WSOL_MINT), solConfig = f.client.configFor(sol);
+  assert.ok(await f.connection.getAccountInfo(solConfig), 'the SOL pair config exists (created by the pairs test)');
+  const parsed = parsePriceUpdate((await f.connection.getAccountInfo(f.oracles.fresh)).data);
+  assert.equal(parsed.feedId, SOL_USD_FEED_ID); assert.equal(parsed.price, 11_106_000_000n); assert.equal(parsed.exponent, -8);
+  const set = (who, oracle, extra = {}) => send(f.connection, who, [f.client.setPricing({ authority: who.publicKey, config: solConfig, priceUpdate: oracle, maxAgeSecs: 3600, maxConfBps: 300, ...extra })], [], 1);
+  await failsWith(set(f.outsider, f.oracles.fresh), /0x1770/);
+  await failsWith(set(f.authority, f.oracles.stale), /0x178a/);
+  await failsWith(set(f.authority, f.oracles.wide), /0x178b/);
+  await failsWith(set(f.authority, f.oracles.otherFeed), /0x1789/);
+  await failsWith(set(f.authority, f.oracles.notPyth), /0x1789/);
+  await failsWith(send(f.connection, f.authority, [f.client.setPricing({ authority: f.authority.publicKey, config: f.config.address, priceUpdate: f.oracles.fresh, maxAgeSecs: 3600, maxConfBps: 300 })], [], 1), /0x1774/, 'a USD starting FDV only applies to SOL pairs');
+  assert.match(explainError(new Error('custom program error: 0x178c')), /refresh the quote/i);
+
+  // A six-decimal USDC stand-in for the USDC fee, minted to the creator.
+  const spl = splTestMint(web3), usdc = Keypair.generate(), user = Keypair.generate();
+  await airdrop(f.connection, user.publicKey, 20 * web3.LAMPORTS_PER_SOL);
+  await send(f.connection, f.authority, await spl.createMintIxs(f.connection, f.authority.publicKey, usdc.publicKey, 6, f.authority.publicKey), [usdc]);
+  await send(f.connection, f.authority, [f.client.createAtaIdempotent(f.authority.publicKey, user.publicKey, usdc.publicKey), spl.mintTo(usdc.publicKey, f.client.ata(user.publicKey, usdc.publicKey), f.authority.publicKey, 50_000_000n)]);
+  const oracle = { priceAccount: f.oracles.fresh.toBase58(), feedId: SOL_USD_FEED_ID, maxAgeSecs: 3600, maxConfBps: 300, feeUsdE6: '10000000', startFdvUsdE6: '5000000000', usdcMint: usdc.publicKey.toBase58() };
+  const enabled = await ensurePricing({ connection: f.connection, payer: f.authority, programId, config: solConfig.toBase58(), oracle });
+  assert.equal(enabled.created, true); assert.equal(enabled.pricing.priceFeed.toBase58(), SOL_USD_PRICE_ACCOUNT); assert.equal(enabled.pricing.feeUsdE6, 10_000_000n);
+  assert.equal((await ensurePricing({ connection: f.connection, payer: f.authority, programId, config: solConfig.toBase58(), oracle })).updated, false, 'idempotent');
+
+  const cfg = { address: solConfig, quoteMint: sol, treasury: f.treasury, quoteTokenProgram: new PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') };
+  const onchain = f.client.decodeConfig((await f.connection.getAccountInfo(solConfig)).data);
+  const fee = usdToQuote(10_000_000n, parsed, 9), vq = virtualQuoteForFdv(5_000_000_000n, parsed, onchain.virtualToken);
+  assert.equal(fee, 90_041_419n + 1n, '$10 at $111.06 = 0.090041420 SOL, rounded up');
+  const firstBuy = 100_000_000n;
+  const launchIx = (mint, extra = {}) => [f.client.computeBudget(), ...f.client.wrapSol(user.publicKey, firstBuy), f.client.launch({ creator: user.publicKey, config: cfg, mint: mint.publicKey, name: 'Priced', symbol: 'USD', firstBuy, minTokensOut: 1n, reward: user.publicKey, priceUpdate: f.oracles.fresh, maxFee: fee, ...extra }), f.client.unwrapSol(user.publicKey)];
+  // The fee cap protects the creator from price moves between quote and confirmation.
+  const capped = Keypair.generate();
+  await failsWith(send(f.connection, user, launchIx(capped, { maxFee: fee - 1n }), [capped], 1), /0x178c/);
+  // Only the bound price account is accepted.
+  const wrong = Keypair.generate();
+  await failsWith(send(f.connection, user, launchIx(wrong, { priceUpdate: f.oracles.otherFeed }), [wrong], 1), /0x1789/);
+  // SOL fee: exactly the oracle conversion goes to the treasury; the curve starts at $5,000 FDV.
+  const treasuryBefore = await f.connection.getBalance(f.treasury), mint = Keypair.generate();
+  const signature = await send(f.connection, user, launchIx(mint), [mint], 1);
+  assert.equal(BigInt(await f.connection.getBalance(f.treasury) - treasuryBefore), fee);
+  const pool = await (async () => f.client.decodePool((await f.connection.getAccountInfo(f.client.poolPda(mint.publicKey))).data))();
+  assert.equal(pool.virtualQuote, vq, 'virtual SOL reserve sized from the oracle');
+  const startFdvSol = poolStats({ ...pool, sold: 0n, realQuote: 0n, liquidityBonus: 0n }, 9).marketCap;
+  assert.ok(Math.abs(startFdvSol * 111.06 - 5000) < 0.01, `starts at $5,000 FDV (${startFdvSol} SOL)`);
+  const [paid] = (await eventsOf(signature)).filter(e => e.name === 'LaunchFeePaid');
+  assert.equal(paid.amount, fee); assert.equal(paid.asset, PublicKey.default.toBase58()); assert.equal(paid.oraclePrice, 11_106_000_000n);
+  // USDC fee: exactly 10 USDC to the treasury's USDC account and no SOL fee.
+  const treasuryUsdc = f.client.ata(f.treasury, usdc.publicKey), usdcBefore = await balance(treasuryUsdc), lamportsBefore = await f.connection.getBalance(f.treasury), mint2 = Keypair.generate();
+  await send(f.connection, user, launchIx(mint2, { maxFee: 0n, usdc: { mint: usdc.publicKey } }), [mint2], 1);
+  assert.equal(await balance(treasuryUsdc) - usdcBefore, 10_000_000n);
+  assert.equal(await f.connection.getBalance(f.treasury), lamportsBefore);
+  // USDC fee on a pair without pricing is refused.
+  const plain = Keypair.generate();
+  await failsWith(send(f.connection, f.creator, [f.client.computeBudget(), f.client.launch({ creator: f.creator.publicKey, config: f.config, mint: plain.publicKey, name: 'Plain', symbol: 'PLN', firstBuy: USDC, minTokensOut: 1n, reward: f.rewardWallet.publicKey, usdc: { mint: usdc.publicKey } })], [plain], 1), /0x178d/);
+  // A price older than the configured age is rejected at launch time.
+  const age = Math.floor(Date.now() / 1000) - f.oracleStart + 6;
+  await set(f.authority, f.oracles.fresh, { maxAgeSecs: age, usdcMint: usdc.publicKey });
+  await sleep(9000);
+  const late = Keypair.generate();
+  await failsWith(send(f.connection, user, launchIx(late), [late], 1), /0x178a/);
+  await set(f.authority, f.oracles.fresh, { usdcMint: usdc.publicKey });
 });
 
 test('Solana pairs reject quote tokens that would break the curve or never graduate (transfer fee, permanent delegate as on xStocks)', { skip }, async () => {

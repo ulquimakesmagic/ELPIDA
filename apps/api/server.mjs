@@ -42,7 +42,7 @@ export function solanaConfig() {
     if (file) {
       try {
         const record = JSON.parse(readFileSync(file, 'utf8'));
-        if (base58.test(record.programId) && record.cluster === net.cluster) deployment = { programId: record.programId, shared: false, build: record.build ?? 'testnet', pairs: Array.isArray(record.pairs) ? record.pairs.filter(p => p && base58.test(p.config ?? '') && base58.test(p.mint ?? '') && ['native', 'xstock', 'token'].includes(p.kind)).map(({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test, wsol, faucet }) => ({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test: !!test, wsol: !!wsol, faucet: faucet ?? null })) : null };
+        if (base58.test(record.programId) && record.cluster === net.cluster) deployment = { programId: record.programId, shared: false, build: record.build ?? 'testnet', usdPricing: record.usdPricing && base58.test(record.usdPricing.priceAccount ?? '') ? { priceAccount: record.usdPricing.priceAccount, feeUsdE6: String(record.usdPricing.feeUsdE6), startFdvUsdE6: String(record.usdPricing.startFdvUsdE6), maxAgeSecs: Number(record.usdPricing.maxAgeSecs), usdcMint: base58.test(record.usdPricing.usdcMint ?? '') ? record.usdPricing.usdcMint : null } : null, pairs: Array.isArray(record.pairs) ? record.pairs.filter(p => p && base58.test(p.config ?? '') && base58.test(p.mint ?? '') && ['native', 'xstock', 'token'].includes(p.kind)).map(({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test, wsol, faucet }) => ({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test: !!test, wsol: !!wsol, faucet: faucet ?? null })) : null };
       } catch {}
     }
   }

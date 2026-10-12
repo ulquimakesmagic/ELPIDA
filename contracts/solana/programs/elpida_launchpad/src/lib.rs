@@ -55,6 +55,12 @@ const PUMP_CREATE_POOL: [u8; 8] = [233, 146, 209, 142, 207, 104, 64, 188];
 const PUMP_WITHDRAW: [u8; 8] = [183, 18, 70, 156, 148, 109, 161, 34];
 /// SOL lent to the LP-authority PDA so it can pay PumpSwap's account rent; the rest is refunded.
 pub const MIGRATION_RENT_LAMPORTS: u64 = 50_000_000;
+/// Pyth Solana Receiver: owner of verified `PriceUpdateV2` accounts (same ID on mainnet and devnet).
+pub const PYTH_RECEIVER: Pubkey = pubkey!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
+/// sha256("account:PriceUpdateV2")[0..8]
+const PRICE_UPDATE_V2: [u8; 8] = [34, 241, 35, 99, 157, 126, 244, 205];
+pub const WSOL_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
+pub const USD_DECIMALS: u32 = 6;
 /// Largest single test-faucet mint, in whole units of the test asset (10,000,000).
 pub const TEST_FAUCET_MAX_WHOLE: u64 = 10_000_000;
 // PumpSwap `Pool` layout offsets (8-byte discriminator included).
@@ -73,6 +79,24 @@ pub struct CurveParams {
     pub max_creator_buy_bps: u16,
     /// Creation fee in lamports (SOL), charged on every launch whatever the trading pair.
     pub launch_fee: u64,
+}
+
+/// USD pricing for one curve config, verified on-chain from a Pyth price account.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy)]
+pub struct PricingParams {
+    /// Pyth feed ID of the quote's USD price (SOL/USD for the SOL pair).
+    pub feed_id: [u8; 32],
+    /// Oldest accepted publish time, in seconds before the launch.
+    pub max_age_secs: u32,
+    /// Largest accepted confidence interval, as basis points of the price.
+    pub max_conf_bps: u16,
+    /// Creation fee in USD with 6 decimals (10_000_000 = $10), charged in SOL or USDC.
+    pub fee_usd_e6: u64,
+    /// SOL pairs only: starting FDV in USD (6 decimals); the curve's virtual SOL reserve is sized from
+    /// the oracle at each launch. Zero keeps the config's fixed virtual reserve.
+    pub start_fdv_usd_e6: u64,
+    /// Six-decimal USDC mint accepted for the fee, or the default key to accept SOL only.
+    pub usdc_mint: Pubkey,
 }
 
 #[program]
@@ -166,7 +190,32 @@ pub mod elpida_launchpad {
         Ok(())
     }
 
-    pub fn launch(ctx: Context<Launch>, name: String, symbol: String, first_buy: u64, min_tokens_out: u64, reward: Pubkey) -> Result<()> {
+    /// Upgrade authority: turns on oracle pricing for a config (or updates it). The price account is
+    /// checked now and bound, so launches must present exactly this Pyth account.
+    pub fn set_pricing(ctx: Context<SetPricing>, params: PricingParams) -> Result<()> {
+        require!(params.max_age_secs > 0 && params.max_age_secs <= 3_600, ElpidaError::InvalidParams);
+        require!(params.max_conf_bps > 0 && params.max_conf_bps <= 1_000, ElpidaError::InvalidParams);
+        require!(params.fee_usd_e6 <= 1_000 * 1_000_000, ElpidaError::InvalidParams);
+        require!(params.start_fdv_usd_e6 == 0 || ctx.accounts.curve_config.quote_mint == WSOL_MINT, ElpidaError::InvalidParams);
+        require!(params.start_fdv_usd_e6 <= 100_000_000 * 1_000_000, ElpidaError::InvalidParams);
+        let p = &mut ctx.accounts.pricing;
+        p.config = ctx.accounts.curve_config.key();
+        p.price_feed = ctx.accounts.price_update.key();
+        p.feed_id = params.feed_id;
+        p.max_age_secs = params.max_age_secs;
+        p.max_conf_bps = params.max_conf_bps;
+        p.fee_usd_e6 = params.fee_usd_e6;
+        p.start_fdv_usd_e6 = params.start_fdv_usd_e6;
+        p.usdc_mint = params.usdc_mint;
+        p.bump = ctx.bumps.pricing;
+        let price = read_price(&ctx.accounts.price_update.to_account_info(), p, Clock::get()?.unix_timestamp)?;
+        emit!(PricingConfigSet { config: p.config, price_feed: p.price_feed, fee_usd_e6: p.fee_usd_e6, start_fdv_usd_e6: p.start_fdv_usd_e6, usdc_mint: p.usdc_mint, price: price.price, exponent: price.exponent, publish_time: price.publish_time });
+        Ok(())
+    }
+
+    /// `max_fee`: the most lamports the creator accepts for the SOL creation fee (price movement guard).
+    /// `fee_in_usdc`: pay the USD fee in USDC instead; the four USDC accounts follow in remaining accounts.
+    pub fn launch<'info>(ctx: Context<'_, '_, 'info, 'info, Launch<'info>>, name: String, symbol: String, first_buy: u64, min_tokens_out: u64, reward: Pubkey, max_fee: u64, fee_in_usdc: bool) -> Result<()> {
         check_beta(&ctx.accounts.beta_gate.to_account_info(), &ctx.accounts.beta_creator.to_account_info())?;
         let name = name.trim().to_string();
         require!(!name.is_empty() && name.len() <= MAX_NAME, ElpidaError::InvalidName);
@@ -177,14 +226,42 @@ pub mod elpida_launchpad {
         require!(first_buy > 0, ElpidaError::FirstBuyRequired);
         require!(reward != Pubkey::default(), ElpidaError::RewardRequired);
 
+        let now = Clock::get()?.unix_timestamp;
         let a = &ctx.accounts;
         let tp = a.token_program.to_account_info();
         let decimals = a.quote_mint.decimals;
-        if a.curve_config.launch_fee > 0 {
+        // Creation fee: fixed lamports from the config, or USD from the bound Pyth price when pricing is on.
+        let pricing = load_pricing(&a.pricing.to_account_info(), &a.curve_config.key())?;
+        let (fee_lamports, usdc_fee, start_quote, price) = match &pricing {
+            None => { require!(!fee_in_usdc, ElpidaError::UsdcFeeUnavailable); (a.curve_config.launch_fee, 0u64, None, None) }
+            Some(p) => {
+                let px = read_price(&a.price_update.to_account_info(), p, now)?;
+                let start = if p.start_fdv_usd_e6 > 0 { Some(usd_to_quote(p.start_fdv_usd_e6, &px, 9)?) } else { None };
+                if fee_in_usdc { (0, p.fee_usd_e6, start, Some(px)) } else { (usd_to_quote(p.fee_usd_e6, &px, 9)?, 0, start, Some(px)) }
+            }
+        };
+        require!(fee_lamports <= max_fee, ElpidaError::FeeAboveMax);
+        if fee_lamports > 0 {
             system_program::transfer(
                 CpiContext::new(a.system_program.to_account_info(), system_program::Transfer { from: a.creator.to_account_info(), to: a.treasury.to_account_info() }),
-                a.curve_config.launch_fee,
+                fee_lamports,
             )?;
+        }
+        if usdc_fee > 0 {
+            let p = pricing.as_ref().ok_or(ElpidaError::UsdcFeeUnavailable)?;
+            require!(p.usdc_mint != Pubkey::default() && ctx.remaining_accounts.len() >= 4, ElpidaError::UsdcFeeUnavailable);
+            let (usdc_mint, creator_usdc, treasury_usdc, usdc_program) = (&ctx.remaining_accounts[0], &ctx.remaining_accounts[1], &ctx.remaining_accounts[2], &ctx.remaining_accounts[3]);
+            require_keys_eq!(usdc_mint.key(), p.usdc_mint, ElpidaError::UsdcFeeUnavailable);
+            require!(*usdc_program.key == anchor_spl::token::ID || *usdc_program.key == anchor_spl::token_2022::ID, ElpidaError::UsdcFeeUnavailable);
+            require!(*usdc_mint.owner == *usdc_program.key, ElpidaError::UsdcFeeUnavailable);
+            require_keys_eq!(treasury_usdc.key(), get_associated_token_address_with_program_id(&a.treasury.key(), &p.usdc_mint, usdc_program.key), ElpidaError::UsdcFeeUnavailable);
+            let usdc_decimals = usdc_mint.try_borrow_data()?.get(44).copied().ok_or(ElpidaError::UsdcFeeUnavailable)?;
+            require!(usdc_decimals as u32 == USD_DECIMALS, ElpidaError::UsdcFeeUnavailable);
+            // The token program enforces that the creator owns and signs for `creator_usdc`.
+            ti::transfer_checked(CpiContext::new(usdc_program.clone(), ti::TransferChecked { from: creator_usdc.clone(), mint: usdc_mint.clone(), to: treasury_usdc.clone(), authority: a.creator.to_account_info() }), usdc_fee, usdc_decimals)?;
+        }
+        if let Some(px) = &price {
+            emit!(LaunchFeePaid { mint: a.mint.key(), payer: a.creator.key(), asset: if usdc_fee > 0 { pricing.as_ref().map(|p| p.usdc_mint).unwrap_or_default() } else { Pubkey::default() }, amount: if usdc_fee > 0 { usdc_fee } else { fee_lamports }, price: px.price, exponent: px.exponent, publish_time: px.publish_time });
         }
         token::mint_to(
             CpiContext::new(tp.clone(), MintTo { mint: a.mint.to_account_info(), to: a.token_vault.to_account_info(), authority: a.creator.to_account_info() }),
@@ -202,7 +279,6 @@ pub mod elpida_launchpad {
         symbol_bytes[..symbol.len()].copy_from_slice(symbol.as_bytes());
         let (mint_key, creator_key) = (a.mint.key(), a.creator.key());
         let cfg: CurveConfig = **ctx.accounts.curve_config;
-        let now = Clock::get()?.unix_timestamp;
 
         let pool = &mut ctx.accounts.pool;
         pool.config = ctx.accounts.curve_config.key();
@@ -211,7 +287,16 @@ pub mod elpida_launchpad {
         pool.reward = reward;
         pool.name = name_bytes;
         pool.symbol = symbol_bytes;
-        pool.virtual_quote = cfg.virtual_quote;
+        // Oracle-priced SOL pairs: the virtual reserve that puts the starting FDV at the configured USD
+        // value at this launch's price (FDV = virtual_quote x supply / virtual_token).
+        pool.virtual_quote = match start_quote {
+            Some(fdv_lamports) => {
+                let vq = (fdv_lamports as u128).checked_mul(cfg.virtual_token as u128).ok_or(ElpidaError::MathOverflow)?.div_ceil(TOKEN_SUPPLY as u128);
+                require!(vq > 0 && vq <= u64::MAX as u128, ElpidaError::InvalidParams);
+                vq as u64
+            }
+            None => cfg.virtual_quote,
+        };
         pool.virtual_token = cfg.virtual_token;
         pool.curve_supply = cfg.curve_supply;
         pool.real_quote = 0;
@@ -640,6 +725,50 @@ fn write_config(config: &mut CurveConfig, quote_mint: Pubkey, decimals: u8, trea
     Ok(())
 }
 
+pub struct OraclePrice { pub price: i64, pub exponent: i32, pub publish_time: i64 }
+
+/// The config's pricing account, when oracle pricing is on (PDA ["pricing", config] owned by this program).
+fn load_pricing(info: &AccountInfo, config: &Pubkey) -> Result<Option<PricingConfig>> {
+    let (expected, _) = Pubkey::find_program_address(&[b"pricing", config.as_ref()], &crate::ID);
+    require_keys_eq!(info.key(), expected, ElpidaError::PriceUnavailable);
+    if info.data_is_empty() || *info.owner != crate::ID { return Ok(None); }
+    let data = info.try_borrow_data()?;
+    let p = PricingConfig::try_deserialize(&mut &data[..])?;
+    require_keys_eq!(p.config, *config, ElpidaError::PriceUnavailable);
+    Ok(Some(p))
+}
+
+/// Reads and checks a verified Pyth `PriceUpdateV2`: the bound account, owned by the Pyth receiver,
+/// fully verified, for the configured feed, positive, fresh and with a tight confidence interval.
+/// Layout: discriminator 8, write authority 32, verification level (1 = Full, 1 byte), then the price
+/// message: feed id 32, price i64, conf u64, exponent i32, publish time i64.
+pub fn read_price(info: &AccountInfo, p: &PricingConfig, now: i64) -> Result<OraclePrice> {
+    require_keys_eq!(info.key(), p.price_feed, ElpidaError::PriceUnavailable);
+    require_keys_eq!(*info.owner, PYTH_RECEIVER, ElpidaError::PriceUnavailable);
+    let data = info.try_borrow_data()?;
+    require!(data.len() >= 101 && data[..8] == PRICE_UPDATE_V2 && data[40] == 1, ElpidaError::PriceUnavailable);
+    require!(data[41..73] == p.feed_id, ElpidaError::PriceUnavailable);
+    let price = i64::from_le_bytes(data[73..81].try_into().unwrap());
+    let conf = u64::from_le_bytes(data[81..89].try_into().unwrap());
+    let exponent = i32::from_le_bytes(data[89..93].try_into().unwrap());
+    let publish_time = i64::from_le_bytes(data[93..101].try_into().unwrap());
+    require!(price > 0 && (-18..=0).contains(&exponent), ElpidaError::PriceUnavailable);
+    require!(publish_time <= now + 30 && now - publish_time <= p.max_age_secs as i64, ElpidaError::PriceStale);
+    require!((conf as u128) * BPS <= (price as u128) * (p.max_conf_bps as u128), ElpidaError::PriceUncertain);
+    Ok(OraclePrice { price, exponent, publish_time })
+}
+
+/// USD (6 decimals) to quote base units at the oracle price, rounded up:
+/// usd_e6 x 10^decimals x 10^-exponent / (price x 10^6).
+pub fn usd_to_quote(usd_e6: u64, px: &OraclePrice, decimals: u32) -> Result<u64> {
+    let scale = 10u128.pow(decimals + (-px.exponent) as u32);
+    let num = (usd_e6 as u128).checked_mul(scale).ok_or(ElpidaError::MathOverflow)?;
+    let den = (px.price as u128) * 10u128.pow(USD_DECIMALS);
+    let v = num.div_ceil(den);
+    require!(v <= u64::MAX as u128, ElpidaError::MathOverflow);
+    Ok(v as u64)
+}
+
 /// Linear decay from `snipe_start_bps` at launch to `base_fee_bps` at the end of the window.
 pub fn current_fee_bps(cfg: &CurveConfig, created_at: i64, now: i64) -> u64 {
     let base = cfg.base_fee_bps as u64;
@@ -885,6 +1014,41 @@ pub struct Launch<'info> {
     /// CHECK: PDA ["beta-creator", creator]; must exist while the beta gate is enabled.
     #[account(seeds = [b"beta-creator", creator.key().as_ref()], bump)]
     pub beta_creator: UncheckedAccount<'info>,
+    /// CHECK: PDA ["pricing", curve_config]; when it exists the fee and SOL curve are priced in USD.
+    pub pricing: UncheckedAccount<'info>,
+    /// CHECK: the Pyth price account bound in `pricing` (any account when pricing is off).
+    pub price_update: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct SetPricing<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub curve_config: Box<Account<'info, CurveConfig>>,
+    #[account(init_if_needed, payer = authority, space = 8 + PricingConfig::INIT_SPACE, seeds = [b"pricing", curve_config.key().as_ref()], bump)]
+    pub pricing: Box<Account<'info, PricingConfig>>,
+    /// CHECK: validated by `read_price` and then bound.
+    pub price_update: UncheckedAccount<'info>,
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ ElpidaError::Unauthorized)]
+    pub program: Program<'info, crate::program::ElpidaLaunchpad>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ ElpidaError::Unauthorized)]
+    pub program_data: Box<Account<'info, ProgramData>>,
+    pub system_program: Program<'info, System>,
+}
+
+/// Oracle pricing for one curve config (PDA ["pricing", config]).
+#[account]
+#[derive(InitSpace)]
+pub struct PricingConfig {
+    pub config: Pubkey,
+    pub price_feed: Pubkey,
+    pub feed_id: [u8; 32],
+    pub max_age_secs: u32,
+    pub max_conf_bps: u16,
+    pub fee_usd_e6: u64,
+    pub start_fdv_usd_e6: u64,
+    pub usdc_mint: Pubkey,
+    pub bump: u8,
 }
 
 #[derive(Accounts)]
@@ -1163,6 +1327,10 @@ impl<'info> HarvestLpFees<'info> {
 // Trade events carry post-trade state so an indexer can derive price
 // ((virtual_quote) / token_reserve), market cap and candles from events alone.
 #[event]
+pub struct PricingConfigSet { pub config: Pubkey, pub price_feed: Pubkey, pub fee_usd_e6: u64, pub start_fdv_usd_e6: u64, pub usdc_mint: Pubkey, pub price: i64, pub exponent: i32, pub publish_time: i64 }
+#[event]
+pub struct LaunchFeePaid { pub mint: Pubkey, pub payer: Pubkey, pub asset: Pubkey, pub amount: u64, pub price: i64, pub exponent: i32, pub publish_time: i64 }
+#[event]
 pub struct CurveConfigUpdated { pub config: Pubkey, pub quote_mint: Pubkey, pub virtual_quote: u64, pub virtual_token: u64, pub curve_supply: u64, pub launch_fee: u64, pub max_creator_buy_bps: u16 }
 #[event]
 pub struct BetaGateSet { pub authority: Pubkey, pub enabled: bool }
@@ -1210,4 +1378,9 @@ pub enum ElpidaError {
     #[msg("This instruction exists only on test networks")] TestNetworksOnly,
     #[msg("Launches are invite-only during the beta")] BetaClosed,
     #[msg("The fee schedule of an existing config cannot change; live pools read it")] FeeScheduleFixed,
+    #[msg("The USD price is unavailable or not the configured oracle account")] PriceUnavailable,
+    #[msg("The USD price is too old")] PriceStale,
+    #[msg("The USD price is too uncertain right now")] PriceUncertain,
+    #[msg("The creation fee rose above your limit; refresh the quote")] FeeAboveMax,
+    #[msg("USDC fee payment is not available for this pair")] UsdcFeeUnavailable,
 }

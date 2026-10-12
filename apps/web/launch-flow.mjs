@@ -45,7 +45,9 @@ export function renderLaunch(ctx) {
   const solana = () => draft.chain?.startsWith('solana');
   const connected = () => !!draft.chain && ctx.currentChain() === draft.chain && (draft.chain === 'local' || !!ctx.wallet.address);
   const freshPrice = p => p?.status === 'fresh' && Number(p.usd) > 0 && Date.now()/1000-p.updatedAt <= (p.maxAge ?? 180);
-  const ready = () => !solana() && (draft.chain==='local'||!!ctx.config.oracles?.[draft.chain]?.available) && connected() && (draft.chain === 'local' || (!!ctx.wallet.deployment&&freshPrice(ctx.wallet.price)));
+  // Solana: the program verifies the bound Pyth SOL/USD account itself; launches need it active and fresh.
+  const solanaPriced = () => !!ctx.wallet?.deployment?.usdPricing;
+  const ready = () => solana() ? connected() && !!ctx.wallet.deployment && solanaPriced() && freshPrice(ctx.wallet.price) : (draft.chain==='local'||!!ctx.config.oracles?.[draft.chain]?.available) && connected() && (draft.chain === 'local' || (!!ctx.wallet.deployment&&freshPrice(ctx.wallet.price)));
   const nativeSymbol = () => draft.chain === 'local' ? 'ETH' : net()?.nativeCurrency.symbol ?? 'ETH';
   /** Same structure on every chain: { native, xstock, token } → { assets, unavailable }. Null until known. */
   const pairOptions = () => {
@@ -224,12 +226,12 @@ export function renderLaunch(ctx) {
     return { body: [
       h('div.stack', h('h3', 'Network'), netGrid), connection,
       h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'The asset buyers pay with: the network’s own coin, an xStock or another approved token. It builds the trading reserve and stays the same after graduation. The $10 launch fee can be paid separately in native currency or supported USDC. The reward asset is chosen separately in the next step.'), pairGrid, assetBox),
-      draft.chain!=='local'&&(solana()||!ctx.config.oracles?.[draft.chain]?.available)?callout('warn','info',solana()?'USD-priced Solana launches need a program upgrade. Existing tokens can still be browsed.':'Verified launch pricing is pending configuration on this network. Use simulation to test creation.') : null,
+      draft.chain!=='local'&&(solana()?!solanaPriced():!ctx.config.oracles?.[draft.chain]?.available)?callout('warn','info',solana()?'USD pricing is not active on this Solana cluster yet. It turns on when the team upgrades the program and runs the deploy (solana-upgrade.cmd). Existing tokens can still be browsed and traded.':'Verified launch pricing is pending configuration on this network. Use simulation to test creation.') : null,
       error,
     ], validate: () => {
       if (!draft.chain) { error.textContent = 'Choose a network.'; return false; }
       if (!connected()) { error.textContent = draft.chain === 'local' ? 'The local simulation is not running.' : 'Connect your wallet to continue.'; return false; }
-      if (!ready()) { error.textContent = solana()?'USD-priced Solana launches are pending a verified-oracle program upgrade. Use simulation for now.':!ctx.config.oracles?.[draft.chain]?.available?'A verified USD feed has not been configured for this network.':!ctx.wallet.deployment?'Fund your connected wallet with test ETH, then click Set up launchpad above. Approve the wallet confirmations before continuing.':'Click Activate price feed above, or in Network and test funds. You need test ETH for its network fee.'; return false; }
+      if (!ready()) { error.textContent = solana()?(!solanaPriced()?'USD pricing is not active on this Solana cluster yet. Use simulation, or ask the team to run the Solana upgrade.':'The on-chain SOL/USD price is stale right now. Wait a moment, then refresh.'):!ctx.config.oracles?.[draft.chain]?.available?'A verified USD feed has not been configured for this network.':!ctx.wallet.deployment?'Fund your connected wallet with test ETH, then click Set up launchpad above. Approve the wallet confirmations before continuing.':'Click Activate price feed above, or in Network and test funds. You need test ETH for its network fee.'; return false; }
       if (ctx.wallet.beta?.enabled && !ctx.wallet.beta.allowed) { error.textContent = 'This wallet is not on the beta launch list yet.'; return false; }
       const group = pairOptions()?.[draft.pair];
       if (!group?.assets.length) { error.textContent = group?.unavailable ?? 'Choose a trading pair.'; return false; }

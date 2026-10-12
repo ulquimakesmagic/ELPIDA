@@ -1,4 +1,4 @@
-import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut } from '/elpida-solana.mjs';
+import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut } from '/elpida-solana.mjs';
 import {normalizeMetadata} from './metadata.mjs';
 import { PAIR_LIMITS } from '/pairs.mjs';
 import { withWalletTimeout, walletErrorText } from './wallet.mjs';
@@ -122,14 +122,48 @@ export class SolanaWallet {
     this.programConfig = launch; this.decimals = launch.quoteDecimals;
     return launch;
   }
+  /** USDC mint accepted for the $10 fee, when the deployment's USD pricing offers it. */
+  get feeUsdc() { return this.deployment?.usdPricing?.usdcMint ?? null; }
+  /**
+   * Reads the SOL pair's on-chain pricing and the bound Pyth SOL/USD account, the same values the program
+   * verifies at launch. Sets `price` (for the fee preview) and `usdPricing` ({ pricing, oracle }).
+   */
+  async loadPrice() {
+    const configs = [...(this.configs?.values() ?? [])];
+    this.usdPricing = null; this.price = null;
+    if (!configs.length) return null;
+    const infos = await this.connection.getMultipleAccountsInfo(configs.map(cfg => this.client.pricingPda(cfg.address)));
+    configs.forEach((cfg, i) => { cfg.pricing = this.client.decodePricing(infos[i]?.data); });
+    const bound = configs.find(cfg => cfg.pricing)?.pricing;
+    if (!bound) return null;
+    const info = await this.connection.getAccountInfo(bound.priceFeed);
+    const oracle = info?.owner.toBase58() === PYTH_RECEIVER ? parsePriceUpdate(info.data) : null;
+    if (!oracle || oracle.feedId !== bound.feedId) { this.price = { status: 'unavailable', source: 'Pyth SOL/USD (on-chain)' }; return null; }
+    const usd = Number(oracle.price) * 10 ** oracle.exponent, age = Date.now() / 1000 - oracle.publishTime;
+    this.price = { symbol: 'SOL', usd, updatedAt: oracle.publishTime, source: 'Pyth SOL/USD (verified on-chain)', maxAge: bound.maxAgeSecs, status: age <= bound.maxAgeSecs && Number(oracle.conf) * 10000 <= Number(oracle.price) * bound.maxConfBps ? 'fresh' : 'stale' };
+    this.usdPricing = { oracle, priceFeed: bound.priceFeed };
+    return this.usdPricing;
+  }
+  /** The SOL fee and virtual reserve a launch on `cfg` will use at the current on-chain price. */
+  launchTerms(cfg) {
+    const priced = cfg.pricing && this.usdPricing && cfg.pricing.priceFeed.equals(this.usdPricing.priceFeed) ? cfg.pricing : null;
+    const oracle = this.usdPricing?.oracle;
+    return {
+      priced: !!priced, priceFeed: priced?.priceFeed ?? null, usdcMint: priced && !priced.usdcMint.equals(web3.PublicKey.default) ? priced.usdcMint : null, usdcFee: priced?.feeUsdE6 ?? 0n,
+      fee: priced ? usdToQuote(priced.feeUsdE6, oracle, 9) : cfg.launchFee,
+      virtualQuote: priced && priced.startFdvUsdE6 > 0n ? virtualQuoteForFdv(priced.startFdvUsdE6, oracle, cfg.virtualToken) : cfg.virtualQuote,
+    };
+  }
   /** Launchable trading assets by kind, the same structure as every other network (packages/core/pairs.mjs). */
   pairOptions() {
     const all = [...(this.configs?.values() ?? [])];
     const asset = cfg => {
       const d = cfg.quoteDecimals, id = cfg.address.toBase58();
       // The creation fee is always lamports (SOL), whatever the pair.
-      return { id, symbol: cfg.symbol, name: cfg.name, decimals: d, test: cfg.test, wsol: cfg.wsol, feeAmount: formatAmount(cfg.launchFee, 9), feeSymbol: 'SOL',
-        curve: { vq: Number(cfg.virtualQuote) / 10 ** d, vt: Number(cfg.virtualToken) / 10 ** TOKEN_DECIMALS, cap: Number(cfg.curveSupply) / 10 ** TOKEN_DECIMALS, feeBps: cfg.baseFeeBps },
+      // Oracle-priced SOL pair: the $10 fee in SOL and the $-sized virtual reserve at the current Pyth price.
+      const terms = this.launchTerms(cfg);
+      return { id, symbol: cfg.symbol, name: cfg.name, decimals: d, test: cfg.test, wsol: cfg.wsol, feeAmount: formatAmount(terms.fee, 9), feeSymbol: 'SOL', usdPriced: terms.priced,
+        curve: { vq: Number(terms.virtualQuote) / 10 ** d, vt: Number(cfg.virtualToken) / 10 ** TOKEN_DECIMALS, cap: Number(cfg.curveSupply) / 10 ** TOKEN_DECIMALS, feeBps: cfg.baseFeeBps },
         faucet: cfg.test && cfg.faucet ? { label: `Get ${Number(cfg.faucet).toLocaleString()} ${cfg.symbol}`, action: 'faucet', body: { asset: id } } : cfg.wsol && this.net.gasFaucet ? { label: 'Get devnet SOL', href: this.net.gasFaucet } : null };
     };
     const group = kind => {
@@ -160,6 +194,7 @@ export class SolanaWallet {
     this.checkWallet();
     if (!this.deployment) return { wallet: this.address, balance: '0', balanceSymbol: 'SOL', nativeSymbol: 'SOL', tokens: [], activity: [], treasuryBalance: '0', undeployed: true };
     const launchConfig = await this.loadConfig();
+    await this.loadPrice().catch(() => { this.price = { status: 'unavailable', source: 'Pyth SOL/USD (on-chain)' }; });
     await this.loadBeta();
     const accounts = await this.connection.getProgramAccounts(this.client.programId, { filters: [{ dataSize: POOL_SIZE }] });
     const pools = accounts.filter(({ account }) => this.client.isPool(account.data)).map(({ pubkey, account }) => ({ pubkey, ...this.client.decodePool(account.data) })).filter(pool => this.configOf(pool));
@@ -178,7 +213,7 @@ export class SolanaWallet {
       const remainingBuy = complete ? 0n : quoteBuy(pool, MAX_U64, config.baseFeeBps, config.baseFeeBps).gross;
       const token = {
         address, pool: pool.pubkey.toBase58(), name: pool.name, symbol: pool.symbol, creator: pool.creator.toBase58(), reward: pool.reward.toBase58(),
-        created: Number(pool.createdAt)*1000, metadata:await readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair: config.kind ?? 'native', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: 'PumpSwap',
+        created: Number(pool.createdAt)*1000, metadata:await readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair: config.kind ?? 'native', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: 'PumpSwap', usdReference: config.wsol ? this.price : null,
         reserve: formatAmount(pool.realQuote, d), liquidityBonus: formatAmount(pool.liquidityBonus, d), lockedLiquidity: formatAmount(stats.lockedLiquidity, d),
         sold: formatAmount(pool.sold, TOKEN_DECIMALS), circulatingSupply: formatAmount(pool.sold, TOKEN_DECIMALS), saleCap: formatAmount(pool.curveSupply, TOKEN_DECIMALS),
         supply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS), balance: formatAmount(this.client.tokenAmount(holdings[index]?.data), TOKEN_DECIMALS),
@@ -208,7 +243,8 @@ export class SolanaWallet {
     const sol = formatAmount(BigInt(lamports), 9);
     // Live native pricing of the SOL pair (set by the team with scripts/native-pricing.mjs).
     const start = poolStats({ ...launchConfig, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 }, launchConfig.quoteDecimals);
-    const pricing = { launchFee: formatAmount(launchConfig.launchFee, 9), startFdv: String(start.marketCap), symbol: 'SOL', matches: true, owner: false };
+    const terms = this.launchTerms(launchConfig);
+    const pricing = { launchFee: formatAmount(terms.fee, 9), usdPriced: terms.priced, usdcFee: terms.usdcMint ? formatAmount(terms.usdcFee, 6) : null, startFdv: String(poolStats({ ...launchConfig, virtualQuote: terms.virtualQuote, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 }, launchConfig.quoteDecimals).marketCap), symbol: 'SOL', matches: true, owner: false, price: this.price };
     return { wallet: this.address, balance: sol, balanceSymbol: 'SOL', pairBalances, nativeBalance: sol, nativeSymbol: 'SOL', tokens, activity: [], pricing, treasuryBalance: formatAmount(BigInt(treasury), 9) };
   }
   dexUrl(pumpPool) { return this.net.cluster === 'devnet' || this.net.cluster === 'localnet' ? this.addressUrl(pumpPool) : `https://dexscreener.com/solana/${pumpPool}`; }
@@ -289,7 +325,6 @@ export class SolanaWallet {
       return { hash: signature, message: `Minted ${Number(formatAmount(amount, target.quoteDecimals)).toLocaleString()} ${target.symbol} (test asset, no value).` };
     }
     if (action === 'launch') {
-      throw new Error('Solana USD-priced launches require the verified-oracle program upgrade. Existing tokens remain available; use simulation to test the launch flow.');
       if (!(await this.loadBeta()).allowed) throw new Error('Launches are invite-only during the beta, and this wallet is not on the list yet. Ask the Elpida team to add it.');
       const kind = body.pair ?? 'native';
       const options = this.pairOptions()[kind];
@@ -305,11 +340,26 @@ export class SolanaWallet {
       if(firstBuy<=0n)throw new Error('Enter a positive first buy.');
       let reward;
       try { reward = new web3.PublicKey(String(body.reward || this.address).trim()); } catch { throw new Error('Enter a valid Solana creator reward wallet.'); }
-      const fresh = { virtualQuote: config.virtualQuote, virtualToken: config.virtualToken, curveSupply: config.curveSupply, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 };
+      // Price-aware terms read from chain just before signing: the program recomputes them at execution.
+      await this.loadPrice();
+      const terms = this.launchTerms(config), inUsdc = body.feeCurrency === 'usdc';
+      if (!terms.priced) throw new Error(`USD pricing is not active for this pair on ${this.net.name} yet. The team turns it on with the Solana deploy script.`);
+      if (this.price?.status !== 'fresh') throw new Error('The on-chain SOL/USD price is stale or uncertain right now. Wait a moment and refresh before launching.');
+      if (inUsdc && !terms.usdcMint) throw new Error('Paying the fee in USDC is not available for this pair.');
+      // A 1% cap above the quoted SOL fee: the launch fails instead of overcharging if SOL drops before it lands.
+      const maxFee = inUsdc ? 0n : terms.fee * 101n / 100n + 1n;
+      const fresh = { virtualQuote: terms.virtualQuote, virtualToken: config.virtualToken, curveSupply: config.curveSupply, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 };
       // The creator's first buy pays only the base fee (no anti-snipe tax); a buy beyond the curve is capped.
       const q = quoteBuy(fresh, firstBuy, config.baseFeeBps, config.baseFeeBps);
       // The SOL creation fee is paid from plain SOL; for SOL pairs the first buy is wrapped from it too.
-      const solNeeded = config.launchFee + (config.wsol ? q.gross : 0n) + SolanaWallet.SOL_HEADROOM;
+      const solNeeded = maxFee + (config.wsol ? q.gross : 0n) + SolanaWallet.SOL_HEADROOM;
+      let usdc = null;
+      if (inUsdc) {
+        const mintInfo = await this.connection.getAccountInfo(terms.usdcMint);
+        usdc = { mint: terms.usdcMint, tokenProgram: mintInfo?.owner };
+        const held = this.client.tokenAmount((await this.connection.getAccountInfo(this.client.ata(this.publicKey, terms.usdcMint, usdc.tokenProgram)))?.data);
+        if (held < terms.usdcFee) throw new Error(`You need ${formatAmount(terms.usdcFee, 6)} USDC for the creation fee.${this.net.mainnet ? '' : ' Get devnet USDC at faucet.circle.com (Solana Devnet).'}`);
+      }
       const getSol = this.net.mainnet ? '' : ' Get devnet SOL at faucet.solana.com.';
       if (config.wsol) { if (await this.quoteBalance(this.publicKey, config) < solNeeded) throw new Error(`You need about ${formatAmount(solNeeded, 9)} SOL (creation fee, first buy and account rent).${getSol}`); }
       else {
@@ -320,9 +370,9 @@ export class SolanaWallet {
       const signature = await this.sendInstructions([
         this.client.computeBudget(),
         ...await this.wrapFor(config, q.gross),
-        this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward }),
+        this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, priceUpdate: terms.priceFeed, maxFee, usdc }),
         ...(config.wsol ? [this.client.unwrapSol(this.publicKey)] : []),
-      ], [mint], `Confirm your token launch in your wallet (${formatAmount(config.launchFee, 9)} SOL creation fee)…`);
+      ], [mint], `Confirm your token launch in your wallet ($10 fee: ${inUsdc ? `${formatAmount(terms.usdcFee, 6)} USDC` : `${formatAmount(terms.fee, 9)} SOL, at most ${formatAmount(maxFee, 9)} SOL`})…`);
       const saved=await writeMetadataCache(metadataKey(this.deployment.programId,mint.publicKey.toBase58()),metadata);
       return { hash: signature, token: mint.publicKey.toBase58(), message: `Your token is live on ${this.net.name}.${saved?' Metadata saved in this browser.':' Metadata could not be saved in this browser.'}` };
     }
