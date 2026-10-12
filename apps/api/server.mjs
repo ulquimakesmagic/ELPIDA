@@ -101,7 +101,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   if(port!==0&&solanaNet.deployment&&solanaRpc&&process.env.ELPIDA_SOLANA_INDEXER!=='off'){
     try{
       solanaIndex=new SolanaIndexer({web3:solanaWeb3,connection:new solanaWeb3.Connection(solanaRpc,'confirmed'),deployment:solanaNet.deployment,network:solanaNet,path:dataFile(`public-solana-${solanaNet.cluster}-${solanaNet.deployment.programId}.sqlite`)});
-      const tick=()=>solanaIndex.sync().then(()=>console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}))).catch(()=>console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,message:'Indexing unavailable; retrying.'})));
+      const tick=()=>solanaIndex.sync().then(()=>console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}))).catch(()=>console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,message:'Indexing unavailable; retrying.'})));
       tick();solanaTimer=setInterval(tick,20000);solanaTimer.unref();
     }catch(error){console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:String(error.name??'INIT').slice(0,40),message:error.message.slice(0,120)}));}
   }

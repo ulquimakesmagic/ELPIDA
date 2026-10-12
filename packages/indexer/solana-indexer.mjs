@@ -13,6 +13,20 @@ const MAX_U64 = (1n << 64n) - 1n;
 const json = value => JSON.stringify(value, (_, v) => typeof v === 'bigint' ? v.toString() : v);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 
+// Only trust events emitted by our program, including when invoked through a router.
+// Other instructions in the same transaction can emit identical event bytes.
+export function programEventLogs(logs, programId) {
+  const stack = [], result = [];
+  for (const line of logs ?? []) {
+    const invoke = /^Program (\S+) invoke \[(\d+)\]$/.exec(line);
+    if (invoke) { stack.length = Number(invoke[2]) - 1; stack.push(invoke[1]); continue; }
+    const exit = /^Program (\S+) (?:success|failed:.*)$/.exec(line);
+    if (exit) { if (stack.at(-1) === exit[1]) stack.pop(); else stack.length = 0; continue; }
+    if (line.startsWith('Program data: ') && stack.at(-1) === programId) result.push(line);
+  }
+  return result;
+}
+
 export class SolanaIndexer {
   /**
    * `web3`: @solana/web3.js; `connection`: a Connection; `deployment`: { programId, pairs }; `network`: net registry entry.
@@ -92,26 +106,43 @@ export class SolanaIndexer {
     const tokens = new Map(this.tokens().map(t => [t.pool, t]));
     let added = 0;
     for (const sig of fresh.reverse()) {
+      let transactionAdded = 0;
+      let events = [], tx;
       if (!sig.err) {
-        const tx = await this.connection.getTransaction(sig.signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
-        const events = decodeEvents(tx?.meta?.logMessages ?? [], this.web3.PublicKey);
+        tx = await this.connection.getTransaction(sig.signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+        // A listed signature may precede transaction availability on this RPC.
+        // Preserve the checkpoint so a later tick retries rather than losing history.
+        if (!tx?.meta) {
+          const error = new Error('Transaction details not available yet.');
+          error.code = 'TRANSACTION_PENDING';
+          throw error;
+        }
+        if (!tx.meta.err) events = decodeEvents(programEventLogs(tx.meta.logMessages, this.deployment.programId), this.web3.PublicKey);
+      }
+      this.db.exec('BEGIN');
+      try {
         events.forEach((e, idx) => {
           if (!['CurveLaunched', 'CurveBought', 'CurveSold'].includes(e.name)) return;
           const token = tokens.get(e.pool);
           if (!token) return;
           const d = token.quoteDecimals, buy = e.name !== 'CurveSold';
           const quoteRaw = buy ? e.quoteIn : e.quoteOut, tokenRaw = buy ? e.tokensOut : e.tokensIn;
-          insert.run(sig.signature, idx, token.address, sig.slot, tx?.blockTime ?? sig.blockTime ?? 0, json({
+          const result = insert.run(sig.signature, idx, token.address, sig.slot, tx?.blockTime ?? sig.blockTime ?? 0, json({
             hash: sig.signature, token: token.address, side: buy ? 'buy' : 'sell', account: buy ? (e.buyer ?? e.creator) : e.seller,
             quoteRaw, tokenRaw, quoteAmount: formatAmount(quoteRaw, d), tokenAmount: formatAmount(tokenRaw, TOKEN_DECIMALS),
             priceQuote: tokenRaw > 0n ? Number(quoteRaw) / 10 ** d / (Number(tokenRaw) / 10 ** TOKEN_DECIMALS) : null,
             launch: e.name === 'CurveLaunched', timestamp: tx?.blockTime ?? sig.blockTime ?? 0, slot: sig.slot,
           }));
-          added++;
+          transactionAdded += Number(result.changes);
         });
-        if (this.spacingMs) await sleep(this.spacingMs);
+        this.db.prepare('INSERT INTO cursor(id, signature, slot) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET signature=excluded.signature, slot=excluded.slot').run(sig.signature, sig.slot);
+        this.db.exec('COMMIT');
+      } catch (error) {
+        this.db.exec('ROLLBACK');
+        throw error;
       }
-      this.db.prepare('INSERT INTO cursor(id, signature, slot) VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET signature=excluded.signature, slot=excluded.slot').run(sig.signature, sig.slot);
+      added += transactionAdded;
+      if (!sig.err && this.spacingMs) await sleep(this.spacingMs);
     }
     return added;
   }
@@ -119,8 +150,13 @@ export class SolanaIndexer {
   async sync() {
     if (this.running) return this.running;
     this.running = (async () => {
-      try { await this.syncPools(); await this.syncTrades(); await this.syncPools(); this.lastError = null; this.lastSuccess = new Date().toISOString(); }
-      catch (error) { this.lastError = String(error.code ?? error.name ?? 'INDEX_ERROR').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 64); throw error; }
+      let phase = 'pool_snapshot';
+      try {
+        await this.syncPools(); phase = 'transaction_history';
+        await this.syncTrades(); phase = 'pool_refresh'; await this.syncPools();
+        this.lastError = null; this.lastErrorPhase = null; this.lastSuccess = new Date().toISOString();
+      }
+      catch (error) { this.lastErrorPhase = phase; this.lastError = String(error.code ?? error.name ?? 'INDEX_ERROR').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 64); throw error; }
       finally { this.running = null; }
     })();
     return this.running;
@@ -163,7 +199,7 @@ export class SolanaIndexer {
   }
   status() {
     const cursor = this.db.prepare('SELECT signature, slot FROM cursor WHERE id=1').get();
-    return { network: this.network.key, programId: this.deployment.programId, tokens: this.db.prepare('SELECT COUNT(*) n FROM tokens').get().n, trades: this.db.prepare('SELECT COUNT(*) n FROM trades').get().n, cursorSlot: cursor?.slot ?? null, lastSuccess: this.lastSuccess, error: this.lastError, backend: 'SQLite WAL' };
+    return { network: this.network.key, programId: this.deployment.programId, tokens: this.db.prepare('SELECT COUNT(*) n FROM tokens').get().n, trades: this.db.prepare('SELECT COUNT(*) n FROM trades').get().n, cursorSlot: cursor?.slot ?? null, lastSuccess: this.lastSuccess, error: this.lastError, errorPhase: this.lastErrorPhase ?? null, backend: 'SQLite WAL' };
   }
   close() { this.db.close(); }
 }
