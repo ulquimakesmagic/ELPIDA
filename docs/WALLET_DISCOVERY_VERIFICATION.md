@@ -11,3 +11,7 @@ Responsiveness: coalesce matching refreshes, bound read API requests to 15 secon
 Liquidity on cards means actual indexed quote funds in the curve or DEX; it excludes virtual reserves and is not two-sided pool TVL. Starting valuation remains unchanged.
 
 Verification: 17 API/discovery/pricing/capability checks and 3 wallet discovery/adapter checks pass. Browser verified Solana Phantom/Zerion discovery with loaded icons and Base wallet selection. Public transactions require user signing and sufficient test funds.
+
+The factory QuoteApproved history was being rescanned in 100-block batches on first wallet load. Approved pair addresses now come from the durable factory event index, with each template verified against factory.approvedQuotes before asset metadata is used. Only unindexed tail blocks are queried in the browser. Chain changes reset the pair cursor and asset cache. Public EVM HTTP reads have a 15-second deadline. Trusted reconnection never requests accounts or switches chains.
+
+22 focused checks passed, including validated factory pair provenance. The public Base launch draft reached the final review; no transaction was signed or submitted. The connected wallet had about 0.000499 ETH, below the roughly 0.004 ETH creation fee before first purchase and gas.

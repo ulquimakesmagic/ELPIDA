@@ -53,7 +53,7 @@ export class TestnetWallet {
   select(key) {
     const net = this.config.testnets.find(item => item.key === key);
     if (!net) throw new Error('That test network is not available.');
-    if (this.net?.key !== key) { this.net = net; this.launches = new Map(); this.scannedBlock = undefined; this.launchFee = undefined; this.nativeVirtualQuote = undefined; this.needsMetadataUpgrade = false; }
+    if (this.net?.key !== key) { this.net = net; this.launches = new Map(); this.scannedBlock = undefined; this.launchFee = undefined; this.pairsScanned=undefined;this.approvedQuotes=[]; this.nativeVirtualQuote = undefined; this.needsMetadataUpgrade = false; }
     return net;
   }
   get dex(){return this.net.key==='base-sepolia'?this.config.publicDex:null;}
@@ -158,18 +158,27 @@ export class TestnetWallet {
   async loadPairs(factory) {
     if (!this.dex || !this.deployment) { this.approvedQuotes = []; return; }
     const latest = await this.provider.getBlockNumber();
-    this.approvedQuotes ??= []; let from = this.pairsScanned === undefined ? this.deployment.block : this.pairsScanned + 1;
-    for (; from <= latest; from += 100) {
-      const to = Math.min(from + 99, latest);
-      for (const event of await factory.queryFilter(factory.filters.QuoteApproved(), from, to)) {
-        const address = event.args.asset, asset = new Contract(address, ['function symbol() view returns(string)', 'function name() view returns(string)', 'function decimals() view returns(uint8)', 'function pairKind() view returns(string)', 'function FAUCET_LIMIT() view returns(uint256)'], this.provider);
-        const [symbol, name, decimals] = await Promise.all([asset.symbol(), asset.name(), asset.decimals()]);
-        let kind = 'token', faucetLimit = 0n; try { kind = await asset.pairKind() === 'xstock' ? 'xstock' : 'token'; } catch {} try { faucetLimit = await asset.FAUCET_LIMIT(); } catch {}
-        this.approvedQuotes.push({ id: address, address, kind, symbol, name, decimals: Number(decimals), virtualQuote: event.args.virtualQuote, test: faucetLimit > 0n,
-          faucet: faucetLimit > 0n ? { label: `Get ${formatUnits(faucetLimit, decimals).replace(/\.0$/, '')} ${symbol}`, action: 'faucet', body: { asset: address } } : null });
-      }
-      this.pairsScanned = to;
+    this.approvedQuotes ??= [];
+    const add=async address=>{
+      if(this.approvedQuotes.some(a=>a.address.toLowerCase()===address.toLowerCase()))return;
+      const template=await factory.approvedQuotes(address);
+      if(template.adapter===ZeroAddress||template.virtualQuote<=0n)return;
+      const asset=new Contract(address,['function symbol() view returns(string)','function name() view returns(string)','function decimals() view returns(uint8)','function pairKind() view returns(string)','function FAUCET_LIMIT() view returns(uint256)'],this.provider);
+      const [symbol,name,decimals]=await Promise.all([asset.symbol(),asset.name(),asset.decimals()]);
+      let kind='token',faucetLimit=0n;try{kind=await asset.pairKind()==='xstock'?'xstock':'token';}catch{}try{faucetLimit=await asset.FAUCET_LIMIT();}catch{}
+      this.approvedQuotes.push({id:address,address,kind,symbol,name,decimals:Number(decimals),virtualQuote:template.virtualQuote,test:faucetLimit>0n,faucet:faucetLimit>0n?{label:'Get '+formatUnits(faucetLimit,decimals).replace(/\.0$/,'')+' '+symbol,action:'faucet',body:{asset:address}}:null});
+    };
+    if(this.pairsScanned===undefined&&this.deployment.shared){
+      const response=await fetch('/api/public/quotes?network='+encodeURIComponent(this.net.key),{signal:AbortSignal.timeout(15000)});
+      if(!response.ok)throw new Error('Trading pair discovery is temporarily unavailable. Refresh shortly.');
+      const data=await response.json();
+      if(data.factory?.toLowerCase()!==this.deployment.factory.toLowerCase()||data.chainId!==this.net.chainId||!Number.isSafeInteger(data.indexedBlock)||data.indexedBlock>latest||data.indexedBlock<this.deployment.block||!Array.isArray(data.assets)||data.assets.some(a=>!isAddress(a)))throw new Error('Trading pair index does not match this launchpad.');
+      for(const address of new Set(data.assets))await add(address);
+      this.pairsScanned=data.indexedBlock;
     }
+    let from=this.pairsScanned===undefined?this.deployment.block:this.pairsScanned+1;
+    if(latest-from>20000)throw new Error('This launchpad needs its public pair index to load trading assets.');
+    for(;from<=latest;from+=100){const to=Math.min(from+99,latest);for(const event of await factory.queryFilter(factory.filters.QuoteApproved(),from,to))await add(event.args.asset);this.pairsScanned=to;}
   }
   /** Treasury only, DEX launchpads: deploys the labelled test xStock and test paired token and approves them as pairs. */
   async setupTestPairs() {

@@ -1,3 +1,4 @@
+import {DatabaseSync} from 'node:sqlite';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Wallet } from 'ethers';
@@ -26,4 +27,14 @@ test('public registry survives restart and accepts metadata only from the indexe
     assert.equal(service.listings('test')[0].name,'Public token');
     assert.equal(service.status('unknown').enabled,false);
   }finally{await service.close();rmSync(dir,{recursive:true,force:true});}
+});
+
+test('approved pairs come only from the validated factory index',()=>{
+ const db=new DatabaseSync(':memory:');db.exec('CREATE TABLE events(height INTEGER,idx INTEGER,data TEXT)');
+ const factory='0x'+'11'.repeat(20),asset='0x'+'22'.repeat(20),insert=db.prepare('INSERT INTO events VALUES(?,?,?)');
+ insert.run(1,0,JSON.stringify({kind:'factory',name:'QuoteApproved',address:factory,args:[asset,'1','adapter']}));
+ insert.run(1,1,JSON.stringify({kind:'curve',name:'QuoteApproved',address:factory,args:['wrong']}));
+ insert.run(1,2,JSON.stringify({kind:'factory',name:'QuoteApproved',address:asset,args:['wrong']}));
+ const e={net:{shared:{factory},chainId:84532},validated:false,index:{db,status:()=>({indexedBlock:1})}},service=Object.create(PublicIndexer.prototype);service.entries=new Map([['test',e]]);
+ assert.equal(service.quotes('test'),null);e.validated=true;assert.deepEqual(service.quotes('test'),{factory,chainId:84532,indexedBlock:1,assets:[asset]});assert.equal(service.quotes('missing'),null);db.close();
 });

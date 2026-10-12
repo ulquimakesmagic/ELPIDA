@@ -22,6 +22,8 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal((await fetch(`${base}/analytics`)).status,200);
     assert.equal((await fetch(`${base}/analytics-view.mjs`)).status,200);
     assert.equal((await fetch(`${base}/chain-ui.mjs`)).status,200);
+    assert.equal((await fetch(`${base}/wallet-discovery.mjs`)).status,200);
+    assert.equal((await fetch(`${base}/api/public/quotes?network=unknown`)).status,503);
     assert.equal((await fetch(`${base}/discovery.mjs`)).status,200);
     const analytics=await (await fetch(`${base}/api/public/analytics`)).json();
     assert.equal(analytics.totals.trades,0,'simulation is excluded from public analytics');

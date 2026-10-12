@@ -30,6 +30,7 @@ export class PublicIndexer {
   }
   start(){this.job=this.tick();this.timer=setInterval(()=>{this.job=this.tick();},15000);this.timer.unref();return this;}
   status(key){const e=this.entries.get(key);return e?{...e.index.status(),error:e.error,lastSuccess:e.lastSuccess,enabled:true}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}
+  quotes(key){const e=this.entries.get(key);if(!e)return null;const status=e.index.status();if(!e.validated||status.indexedBlock==null)return null;return {factory:e.net.shared.factory,chainId:e.net.chainId,indexedBlock:status.indexedBlock,assets:e.index.db.prepare("SELECT data FROM events WHERE json_extract(data,'$.name')='QuoteApproved' ORDER BY height,idx").all().map(r=>JSON.parse(r.data)).filter(r=>r.kind==='factory'&&r.address.toLowerCase()===e.net.shared.factory.toLowerCase()).map(r=>r.args[0])};}
   listings(key){const e=this.entries.get(key);return e?e.index.listings().map(t=>({...t,metadata:e.metadata.get(t.address)??{},metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key})):[];}
   metadataMessage(body){
     const e=this.entries.get(body.network),token=e?.index.tokens().find(t=>t.address===String(body.token).toLowerCase());
