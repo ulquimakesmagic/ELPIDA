@@ -7,13 +7,23 @@ import { amount } from './runtime.mjs';
 import { EvmIndexer } from '../../packages/indexer/evm-indexer.mjs';
 import {deployLocalV3,v3Artifacts,baseSepoliaDex} from '../../packages/core/uniswap.mjs';
 import { normalizeMetadata } from '../web/metadata.mjs';
-import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync, appendFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
-export async function createRuntime({seed = true, dex = false, metadataStore = null, metadataPath = null, indexerPath = ":memory:"} = {}) {
+// Simulation actions that change chain state. With `journalPath` (on durable storage) each successful
+// action is appended to a JSON-lines journal and replayed at startup, with its original time and oracle
+// price, so the simulated chain survives restarts and redeploys.
+export const JOURNALED_ACTIONS = ['launch','buy','sell','withdraw','graduate','reward-stock-faucet','reward-claim'];
+function readJournal(path){
+  if(!path||!existsSync(path))return [];
+  return readFileSync(path,'utf8').split('\n').filter(Boolean).flatMap(line=>{try{const e=JSON.parse(line);return JOURNALED_ACTIONS.includes(e.action)&&Number.isFinite(e.at)?[e]:[];}catch{return [];}});
+}
+export async function createRuntime({seed = true, dex = false, metadataStore = null, metadataPath = null, indexerPath = ":memory:", journalPath = null, log = () => {}} = {}) {
+  const journal = readJournal(journalPath);
   const compiled = compileContracts({includeMocks:true});
   const artifact = name => compiled[`contracts/evm/src/${name}.sol`][name];
-  const connection = await network.create('localTest');
+  // Replays start the chain shortly before the first recorded action so timestamps can be restored.
+  const connection = await network.create(journal.length ? {network:'localTest',override:{initialDate:new Date(journal[0].at-10*60*1000)}} : 'localTest');
   const provider = new BrowserProvider(connection.provider,undefined,{cacheTimeout:-1}); provider.pollingInterval = 10;
   const signers = await Promise.all([0,1,2,3].map(i => provider.getSigner(i)));
   const addresses = await Promise.all(signers.map(s => s.getAddress()));
@@ -160,7 +170,28 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
     const [out,fee] = body.side === 'buy'?await m.quoteBuy(input):await m.quoteSell(input);
     return {out:formatUnits(out,body.side === 'buy'?18:decimals(r)),fee:formatUnits(fee,decimals(r)),quoteSymbol:r.quoteSymbol};
   }
-  if (seed) for (const [name,symbol,firstBuy,pair,account] of [['Orbit Club','ORBIT','0.1','native','0'],['Pixel Party','PIXEL','0.05','native','1'],['Lucky Sprout','LUCK','0.03','native','0']]) await execute('launch',{name,symbol,firstBuy,pair,account});
+  async function apply(action,body){
+    const result=action==='reward-claim'?await rewards.claim(body):await execute(action,body);
+    if(['launch','buy','sell','withdraw','graduate'].includes(action))await rewards.tick();
+    return result;
+  }
+  let replayed=0,skipped=0;
+  if(journal.length){
+    for(const entry of journal){
+      try{
+        // The oracle refresh takes the block just before the action's original time.
+        const latest=(await provider.getBlock('latest')).timestamp,at=Math.max(latest+1,Math.floor(entry.at/1000)-1);
+        await provider.send('evm_setNextBlockTimestamp',[at]);
+        await updatePrice(Number(entry.usd)>0?Number(entry.usd):config.local.price?.usd??2500);
+        await apply(entry.action,entry.body);replayed++;
+      }catch(error){skipped++;log(JSON.stringify({event:'simulation_replay_skipped',action:entry.action,code:String(error.code??error.name??'REPLAY').slice(0,40)}));}
+    }
+    const latest=(await provider.getBlock('latest')).timestamp,now=Math.floor(Date.now()/1000);
+    if(now>latest)await provider.send('evm_mine',[now]);
+    await updatePrice(config.local.price?.usd??2500);
+  }else if (seed) for (const [name,symbol,firstBuy,pair,account] of [['Orbit Club','ORBIT','0.1','native','0'],['Pixel Party','PIXEL','0.05','native','1'],['Lucky Sprout','LUCK','0.03','native','0']]) await execute('launch',{name,symbol,firstBuy,pair,account});
+  config.simulation={durable:Boolean(journalPath),replayed,skipped};
+  const record=(action,body,at)=>{if(!journalPath||!JOURNALED_ACTIONS.includes(action))return;mkdirSync(dirname(journalPath),{recursive:true});appendFileSync(journalPath,JSON.stringify({action,body,at,usd:config.local.price?.usd??null})+'\n');};
   await indexer.sync();
-  return {updatePrice,config,state,getQuote,indexer,listings,provider,rewards,transact(action,body) { const result = queue.then(async () => { const result=action==='reward-x-finish'?await rewards.finishX(body):action==='reward-x-start'?await rewards.startX(body):action==='reward-claim'?await rewards.claim(body):action==='reward-verify'?await rewards.verify(body):action==='reward-challenge'?await rewards.challenge(body):action==='reward-process'?(await rewards.tick(),{message:'Reward treasuries processed.'}):await execute(action,body); if(['launch','buy','sell','withdraw','graduate'].includes(action))await rewards.tick(); try {await indexer.sync();} catch {result.message += " Indexing pending; refresh to retry.";} return result;}); queue = result.catch(() => {}); return result; },async close() {await queue; await indexer.close(); provider.destroy(); await connection.close();}};
+  return {updatePrice,config,state,getQuote,indexer,listings,provider,rewards,transact(action,body) { const result = queue.then(async () => { const started=((await provider.getBlock('latest')).timestamp+1)*1000; const result=action==='reward-x-finish'?await rewards.finishX(body):action==='reward-x-start'?await rewards.startX(body):action==='reward-verify'?await rewards.verify(body):action==='reward-challenge'?await rewards.challenge(body):action==='reward-process'?(await rewards.tick(),{message:'Reward treasuries processed.'}):await apply(action,body); record(action,body,started); try {await indexer.sync();} catch {result.message += " Indexing pending; refresh to retry.";} return result;}); queue = result.catch(() => {}); return result; },async close() {await queue; await indexer.close(); provider.destroy(); await connection.close();}};
 }

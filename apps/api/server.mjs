@@ -83,9 +83,10 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const dataFile=name=>resolve(dataDir,dataPrefix+name);
   const circle = circleFunding ?? createCircleFunding({ path: port === 0 ? null : dataFile('circle-test-wallets.json') });
   const metadataStore=new MetadataStore({path:port===0?null:dataFile('ipfs-content')});
-  const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:dataFile('token-metadata.json'), dex:port!==0, indexerPath:port===0?":memory:":dataFile('curve-dex-usd-v9-index.sqlite') });
+  // The simulation is rebuilt from its action journal on the data volume, so its index can stay in memory.
+  const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:dataFile('token-metadata.json'), dex:port!==0, indexerPath:":memory:", journalPath:port===0?null:dataFile('simulation-journal.jsonl'), log:console.log });
   const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore}).start();
-  console.log(JSON.stringify({event:'storage_ready',durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),publicNetworks:[...publicIndex.entries.keys()],simulation:'resets on process restart'}));
+  console.log(JSON.stringify({event:'storage_ready',durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),dataDir,publicNetworks:[...publicIndex.entries.keys()],simulation:runtime.config.simulation?.durable?`journal replay: ${runtime.config.simulation.replayed} actions restored, ${runtime.config.simulation.skipped} skipped`:'resets on process restart'}));
   const priceKeeper=new PriceKeeper();
   const updatePrices=async()=>{await priceKeeper.refresh();const prices=priceKeeper.snapshot();const p=[prices.local,prices['base-sepolia'],prices['ethereum-sepolia']].find(p=>p.status==='fresh');if(p)await runtime.updatePrice(p.usd);};
   const priceTimer=port===0?null:setInterval(()=>updatePrices().catch(()=>{}),60000);priceTimer?.unref();
@@ -115,7 +116,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         }
         if (url.pathname === '/api/rewards') return send(200,await runtime.rewards.dashboard());
         if(url.pathname==='/api/prices')return send(200,priceSnapshot());
-        if(url.pathname==='/api/public/status')return send(200,{storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),simulationEphemeral:true},networks:Object.fromEntries(evmTestnets.map(n=>[n.key,publicIndex.status(n.key)]))});
+        if(url.pathname==='/api/public/status')return send(200,{storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),simulationEphemeral:!runtime.config.simulation?.durable,simulation:runtime.config.simulation},networks:Object.fromEntries(evmTestnets.map(n=>[n.key,publicIndex.status(n.key)]))});
         const publicMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?)?$/);
         if(publicMatch){const key=url.searchParams.get('network')??'base-sepolia';if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown public network.'});if(!publicMatch[1])return send(200,publicIndex.listings(key));const data=publicIndex.detail(key,publicMatch[1],publicMatch[2],Number(url.searchParams.get('interval')??60));return data===null?send(404,{error:'Token not indexed yet. Check indexer status and retry.'}):send(200,data);}
         if (url.pathname === '/api/config') return send(200, { ...runtime.config, circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), csrf });
@@ -186,6 +187,6 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     process.exit(1);
   }
   console.log(`Elpida is ready: ${app.url}`);
-  console.log('Private simulation resets on restart. Public token history is indexed from chain and stored in SQLite.');
+  console.log('Simulation state is journaled to the data directory and replayed on restart. Public token history is indexed from chain and stored in SQLite.');
   for (const signal of ['SIGINT', 'SIGTERM']) process.once(signal, async () => { await app.close(); process.exit(0); });
 }
