@@ -688,3 +688,4 @@ button.link-button,.copy { min-height:44px; }
 .price-sources { margin:0 0 24px; font-size:13px; color:var(--ink-3); }
 .price-sources summary { min-height:44px; display:flex; align-items:center; cursor:pointer; text-decoration:underline; text-underline-offset:4px; }
 @media(max-width:600px) { .tabbar { grid-template-columns:none; grid-auto-flow:column; grid-auto-columns:minmax(0,1fr); } }
+@media(max-width:600px) { .top-actions { min-width:0; width:100%; } .chain-selector { flex:1; min-width:0; } #env-button { width:100%; min-width:0; max-width:none; gap:6px; padding:8px 10px; } #env-button>span { min-width:0; } .account-button { flex-shrink:0; } }
