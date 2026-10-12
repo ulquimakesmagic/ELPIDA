@@ -3,6 +3,7 @@ import {normalizeMetadata} from './metadata.mjs';
 import { PAIR_LIMITS } from '/pairs.mjs';
 import { withWalletTimeout, walletErrorText } from './wallet.mjs';
 
+import { standardSolanaWallets, standardSolanaProvider } from './wallet-discovery.mjs';
 const SOL_CHOICE = 'elpida:solana-wallet';
 const SOLANA_WALLETS = [
   { id: 'phantom', name: 'Phantom', get: () => window.phantom?.solana ?? (window.solana?.isPhantom ? window.solana : null) },
@@ -10,15 +11,18 @@ const SOLANA_WALLETS = [
   { id: 'backpack', name: 'Backpack', get: () => window.backpack ?? null },
 ];
 /** Installed Solana wallets: [{ id, name }]. */
-export function solanaWallets() {
-  const list = SOLANA_WALLETS.filter(w => { try { return !!w.get(); } catch { return false; } }).map(({ id, name }) => ({ id, name }));
+export function solanaWallets(chain='solana:devnet') {
+  const list = SOLANA_WALLETS.filter(w => { try { return !!w.get(); } catch { return false; } }).map(({ id, name }) => ({ id, name, icon: ['phantom','solflare'].includes(id)?`/assets/wallets/${id}.svg`:'' }));
   if (!list.length && typeof window !== 'undefined' && window.solana) list.push({ id: 'injected', name: 'Solana wallet' });
-  return list;
+  const standard=standardSolanaWallets(chain);
+  return [...standard,...list.filter(w=>!standard.some(a=>a.name.toLowerCase()===w.name.toLowerCase()))];
 }
 export function chosenSolanaWallet() { try { return localStorage.getItem(SOL_CHOICE); } catch { return null; } }
-function solanaProvider(id = chosenSolanaWallet()) {
+function solanaProvider(id = chosenSolanaWallet(),chain='solana:devnet') {
+  if(id?.startsWith('standard:'))return standardSolanaProvider(id,globalThis.solanaWeb3,chain);
   const pick = SOLANA_WALLETS.find(w => w.id === id)?.get();
-  return pick ?? SOLANA_WALLETS.map(w => w.get()).find(Boolean) ?? window.solana ?? null;
+  if(id)return pick ?? (id==='injected'?window.solana:null);
+  return SOLANA_WALLETS.map(w => w.get()).find(Boolean) ?? window.solana ?? null;
 }
 import {readMetadataCache,writeMetadataCache} from './metadata-cache.mjs';
 const metadataKey=(program,mint)=>`elpida:solana-metadata:${program}:${mint}`;
@@ -49,8 +53,8 @@ export class SolanaWallet {
     return this.net;
   }
   get deployment() { return this.net.deployment ?? null; }
-  get provider() { return this._provider ?? solanaProvider(); }
-  get walletName() { return SOLANA_WALLETS.find(w => w.id === (this.walletId ?? chosenSolanaWallet()))?.name ?? 'your Solana wallet'; }
+  get provider() { return this._provider ?? solanaProvider(undefined,this.net.mainnet?'solana:mainnet':'solana:devnet'); }
+  get walletName() { return solanaWallets(this.net.mainnet?'solana:mainnet':'solana:devnet').find(w => w.id === (this.walletId ?? chosenSolanaWallet()))?.name ?? 'your Solana wallet'; }
   get client() {
     if (!this.deployment) throw new Error('The Solana program is not deployed yet. Run npm run solana:deploy once (see docs/LOCALHOST_AND_TESTNET.md).');
     return (this._client ??= createElpidaSolana(web3, this.deployment.programId));
@@ -70,7 +74,7 @@ export class SolanaWallet {
   async connect(walletId) {
     if (!web3) throw new Error('The Solana library did not load. Refresh the page.');
     if (walletId) { try { localStorage.setItem(SOL_CHOICE, walletId); } catch {} }
-    const provider = solanaProvider(walletId ?? chosenSolanaWallet());
+    const provider = solanaProvider(walletId ?? chosenSolanaWallet(),this.net.mainnet?'solana:mainnet':'solana:devnet');
     if (!provider) throw new Error('Install Phantom, Solflare or Backpack to use Solana Devnet.');
     this._provider = provider; this.walletId = walletId ?? chosenSolanaWallet();
     let result = null;

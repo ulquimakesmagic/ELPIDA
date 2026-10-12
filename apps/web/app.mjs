@@ -18,7 +18,7 @@ let allTokens = [], discoveryErrors = [], chainControl, connecting=false;
 const ui = { filter: 'all', query: '', sort: 'marketcap',stage:'all' };
 
 async function api(path, body, renewed = false) {
-  const response = await fetch(`/api/${path}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': config.csrf }, body: JSON.stringify({ ...body, account }) } : {});
+  const response = await fetch(`/api/${path}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': config.csrf }, body: JSON.stringify({ ...body, account }) } : {signal:AbortSignal.timeout(15000)});
   let result = {}; try { result = await response.json(); } catch {}
   // This rejection occurs before any operation is executed. Retry only this explicit
   // session-expiry response, never an uncertain transaction or other server error.
@@ -54,15 +54,24 @@ async function run(action, body = {}, { quiet = false, onProgress } = {}) {
 /** Same as run, but reports errors as notifications (for one-click actions). */
 async function act(action, body, opts) { try { return await run(action, body, opts); } catch (error) { toast(errorText(error), { kind: 'error' }); return null; } }
 
-async function refresh({ preserveInput = false } = {}) {
+let pendingRefresh=null,pendingRefreshKey=null;
+function refresh(options={}){
+  options={...options,walletRead:options.walletRead??!['explore','analytics'].includes(currentRoute.name)};
+  const key=mode+':'+currentChain()+':'+(wallet.address??account)+':'+options.walletRead;
+  if(pendingRefresh&&pendingRefreshKey===key)return pendingRefresh;
+  pendingRefreshKey=key;
+  const task=refreshNow(options).finally(()=>{if(pendingRefresh===task){pendingRefresh=null;pendingRefreshKey=null;}});
+  pendingRefresh=task;return task;
+}
+async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
   const revision = ++refreshRevision;
   try{const latest=await api('prices');config.prices=latest;}catch{}
   if(mode==='local'){try{const c=await api('config');config.local=c.local;config.pricing=c.pricing;}catch{}}
   let next;
-  if (mode === 'testnet' && !wallet.address) {
+  if (mode === 'testnet' && (!wallet.address || !walletRead)) {
     let tokens=[],discoveryError=false;
     try{tokens=await wallet.publicTokens();}catch{discoveryError=true;}
-    next = { balance: '0', nativeBalance:'0', tokens, activity: [], disconnected: true,discoveryError };
+    next = { ...state, wallet:wallet.address, balance:state?.balance??'0', nativeBalance:state?.nativeBalance??'0', tokens, activity: [], disconnected: !wallet.address,discoveryError };
   }
   else if(mode==='local')next=await api(`state?account=${account}`);
   else{try{next=await wallet.state();}catch(error){
@@ -108,7 +117,7 @@ async function connect(key, walletId) {
     await wallet.connect(walletId); connected = true; mode = 'testnet';
     try { localStorage.setItem('elpida:network', key); } catch {}
     state = { wallet: wallet.address, balance: '0', tokens: [], activity: [] };
-    await refresh();
+    await refresh({walletRead:true});
     return true;
   } catch (error) {
     if (!connected) { wallet = previousWallet; try { if (wallet.net.key !== previousKey) wallet.select(previousKey); } catch {} }
@@ -126,7 +135,7 @@ async function useLocal() {
  */
 function walletButtons(net, { onDone = () => {}, onError = () => {} } = {}) {
   const solana = net.kind === 'solana';
-  const list = solana ? solanaWallets() : evmWallets();
+  const list = solana ? solanaWallets(net.mainnet?'solana:mainnet':'solana:devnet') : evmWallets();
   const chosen = solana ? chosenSolanaWallet() : chosenEvmWallet();
   if (!list.length) return h('p.small.muted', solana ? 'No Solana wallet found. Install Phantom, Solflare or Backpack, then reload this page.' : 'No Ethereum wallet found. Install MetaMask or another browser wallet, then reload this page.');
   const sorted = [...list].sort((a, b) => Number(b.id === chosen) - Number(a.id === chosen));
@@ -135,7 +144,7 @@ function walletButtons(net, { onDone = () => {}, onError = () => {} } = {}) {
     try { await connect(net.key, w.id); toast(`Connected to ${net.name} with ${w.name}.`, { kind: 'success' }); onDone(); }
     catch (e) { onError(e); }
     finally { button.disabled = false; text.textContent = label; }
-  } } }, w.icon && /^data:image\//.test(w.icon) ? h('img.wallet-icon', { src: w.icon, alt: '', width: 18, height: 18 }) : icon('wallet', 'icon-sm'), h('span', list.length > 1 ? w.name : `Connect ${w.name}`))));
+  } } }, w.icon && (/^data:image\//.test(w.icon)||/^\/assets\/wallets\//.test(w.icon)) ? h('img.wallet-icon', { src: w.icon, alt: '', width: 18, height: 18 }) : icon('wallet', 'icon-sm'), h('span', list.length > 1 ? w.name : `Connect ${w.name}`))));
 }
 const ctx = {
   get config() { return config; }, get state() { return state; }, get mode() { return mode; }, get wallet() { return wallet; }, get account() { return account; },
@@ -185,6 +194,7 @@ function route() {
   $$('[data-nav]').forEach(link => { if (link.dataset.nav === next.name) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
   document.title = `Elpida · ${{ explore: 'Explore tokens', portfolio: 'Portfolio', rewards: 'Rewards', launch: 'Create a token', token: 'Token', analytics: 'Protocol analytics' }[next.name]}`;
   rerender('route');
+  if(changed&&wallet?.address&&!['explore','analytics'].includes(next.name))refresh({preserveInput:true,walletRead:true}).catch(e=>toast(errorText(e),{kind:'error'}));
   if (changed) { window.scrollTo({ top: 0 }); if (next.name !== 'launch') $('#main').focus({ preventScroll: true }); }
 }
 let launchView = null, analyticsView = null;
@@ -254,7 +264,7 @@ function tokenCard(token) {
     h('p.desc', token.metadata?.description || 'No description yet.'),
     // Market cap = price × the full 1B supply (all minted at launch), the same figure as FDV.
     h('div.figures', h('div.figure', h('span', 'Market cap'), h('strong', fmtValue(p.marketCap, token))), h('div.figure', h('span', 'Price'), h('strong.nowrap', fmtPrice(token)))),
-    h('div.figures',h('div.figure',h('span',token.graduated?'DEX quote balance':'Curve reserve'),h('strong',fmtValue(token.reserve,token))),h('div.figure',h('span','Age'),h('strong',token.created?age(token.created):'Unavailable'))),
+    h('div.figures',h('div.figure',h('span',{title:token.graduated?'Indexed quote assets in the DEX pool; not total two-sided TVL.':'Real quote funds collected by the curve. Virtual reserves are excluded.'},'Liquidity'),h('strong',fmtValue(token.reserve,token))),h('div.figure',h('span','Age'),h('strong',token.created?age(token.created):'Unavailable'))),
     h('p.card-change',{'data-direction':!token.priceChange24h?'unknown':token.priceChange24h.percent>=0?'up':'down',title:token.priceChange24h?.basis??'Requires confirmed prices near both comparison times'},token.priceChange24h?icon(token.priceChange24h.percent>=0?'trending-up':'trending-down','icon-sm'):null,token.priceChange24h?`${token.priceChange24h.percent>=0?'+':''}${number(token.priceChange24h.percent,2)}% — 24h`:'24h change unavailable'),
     token.complete&&!token.graduated?h('p.small.muted','Migration pending. Open token for status and next action.'):null,
     h('div.progress', h('div.progress-label', h('span', token.graduated ? 'Graduated' : 'Bonding curve'), h('strong', `${number(pct, 1)}%`)), bar(pct, token.complete || token.graduated)));
@@ -326,7 +336,7 @@ function portfolioView() {
 
 /* ---------- Network and test funds ---------- */
 async function connectCurrent() {
-  const list = wallet.net.kind === 'solana' ? solanaWallets() : evmWallets();
+  const list = wallet.net.kind === 'solana' ? solanaWallets(wallet.net.mainnet?'solana:mainnet':'solana:devnet') : evmWallets();
   if (list.length >= 1) {
     const dialog=$('#tools-dialog'),error=h('p.error-text',{role:'alert'});
     $('#tools-body').replaceChildren(h('h3',`Connect a wallet · ${wallet.net.name}`),walletButtons(wallet.net,{onDone:()=>dialog.close(),onError:e=>{error.textContent=errorText(e);}}),error);

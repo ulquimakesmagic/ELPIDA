@@ -7,6 +7,7 @@ import { EVM_TEST_PAIRS } from '/pairs.mjs';
 
 // EIP-6963: every installed EVM wallet announces itself, so Elpida can use the one the person picks
 // instead of whichever extension last claimed window.ethereum (Phantom, Coinbase and MetaMask all try).
+import { injectedEvmWallets } from './wallet-discovery.mjs';
 const announced = new Map();
 if (typeof window !== 'undefined') {
   window.addEventListener('eip6963:announceProvider', event => { const d = event.detail; if (d?.info?.rdns && d.provider) announced.set(d.info.rdns, d); });
@@ -14,18 +15,12 @@ if (typeof window !== 'undefined') {
 }
 const EVM_CHOICE = 'elpida:evm-wallet';
 /** Installed EVM wallets: [{ id, name, icon }]. Falls back to window.ethereum when none announce. */
-export function evmWallets() {
-  const list = [...announced.values()].map(d => ({ id: d.info.rdns, name: d.info.name, icon: d.info.icon }));
-  if (!list.length && typeof window !== 'undefined' && window.ethereum) list.push({ id: 'injected', name: window.ethereum.isMetaMask ? 'MetaMask' : 'Browser wallet', icon: '' });
-  return list;
-}
+export function evmWallets() { return injectedEvmWallets(typeof window==='undefined'?{}:window,[...announced.values()]); }
 export function chosenEvmWallet() { try { return localStorage.getItem(EVM_CHOICE); } catch { return null; } }
 function evmProvider(id = chosenEvmWallet()) {
-  if (id && announced.has(id)) return announced.get(id).provider;
-  if (announced.size === 1) return [...announced.values()][0].provider;
-  // Several wallets and no choice yet: prefer a dedicated EVM wallet over multi-chain ones.
-  const preferred = [...announced.values()].find(d => !/phantom|backpack|solflare/i.test(d.info.rdns));
-  return preferred?.provider ?? [...announced.values()][0]?.provider ?? window.ethereum ?? null;
+  const list=evmWallets();
+  if(id){const selected=list.find(w=>w.id===id);if(selected)return selected.provider;return null;}
+  return list.length===1?list[0].provider:null;
 }
 /** Wallet requests that never open a popup otherwise hang forever; this turns that into a clear error. */
 export function withWalletTimeout(promise, name = 'Your wallet', ms = 90_000) {
