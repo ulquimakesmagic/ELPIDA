@@ -1,3 +1,4 @@
+import { protocolAnalytics } from './protocol-analytics.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
 import { PublicIndexer } from './public-indexer.mjs';
 import { SolanaIndexer } from '../../packages/indexer/solana-indexer.mjs';
@@ -20,6 +21,8 @@ const ethersFile = fileURLToPath(new URL('../../node_modules/ethers/dist/ethers.
 const resources = new Map([['/', ['index.html', 'text/html']], ['/launch', ['index.html', 'text/html']], ['/reward-policy.mjs', ['reward-policy.mjs', 'text/javascript']], ['/reward-ui.mjs', ['reward-ui.mjs', 'text/javascript']], ['/metadata.mjs', ['metadata.mjs', 'text/javascript']], ['/launch-capabilities.mjs', ['launch-capabilities.mjs', 'text/javascript']], ['/styles.css', ['styles.css', 'text/css']], ['/app.mjs', ['app.mjs', 'text/javascript']], ['/wallet.mjs', ['wallet.mjs', 'text/javascript']], ['/solana-wallet.mjs', ['solana-wallet.mjs', 'text/javascript']], ['/ui.mjs', ['ui.mjs', 'text/javascript']], ['/launch-flow.mjs', ['launch-flow.mjs', 'text/javascript']], ['/token-page.mjs', ['token-page.mjs', 'text/javascript']], ['/amounts.mjs', ['amounts.mjs', 'text/javascript']], ['/rewards-view.mjs', ['rewards-view.mjs', 'text/javascript']]]);
 // Static design assets (brand, fonts, icon sprite): only these extensions, only inside apps/web/assets.
 const assetRoot = fileURLToPath(new URL('../web/assets/', import.meta.url));
+resources.set('/analytics', ['index.html', 'text/html']);
+resources.set('/analytics-view.mjs', ['analytics-view.mjs', 'text/javascript']);
 resources.set('/metadata-cache.mjs', ['metadata-cache.mjs', 'text/javascript']);
 resources.set('/circle-funding.mjs', ['circle-funding.mjs', 'text/javascript']);
 const assetTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8' };
@@ -128,6 +131,13 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         }
         if (url.pathname === '/api/rewards') return send(200,await runtime.rewards.dashboard());
         if(url.pathname==='/api/prices')return send(200,priceSnapshot());
+        if(url.pathname==='/api/public/analytics'){
+          const sources=evmTestnets.map(net=>({key:net.key,name:net.name,status:publicIndex.status(net.key),tokens:publicIndex.listings(net.key),trades:publicIndex.entries.get(net.key)?.index.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()??[]}));
+          if(solanaIndex)sources.push({key:solanaIndex.network.key,name:solanaIndex.network.name,status:{enabled:true,...solanaIndex.status(),scope:'Elpida curves; PumpSwap trades are not yet indexed'},tokens:solanaIndex.listings(),trades:solanaIndex.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()});
+          if(!solanaIndex)sources.push({key:solanaNet.key,name:solanaNet.name,status:{enabled:false,reason:'No public Solana deployment configured.'},tokens:[],trades:[]});
+          for(const source of sources){const rows=source.trades;source.trades=(function*(){for(const row of rows)yield JSON.parse(row.data);})();}
+          try{return send(200,protocolAnalytics({sources,prices:priceSnapshot(),period:url.searchParams.get('period')??'7d',network:url.searchParams.get('network')??'all'}));}catch(error){return send(400,{error:error.message});}
+        }
         if(url.pathname==='/api/public/status')return send(200,{storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),simulationEphemeral:!runtime.config.simulation?.durable,simulation:runtime.config.simulation},networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,publicIndex.status(n.key)])),...(solanaIndex?{[solanaIndex.network.key]:{enabled:true,...solanaIndex.status()}}:{})}});
         const solanaMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/([1-9A-HJ-NP-Za-km-z]{32,44})(?:\/(trades|candles|holders))?)?$/);
         if(solanaMatch&&url.searchParams.get('network')?.startsWith('solana-')){
