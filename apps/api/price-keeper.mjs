@@ -36,7 +36,7 @@ export class PriceKeeper {
         const data=await this.json(`https://pyth.dourolabs.app/hermes/v2/updates/price/latest?ids[]=${this.ids[symbol]}`);
         const item=data.parsed?.find(p=>p.id.replace(/^0x/,'')===this.ids[symbol].replace(/^0x/,'')),p=item?.price;
         if(!p||!Number.isInteger(p.expo)||p.expo< -18||p.expo>0||!Number.isFinite(Number(p.conf))||p.conf==null||Number(p.conf)<0||Number(p.conf)/Number(p.price)>.02)throw new Error('Uncertain price');
-        this.values[symbol]=validatePrice({usd:Number(p.price)*10**p.expo,updatedAt:p.publish_time,source:'Pyth Hermes',symbol},this.now());
+        this.values[symbol]=validatePrice({usd:Number(p.price)*10**p.expo,updatedAt:p.publish_time,source:'Pyth Hermes',symbol,feed:this.ids[symbol]},this.now());
       }));
       // Independent fallback; retain the upstream timestamp, never fabricate freshness.
       const missing=['ETH','BNB','SOL'].filter(s=>{try{validatePrice(this.values[s],this.now());return false;}catch{return true;}});
