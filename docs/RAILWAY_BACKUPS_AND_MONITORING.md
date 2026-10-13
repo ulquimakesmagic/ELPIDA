@@ -1,6 +1,16 @@
 # Railway backup activation and monitoring
 
-The application now contains daily encrypted backup automation, upload readback verification, off-site restoration tooling and operational health checks. **Off-site backups remain inactive until bucket credentials and the encryption key are configured.** Local test results do not establish that a real bucket or Railway restore drill has completed.
+The application contains daily encrypted backup automation, upload readback verification, off-site restoration tooling and operational health checks. **Production off-site backups are active, and the first actual Railway bucket snapshot and separate staging restore were verified on 13 October 2026.** These operational checks do not replace an independent security audit.
+
+## Verified Railway recovery drill
+
+- Private bucket: `elpida-backups` in the existing Railway project. Production uses bucket-variable references and a separately retained encryption key, with a 24-hour schedule.
+- First snapshot: `ops-1791928111473-54c1c42d-a177-4460-8c16-e20a7e02e9f8`. Production reported lastSuccess `2026-10-13T21:48:34.288Z`; its Railway log showed `backup_verified`, 10 objects (nine data files and the encrypted manifest). Bucket usage was about 15.8 MB. Operations status was `ok` with no incidents.
+- A new empty `restore-staging` environment and `elpida-restore` service were created with a separate volume mounted at `/recovery-volume`. Circle credentials were not copied, no public domain was generated, and automatic backups stayed disabled.
+- The actual snapshot was downloaded, authenticated, decrypted and hash-verified directly into the fresh `/recovery-volume/restored-data` destination. Both SQLite databases passed `PRAGMA integrity_check`: Base contained three tokens and ten trades; Solana contained zero tokens/trades. ELTEST's content-addressed metadata was present.
+- The fresh volume initially belonged to root and the application could not write there. Its ownership and the recovered folder's ownership were corrected to the existing `node` user; the app's privilege level was not increased.
+- After switching `ELPIDA_DATA_DIR` to the restored folder and removing all six temporary bucket/key variables, staging restarted successfully. Internal HTTP checks returned health 200, the three symbols ELTEST/JUICEWRLD/JOSH, and metadata name `Elpida Lifecycle Test`. Base indexing resumed with lag 2 and no error. Runtime checks confirmed the temporary encryption key, bucket secret and Circle API key were absent.
+- Final staging deployment: `00dd925c-55ce-44dd-ba32-d011abffcf26`. Production's volume was never overwritten. Staging remains a private running service with a separate volume; it has provider usage costs until stopped or removed. This drill verifies recovery from the selected snapshot, not a regional outage or restoration of excluded private credentials.
 
 ## Activate the private bucket
 
@@ -53,4 +63,4 @@ Conditions include 80% metadata/provisional capacity (warning), full capacity (c
 
 Local checks cover encrypted upload/restore, wrong-object and tampered ciphertext rejection, overwrite protection, scheduler restart deduplication, failed-upload reporting, S3 byte readback and download bounds, SQLite/WAL restoration, storage thresholds and incident transition suppression. The API regression confirms backups are reported inactive without credentials. The dependency installation reported zero known vulnerabilities; this is not an independent security audit.
 
-Remaining external steps: create/configure the actual Railway bucket, activate and verify its first backup, perform the Railway staging restore drill, configure off-site retention and external alert delivery, and arrange the independent contract audit.
+Remaining external steps: configure off-site retention and external alert delivery, confirm separate recovery for private credentials and the encryption key, and arrange the independent contract audit. The actual bucket activation, first verified backup and separate Railway staging restore are complete.
