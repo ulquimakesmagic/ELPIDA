@@ -32,6 +32,7 @@ resources.set('/payment-errors.mjs', ['payment-errors.mjs','text/javascript']);
 resources.set('/analytics', ['index.html', 'text/html']);
 resources.set('/analytics-view.mjs', ['analytics-view.mjs', 'text/javascript']);
 resources.set('/metadata-cache.mjs', ['metadata-cache.mjs', 'text/javascript']);
+resources.set('/wallet-batch.mjs', ['wallet-batch.mjs', 'text/javascript']);
 resources.set('/circle-funding.mjs', ['circle-funding.mjs', 'text/javascript']);
 const assetTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8' };
 const vendorFiles = new Map([
@@ -119,6 +120,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const cookieSecurity = publicUrl ? '; Secure' : '';
   const csrf = randomBytes(24).toString('hex');
   let diagnosticWindow=Date.now(),diagnosticCount=0;
+  let metadataWindow=Date.now(),metadataCount=0;
   const solana = solanaConfig();
   const connectSources = [...evmTestnets.map(net => net.rpcUrl), solana.rpcUrl, solana.wsUrl].filter(url => /^(https?|wss?):/.test(url ?? '')).join(' ');
   const rpcProxy = solana.mainnet ? createRpcProxy(process.env.SOLANA_RPC_URL) : null;
@@ -184,7 +186,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if (req.headers['x-elpida-token'] !== csrf || req.headers['content-type'] !== 'application/json') return send(403, { error: 'Refresh this page before submitting.' });
       const chunks = [];
       let size = 0;
-      for await (const chunk of req) { size += chunk.length; if (size > (['/api/launch','/api/metadata/publish','/api/public/metadata/prepare','/api/public/metadata/save'].includes(url.pathname) ? MAX_METADATA_REQUEST_BYTES : 8192)) { send(413, { error: 'Request too large.' }); return; } chunks.push(chunk); }
+      for await (const chunk of req) { size += chunk.length; if (size > (['/api/launch','/api/metadata/stage','/api/metadata/publish','/api/public/metadata/prepare','/api/public/metadata/save'].includes(url.pathname) ? MAX_METADATA_REQUEST_BYTES : 8192)) { send(413, { error: 'Request too large.' }); return; } chunks.push(chunk); }
       let body;
       try { body = JSON.parse(Buffer.concat(chunks).toString()); } catch { return send(400, { error: 'Invalid request.' }); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) return send(400, { error: 'Invalid request.' });
@@ -197,6 +199,15 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         catch (error) { return send(error.status ?? 502, { error: error.message }); }
       }
       if(action==='metadata/publish')return send(200,await metadataStore.publish(body,true));
+      if(action==='metadata/stage'){
+        if(Date.now()-metadataWindow>=60000){metadataWindow=Date.now();metadataCount=0;}
+        if(++metadataCount>20)return send(429,{error:'Metadata upload limit reached. Wait a minute before retrying; no launch was submitted.'});
+        const net=evmTestnets.find(n=>n.key===body.network);
+        if(!net||net.mainnet||net.shared?.model!=='curve-dex-v9')return send(400,{error:'On-chain launch metadata staging is unavailable on this network.'});
+        const pinned=metadataStore.status().publicEnabled;
+        if(!pinned&&!process.env.RAILWAY_VOLUME_MOUNT_PATH)return send(503,{error:'Configure public IPFS pinning or a persistent testnet data volume before launching with metadata.'});
+        return send(200,{...(await metadataStore.publish(body,pinned)),storage:pinned?'public-ipfs':'elpida-hosted'});
+      }
       if(action==='reward-x-start'){const result=await runtime.transact(action,body);res.setHeader('Set-Cookie',`elpida_x=${result.cookie}; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=600${cookieSecurity}`);return send(200,{url:result.url});}
       if (action === 'quote') return send(200, await runtime.getQuote(body));
       if (action === 'conversion-quote') return send(200, await runtime.getConversionQuote(body));

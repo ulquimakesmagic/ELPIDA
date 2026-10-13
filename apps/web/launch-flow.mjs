@@ -335,6 +335,8 @@ export function renderLaunch(ctx) {
         block('Creator rewards', 2, row('Strategy', STRATEGIES[draft.rewardMode].name), ...(['holders', 'paired', 'buyback'].includes(draft.rewardMode) ? [row('Distribution threshold', `${draft.threshold} ${pairSymbol()}`), row('Minimum token holding', `${number(draft.minimumHolding, 0)} ${draft.symbol.toUpperCase()}`)] : [row('Recipients', recipients)]), draft.rewardMode === 'paired' ? row('Reward asset', rewardData?.assets.find(a => a.address === draft.rewardToken)?.symbol ?? '—') : null, draft.rewardMode === 'buyback' ? row('Vesting', `${draft.vestingDays} days`) : null),
         block('First purchase and costs', 3, row('Launch fee · $10', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), row('First purchase', `${number(draft.firstBuy, 6)} ${pairSymbol()}`), row('Estimated tokens', estimate() ? compact(estimate().tokens) : 'Shown after launch'), row('Conversion',priceNote()),row('Network gas', 'Estimated before signing; paid separately'))),
       h('section.summary-card', h('h4', 'Fixed after launch'), h('ul.fixed-list', h('li', 'Name, symbol and the 1,000,000,000 fixed supply'), h('li', `Trading pair (${pairSymbol()})`), h('li', 'Creator reward strategy, recipients and percentages'), h('li', `Graduation into a ${dexName()} pool with permanently locked liquidity`))),
+      ctx.mode!=='local'&&!solana() ? h('p.hint',ctx.wallet.atomicLaunch ? 'Your wallet supports one atomic confirmation for payment approval, creation, supported metadata and the first purchase.' : 'Metadata uses the launch confirmation. This wallet may require a separate token payment approval; one-confirmation approval and launch requires an atomic-capable wallet.') : null,
+      draft.chain==='base-sepolia'&&!ctx.wallet.needsMetadataUpgrade ? h('p.hint',ctx.config.metadataPublishing?.publicEnabled ? 'Token details are pinned to public IPFS and their reference is included in your launch transaction.' : 'Token details are stored on Elpida’s persistent server and their content reference is included in your launch transaction. Public IPFS pinning is not configured.') : null,
       policy ? null : callout('error', 'circle-alert', 'The reward settings need attention before you can create this token.'),
     ], validate: () => !!policy };
   }
@@ -342,7 +344,7 @@ export function renderLaunch(ctx) {
   /* ---------- Submission ---------- */
   const STATUS_STEPS = () => ctx.mode === 'local'
     ? [['submit', 'Create on the local simulation', 'Simulated funds, no wallet needed'], ['confirm', 'Confirmed', 'Your token is live']]
-    : [...(!solana() && draft.pair !== 'native' ? [['approve', 'Approve the payment if needed', `Allows the launchpad to take the ${pairSymbol()} first purchase`]] : []), ['wallet', 'Confirm in your wallet', `Pays the ${feeSymbol()} creation fee, creates the token and makes your first purchase`], ['submit', 'Submitted', 'Waiting for the network to confirm'], ['confirm', 'Confirmed', 'Your token is live']];
+    : [...(!solana() && !ctx.wallet.atomicLaunch && (draft.pair !== 'native'||draft.feeCurrency==='usdc') ? [['approve', 'Approve the payment if needed', 'Allows only the requested launch payment; no unlimited approval']] : []), ['wallet', 'Confirm in your wallet', `Pays the ${feeSymbol()} creation fee, records supported metadata, creates the token and makes your first purchase`], ['submit', 'Submitted', 'Waiting for the network to confirm'], ['confirm', 'Confirmed', 'Your token is live']];
   function statusView() {
     const steps = STATUS_STEPS();
     const at = steps.findIndex(s => s[0] === statusState.step);
@@ -389,6 +391,7 @@ export function renderLaunch(ctx) {
       const token = { symbol: draft.symbol, metadata: { image: draft.image } };
       panel.replaceChildren(h('div.success.panel', avatar(token, 'avatar-lg'), h('h2', { tabindex: '-1' }, `${draft.symbol.toUpperCase()} is live`),
         h('p', `${draft.name} is trading on its bonding curve${draft.chain === 'local' ? ' in the local simulation' : ` on ${net()?.name}`}. Share it with your community; creator fees follow the reward settings you chose.`),
+        result?.metadataPublished ? h('p.small',result.metadataStorage==='elpida-hosted' ? 'Token details are hosted by Elpida, with their content reference recorded on-chain. Public IPFS pinning is not configured.' : 'Token details published and linked on-chain.') : null,
         h('div.actions', result?.token ? h('a.btn.btn-primary', { href: `#/token/${result.token}` }, 'View token') : null, ctx.txLink(result?.hash) ? h('a.btn.btn-secondary', { href: ctx.txLink(result.hash).href, target: '_blank', rel: 'noopener noreferrer' }, 'View transaction', icon('external-link', 'icon-sm')) : null,
           h('button.btn.btn-ghost', { type: 'button', on: { click: () => { Object.assign(draft, blankDraft(), { chain: ctx.currentChain() }); step = 0; maxStep = 0; phase = 'edit'; result = null; draw(); } } }, 'Create another'))));
       panel.querySelector('h2').focus();

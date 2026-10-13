@@ -23,6 +23,8 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal((await fetch(`${base}/analytics-view.mjs`)).status,200);
     assert.equal((await fetch(`${base}/chain-ui.mjs`)).status,200);
     assert.equal((await fetch(`${base}/wallet-discovery.mjs`)).status,200);
+    assert.equal((await fetch(`${base}/wallet-batch.mjs`)).status,200);
+    assert.equal((await request('metadata/stage',{network:'unsupported',name:'Test',symbol:'TEST'})).status,400);
     assert.equal((await fetch(`${base}/usdc-conversion.mjs`)).status,200);
     assert.equal((await fetch(`${base}/usdc-funding.mjs`)).status,200);
     assert.equal((await fetch(`${base}/payment-errors.mjs`)).status,200);

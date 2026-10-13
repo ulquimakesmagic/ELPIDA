@@ -6,6 +6,7 @@ import {publishForLaunch} from './launch-capabilities.mjs';
 import { EVM_TEST_PAIRS } from '/pairs.mjs';
 import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
 import {nativeFundingError} from './payment-errors.mjs';
+import {supportsAtomicLaunch,waitAtomicLaunch} from './wallet-batch.mjs';
 
 // EIP-6963: every installed EVM wallet announces itself, so Elpida can use the one the person picks
 // instead of whichever extension last claimed window.ethereum (Phantom, Coinbase and MetaMask all try).
@@ -55,7 +56,7 @@ export class TestnetWallet {
   select(key) {
     const net = this.config.testnets.find(item => item.key === key);
     if (!net) throw new Error('That test network is not available.');
-    if (this.net?.key !== key) { this.net = net; this.launches = new Map(); this.scannedBlock = undefined; this.launchFee = undefined; this.pairsScanned=undefined;this.approvedQuotes=[]; this.nativeVirtualQuote = undefined; this.needsMetadataUpgrade = false; }
+    if (this.net?.key !== key) { this.net = net; this.atomicLaunch=undefined; this.launches = new Map(); this.scannedBlock = undefined; this.launchFee = undefined; this.pairsScanned=undefined;this.approvedQuotes=[]; this.nativeVirtualQuote = undefined; this.needsMetadataUpgrade = false; }
     return net;
   }
   get dex(){return this.net.key==='base-sepolia'?this.config.publicDex:null;}
@@ -122,6 +123,7 @@ export class TestnetWallet {
     this.provider = new JsonRpcProvider(rpc, net.chainId, { staticNetwork:true,cacheTimeout: -1, batchMaxCount: 1 });
     this.address = await this.signer.getAddress();
     await this.checkNetwork();
+    this.atomicLaunch=await supportsAtomicLaunch(args=>eth.request(args),this.address,net.chainId);
     return this.address;
   }
   async checkNetwork() {
@@ -262,6 +264,20 @@ export class TestnetWallet {
     const error=nativeFundingError({balance:await this.provider.getBalance(this.address),gasCost:gas*(fees.maxFeePerGas??fees.gasPrice??0n),native:this.net.nativeCurrency.symbol,network:this.net.name,feeInUsdc,stage:'approval'});
     if(error)throw new Error(error);
     return this.wait(coin.approve(spender,amount),message);
+  }
+  async confirmLaunchBatch(key,record){
+    const request=args=>this.eth.request(args),factory=this.factoryContract();
+    try{
+      const receipts=await waitAtomicLaunch(request,record.id,this.net.chainId);
+      const receipt=receipts.find(r=>r.logs.some(l=>l.address.toLowerCase()===factory.target.toLowerCase()&&(()=>{try{const event=factory.interface.parseLog(l);return event?.name==='Launched'&&event.args.creator.toLowerCase()===this.address.toLowerCase();}catch{return false;}})()));
+      if(!receipt)throw new Error('Confirmed batch has no creator launch event. Check your wallet before retrying.');
+      const actual=await this.provider.getTransactionReceipt(receipt.transactionHash);
+      if(!actual||actual.status!==1)throw new Error('Launch receipt is not available yet. Check your wallet before retrying.');
+      // A bundler receipt may contain other users' events. Keep only this wallet batch's verified logs.
+      const logs=receipt.logs.filter(log=>actual.logs.some(l=>l.address.toLowerCase()===log.address.toLowerCase()&&l.data===log.data&&JSON.stringify(l.topics)===JSON.stringify(log.topics)));
+      if(logs.length!==receipt.logs.length)throw new Error('Wallet batch logs do not match the chain receipt.');
+      localStorage.removeItem(key);return {tx:{hash:receipt.transactionHash},receipt:{...actual,logs}};
+    }catch(error){if(error.batchFailed)localStorage.removeItem(key);throw error;}
   }
   async deploy() {
     await this.checkNetwork();
@@ -424,8 +440,15 @@ export class TestnetWallet {
       return { hash: result.tx.hash, message: `Added ${formatUnits(limit, a.decimals)} ${a.symbol} (test asset, no value).` };
     }
     if (action === 'faucet') throw new Error(`Get test ${this.net.nativeCurrency.symbol} from the network faucet linked in Network and funds.`);
-    let metadataSaved = true, metadataPublished = false;
+    let metadataSaved = true, metadataPublished = false, launchedToken, metadataStorage;
     if (action === 'launch') {
+      const pendingKey='elpida:launch-batch:'+this.net.chainId+':'+this.address.toLowerCase(),pending=localStorage.getItem(pendingKey);
+      if(pending){
+        const record=JSON.parse(pending);this.onProgress('Checking your previous launch batch. No new launch will be submitted…');
+        const completed=await this.confirmLaunchBatch(pendingKey,record),event=completed.receipt.logs.map(l=>{try{return factory.interface.parseLog(l);}catch{return null;}}).find(l=>l?.name==='Launched'&&l.args.creator.toLowerCase()===this.address.toLowerCase());
+        const saved=event&&await writeMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,event.args.token),record.metadata??{});
+        return {hash:completed.tx.hash,token:event?.args.token,metadataSaved:!!saved,metadataPublished:!!record.uri,metadataStorage:record.storage,message:'Your previous launch is confirmed. No duplicate token was created.'};
+      }
       if(!['native','usdc'].includes(body.feeCurrency??'native'))throw new Error('Choose native currency or USDC for the launch fee.');
       await this.verifyFactory({launch:true});
       const details = normalizeMetadata(body);
@@ -452,30 +475,49 @@ export class TestnetWallet {
       if (paired && await pairToken.balanceOf(this.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, asset.decimals)} ${asset.symbol} for the first buy.${asset.test ? ' Use its test faucet in Network and funds.' : ''}`);
       let published;
       if(publishForLaunch({chain:this.net.key,publicEnabled:this.config.metadataPublishing?.publicEnabled,metadataSupported:!this.needsMetadataUpgrade})){
-        this.onProgress('Publishing your token metadata to IPFS…');
-        const response=await fetch('/api/metadata/publish',{method:'POST',headers:{'Content-Type':'application/json','X-Elpida-Token':this.config.csrf},body:JSON.stringify({name,symbol,...details})});
+        this.onProgress('Preparing public token details for the launch transaction…');
+        const response=await fetch('/api/metadata/stage',{method:'POST',headers:{'Content-Type':'application/json','X-Elpida-Token':this.config.csrf},body:JSON.stringify({network:this.net.key,name,symbol,...details})});
         published=await response.json();if(!response.ok)throw new Error(published.error??'Metadata publishing failed.');
-        if(!published.public || !/^ipfs:\/\//.test(published.uri))throw new Error('Public metadata did not publish. No launch was submitted.');
+        if(!/^ipfs:\/\//.test(published.uri)||!['public-ipfs','elpida-hosted'].includes(published.storage))throw new Error('Token details were not staged safely. No launch was submitted.');
+        metadataStorage=published.storage;
         await this.checkNetwork();
       }
       const sharedUsdc = inUsdc && paired && asset.address.toLowerCase()===this.feeUsdc?.toLowerCase();
-      if (paired && !sharedUsdc && await pairToken.allowance(this.address, await factory.getAddress()) < firstBuy) await this.approvePayment(pairToken,factory.target,firstBuy,`Approve the ${asset.symbol} first buy…`,inUsdc);
+      const approvalCalls=[],batchKey='elpida:launch-batch:'+this.net.chainId+':'+this.address.toLowerCase();
+      const batchRequest=args=>this.eth.request(args);
+      const atomic=await supportsAtomicLaunch(batchRequest,this.address,this.net.chainId);
+      const approve=async(coin,amount,message)=>{if(atomic)approvalCalls.push({to:coin.target,data:coin.interface.encodeFunctionData('approve',[factory.target,amount]),value:'0x0'});else await this.approvePayment(coin,factory.target,amount,message,inUsdc);};
+      if (paired && !sharedUsdc && await pairToken.allowance(this.address, await factory.getAddress()) < firstBuy) await approve(pairToken,firstBuy,`Approve the ${asset.symbol} first buy…`);
       if(inUsdc){
         if(!this.feeUsdc||this.feeUsdc===ZeroAddress)throw new Error('USDC fee payment is unavailable on this network.');
         const coin=new Contract(this.feeUsdc,this.config.contracts.quote.abi,this.signer);
         const totalUsdc=10_000_000n+(sharedUsdc?firstBuy:0n);
         if(await coin.balanceOf(this.address)<totalUsdc)throw new Error('Add '+formatUnits(totalUsdc,6)+' USDC on this network for the launch fee'+(sharedUsdc?' and first purchase':'')+'. Native gas is separate.');
-        if(await coin.allowance(this.address,factory.target)<totalUsdc)await this.approvePayment(coin,factory.target,totalUsdc,'Approve exactly '+formatUnits(totalUsdc,6)+' USDC for the launch fee'+(sharedUsdc?' and first purchase':'')+'…',inUsdc);
+        if(await coin.allowance(this.address,factory.target)<totalUsdc)await approve(coin,totalUsdc,'Approve exactly '+formatUnits(totalUsdc,6)+' USDC for the launch fee'+(sharedUsdc?' and first purchase':'')+'…');
       }
       await this.oraclePrice();await this.checkNetwork();
       const args=[name,symbol,asset?.address??ZeroAddress,firstBuy,out*9950n/10000n,reward,published?.uri??'',inUsdc];
-      const gas=await factory.launchWithPayment.estimateGas(...args,{value});
+      // A separate estimate cannot simulate allowances that only exist inside the atomic batch.
+      // The wallet must simulate the entire batch; ordinary launches retain the RPC estimate.
+      const gas=approvalCalls.length?null:await factory.launchWithPayment.estimateGas(...args,{value});
       const gasPrice=(await this.provider.getFeeData()).maxFeePerGas??(await this.provider.getFeeData()).gasPrice??0n;
-      const launchGasError=nativeFundingError({balance:await this.provider.getBalance(this.address),value,gasCost:gas*gasPrice,native,network:this.net.name,feeInUsdc:inUsdc});
+      const launchGasError=nativeFundingError({balance:await this.provider.getBalance(this.address),value,gasCost:gas===null?0n:gas*gasPrice,native,network:this.net.name,feeInUsdc:inUsdc});
       if(launchGasError)throw new Error(launchGasError);
-      const confirmation='Confirm the '+(inUsdc?'10 USDC':'$10 equivalent native')+' launch fee, first purchase '+body.firstBuy+' '+this.qsym({pair:kind,quoteSymbol:asset?.symbol})+' and gas up to '+formatUnits(gas*gasPrice,18)+' '+native+'. '+(inUsdc?'USDC covers the launch fee; native currency covers gas.':'Native fee cap includes 1%; unused fee is refunded.');
-      result=await this.wait(factory.launchWithPayment(...args,{value}),confirmation);
+      const confirmation='Confirm the '+(inUsdc?'10 USDC':'$10 equivalent native')+' launch fee, first purchase '+body.firstBuy+' '+this.qsym({pair:kind,quoteSymbol:asset?.symbol})+(gas===null?' and wallet-estimated gas.':' and estimated gas '+formatUnits(gas*gasPrice,18)+' '+native+'.')+' '+(inUsdc?'USDC covers the launch fee; native currency covers gas.':'Native fee cap includes 1%; unused fee is refunded.');
+      if(approvalCalls.length){
+        const id=crypto.randomUUID(),calls=[...approvalCalls,{to:factory.target,data:factory.interface.encodeFunctionData('launchWithPayment',args),value:'0x'+value.toString(16)}];
+        const record={id,chain:this.net.chainId,created:Date.now(),metadata:published?.metadata??details,uri:published?.uri,storage:metadataStorage};
+        localStorage.setItem(batchKey,JSON.stringify(record));
+        this.onProgress('Confirm one atomic launch in your wallet: exact payment approval, token details, creation and first purchase. '+confirmation);
+        try{const sent=await withWalletTimeout(batchRequest({method:'wallet_sendCalls',params:[{version:'2.0.0',id,from:this.address,chainId:'0x'+BigInt(this.net.chainId).toString(16),atomicRequired:true,calls}]}),this.walletName);
+          if(typeof sent?.id!=='string'||!sent.id)throw new Error('Wallet did not return a launch batch ID. Check it before retrying.');
+          record.id=sent.id;localStorage.setItem(batchKey,JSON.stringify(record));
+          this.onProgress('Launch batch submitted. Waiting for confirmation…');
+          result=await this.confirmLaunchBatch(batchKey,record);
+        }catch(error){if(error.code===4001||error.code==='ACTION_REJECTED')localStorage.removeItem(batchKey);throw error;}
+      }else result=await this.wait(factory.launchWithPayment(...args,{value}),confirmation);
       const event = result.receipt.logs.map(log => {try{return factory.interface.parseLog(log);}catch{return null;}}).find(log => log?.name === 'Launched');
+      launchedToken=event?.args.token;
       metadataSaved = !!event && await writeMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,event.args.token),published?.metadata??details);
       if(published){metadataSaved=true;metadataPublished=true;}
     } else {
@@ -502,6 +544,6 @@ export class TestnetWallet {
         result = await this.wait(action === 'buy' ? curve.buy(input, minimum, {value: item.pair === 'native' ? input : 0n}) : curve.sell(input, minimum), 'Confirm the trade in your wallet…');
       }
     }
-    return { hash: result.tx.hash, metadataSaved, message: action === 'launch' ? `Your token is live on ${this.net.name}.${metadataPublished ? ' Metadata published to IPFS and linked on-chain.' : metadataSaved ? ' Metadata saved in this browser.' : ' Browser metadata storage failed; keep a copy of your token details.'}` : action === 'withdraw' ? 'Fees distributed to their recipient wallets.' : `Trade confirmed on ${this.net.name}.` };
+    return { hash: result.tx.hash, token:launchedToken, metadataSaved, metadataPublished, metadataStorage, message: action === 'launch' ? `Your token is live on ${this.net.name}.${metadataPublished ? (metadataStorage==='public-ipfs'?' Metadata pinned to public IPFS and linked on-chain.':' Metadata hosted by Elpida and linked on-chain; public IPFS pinning is not configured.') : metadataSaved ? ' Metadata saved in this browser.' : ' Browser metadata storage failed; keep a copy of your token details.'}` : action === 'withdraw' ? 'Fees distributed to their recipient wallets.' : `Trade confirmed on ${this.net.name}.` };
   }
 }
