@@ -97,7 +97,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const dataDir=resolve(process.env.ELPIDA_DATA_DIR??process.env.RAILWAY_VOLUME_MOUNT_PATH??fileURLToPath(new URL('../../local-data/',import.meta.url)));
   const dataFile=name=>resolve(dataDir,dataPrefix+name);
   const circle = circleFunding ?? createCircleFunding({ path: port === 0 ? null : dataFile('circle-test-wallets.json') });
-  const metadataStore=new MetadataStore({path:port===0?null:dataFile('ipfs-content')});
+  const metadataStore=new MetadataStore({path:port===0?null:dataFile('ipfs-content'),chainBound:Boolean(publicUrl),...(process.env.ELPIDA_METADATA_MAX_BYTES?{maxBytes:Number(process.env.ELPIDA_METADATA_MAX_BYTES)}:{}),...(process.env.ELPIDA_METADATA_MAX_PENDING_BYTES?{maxPendingBytes:Number(process.env.ELPIDA_METADATA_MAX_PENDING_BYTES)}:{})});
   // The simulation is rebuilt from its action journal on the data volume, so its index can stay in memory.
   const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:dataFile('token-metadata.json'), dex:port!==0, indexerPath:":memory:", journalPath:port===0?null:dataFile('simulation-journal-v2.jsonl'), log:console.log });
   const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore}).start();
@@ -202,13 +202,13 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(Date.now()-metadataWindow>=60000){metadataWindow=Date.now();metadataCount=0;}
         if(++metadataCount>20)return send(429,{error:'Metadata upload limit reached. Wait a minute before retrying; no launch was submitted.'});
       }
-      if(action==='metadata/publish')return send(200,await metadataStore.publish(body,true));
+      if(action==='metadata/publish'){if(publicUrl)return send(410,{error:'Public metadata uploads must use the launch staging flow; retention is verified from the launch transaction.'});return send(200,await metadataStore.publish(body,true));}
       if(action==='metadata/stage'){
         const net=evmTestnets.find(n=>n.key===body.network);
         if(!net||net.mainnet||net.shared?.model!=='curve-dex-v9')return send(400,{error:'On-chain launch metadata staging is unavailable on this network.'});
         const pinned=metadataStore.status().publicEnabled;
         if(!pinned&&!process.env.RAILWAY_VOLUME_MOUNT_PATH)return send(503,{error:'Configure public IPFS pinning or a persistent testnet data volume before launching with metadata.'});
-        return send(200,{...(await metadataStore.publish(body,pinned)),storage:pinned?'public-ipfs':'elpida-hosted'});
+        return send(200,{...(await metadataStore.publish(body,pinned,{provisional:true})),storage:pinned?'public-ipfs':'elpida-hosted',retention:'pending-chain-verification'});
       }
       if(action==='reward-x-start'){const result=await runtime.transact(action,body);res.setHeader('Set-Cookie',`elpida_x=${result.cookie}; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=600${cookieSecurity}`);return send(200,{url:result.url});}
       if (action === 'quote') return send(200, await runtime.getQuote(body));
@@ -219,7 +219,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     } catch (error) {
       const message = error.reason ?? error.shortMessage ?? error.message ?? 'Request failed.';
       console.error(JSON.stringify({event:'request_error',requestId,code:String(error.code??error.name??'UNKNOWN').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40),reason:error.reason?'Contract reverted':'Request rejected'}));
-      return send(400, { error: String(message).slice(0, 250) });
+      return send(error.code==='METADATA_QUOTA'?503:400, { error: String(message).slice(0, 250) });
     }
   });
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();

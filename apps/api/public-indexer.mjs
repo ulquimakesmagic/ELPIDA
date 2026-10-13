@@ -23,7 +23,10 @@ export class PublicIndexer {
       try{
         if(!e.validated){const chain=Number((await e.provider.getNetwork()).chainId),v=Number(await new Contract(e.net.shared.factory,['function MODEL_VERSION() view returns(uint256)'],e.provider).MODEL_VERSION());if(chain!==e.net.chainId||v!==(e.net.shared.model==='curve-dex-v9'?9:8))throw new Error('Deployment identity mismatch');e.validated=true;}
         await e.index.sync();e.error=null;e.lastSuccess=new Date().toISOString();
-        for(const t of e.index.tokens())if(t.metadataURI&&!e.metadata.has(t.address)){try{e.metadata.set(t.address,normalizeMetadata(await this.metadataStore.resolve(t.metadataURI)));}catch{/* IPFS outage does not discard chain history. */}}
+        for(const t of e.index.tokens())if(t.metadataURI){
+          // Only factory events synchronized by the validated chain index authorize retention.
+          try{this.metadataStore.retainPublished(t.metadataURI);if(!e.metadata.has(t.address))e.metadata.set(t.address,normalizeMetadata(await this.metadataStore.resolve(t.metadataURI)));}catch{/* IPFS outage does not discard chain history. */}
+        }
         this.log(JSON.stringify({event:'public_indexer_synced',network:e.net.key,...e.index.status(),error:null}));
       }catch(error){e.error='Indexing unavailable; retrying.';this.log(JSON.stringify({event:'public_indexer_error',network:e.net.key,code:String(error.code??error.name??'INDEX_ERROR').replace(/[^a-zA-Z0-9_]/g,'').slice(0,64),message:e.error}));}
     }}finally{this.running=false;}

@@ -46,3 +46,26 @@ test('untrusted remote metadata is size bounded, validated and checked against r
  const corrupt=new MetadataStore({jwt:null,fetcher:async()=>new Response(document+' ')});await assert.rejects(corrupt.resolve('ipfs://'+cid),/integrity/);
  const huge=new MetadataStore({jwt:null,fetcher:async()=>new Response('x'.repeat(20001))});await assert.rejects(huge.resolve('ipfs://'+cid),/too large/);
 });
+
+test('pending quotas survive restart and verified publication retains the document and logo',async t=>{
+ const path=mkdtempSync(join(tmpdir(),'elpida-retention-'));t.after(()=>rmSync(path,{recursive:true}));
+ let now=1000;const opts={path,jwt:null,chainBound:true,now:()=>now,pendingAge:100,maxBytes:100000,maxPendingBytes:30000};
+ const writer=new MetadataStore(opts),result=await writer.publish(body);
+ const before=writer.status().storage;assert.ok(before.pendingBytes>0);
+ const reader=new MetadataStore(opts);assert.equal(reader.status().storage.pendingBytes,before.pendingBytes);
+ now=2000;assert.equal(reader.status().storage.expiredPendingBytes,before.pendingBytes);
+ assert.equal((await reader.resolve(result.uri)).description,body.description,'old pending content is never deleted solely by age');
+ await reader.publish(body);assert.equal(reader.status().storage.pendingBytes,before.pendingBytes,'simulation or duplicate uploads cannot grant chain retention');
+ reader.retainPublished(result.uri);assert.equal(reader.status().storage.pendingBytes,0);
+ const restarted=new MetadataStore(opts);assert.equal(restarted.status().storage.pendingBytes,0);assert.equal((await restarted.resolve(result.uri)).description,body.description);
+});
+
+test('quota rejects before provider billing, exact content deduplicates and published data stays available',async()=>{
+ let uploads=0;const store=new MetadataStore({jwt:'test',maxBytes:20000,maxPendingBytes:20000,fetcher:async()=>{uploads++;throw new Error('unexpected upload');}});
+ await assert.rejects(store.publish(body,true,{provisional:true}),/storage limit/);assert.equal(uploads,0);
+ const limited=new MetadataStore({jwt:null,maxBytes:200,maxPendingBytes:100,chainBound:true});
+ const bytes=Buffer.from('small'),cid=rawCid(bytes);limited.put(cid,bytes,'text/plain');const used=limited.status().storage.bytes;
+ limited.put(cid,bytes,'text/plain');assert.equal(limited.status().storage.bytes,used);
+ assert.throws(()=>limited.put(rawCid(Buffer.alloc(100)),Buffer.alloc(100),'text/plain'),/storage limit/);
+ limited.retainPublished('ipfs://'+cid);assert.equal(limited.status().storage.pendingBytes,0);assert.equal(limited.get(cid).data,bytes.toString('base64'));
+});

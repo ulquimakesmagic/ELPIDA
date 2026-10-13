@@ -38,3 +38,12 @@ test('approved pairs come only from the validated factory index',()=>{
  const e={net:{shared:{factory},chainId:84532},validated:false,index:{db,status:()=>({indexedBlock:1})}},service=Object.create(PublicIndexer.prototype);service.entries=new Map([['test',e]]);
  assert.equal(service.quotes('test'),null);e.validated=true;assert.deepEqual(service.quotes('test'),{factory,chainId:84532,indexedBlock:1,assets:[asset]});assert.equal(service.quotes('missing'),null);db.close();
 });
+
+test('only successful validated index synchronization authorizes staged metadata retention',async()=>{
+ const retained=[],uri='ipfs://'+'b'+'a'.repeat(40);
+ const e={validated:true,net:{key:'test'},metadata:new Map(),index:{sync:async()=>{},tokens:()=>[{address:'token',metadataURI:uri}],status:()=>({indexedBlock:1})}};
+ const service=Object.create(PublicIndexer.prototype);Object.assign(service,{entries:new Map([['test',e]]),metadataStore:{retainPublished:id=>retained.push(id),resolve:async()=>({description:'Confirmed metadata'})},log(){}});
+ await service.tick();assert.deepEqual(retained,[uri]);assert.equal(e.metadata.get('token').description,'Confirmed metadata');
+ await service.tick();assert.equal(retained.length,2,'retention is replayed even with cached metadata');
+ e.index.sync=async()=>{throw new Error('Unverified chain state');};await service.tick();assert.equal(retained.length,2,'failed synchronization cannot grant retention');
+});
