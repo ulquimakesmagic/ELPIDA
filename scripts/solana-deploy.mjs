@@ -140,7 +140,7 @@ const isAuthority = (await upgradeAuthority(connection, programKeypair.publicKey
 if (!isAuthority) console.log('The upgrade authority is not this deployer (multisig?): existing pair configs are left as they are. Reprice with node scripts/native-pricing.mjs --export.');
 // Native SOL pair (and, on test networks, a test paired token), created or repriced to config/native-pricing.json.
 const pairs = await ensurePairConfigs({ connection, payer, programId: programKeypair.publicKey, treasury: args.treasury ?? payer.publicKey.toBase58(),
-  templates: solanaPairTemplates(pricing, { test: !mainnet && !args['no-test-pairs'] }), saved: state.testAssets ?? {}, reprice: isAuthority, onProgress: message => console.log(message) });
+  templates: solanaPairTemplates(pricing, { test: !mainnet && !args['no-test-pairs'], usdcMint: SOLANA_ORACLES[args.cluster]?.usdcMint, usdcStartFdv: mainnet?'5000':'50' }), saved: state.testAssets ?? {}, reprice: isAuthority, onProgress: message => console.log(message) });
 state.testAssets = Object.fromEntries(pairs.filter(p => p.test).map(p => [p.key, p.mint]));
 writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
 for (const p of pairs) console.log(`${p.symbol} pair config ${p.created ? 'created' : p.repriced ? 'repriced for future launches' : 'up to date'} (${p.kind}, mint ${p.mint}).`);

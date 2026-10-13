@@ -1,16 +1,17 @@
-// Trading pairs, the same three kinds on every chain:
+// Trading pairs, the same four kinds on every chain:
 //   native  the chain's own coin (ETH, BNB, SOL…), the default
+//   usdc    verified USDC, with a deployed migration configuration
 //   xstock  a tokenized stock (xStocks); on test networks a clearly labelled simulated stock
 //   token   another approved token, for example a graduated Elpida token
-// Creation fees are always paid in the chain's native coin, at the price the team sets in
-// config/native-pricing.json. There are no dollar (USDC) pairs or fees.
+// Creation fees support oracle-priced native currency or verified USDC. Network gas remains native.
 // A network offers a kind when its launchpad has at least one approved asset of that kind. The web app
-// shows all three everywhere and explains why a kind is unavailable on a given network.
+// shows all four everywhere and explains why a kind is unavailable on a given network.
 
-export const PAIR_KINDS = ['native', 'xstock', 'token'];
+export const PAIR_KINDS = ['native', 'usdc', 'xstock', 'token'];
 
 export const PAIR_INFO = {
   native: { title: 'Native coin', glyph: 'coins', note: symbol => `Buyers pay in ${symbol}, the network’s own coin.` },
+  usdc: { title: 'USDC', glyph: 'coins', note: () => 'Buyers pay in USDC. The curve and graduated pool stay paired with USDC; network gas is separate.' },
   xstock: { title: 'xStock', glyph: 'chart-candlestick', note: () => 'Buyers pay in a tokenized stock. On test networks this is a simulated stock with no value.' },
   token: { title: 'Paired token', glyph: 'layers', note: () => 'Buyers pay in another approved token, such as a graduated Elpida token.' },
 };
@@ -30,10 +31,12 @@ export const PAIR_LIMITS = {
  * (launchFee in SOL, startFdv / endFdv in SOL). Test networks add a labelled test paired token, minted
  * only by the program's faucet PDA; its curve is sized in that token, its creation fee is still SOL.
  */
-export function solanaPairTemplates(native, { test = false } = {}) {
+export function solanaPairTemplates(native, { test = false, usdcMint = null, usdcStartFdv = '5000' } = {}) {
   const sol = { kind: 'native', key: 'sol', symbol: 'SOL', name: 'SOL (wrapped automatically)', decimals: 9, wsol: true, startFdv: native.startFdv, endFdv: native.endFdv, launchFee: native.launchFee, testSized: !!native.testSized };
-  if (!test) return [sol];
-  return [sol, { kind: 'token', key: 'test-meme', symbol: 'TEST-MEME', name: 'Elpida test paired token (no value)', decimals: 6, startFdv: '500000', endFdv: '5000000', launchFee: native.launchFee, faucet: '6000000' }];
+  const pairs = [sol];
+  if (usdcMint) pairs.push({ kind: 'usdc', key: 'usdc', symbol: 'USDC', name: test ? 'Circle test USDC (no value)' : 'USDC', mint: usdcMint, decimals: 6, startFdv: usdcStartFdv, endFdv: String(Number(usdcStartFdv)*10), launchFee: native.launchFee, testSized: !!test });
+  if (test) pairs.push({ kind: 'token', key: 'test-meme', symbol: 'TEST-MEME', name: 'Elpida test paired token (no value)', decimals: 6, startFdv: '500000', endFdv: '5000000', launchFee: native.launchFee, faucet: '6000000' });
+  return pairs;
 }
 
 /** EVM test-network paired assets the treasury can deploy and approve from the browser (DEX launchpads). */

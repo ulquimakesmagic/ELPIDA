@@ -3,6 +3,8 @@ pragma solidity ^0.8.24;
 
 // Test-only quote asset. Never use this as a production USDC deployment.
 contract MockUSDC {
+    string public constant symbol = "USDC";
+    string public constant name = "Simulated USDC";
     uint8 public decimals = 6;
     function setDecimals(uint8 value) external { decimals = value; }
     mapping(address => uint256) public balanceOf;

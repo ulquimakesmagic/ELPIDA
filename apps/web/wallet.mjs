@@ -4,6 +4,7 @@ import { normalizeMetadata } from './metadata.mjs';
 import { readMetadataCache, writeMetadataCache } from './metadata-cache.mjs';
 import {publishForLaunch} from './launch-capabilities.mjs';
 import { EVM_TEST_PAIRS } from '/pairs.mjs';
+import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
 
 // EIP-6963: every installed EVM wallet announces itself, so Elpida can use the one the person picks
 // instead of whichever extension last claimed window.ethereum (Phantom, Coinbase and MetaMask all try).
@@ -150,11 +151,49 @@ export class TestnetWallet {
       : `No ${kind === 'xstock' ? 'xStock' : 'paired token'} is approved on ${this.net.name} yet. The launchpad owner can add the test assets from Network and funds.`;
     return {
       native: { assets: [{ id: 'native', symbol: native, name: this.net.nativeCurrency.name, decimals: 18, ...fee }] },
+      usdc: approved('usdc').length ? { assets: approved('usdc') } : { assets: [], unavailable: !this.dex ? 'USDC trading pairs need a DEX graduation adapter on this network.' : 'The launchpad owner must approve this network’s USDC trading pair first. USDC launch-fee payment is separate.' },
       xstock: approved('xstock').length ? { assets: approved('xstock') } : { assets: [], unavailable: missing('xstock') },
       token: approved('token').length ? { assets: approved('token') } : { assets: [], unavailable: missing('token') },
     };
   }
   /** Reads the DEX factory's approved quotes (QuoteApproved events) and labels each by `pairKind()`. */
+  async setupUsdcPair() {
+    await this.checkNetwork(); const factory=(await this.verifyFactory()).connect(this.signer);
+    if(!this.dex||!this.feeUsdc||this.feeUsdc===ZeroAddress)throw new Error('A configured USDC asset and DEX adapter are required on this network.');
+    if((await factory.treasury()).toLowerCase()!==this.address.toLowerCase())throw new Error('Only the launchpad treasury can approve the USDC trading pair.');
+    if((await factory.approvedQuotes(this.feeUsdc)).adapter!==ZeroAddress)return {message:'USDC trading pair is already approved.'};
+    if(Number(await new Contract(this.feeUsdc,['function decimals() view returns(uint8)'],this.provider).decimals())!==6)throw new Error('The configured USDC asset must use six decimals.');
+    const adapterKey=`elpida:usdc-adapter:${this.net.chainId}:${factory.target.toLowerCase()}`;
+    let adapterAddress=localStorage.getItem(adapterKey);
+    if(adapterAddress){const a=new Contract(adapterAddress,['function manager() view returns(address)','function usdc() view returns(address)','function fee() view returns(uint24)'],this.provider);if((await a.manager()).toLowerCase()!==this.dex.manager.toLowerCase()||(await a.usdc()).toLowerCase()!==this.feeUsdc.toLowerCase()||await a.fee()!==10000n)throw new Error('Saved USDC adapter does not match this launchpad.');}
+    else {const a=this.config.contracts.adapter;this.onProgress('Confirm the USDC graduation adapter deployment…');const adapter=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,this.feeUsdc,10000);await adapter.waitForDeployment();adapterAddress=adapter.target;localStorage.setItem(adapterKey,adapterAddress);}
+    const vq=5_000_000_000n*await factory.VIRTUAL_TOKEN()/await factory.TOKEN_SUPPLY();
+    const result=await this.wait(factory.approveQuote(this.feeUsdc,vq,adapterAddress),'Approve USDC trading: starting valuation 5,000 USDC, permanent locked-pool graduation…');
+    this.pairsScanned=undefined;this.approvedQuotes=[];await this.loadPairs(factory);
+    return {hash:result.tx.hash,message:'USDC trading pair is approved. Launch-fee currency remains independently selectable.'};
+  }
+  async getUsdcConversionQuote(body) {
+    await this.checkNetwork();await this.verifyFactory();
+    const slippageBps=Math.round(Number(body.slippage??'1')*100);
+    const q=await quoteUsdcConversion({Contract,provider:this.provider,dex:this.dex,usdc:this.feeUsdc,amountOut:parseUnits(body.nativeAmount,18),slippageBps});
+    return {nativeAmount:formatUnits(q.amountOut,18),usdcAmount:formatUnits(q.amountIn,6),maxUsdc:formatUnits(q.maxUsdc,6),quotedAt:q.quotedAt,fee:q.fee};
+  }
+  async convertUsdc(body) {
+    await this.checkNetwork();await this.verifyFactory();
+    if(!Number.isSafeInteger(body.quotedAt)||Date.now()-body.quotedAt>60000||body.quotedAt>Date.now())throw new Error('Conversion quote expired. Get a fresh quote.');
+    const q=await quoteUsdcConversion({Contract,provider:this.provider,dex:this.dex,usdc:this.feeUsdc,amountOut:parseUnits(body.nativeAmount,18),slippageBps:Math.round(Number(body.slippage??'1')*100)});
+    const ceiling=parseUnits(body.maxUsdc,6);if(ceiling<=0n||q.amountIn>ceiling)throw new Error('USDC conversion price moved beyond your maximum. Get a new quote.');q.maxUsdc=ceiling;
+    const coin=new Contract(this.feeUsdc,this.config.contracts.quote.abi,this.signer);
+    if(await coin.balanceOf(this.address)<ceiling)throw new Error('Add at least '+body.maxUsdc+' USDC on this network. Native gas is also required.');
+    if(await coin.allowance(this.address,this.dex.router)<ceiling)await this.wait(coin.approve(this.dex.router,ceiling),'Approve at most '+body.maxUsdc+' USDC for conversion only…');
+    await this.checkNetwork();
+    const router=new Contract(this.dex.router,CONVERSION_ROUTER_ABI,this.signer),deadline=Math.floor(Date.now()/1000)+120;
+    const calls=conversionCalls({Contract,router:this.dex.router,dex:this.dex,usdc:this.feeUsdc,owner:this.address,quote:q});
+    const gas=await router['multicall(uint256,bytes[])'].estimateGas(deadline,calls),data=await this.provider.getFeeData();
+    if(await this.provider.getBalance(this.address)<gas*(data.maxFeePerGas??data.gasPrice??0n))throw new Error('Add native currency for conversion gas. USDC cannot pay gas.');
+    const result=await this.wait(router['multicall(uint256,bytes[])'](deadline,calls),'Convert at most '+body.maxUsdc+' USDC into '+body.nativeAmount+' '+this.net.nativeCurrency.symbol+'. Launch or buy is a separate transaction…');
+    return {hash:result.tx.hash,nativeAmount:body.nativeAmount,message:'Conversion complete. Native funds are in your wallet; continue with your launch or purchase.'};
+  }
   async loadPairs(factory) {
     if (!this.dex || !this.deployment) { this.approvedQuotes = []; return; }
     const latest = await this.provider.getBlockNumber();
@@ -166,6 +205,7 @@ export class TestnetWallet {
       const asset=new Contract(address,['function symbol() view returns(string)','function name() view returns(string)','function decimals() view returns(uint8)','function pairKind() view returns(string)','function FAUCET_LIMIT() view returns(uint256)'],this.provider);
       const [symbol,name,decimals]=await Promise.all([asset.symbol(),asset.name(),asset.decimals()]);
       let kind='token',faucetLimit=0n;try{kind=await asset.pairKind()==='xstock'?'xstock':'token';}catch{}try{faucetLimit=await asset.FAUCET_LIMIT();}catch{}
+      if (this.feeUsdc && address.toLowerCase() === this.feeUsdc.toLowerCase()) kind='usdc';
       this.approvedQuotes.push({id:address,address,kind,symbol,name,decimals:Number(decimals),virtualQuote:template.virtualQuote,test:faucetLimit>0n,faucet:faucetLimit>0n?{label:'Get '+formatUnits(faucetLimit,decimals).replace(/\.0$/,'')+' '+symbol,action:'faucet',body:{asset:address}}:null});
     };
     if(this.pairsScanned===undefined&&this.deployment.shared){
@@ -362,6 +402,8 @@ export class TestnetWallet {
     const factory = (await this.verifyFactory()).connect(this.signer);
     let result;
     if (action === 'setup-pairs') return this.setupTestPairs();
+    if (action === 'setup-usdc-pair') return this.setupUsdcPair();
+    if (action === 'convert-usdc') return this.convertUsdc(body);
     if (action === 'apply-pricing') return this.applyPricing();
     if (action === 'faucet' && body?.asset) {
       const a = (this.approvedQuotes ?? []).find(x => x.address.toLowerCase() === String(body.asset).toLowerCase() && x.test);
@@ -377,8 +419,8 @@ export class TestnetWallet {
       await this.verifyFactory({launch:true});
       const details = normalizeMetadata(body);
       const kind = body.pair ?? 'native';
-      if (!['native','xstock','token'].includes(kind)) throw new Error('Choose a trading pair.');
-      const nativePair = kind === 'native', paired = kind === 'xstock' || kind === 'token';
+      if (!['native','usdc','xstock','token'].includes(kind)) throw new Error('Choose a trading pair.');
+      const nativePair = kind === 'native', paired = !nativePair;
       const asset = paired ? (this.approvedQuotes ?? []).find(a => a.kind === kind && a.address.toLowerCase() === String(body.quoteAsset ?? '').toLowerCase()) : null;
       if (paired && !asset) throw new Error(this.pairOptions()[kind].unavailable ?? 'Choose an approved asset for this pair.');
       const firstBuy = parseUnits(body.firstBuy, nativePair ? 18 : asset.decimals);
@@ -404,12 +446,14 @@ export class TestnetWallet {
         if(!published.public || !/^ipfs:\/\//.test(published.uri))throw new Error('Public metadata did not publish. No launch was submitted.');
         await this.checkNetwork();
       }
-      if (paired && await pairToken.allowance(this.address, await factory.getAddress()) < firstBuy) await this.wait(pairToken.approve(await factory.getAddress(), firstBuy), `Approve the ${asset.symbol} first buy…`);
+      const sharedUsdc = inUsdc && paired && asset.address.toLowerCase()===this.feeUsdc?.toLowerCase();
+      if (paired && !sharedUsdc && await pairToken.allowance(this.address, await factory.getAddress()) < firstBuy) await this.wait(pairToken.approve(await factory.getAddress(), firstBuy), `Approve the ${asset.symbol} first buy…`);
       if(inUsdc){
         if(!this.feeUsdc||this.feeUsdc===ZeroAddress)throw new Error('USDC fee payment is unavailable on this network.');
         const coin=new Contract(this.feeUsdc,this.config.contracts.quote.abi,this.signer);
-        if(await coin.balanceOf(this.address)<10_000_000n)throw new Error('Add 10 USDC on this network to pay the launch fee. Gas and first purchase are separate.');
-        if(await coin.allowance(this.address,factory.target)<10_000_000n)await this.wait(coin.approve(factory.target,10_000_000n),'Approve exactly 10 USDC for the launch fee…');
+        const totalUsdc=10_000_000n+(sharedUsdc?firstBuy:0n);
+        if(await coin.balanceOf(this.address)<totalUsdc)throw new Error('Add '+formatUnits(totalUsdc,6)+' USDC on this network for the launch fee'+(sharedUsdc?' and first purchase':'')+'. Native gas is separate.');
+        if(await coin.allowance(this.address,factory.target)<totalUsdc)await this.wait(coin.approve(factory.target,totalUsdc),'Approve exactly '+formatUnits(totalUsdc,6)+' USDC for the launch fee'+(sharedUsdc?' and first purchase':'')+'…');
       }
       await this.oraclePrice();await this.checkNetwork();
       const args=[name,symbol,asset?.address??ZeroAddress,firstBuy,out*9950n/10000n,reward,published?.uri??'',inUsdc];

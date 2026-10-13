@@ -99,15 +99,15 @@ export class SolanaWallet {
   }
   /**
    * Loads every trading-pair config the deployment records (SOL and, on test networks, the test paired
-   * token), each checked on-chain, with its quote mint's token program. Dollar (USDC) configs from older
-   * deployments are ignored: pricing is native only.
+   * token), each checked on-chain, with its quote mint's token program. USDC pairs require an explicit
+   * deployed configuration and retain SOL for network gas.
    */
   async loadConfig() {
     if (this.programConfig) return this.programConfig;
     const c = this.client;
     const listed = (Array.isArray(this.deployment.pairs) && this.deployment.pairs.length ? this.deployment.pairs : [
       { kind: 'native', key: 'sol', symbol: 'SOL', name: 'SOL (wrapped automatically)', config: c.configFor(new web3.PublicKey(WSOL_MINT)).toBase58() },
-    ]).filter(p => p.kind !== 'usdc');
+    ]);
     const infos = await this.connection.getMultipleAccountsInfo(listed.map(p => new web3.PublicKey(p.config)));
     this.configs = new Map();
     listed.forEach((p, i) => {
@@ -182,7 +182,7 @@ export class SolanaWallet {
       if (assets.length) return { assets };
       return { assets: [], unavailable: PAIR_LIMITS.solana[kind] ?? (!this.deployment ? 'The Solana program is not deployed yet.' : this.net.mainnet ? `No ${kind === 'token' ? 'paired token' : 'asset of this kind'} is approved on mainnet yet.` : `Not set up on ${this.net.name} yet. Run solana-upgrade.cmd to add the SOL and test-token pairs.`) };
     };
-    return { native: group('native'), xstock: group('xstock'), token: group('token') };
+    return { native: group('native'), usdc: group('usdc'), xstock: group('xstock'), token: group('token') };
   }
   /** The config a pool was launched with (null for pools of unknown configs). */
   configOf(pool) { return this.configs?.get(pool.config.toBase58()) ?? null; }
@@ -375,7 +375,8 @@ export class SolanaWallet {
         const mintInfo = await this.connection.getAccountInfo(terms.usdcMint);
         usdc = { mint: terms.usdcMint, tokenProgram: mintInfo?.owner };
         const held = this.client.tokenAmount((await this.connection.getAccountInfo(this.client.ata(this.publicKey, terms.usdcMint, usdc.tokenProgram)))?.data);
-        if (held < terms.usdcFee) throw new Error(`You need ${formatAmount(terms.usdcFee, 6)} USDC for the creation fee.${this.net.mainnet ? '' : ' Get devnet USDC at faucet.circle.com (Solana Devnet).'}`);
+        const required=terms.usdcFee+(config.quoteMint.equals(terms.usdcMint)?q.gross:0n);
+        if (held < required) throw new Error(`You need ${formatAmount(required, 6)} USDC for the creation fee and any USDC first buy.${this.net.mainnet ? '' : ' Get devnet USDC at faucet.circle.com (Solana Devnet).'}`);
       }
       const getSol = this.net.mainnet ? '' : ' Get devnet SOL at faucet.solana.com.';
       if (config.wsol) { if (await this.quoteBalance(this.publicKey, config) < solNeeded) throw new Error(`You need about ${formatAmount(solNeeded, 9)} SOL (creation fee, first buy and account rent).${getSol}`); }

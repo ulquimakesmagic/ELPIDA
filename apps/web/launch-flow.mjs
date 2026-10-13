@@ -6,6 +6,7 @@ import { normalizeMetadata, MAX_IMAGE_BYTES, IMAGE_TYPES, IMAGE_FORMATS } from '
 import { normalizeRewardPolicy } from './reward-policy.mjs';
 import { launchProfile } from './launch-capabilities.mjs';
 import { STRATEGIES } from './rewards-view.mjs';
+import { usdcFunding } from './usdc-funding.mjs';
 import { PAIR_KINDS, PAIR_INFO } from '/pairs.mjs';
 
 const DRAFT_KEY = 'elpida:launch-draft';
@@ -67,6 +68,7 @@ export function renderLaunch(ctx) {
     const paired = (list, empty) => !ctx.config.dex ? { assets: [], unavailable: 'Needs the local DEX environment, which graduates into Uniswap v3.' } : list.length ? { assets: list } : { assets: [], unavailable: loading ?? empty };
     return {
       native: { assets: [{ id: 'native', symbol: 'ETH', name: 'Local test ETH', decimals: 18, curve: nativeCurve, ...fee }] },
+      usdc: ctx.config.dex ? { assets: [{ id:ctx.config.local.feeUsdc,symbol:'USDC',name:'Simulated USDC (test only)',decimals:6,curve:{vq:5000*16/15,vt:1066666666.6667,cap:8e8,feeBps:125},...fee }] } : { assets:[],unavailable:'USDC trading pairs need the local DEX environment.' },
       xstock: paired(assets.filter(a => a.kind === 'simulation').map(a => ({ id: a.address, symbol: 'TEST-STOCK', name: 'Simulated stock (test only, not an issued xStock)', decimals: 18, test: true, ...fee, faucet: { label: 'Get 1 TEST-STOCK for 0.04 local ETH', action: 'reward-stock-faucet', body: {} } })), 'The simulated stock is not available.'),
       token: paired(assets.filter(a => a.kind === 'elpida' && a.pairEligible).map(a => ({ id: a.address, symbol: a.symbol, name: `${a.symbol}, a graduated Elpida token`, decimals: 18, ...fee })), 'No graduated ETH-paired Elpida token yet. Graduate one first, and it can become a pair.'),
     };
@@ -124,7 +126,7 @@ export function renderLaunch(ctx) {
   /** A first purchase of about 0.5% of the starting FDV, rounded to two significant figures. */
   function defaultBuy(kind, asset) {
     if (asset?.curve) { const v = asset.curve.vq * 1e9 / asset.curve.vt * 0.005; const p = 10 ** (Math.floor(Math.log10(v)) - 1); return String(Number((Math.round(v / p) * p).toPrecision(2))); }
-    return { native: '0.01', xstock: '1', token: '100' }[kind];
+    return { native: '0.01', usdc:'10', xstock: '1', token: '100' }[kind];
   }
 
   /* ---------- Steps ---------- */
@@ -214,7 +216,7 @@ export function renderLaunch(ctx) {
       asset.wsol ? callout('', 'info', 'You pay and receive plain SOL. Elpida wraps it for each trade and unwraps what is left in the same transaction.') : null) : null;
     return { body: [
       h('p.chain-context',chainIcon(draft.chain),`Launching on ${net()?.name??'Simulation'}. Change the chain in the header.`), connection,
-      h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'The asset buyers pay with: the network’s own coin, an xStock or another approved token. It builds the trading reserve and stays the same after graduation. The $10 launch fee can be paid separately in native currency or supported USDC. The reward asset is chosen separately in the next step.'), pairGrid, assetBox),
+      h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'Choose native currency, USDC, an xStock or another approved token. Buyers pay in this asset, and the graduated pool keeps the same pair. Pay the $10 launch fee separately in native currency or USDC. Network gas is always paid in the native coin.'), pairGrid, assetBox),
       draft.chain!=='local'&&(solana()?!solanaPriced():!ctx.config.oracles?.[draft.chain]?.available)?callout('warn','info',solana()?'USD pricing is not active on this Solana cluster yet. It turns on when the team upgrades the program and runs the deploy (solana-upgrade.cmd). Existing tokens can still be browsed and traded.':'Verified launch pricing is pending configuration on this network. Use simulation to test creation.') : null,
       error,
     ], validate: () => {
@@ -303,6 +305,7 @@ export function renderLaunch(ctx) {
       priceStatus,
       field({ label: 'Purchase amount', control: h('div.input-affix', amount, h('span.affix', pairSymbol())), hint: 'Required by the launch contract: any amount above zero. Smaller purchases leave more of the curve for your community.' }),
       estBox,
+      draft.pair==='native'?usdcFunding(ctx,{amount:()=>String(draft.firstBuy),symbol:nativeSymbol()}):null,
       callout('', 'info', 'Native payment uses the on-chain price at execution, rounded up by at most one smallest unit. A 1% fee cap protects your total; unused native funds are refunded. The oracle price can differ from the live market. USDC payment is exactly 10 USDC, whose dollar value can move.'),
       callout('', 'info', `This is the first trade on the virtual bonding curve. The curve is not a funded pool: your purchase starts the trading reserve, which moves into a locked ${dexName()} pool when the curve sells out.${solana() ? ' Your first purchase pays the normal 1.25% fee; other buyers pay a higher launch-protection fee during the first minute.' : ''}`),
     ], validate: () => {

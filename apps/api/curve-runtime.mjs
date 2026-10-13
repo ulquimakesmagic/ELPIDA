@@ -10,10 +10,11 @@ import { normalizeMetadata } from '../web/metadata.mjs';
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync, appendFileSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
+import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from '../web/usdc-conversion.mjs';
 // Simulation actions that change chain state. With `journalPath` (on durable storage) each successful
 // action is appended to a JSON-lines journal and replayed at startup, with its original time and oracle
 // price, so the simulated chain survives restarts and redeploys.
-export const JOURNALED_ACTIONS = ['launch','buy','sell','withdraw','graduate','reward-stock-faucet','reward-claim'];
+export const JOURNALED_ACTIONS = ['launch','buy','sell','withdraw','graduate','reward-stock-faucet','reward-claim','convert-usdc'];
 function readJournal(path){
   if(!path||!existsSync(path))return [];
   return readFileSync(path,'utf8').split('\n').filter(Boolean).flatMap(line=>{try{const e=JSON.parse(line);return JOURNALED_ACTIONS.includes(e.action)&&Number.isFinite(e.at)?[e]:[];}catch{return [];}});
@@ -41,6 +42,19 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   const feeCoin=await new ContractFactory(mock.abi,mock.evm.bytecode.object,signers[0]).deploy();await feeCoin.waitForDeployment();
   for(const a of addresses.slice(0,2))await(await feeCoin.mint(a,1000_000_000n)).wait();
   await(await factory.connect(signers[2]).configureUsdPricing(usdFeed.target,86400,feeCoin.target)).wait();
+  if (dex) {
+    const a=artifact('ElpidaV3MigrationAdapter');
+    const usdcAdapter=await new ContractFactory(a.abi,a.evm.bytecode.object,signers[2]).deploy(v3.manager.target,feeCoin.target,10000);await usdcAdapter.waitForDeployment();
+    await(await factory.connect(signers[2]).approveQuote(feeCoin.target,5_000_000_000n*await factory.VIRTUAL_TOKEN()/await factory.TOKEN_SUPPLY(),usdcAdapter.target)).wait();
+    // Dedicated simulated routing pool, separate from every launch's locked liquidity.
+    const routingUsdc=25_000_000_000n,routingEth=parseUnits('10',18);
+    await(await feeCoin.mint(addresses[2],routingUsdc)).wait();await(await v3.weth.connect(signers[2]).deposit({value:routingEth})).wait();
+    const first=BigInt(feeCoin.target)<BigInt(v3.weth.target),routeToken0=first?feeCoin.target:v3.weth.target,routeToken1=first?v3.weth.target:feeCoin.target,n0=first?routingUsdc:routingEth,n1=first?routingEth:routingUsdc;
+    const n=n1*(1n<<192n)/n0;let x=n,y=(x+1n)/2n;while(y<x){x=y;y=(x+n/x)/2n;}
+    await(await v3.manager.createAndInitializePoolIfNecessary(routeToken0,routeToken1,3000,x)).wait();
+    await(await feeCoin.connect(signers[2]).approve(v3.manager.target,routingUsdc)).wait();await(await v3.weth.connect(signers[2]).approve(v3.manager.target,routingEth)).wait();
+    await(await v3.manager.connect(signers[2]).mint({token0:routeToken0,token1:routeToken1,fee:3000,tickLower:-887220,tickUpper:887220,amount0Desired:n0,amount1Desired:n1,amount0Min:1,amount1Min:1,recipient:addresses[2],deadline:BigInt((await provider.getBlock('latest')).timestamp+3600)})).wait();
+  }
   async function updatePrice(usd){
     if(!Number.isFinite(usd)||usd<=0)throw new Error('Invalid reference price');
     const b=await provider.getBlock('latest'),r=await usdFeed.roundId()+1n;
@@ -77,18 +91,35 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   const decimals = r => r.pair === 'native' ? 18 : (r.quoteDecimals??6);
   const quoteFor = r => r.pair==='native'?null:new Contract(r.quoteAddress,config.contracts.quote.abi,provider);
   const bps = value => { const p = Number(value ?? '0.5'); if (!Number.isFinite(p) || p < 0.1 || p > 5) throw new Error('Slippage must be between 0.1% and 5%.'); return BigInt(Math.round(p*100)); };
+  async function conversionQuote(body) {
+    const q=await quoteUsdcConversion({Contract,provider,dex:v3?.config,usdc:feeCoin.target,amountOut:amount(body.nativeAmount,18),slippageBps:Number(bps(body.slippage??'1'))});
+    return q;
+  }
+  async function getConversionQuote(body) {const q=await conversionQuote(body);return {nativeAmount:formatUnits(q.amountOut,18),usdcAmount:formatUnits(q.amountIn,6),maxUsdc:formatUnits(q.maxUsdc,6),quotedAt:q.quotedAt,fee:q.fee};}
   async function execute(action,body) {
     const s = signerFor(body.account ?? '0'), owner = await s.getAddress();
+    if(action==='convert-usdc') {
+      const q=await conversionQuote(body),ceiling=amount(body.maxUsdc,6);
+      if(ceiling<=0n||q.amountIn>ceiling)throw new Error('Conversion exceeds your USDC maximum. Get a new quote.');
+      if(await feeCoin.balanceOf(owner)<ceiling)throw new Error('Not enough simulated USDC for conversion.');q.maxUsdc=ceiling;
+      await mined(feeCoin.connect(s).approve(v3.router.target,ceiling));
+      const router=new Contract(v3.router.target,CONVERSION_ROUTER_ABI,s),calls=conversionCalls({Contract,router:router.target,dex:v3.config,usdc:feeCoin.target,owner,quote:q}),deadline=BigInt((await provider.getBlock('latest')).timestamp+120);
+      const tx=await mined(router['multicall(uint256,bytes[])'](deadline,calls));
+      return {hash:tx.hash,nativeAmount:formatUnits(q.amountOut,18),message:'Simulated USDC converted to native ETH. Continue with your launch or purchase.'};
+    }
     if(action==='reward-stock-faucet'){const price=await rewards.stock.PRICE();const tx=await mined(rewards.stock.connect(s).buy(price,parseUnits('1',18),{value:price}));return {hash:tx.hash,message:`Received 1 simulated TEST-STOCK for ${formatUnits(price,18)} local ETH. This is not an issued xStock.`};}
     if (action === 'launch') {
       if(!['native','usdc'].includes(body.feeCurrency??'native'))throw new Error('Choose native currency or USDC for the launch fee.');
       const details = normalizeMetadata(body);
       const name = String(body.name ?? '').trim(), symbol = String(body.symbol ?? '').trim().toUpperCase();
       if (!name || name.length > 40 || !/^[A-Z0-9]{1,10}$/.test(symbol)) throw new Error('Check the token name and symbol.');
-      const pair = body.pair ?? 'native'; if (!['native','token','xstock'].includes(pair)) throw new Error('Choose an approved trading pair.');
-      const paired = pair==='token'||pair==='xstock';
+      const pair = body.pair ?? 'native'; if (!['native','usdc','token','xstock'].includes(pair)) throw new Error('Choose an approved trading pair.');
+      const paired = pair!=='native';
       let pairAsset=ZeroAddress,pairDecimals=18,pairSymbol='ETH',pairVirtual;
-      if(paired){
+      if(pair==='usdc') {
+        if(!dex)throw new Error('USDC trading pairs need the DEX environment.');
+        pairAsset=feeCoin.target;pairDecimals=6;pairSymbol='USDC';pairVirtual=(await factory.approvedQuotes(pairAsset)).virtualQuote;
+      } else if(paired){
         if(!dex)throw new Error('xStock and paired-token launches need the DEX test environment.');
         const selectedAsset=rewards.assets().find(a=>a.address.toLowerCase()===String(body.quoteToken).toLowerCase());
         if(!selectedAsset||!selectedAsset.pairEligible)throw new Error('Choose a graduated ETH-paired Elpida token or the simulated stock.');
@@ -106,7 +137,7 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
       }
       const buy = amount(body.firstBuy,pair === 'native' ? 18 : pairDecimals);
       const fee = await factory.launchFee(),inUsdc=body.feeCurrency==='usdc';
-      if(inUsdc)await mined(feeCoin.connect(s).approve(factory.target,10_000_000n));
+      if(inUsdc)await mined(feeCoin.connect(s).approve(factory.target,10_000_000n+(pair==='usdc'?buy:0n)));
       if(await provider.getBalance(owner)<(inUsdc?0n:fee)+(pair==='native'?buy:0n))throw new Error('Not enough ETH for the creation fee and first buy.');
       if(paired&&await new Contract(pairAsset,config.contracts.quote.abi,provider).balanceOf(owner)<buy)throw new Error(`Not enough ${pairSymbol} for the first buy. Buy the paired token first, or use the simulated-stock test-funds button.`);
       const prepared = body.rewardPolicy ? await rewards.prepare(body.rewardPolicy,body.reward||owner,pair,pair==='native'?ZeroAddress:pairAsset) : null;
@@ -115,7 +146,7 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
       const v = paired?pairVirtual:await factory.nativeVirtualQuote();
       const net = buy - buy*125n/10000n, out = await factory.VIRTUAL_TOKEN()*net/(v+net);
       const published=dex&&metadataStore&&Object.values(details).some(Boolean)?await metadataStore.publish({name,symbol,...details}):null;
-      if(paired)await mined(new Contract(pairAsset,config.contracts.quote.abi,s).approve(factory.target,buy));
+      if(paired&&!(pair==='usdc'&&inUsdc))await mined(new Contract(pairAsset,config.contracts.quote.abi,s).approve(factory.target,buy));
       const tx = await factory.connect(s).launchWithPayment(name,symbol,pairAsset,buy,out*9950n/10000n,reward,published?.uri??'',inUsdc,{value:(inUsdc?0n:fee)+(paired?0n:buy)});
       const receipt = await tx.wait();
       const event = receipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(l => l?.name === 'Launched');
@@ -160,7 +191,7 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
     const owner = await signerFor(account).getAddress();
     await indexer.sync();
     const items = await Promise.all(listings().map(async r => ({...r,rewardPolicy:tokens.find(t=>t.address===r.address)?.rewardPolicy,rewardVault:tokens.find(t=>t.address===r.address)?.rewardVault,spotPrice:Number(r.spotPrice),balance:formatUnits(await new Contract(r.address,config.contracts.token.abi,provider).balanceOf(owner),18)})));
-    return {wallet:owner,balance:formatUnits(await provider.getBalance(owner),18),nativeBalance:formatUnits(await provider.getBalance(owner),18),nativeSymbol:'ETH',wrappedNativeBalance:dex?formatUnits(await v3.weth.balanceOf(owner),18):undefined,tokens:items,indexer:indexer.status(),activity,treasuryBalance:formatUnits(await provider.getBalance(addresses[2]),18)};
+    return {wallet:owner,balance:formatUnits(await provider.getBalance(owner),18),nativeBalance:formatUnits(await provider.getBalance(owner),18),nativeSymbol:'ETH',feeUsdcBalance:formatUnits(await feeCoin.balanceOf(owner),6),pairBalances:{[feeCoin.target]:formatUnits(await feeCoin.balanceOf(owner),6)},wrappedNativeBalance:dex?formatUnits(await v3.weth.balanceOf(owner),18):undefined,tokens:items,indexer:indexer.status(),activity,treasuryBalance:formatUnits(await provider.getBalance(addresses[2]),18)};
   }
   async function getQuote(body) {
     const r = recordFor(body.token), m = await market(r);
@@ -195,5 +226,5 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   if(!journal.length&&seed)for (const [name,symbol,firstBuy,pair,account] of [['Orbit Club','ORBIT','0.1','native','0'],['Pixel Party','PIXEL','0.05','native','1'],['Lucky Sprout','LUCK','0.03','native','0']]){const at=((await provider.getBlock('latest')).timestamp+1)*1000,body={name,symbol,firstBuy,pair,account};await apply('launch',body);record('launch',body,at);}
   config.simulation={durable:Boolean(journalPath),replayed,skipped};
   await indexer.sync();
-  return {updatePrice,config,state,getQuote,indexer,listings,provider,rewards,transact(action,body) { const result = queue.then(async () => { const started=((await provider.getBlock('latest')).timestamp+1)*1000; const result=action==='reward-x-finish'?await rewards.finishX(body):action==='reward-x-start'?await rewards.startX(body):action==='reward-verify'?await rewards.verify(body):action==='reward-challenge'?await rewards.challenge(body):action==='reward-process'?(await rewards.tick(),{message:'Reward treasuries processed.'}):await apply(action,body); record(action,body,started); try {await indexer.sync();} catch {result.message += " Indexing pending; refresh to retry.";} return result;}); queue = result.catch(() => {}); return result; },async close() {await queue; await indexer.close(); provider.destroy(); await connection.close();}};
+  return {updatePrice,config,state,getQuote,getConversionQuote,indexer,listings,provider,rewards,transact(action,body) { const result = queue.then(async () => { const started=((await provider.getBlock('latest')).timestamp+1)*1000; const result=action==='reward-x-finish'?await rewards.finishX(body):action==='reward-x-start'?await rewards.startX(body):action==='reward-verify'?await rewards.verify(body):action==='reward-challenge'?await rewards.challenge(body):action==='reward-process'?(await rewards.tick(),{message:'Reward treasuries processed.'}):await apply(action,body); record(action,body,started); try {await indexer.sync();} catch {result.message += " Indexing pending; refresh to retry.";} return result;}); queue = result.catch(() => {}); return result; },async close() {await queue; await indexer.close(); provider.destroy(); await connection.close();}};
 }

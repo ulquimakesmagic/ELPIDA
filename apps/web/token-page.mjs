@@ -1,4 +1,5 @@
 import { assetIcon, chainIcon } from './chain-ui.mjs';
+import { usdcFunding } from './usdc-funding.mjs';
 // Token detail page: market figures with plain definitions, bonding-curve progress, trade panel,
 // graduation actions, creator-fee summary and technical details.
 import { h, icon, short, number, compact, avatar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, copyButton, errorText, toast, usdRate, formatPrice, bar } from './ui.mjs';
@@ -220,10 +221,17 @@ function tradePanel(ctx, token, { dex, solana }) {
   const remaining = !token.complete && !token.graduated && Number(token.remainingBuy) > 0;
   const remainingHint = h('p.hint', remaining ? `About ${number(token.remainingBuy,8)} ${q} remains to complete the curve. Further trading continues after graduation into the locked pool.` : '');
   const useRemaining = h('button.btn.btn-secondary.btn-sm.curve-limit-action', {type:'button',hidden:true,on:{click:()=>{amount.value=token.remainingBuy;quote();}}}, 'Use remaining amount');
+  const funding=token.pair==='native'?usdcFunding(ctx,{amount:()=>amount.value,symbol:q,context:token.address}):null;
   const tabs = h('div.segmented', { role: 'tablist', 'aria-label': 'Trade side' }, ['buy', 'sell'].map(s => h('button', { type: 'button', role: 'tab', 'data-side': s, 'aria-selected': String(s === side), on: { click: () => setSide(s) } }, s === 'buy' ? 'Buy' : 'Sell')));
-  const quoteBalance = () => token.pair === 'native' ? `${number(ctx.state.nativeBalance ?? 0, 6)} ${q}` : token.quoteAddress && ctx.state.balanceSymbol && ctx.state.balanceSymbol !== q ? null : `${number(ctx.state.balance, 4)} ${ctx.state.balanceSymbol ?? q}`;
+  const quoteBalance = () => {
+    if(token.pair === 'native') return `${number(ctx.state.nativeBalance ?? 0, 6)} ${q}`;
+    const held=Object.entries(ctx.state.pairBalances??{}).find(([address])=>address.toLowerCase()===token.quoteAddress?.toLowerCase())?.[1];
+    if(held!=null)return `${number(held,4)} ${q}`;
+    return ctx.state.balanceSymbol===q?`${number(ctx.state.balance,4)} ${q}`:null;
+  };
   function setSide(next) {
     side = next; revision++; clearTimeout(timer);
+    if(funding)funding.hidden=side!=='buy';
     quoteReady = false; updateSubmit(); useRemaining.hidden = true; remainingHint.hidden = side !== 'buy';
     tabs.querySelectorAll('button').forEach(b => { b.setAttribute('aria-selected', String(b.dataset.side === side)); b.tabIndex = b.dataset.side === side ? 0 : -1; });
     form?.querySelector('label[for=trade-amount]')?.replaceChildren(side === 'buy' ? 'Pay' : 'Sell');
@@ -287,6 +295,7 @@ function tradePanel(ctx, token, { dex, solana }) {
     tabs,
     h('div.pay-box', h('label', { for: 'trade-amount' }, side === 'buy' ? 'Pay' : 'Sell'), h('div.pay-input', amount, unit), shortcuts, balance),
     remainingHint, useRemaining,
+    funding,
     h('div.receive', h('span', 'You receive'), out),
     h('div.trade-meta', h('span', 'Trading fee'), fee),
     h('div.trade-meta', h('label', { for: 'trade-slippage' }, 'Slippage'), slippage),

@@ -26,6 +26,8 @@ const assetRoot = fileURLToPath(new URL('../web/assets/', import.meta.url));
 resources.set('/wallet-discovery.mjs', ['wallet-discovery.mjs','text/javascript']);
 resources.set('/discovery.mjs', ['discovery.mjs','text/javascript']);
 resources.set('/chain-ui.mjs', ['chain-ui.mjs','text/javascript']);
+resources.set('/usdc-conversion.mjs', ['usdc-conversion.mjs','text/javascript']);
+resources.set('/usdc-funding.mjs', ['usdc-funding.mjs','text/javascript']);
 resources.set('/analytics', ['index.html', 'text/html']);
 resources.set('/analytics-view.mjs', ['analytics-view.mjs', 'text/javascript']);
 resources.set('/metadata-cache.mjs', ['metadata-cache.mjs', 'text/javascript']);
@@ -196,6 +198,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if(action==='metadata/publish')return send(200,await metadataStore.publish(body,true));
       if(action==='reward-x-start'){const result=await runtime.transact(action,body);res.setHeader('Set-Cookie',`elpida_x=${result.cookie}; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=600${cookieSecurity}`);return send(200,{url:result.url});}
       if (action === 'quote') return send(200, await runtime.getQuote(body));
+      if (action === 'conversion-quote') return send(200, await runtime.getConversionQuote(body));
+      if (action === 'convert-usdc') return send(200, await runtime.transact(action,body));
       if (!['launch', 'buy', 'sell', 'withdraw', 'graduate', 'reward-claim', 'reward-challenge', 'reward-verify', 'reward-process', 'reward-stock-faucet'].includes(action)) return send(404, { error: 'Action not found.' });
       return send(200, await runtime.transact(action, body));
     } catch (error) {

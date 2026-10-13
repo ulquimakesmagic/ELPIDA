@@ -251,7 +251,7 @@ export async function pricingUpdates({ connection, programId, authority, templat
   const client = createElpidaSolana(web3, programId);
   const updates = [];
   for (const t of templates) {
-    const mint = t.wsol ? new PublicKey(WSOL_MINT) : saved[t.key] ? new PublicKey(saved[t.key]) : null;
+    const mint = t.wsol ? new PublicKey(WSOL_MINT) : t.mint ? new PublicKey(t.mint) : saved[t.key] ? new PublicKey(saved[t.key]) : null;
     if (!mint) continue;
     const address = client.configFor(mint);
     const info = await connection.getAccountInfo(address);
@@ -276,7 +276,8 @@ export async function ensurePairConfigs({ connection, payer, programId, treasury
   const spl = splTestMint(web3);
   const pairs = [];
   for (const t of templates) {
-    let mint = t.wsol ? new PublicKey(WSOL_MINT) : saved[t.key] ? new PublicKey(saved[t.key]) : null;
+    let mint = t.wsol ? new PublicKey(WSOL_MINT) : t.mint ? new PublicKey(t.mint) : saved[t.key] ? new PublicKey(saved[t.key]) : null;
+    if (t.mint && !await connection.getAccountInfo(mint)) throw new Error('The configured USDC mint does not exist on this cluster.');
     if (mint && !t.wsol && !await connection.getAccountInfo(mint)) mint = null;
     if (!mint) {
       const kp = Keypair.generate();
@@ -288,6 +289,7 @@ export async function ensurePairConfigs({ connection, payer, programId, treasury
       mint = kp.publicKey;
     }
     const info = await connection.getAccountInfo(mint);
+    if(t.mint && (!info.owner.equals(new PublicKey(TOKEN_PROGRAM)) || info.data.length!==82 || info.data[44]!==6 || info.data[45]!==1)) throw new Error('Configured USDC must be an initialized six-decimal SPL mint.');
     const quoteTokenProgram = info.owner;
     const address = client.configFor(mint);
     let created = false, repriced = false;
@@ -305,7 +307,7 @@ export async function ensurePairConfigs({ connection, payer, programId, treasury
       }
     }
     pairs.push({ kind: t.kind, key: t.key, symbol: t.symbol, name: t.name, mint: mint.toBase58(), config: address.toBase58(), decimals: t.decimals,
-      tokenProgram: quoteTokenProgram.toBase58(), test: !t.wsol, wsol: !!t.wsol, testSized: !!t.testSized, faucet: t.faucet ?? null, created, repriced });
+      tokenProgram: quoteTokenProgram.toBase58(), test: !t.wsol && !t.mint, wsol: !!t.wsol, testSized: !!t.testSized, faucet: t.faucet ?? null, created, repriced });
   }
   return pairs;
 }

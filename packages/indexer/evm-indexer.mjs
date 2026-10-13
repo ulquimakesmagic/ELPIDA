@@ -94,6 +94,7 @@ export class EvmIndexer {
       const [name,symbol,reward,virtualQuote,virtualToken,saleCap] = await Promise.all([token.name(call),token.symbol(call),curve.creatorRewardVault(call),curve.virtualQuote(call),curve.virtualToken(call),curve.SALE_CAP(call)]);
       let kind=native?'native':'token';
       if(custom){try{kind=await new Contract(quote,['function pairKind() view returns(string)'],this.provider).pairKind(call)==='xstock'?'xstock':'token';}catch{kind='token';}}
+      if(!native){try{if((await new Contract(this.factory,['function feeUsdc() view returns(address)'],this.provider).feeUsdc(call)).toLowerCase()===quote.toLowerCase())kind='usdc';}catch{/* Older deployments lack independent USDC payment. */}}
       fresh.push({address:e.args.token.toLowerCase(),metadataURI:metadataURIs.get(e.args.token.toLowerCase())??'',curve:e.args.curve.toLowerCase(),creator:e.args.creator,reward,name,symbol,pair:kind,quoteAddress:quote,quoteDecimals:d,quoteSymbol:native?this.nativeSymbol:await new Contract(quote,['function symbol() view returns(string)'],this.provider).symbol(call),virtualQuote:virtualQuote.toString(),virtualToken:virtualToken.toString(),saleCapRaw:saleCap.toString(),created:block.timestamp*1000,creationBlock:height,hash:log.transactionHash});
     }
     const records=[...known,...fresh], addressMap=new Map();
