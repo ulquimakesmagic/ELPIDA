@@ -52,7 +52,7 @@ export function formatPrice(value, prefix = '$') {
 /** Price and market values for a token, in its trading pair (the native coin or the paired asset). No dollar conversion. */
 export function pricing(token) {
   const supply = Number(token.supply), sold = Number(token.sold), reserve = Number(token.reserve);
-  const price = token.spotPrice ?? (supply - sold > 0 ? reserve / (supply - sold) : 0);
+  const price = Number(token.spotPrice ?? (supply - sold > 0 ? reserve / (supply - sold) : 0));
   // The full 1B supply is minted at launch (into the curve), so circulating supply is the total supply
   // and market cap equals FDV: price × 1B. Tokens still in the curve or pool are part of that supply.
   return { price, fdv: price * supply, marketCap: price * supply, circulating: supply, supply };
