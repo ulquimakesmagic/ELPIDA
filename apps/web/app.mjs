@@ -219,7 +219,7 @@ function rerender(reason) {
   if (!state) { view.replaceChildren(loadingView()); return; }
   if (r.name === 'token') {
     const previous = reason === 'background' ? {
-      side: view.querySelector('[role=tab][aria-selected=true]')?.dataset.side,
+      side: view.querySelector('[data-side][role=tab][aria-selected=true]')?.dataset.side,
       amount: view.querySelector('#trade-amount')?.value,
       slippage: view.querySelector('#trade-slippage')?.value,
       focused: document.activeElement?.id,
