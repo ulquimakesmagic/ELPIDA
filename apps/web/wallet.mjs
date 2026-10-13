@@ -5,6 +5,7 @@ import { readMetadataCache, writeMetadataCache } from './metadata-cache.mjs';
 import {publishForLaunch} from './launch-capabilities.mjs';
 import { EVM_TEST_PAIRS } from '/pairs.mjs';
 import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
+import {nativeFundingError} from './payment-errors.mjs';
 
 // EIP-6963: every installed EVM wallet announces itself, so Elpida can use the one the person picks
 // instead of whichever extension last claimed window.ethereum (Phantom, Coinbase and MetaMask all try).
@@ -256,6 +257,12 @@ export class TestnetWallet {
     if (!receipt || receipt.status !== 1) throw new Error('Transaction did not succeed.');
     return { tx, receipt };
   }
+  async approvePayment(coin,spender,amount,message,feeInUsdc) {
+    const gas=await coin.approve.estimateGas(spender,amount),fees=await this.provider.getFeeData();
+    const error=nativeFundingError({balance:await this.provider.getBalance(this.address),gasCost:gas*(fees.maxFeePerGas??fees.gasPrice??0n),native:this.net.nativeCurrency.symbol,network:this.net.name,feeInUsdc,stage:'approval'});
+    if(error)throw new Error(error);
+    return this.wait(coin.approve(spender,amount),message);
+  }
   async deploy() {
     await this.checkNetwork();
     if (this.deployment && !this.needsMetadataUpgrade) throw new Error(`This ${this.net.name} launchpad is already set up. Use it for your launches.`);
@@ -439,7 +446,8 @@ export class TestnetWallet {
       const inUsdc=body.feeCurrency==='usdc';
       if(inUsdc && (await factory.treasury()).toLowerCase()===this.address.toLowerCase())throw new Error('This wallet is also the launchpad fee recipient. The contract cannot verify a USDC fee paid to the same wallet. Choose native payment for this test, or launch from a different funded wallet to test USDC fee collection. No launch was submitted.');
       const fee = await factory.launchFee(), value = (inUsdc?0n:(fee*101n+99n)/100n) + (nativePair ? firstBuy : 0n), native = this.net.nativeCurrency.symbol;
-      if (await this.provider.getBalance(this.address) <= value) throw new Error(`You need more than ${formatUnits(value, 18)} ${native} for the creation fee${nativePair ? ' and first buy' : ''} plus network fees.`);
+      const fundingError=nativeFundingError({balance:await this.provider.getBalance(this.address),value,native,network:this.net.name,feeInUsdc:inUsdc});
+      if(fundingError)throw new Error(fundingError);
       const pairToken = paired ? new Contract(asset.address, this.config.contracts.quote.abi, this.signer) : null;
       if (paired && await pairToken.balanceOf(this.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, asset.decimals)} ${asset.symbol} for the first buy.${asset.test ? ' Use its test faucet in Network and funds.' : ''}`);
       let published;
@@ -451,20 +459,21 @@ export class TestnetWallet {
         await this.checkNetwork();
       }
       const sharedUsdc = inUsdc && paired && asset.address.toLowerCase()===this.feeUsdc?.toLowerCase();
-      if (paired && !sharedUsdc && await pairToken.allowance(this.address, await factory.getAddress()) < firstBuy) await this.wait(pairToken.approve(await factory.getAddress(), firstBuy), `Approve the ${asset.symbol} first buy…`);
+      if (paired && !sharedUsdc && await pairToken.allowance(this.address, await factory.getAddress()) < firstBuy) await this.approvePayment(pairToken,factory.target,firstBuy,`Approve the ${asset.symbol} first buy…`,inUsdc);
       if(inUsdc){
         if(!this.feeUsdc||this.feeUsdc===ZeroAddress)throw new Error('USDC fee payment is unavailable on this network.');
         const coin=new Contract(this.feeUsdc,this.config.contracts.quote.abi,this.signer);
         const totalUsdc=10_000_000n+(sharedUsdc?firstBuy:0n);
         if(await coin.balanceOf(this.address)<totalUsdc)throw new Error('Add '+formatUnits(totalUsdc,6)+' USDC on this network for the launch fee'+(sharedUsdc?' and first purchase':'')+'. Native gas is separate.');
-        if(await coin.allowance(this.address,factory.target)<totalUsdc)await this.wait(coin.approve(factory.target,totalUsdc),'Approve exactly '+formatUnits(totalUsdc,6)+' USDC for the launch fee'+(sharedUsdc?' and first purchase':'')+'…');
+        if(await coin.allowance(this.address,factory.target)<totalUsdc)await this.approvePayment(coin,factory.target,totalUsdc,'Approve exactly '+formatUnits(totalUsdc,6)+' USDC for the launch fee'+(sharedUsdc?' and first purchase':'')+'…',inUsdc);
       }
       await this.oraclePrice();await this.checkNetwork();
       const args=[name,symbol,asset?.address??ZeroAddress,firstBuy,out*9950n/10000n,reward,published?.uri??'',inUsdc];
       const gas=await factory.launchWithPayment.estimateGas(...args,{value});
       const gasPrice=(await this.provider.getFeeData()).maxFeePerGas??(await this.provider.getFeeData()).gasPrice??0n;
-      if(await this.provider.getBalance(this.address)<value+gas*gasPrice)throw new Error('Add '+native+' for the estimated network gas in addition to the fee and first purchase.');
-      const confirmation='Confirm the $10 launch fee, first purchase '+body.firstBuy+' '+this.qsym({pair:kind,quoteSymbol:asset?.symbol})+' and gas up to '+formatUnits(gas*gasPrice,18)+' '+native+'. Native fee cap includes 1%; unused fee is refunded.';
+      const launchGasError=nativeFundingError({balance:await this.provider.getBalance(this.address),value,gasCost:gas*gasPrice,native,network:this.net.name,feeInUsdc:inUsdc});
+      if(launchGasError)throw new Error(launchGasError);
+      const confirmation='Confirm the '+(inUsdc?'10 USDC':'$10 equivalent native')+' launch fee, first purchase '+body.firstBuy+' '+this.qsym({pair:kind,quoteSymbol:asset?.symbol})+' and gas up to '+formatUnits(gas*gasPrice,18)+' '+native+'. '+(inUsdc?'USDC covers the launch fee; native currency covers gas.':'Native fee cap includes 1%; unused fee is refunded.');
       result=await this.wait(factory.launchWithPayment(...args,{value}),confirmation);
       const event = result.receipt.logs.map(log => {try{return factory.interface.parseLog(log);}catch{return null;}}).find(log => log?.name === 'Launched');
       metadataSaved = !!event && await writeMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,event.args.token),published?.metadata??details);

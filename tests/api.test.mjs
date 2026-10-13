@@ -25,6 +25,7 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal((await fetch(`${base}/wallet-discovery.mjs`)).status,200);
     assert.equal((await fetch(`${base}/usdc-conversion.mjs`)).status,200);
     assert.equal((await fetch(`${base}/usdc-funding.mjs`)).status,200);
+    assert.equal((await fetch(`${base}/payment-errors.mjs`)).status,200);
     const noRoute=await request('conversion-quote',{nativeAmount:'0.01'});
     assert.equal(noRoute.status,400,'conversion refuses an environment without a DEX route');
     assert.equal((await fetch(`${base}/api/public/quotes?network=unknown`)).status,503);

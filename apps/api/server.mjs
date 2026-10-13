@@ -28,6 +28,7 @@ resources.set('/discovery.mjs', ['discovery.mjs','text/javascript']);
 resources.set('/chain-ui.mjs', ['chain-ui.mjs','text/javascript']);
 resources.set('/usdc-conversion.mjs', ['usdc-conversion.mjs','text/javascript']);
 resources.set('/usdc-funding.mjs', ['usdc-funding.mjs','text/javascript']);
+resources.set('/payment-errors.mjs', ['payment-errors.mjs','text/javascript']);
 resources.set('/analytics', ['index.html', 'text/html']);
 resources.set('/analytics-view.mjs', ['analytics-view.mjs', 'text/javascript']);
 resources.set('/metadata-cache.mjs', ['metadata-cache.mjs', 'text/javascript']);

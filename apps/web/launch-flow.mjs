@@ -293,7 +293,9 @@ export function renderLaunch(ctx) {
     const drawEstimate = () => {
       const e = estimate();
       estBox.replaceChildren(...[h('dl.kv', h('dt', 'Launch fee · $10'), h('dd', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), h('dt', 'First purchase'), h('dd', `${number(draft.firstBuy, 6)} ${pairSymbol()}`), h('dt', 'Trading fee included'), h('dd', `${number(Number(draft.firstBuy || 0) * 0.0125, 6)} ${pairSymbol()}`),
-        h('dt', 'Estimated tokens'), h('dd', e ? `${compact(e.tokens)} (${number(e.share, 2)}% of supply)` : 'Shown after launch'), balance() ? [h('dt', 'Available balance'), h('dd', balance())] : null),
+        h('dt', 'Estimated tokens'), h('dd', e ? `${compact(e.tokens)} (${number(e.share, 2)}% of supply)` : 'Shown after launch'), balance() ? [h('dt', 'Available balance'), h('dd', balance())] : null,
+        connected()&&draft.chain!=='local'?[h('dt','Available for native payment and gas'),h('dd',`${number(ctx.state?.nativeBalance??0,8)} ${nativeSymbol()}`)]:null),
+        connected()&&draft.chain!=='local'&&Number(ctx.state?.nativeBalance)===0?callout('warn','info',`This wallet has no ${nativeSymbol()} on ${net()?.name}. Add native currency for approval and launch gas, even when both payments use USDC.`):null,
         e?.completes ? callout('warn', 'triangle-alert', 'This amount reaches the curve limit. An amount above the remaining curve is rejected. Reduce your first purchase to leave supply for the community.') : null,
         !e ? h('p.hint', 'This network does not publish the curve for this pair before launch, so the exact amount appears on the token page.') : null].filter(Boolean));
       drawPreview();
