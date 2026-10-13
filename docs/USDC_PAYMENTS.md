@@ -2,7 +2,7 @@
 
 Launch fees remain independently selectable: oracle-priced native currency or 10 units of verified USDC. USDC can deviate from one dollar; native gas is separate.
 
-USDC trading pairs keep the curve, buys, sells, creator fees and graduated locked pool denominated in USDC. The EVM owner can enable the approved six-decimal USDC asset through Network and funds (adapter deployment, then quote approval). The starting valuation is 5,000 USDC, with the existing supply and curve formula. Existing launches are unchanged.
+USDC trading pairs keep the curve, buys, sells, creator fees and graduated locked pool denominated in USDC. New EVM DEX setup and pricing activation automatically include the approved six-decimal USDC asset (adapter deployment, then quote approval). Existing deployments offer the owner “Finish USDC setup” directly on the launch card; this requires wallet confirmations once per deployment and then applies to every creator. Network and funds offers the same recovery action. The starting valuation is 5,000 USDC, with the existing supply and curve formula. Existing launches are unchanged. Wallet connection alone never triggers setup transactions.
 
 Native-paired launches and buys also have an explicit USDC funding step. It quotes a direct USDC/wrapped-native Uniswap v3 pool, compares available fee tiers, approves a bounded amount and executes exact-output conversion plus unwrapping in one router transaction. The launch or buy remains a separate transaction. Cancelling that later action leaves the native funds in the wallet. This is not automatic settlement or sponsored gas.
 

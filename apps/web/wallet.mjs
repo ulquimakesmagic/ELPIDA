@@ -138,8 +138,8 @@ export class TestnetWallet {
   feeText() { return this.launchFee !== undefined ? formatUnits(this.launchFee, 18).replace(/\.0$/, '') : this.pricing.launchFee; }
   /**
    * Launchable trading assets by kind (packages/core/pairs.mjs). Native comes from the factory; xStock and
-   * paired-token assets are the factory's approved quotes (DEX launchpads only). Every launch pays its
-   * creation fee in the native coin.
+   * paired-token assets are the factory's approved quotes (DEX launchpads only). Native and USDC fee
+   * payment remain independent of the trading pair.
    */
   pairOptions() {
     const native = this.net.nativeCurrency.symbol;
@@ -151,14 +151,15 @@ export class TestnetWallet {
       : `No ${kind === 'xstock' ? 'xStock' : 'paired token'} is approved on ${this.net.name} yet. The launchpad owner can add the test assets from Network and funds.`;
     return {
       native: { assets: [{ id: 'native', symbol: native, name: this.net.nativeCurrency.name, decimals: 18, ...fee }] },
-      usdc: approved('usdc').length ? { assets: approved('usdc') } : { assets: [], unavailable: !this.dex ? 'USDC trading pairs need a DEX graduation adapter on this network.' : 'The launchpad owner must approve this network’s USDC trading pair first. USDC launch-fee payment is separate.' },
+      usdc: approved('usdc').length ? { assets: approved('usdc') } : { assets: [], unavailable: !this.dex ? 'USDC trading pairs need a DEX graduation adapter on this network.' : 'USDC trading setup is incomplete on this deployment. The owner can finish it here once; it then becomes available to everyone.' },
       xstock: approved('xstock').length ? { assets: approved('xstock') } : { assets: [], unavailable: missing('xstock') },
       token: approved('token').length ? { assets: approved('token') } : { assets: [], unavailable: missing('token') },
     };
   }
   /** Reads the DEX factory's approved quotes (QuoteApproved events) and labels each by `pairKind()`. */
-  async setupUsdcPair() {
-    await this.checkNetwork(); const factory=(await this.verifyFactory()).connect(this.signer);
+  async setupUsdcPair(configuredFactory=null) {
+    await this.checkNetwork(); const factory=(configuredFactory??await this.verifyFactory()).connect(this.signer);
+    this.feeUsdc=await factory.feeUsdc();
     if(!this.dex||!this.feeUsdc||this.feeUsdc===ZeroAddress)throw new Error('A configured USDC asset and DEX adapter are required on this network.');
     if((await factory.treasury()).toLowerCase()!==this.address.toLowerCase())throw new Error('Only the launchpad treasury can approve the USDC trading pair.');
     if((await factory.approvedQuotes(this.feeUsdc)).adapter!==ZeroAddress)return {message:'USDC trading pair is already approved.'};
@@ -283,8 +284,9 @@ export class TestnetWallet {
     this.launches.clear(); this.scannedBlock = undefined;
     if (!write(deploymentKey(this.net.chainId), record)) throw new Error(`Deployed, but this browser blocks storage. Save factory ${record.factory} (block ${record.block}) in packages/core/networks.mjs.`);
     await this.wait(contract.configureUsdPricing(this.oracle.feed,this.oracle.maxAge,this.oracle.usdc??ZeroAddress),'Activate verified USD pricing. This fixes the oracle and enables launches…');
+    if(this.dex&&this.oracle.usdc&&this.oracle.usdc!==ZeroAddress)await this.setupUsdcPair(contract);
     this.needsMetadataUpgrade=false;
-    return { hash: receipt.hash, message: `Your ${this.net.name} launchpad is deployed, using the on-chain USD oracle for the $10 launch fee.` };
+    return { hash: receipt.hash, message: `Your ${this.net.name} launchpad is deployed, using the on-chain USD oracle for the $10 launch fee.${this.dex&&this.oracle.usdc?' USDC trading is configured for all creators.':''}` };
   }
   async verifyFactory({launch=false}={}) {
     const factory=this.factoryContract(),version=await factory.MODEL_VERSION();
@@ -301,7 +303,9 @@ export class TestnetWallet {
     await this.checkNetwork();await this.oraclePrice();
     const factory=this.factoryContract().connect(this.signer);
     if(await factory.usdFeed()!==ZeroAddress)throw new Error('Oracle pricing is already fixed. Manual pricing is disabled.');
-    return this.wait(factory.configureUsdPricing(this.oracle.feed,this.oracle.maxAge,this.oracle.usdc??ZeroAddress),'Activate verified USD pricing…');
+    const result=await this.wait(factory.configureUsdPricing(this.oracle.feed,this.oracle.maxAge,this.oracle.usdc??ZeroAddress),'Activate verified USD pricing…');
+    if(this.dex&&this.oracle.usdc&&this.oracle.usdc!==ZeroAddress)await this.setupUsdcPair(factory);
+    return result;
   }
   async state() {
     await this.checkNetwork();

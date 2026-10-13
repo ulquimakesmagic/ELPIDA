@@ -193,7 +193,7 @@ export function renderLaunch(ctx) {
         else if (n.mainnet) connection.append(callout('warn', 'triangle-alert', 'Mainnet beta: this launch uses real funds and new, unaudited contracts.'));
         if (!ctx.wallet.deployment) connection.append(n.kind === 'solana'
           ? callout('warn', 'triangle-alert', 'The Elpida program is not deployed on this network. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.')
-          : h('div.connection-row', callout('warn', 'triangle-alert', `${n.name} needs a one-time launchpad setup from your wallet before the first token. It takes ${ctx.wallet.dex ? 'three confirmations' : 'two confirmations'} and costs only gas. Launches are then charged ${ctx.wallet.feeText?.() ?? ''} ${n.nativeCurrency.symbol} each, the on-chain equivalent of $10 (or 10 USDC).`),
+          : h('div.connection-row', callout('warn', 'triangle-alert', `${n.name} needs a one-time launchpad setup from your wallet before the first token. ${ctx.wallet.dex ? 'This includes the native and USDC trading pairs, with wallet confirmations for deployment and registration.' : 'It takes two wallet confirmations.'} Setup costs only gas. Launches are then charged ${ctx.wallet.feeText?.() ?? ''} ${n.nativeCurrency.symbol} each, the on-chain equivalent of $10 (or 10 USDC).`),
             h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { networkError = ''; error.textContent = ''; try { await ctx.run('deploy', {}); } catch (e) { networkError = errorText(e); } draw(); } } }, 'Set up launchpad')));
       }
     }
@@ -202,8 +202,10 @@ export function renderLaunch(ctx) {
       const info = PAIR_INFO[kind], group = pairs?.[kind];
       const reason = !draft.chain ? 'Choose a network first.' : !pairs ? 'Connect your wallet to see the assets on this network.' : group?.unavailable ?? (group?.assets.length ? null : 'Not available on this network.');
       const symbols = group?.assets.map(a => a.symbol).join(', ');
-      return h('label.choice', { 'data-unavailable': reason ? 'true' : undefined }, h('input', { type: 'radio', name: 'pair', value: kind, checked: draft.pair === kind, disabled: !!reason, on: { change: () => { draft.pair = kind; draft.quoteAsset = group.assets[0].id; draft.firstBuy = defaultBuy(kind, group.assets[0]); save(); draw(); } } }),
-        h('span.choice-title', icon(info.glyph), info.title, symbols ? h('span.chip', symbols) : null), h('p', reason ?? info.note(kind === 'native' ? group.assets[0].symbol : '')));
+      const ownerSetup=kind==='usdc'&&!!reason&&draft.chain!=='local'&&!solana()&&connected()&&ctx.state?.pricing?.owner&&ctx.wallet.dex&&ctx.wallet.feeUsdc;
+      const finish=ownerSetup?h('button.btn.btn-secondary.btn-sm',{type:'button','data-busy-disable':'',on:{click:async e=>{e.preventDefault();networkError='';try{await ctx.run('setup-usdc-pair',{});const asset=ctx.wallet.pairOptions().usdc.assets[0];if(asset){draft.pair='usdc';draft.quoteAsset=asset.id;draft.firstBuy=defaultBuy('usdc',asset);save();}}catch(err){networkError=errorText(err);}draw();}}},'Finish USDC setup'):null;
+      return h('div.choice', { 'data-unavailable': reason ? 'true' : undefined }, h('label',h('input', { type: 'radio', name: 'pair', value: kind, checked: draft.pair === kind, disabled: !!reason, on: { change: () => { draft.pair = kind; draft.quoteAsset = group.assets[0].id; draft.firstBuy = defaultBuy(kind, group.assets[0]); save(); draw(); } } }),
+        h('span.choice-title', icon(info.glyph), info.title, symbols ? h('span.chip', symbols) : null), h('p', ownerSetup?'Finish this existing deployment’s one-time USDC setup. Your wallet confirms the adapter and registration; creators do not repeat this.':reason ?? info.note(kind === 'native' ? group.assets[0].symbol : ''))),finish);
     }));
     const asset = selectedAsset(), group = pairs?.[draft.pair];
     const balanceOf = a => ctx.state?.pairBalances?.[a.id] ?? (draft.pair === 'native' ? ctx.state?.nativeBalance : null);
