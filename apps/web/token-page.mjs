@@ -58,7 +58,8 @@ export function renderToken(ctx, address) {
   const head = h('header.token-hero', avatar(token, 'avatar-lg'),
     h('div.token-identity', h('h1', token.name, h('span.sym', token.symbol)), byline,
       h('div.chips', h(`span.chip${life.chip ? '.' + life.chip : ''}`, life.label), h(`span.chip.${ctx.mode === 'local' ? 'chip-sim' : 'chip-testnet'}`, chainIcon(token.network??ctx.wallet.net.key),ctx.envLabel()))),
-    h('div.market-headline', h('span.meta', 'Market cap'), h('strong', fmtValue(p.marketCap, token)), h('span.meta', `${fmtPrice(token)} price`)));
+    h('div.market-headline', h('span.meta', 'Market cap'), h('strong', fmtValue(p.marketCap, token)), h('span.meta', `${fmtPrice(token)} price`),
+      h('span.meta', usdRate(token)===null ? `USD conversion unavailable or stale. Values are shown in ${q}.` : `USD estimate · ${token.usdReference.source ?? 'Price reference'} · updated ${new Date(token.usdReference.updatedAt*1000).toLocaleTimeString()}`)));
 
   // Curve progress: real reserve raised toward the reserve that completes the curve (net of the fee).
   const reserve = Number(token.reserve || 0), remainingNet = Number(token.remainingBuy || 0) * (1 - 0.0125);
