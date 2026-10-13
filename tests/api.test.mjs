@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
 import { startServer } from '../apps/api/server.mjs';
 import {MAX_IMAGE_BYTES} from '../apps/web/metadata.mjs';
+import {keccak256,toUtf8Bytes} from 'ethers';
 
 test('localhost API exercises launch, trading, fee payout and request protection', async t => {
   const app = await startServer({ port: 0, seed: false, publicUrl: 'https://elpida-preview.up.railway.app' });
@@ -11,7 +12,13 @@ test('localhost API exercises launch, trading, fee payout and request protection
   const config = await (await fetch(`${base}/api/config`)).json();
   const state = async account => (await fetch(`${base}/api/state?account=${account ?? '0'}`)).json();
   const request = async (action, body, headers = {}) => {
-    const response = await fetch(`${base}/api/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': config.csrf, ...headers }, body: JSON.stringify({ account: '0', ...body }) });
+    const payload=JSON.stringify({account:'0',...body}),proof={};
+    if(action==='metadata/stage'){
+      const r=await fetch(`${base}/api/metadata/challenge?digest=${keccak256(toUtf8Bytes(payload))}`),c=await r.json();
+      let nonce=0;while(!keccak256(toUtf8Bytes(`${c.id}:${c.digest}:${nonce}`)).slice(2).startsWith('0'.repeat(c.difficulty)))nonce++;
+      Object.assign(proof,{Cookie:r.headers.get('set-cookie').split(';')[0],'X-Elpida-Upload-Id':c.id,'X-Elpida-Upload-Nonce':String(nonce)});
+    }
+    const response = await fetch(`${base}/api/${action}`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': config.csrf,...proof, ...headers }, body: payload });
     return { status: response.status, body: await response.json() };
   };
   await t.test('serves the app and refuses unsigned or foreign-origin mutations', async () => {
@@ -25,6 +32,8 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal((await fetch(`${base}/wallet-discovery.mjs`)).status,200);
     assert.equal((await fetch(`${base}/wallet-batch.mjs`)).status,200);
     assert.equal((await request('metadata/stage',{network:'unsupported',name:'Test',symbol:'TEST'})).status,400);
+    assert.equal((await fetch(`${base}/api/metadata/stage?bypass=true`,{method:'POST',headers:{'Content-Type':'application/json','X-Elpida-Token':config.csrf},body:'{}'})).status,403,'query parameters cannot bypass upload admission');
+    assert.equal((await fetch(`${base}/upload-proof.mjs`)).status,200);
     assert.equal((await fetch(`${base}/usdc-conversion.mjs`)).status,200);
     assert.equal((await fetch(`${base}/usdc-funding.mjs`)).status,200);
     assert.equal((await fetch(`${base}/payment-errors.mjs`)).status,200);

@@ -14,6 +14,8 @@ import { fileURLToPath } from 'node:url';
 import { resolve } from 'node:path';
 import { createRuntime } from './curve-runtime.mjs';
 import {MetadataStore} from './metadata-store.mjs';
+import {UploadAdmission} from './upload-admission.mjs';
+import {keccak256} from 'ethers';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
 import { MAX_METADATA_REQUEST_BYTES } from '../web/metadata.mjs';
 import { evmTestnets, solanaDevnet, solanaLocalnet, solanaMainnet } from '../../packages/core/networks.mjs';
@@ -33,6 +35,8 @@ resources.set('/analytics', ['index.html', 'text/html']);
 resources.set('/analytics-view.mjs', ['analytics-view.mjs', 'text/javascript']);
 resources.set('/metadata-cache.mjs', ['metadata-cache.mjs', 'text/javascript']);
 resources.set('/wallet-batch.mjs', ['wallet-batch.mjs', 'text/javascript']);
+resources.set('/upload-proof.mjs', ['upload-proof.mjs', 'text/javascript']);
+resources.set('/upload-proof-worker.mjs', ['upload-proof-worker.mjs', 'text/javascript']);
 resources.set('/circle-funding.mjs', ['circle-funding.mjs', 'text/javascript']);
 const assetTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8' };
 const vendorFiles = new Map([
@@ -119,6 +123,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const priceSnapshot=()=>({...priceKeeper.snapshot(),local:runtime.config.local.price});
   const cookieSecurity = publicUrl ? '; Secure' : '';
   const csrf = randomBytes(24).toString('hex');
+  const uploadAdmission=new UploadAdmission({path:port===0?':memory:':dataFile('metadata-admission.sqlite')});
   let diagnosticWindow=Date.now(),diagnosticCount=0;
   let metadataWindow=Date.now(),metadataCount=0;
   const solana = solanaConfig();
@@ -137,6 +142,11 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
       if (req.method === 'GET') {
+        if(url.pathname==='/api/metadata/challenge'){
+          let client=String(req.headers.cookie??'').split(';').map(v=>v.trim()).find(v=>v.startsWith('elpida_upload='))?.slice(14);
+          if(!/^[a-f0-9]{64}$/.test(client??'')){client=randomBytes(32).toString('hex');res.setHeader('Set-Cookie',`elpida_upload=${client}; HttpOnly; SameSite=Strict; Path=/api/metadata; Max-Age=86400${cookieSecurity}`);}
+          return send(200,uploadAdmission.issue({digest:url.searchParams.get('digest'),client,transport:req.socket.remoteAddress??'unknown'}));
+        }
         if(url.pathname==='/api/rewards/x/callback'){
           try{const cookie=String(req.headers.cookie??'').split(';').map(x=>x.trim()).find(x=>x.startsWith('elpida_x='))?.slice(9);await runtime.transact('reward-x-finish',{state:url.searchParams.get('state'),code:url.searchParams.get('code'),cookie});res.writeHead(200,{'Content-Type':'text/html','Set-Cookie':`elpida_x=; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=0${cookieSecurity}`});return res.end('<!doctype html><title>X verified</title><h1>X profile verified</h1><p>Your rewards are bound to the signed payout wallet. Return to Creator rewards and refresh to claim.</p><a href="/">Return to Elpida</a>');}catch{ return send(400,{error:'X verification failed or expired. Return to the dashboard and try again.'});}
         }
@@ -184,11 +194,17 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if (req.method === 'POST' && url.pathname === '/api/solana-rpc') return rpcProxy ? rpcProxy(req, res, send) : send(404, { error: 'Not found.' });
       if (req.method !== 'POST' || !url.pathname.startsWith('/api/')) return send(405, { error: 'Method not allowed.' });
       if (req.headers['x-elpida-token'] !== csrf || req.headers['content-type'] !== 'application/json') return send(403, { error: 'Refresh this page before submitting.' });
+      let uploadDigest;
+      if(url.pathname==='/api/metadata/stage'){
+        const client=String(req.headers.cookie??'').split(';').map(v=>v.trim()).find(v=>v.startsWith('elpida_upload='))?.slice(14)??'';
+        uploadDigest=uploadAdmission.consume({id:req.headers['x-elpida-upload-id'],nonce:req.headers['x-elpida-upload-nonce'],client,transport:req.socket.remoteAddress??'unknown'});
+      }
       const chunks = [];
       let size = 0;
       for await (const chunk of req) { size += chunk.length; if (size > (['/api/launch','/api/metadata/stage','/api/metadata/publish','/api/public/metadata/prepare','/api/public/metadata/save'].includes(url.pathname) ? MAX_METADATA_REQUEST_BYTES : 8192)) { send(413, { error: 'Request too large.' }); return; } chunks.push(chunk); }
       let body;
-      try { body = JSON.parse(Buffer.concat(chunks).toString()); } catch { return send(400, { error: 'Invalid request.' }); }
+      const rawBody=Buffer.concat(chunks);if(uploadDigest&&keccak256(rawBody)!==uploadDigest)return send(403,{error:'Upload payload changed. Prepare it again; no launch was submitted.'});
+      try { body = JSON.parse(rawBody.toString()); } catch { return send(400, { error: 'Invalid request.' }); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) return send(400, { error: 'Invalid request.' });
       const action = url.pathname.slice('/api/'.length);
       if(action==='public/metadata/prepare')return send(200,{message:publicIndex.metadataMessage(body).message});
@@ -219,12 +235,12 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     } catch (error) {
       const message = error.reason ?? error.shortMessage ?? error.message ?? 'Request failed.';
       console.error(JSON.stringify({event:'request_error',requestId,code:String(error.code??error.name??'UNKNOWN').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40),reason:error.reason?'Contract reverted':'Request rejected'}));
-      return send(error.code==='METADATA_QUOTA'?503:400, { error: String(message).slice(0, 250) });
+      return send(error.code==='METADATA_QUOTA'?503:[400,403,429].includes(error.status)?error.status:400, { error: String(message).slice(0, 250) });
     }
   });
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, async close() {clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done)); await publicIndex.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, async close() {clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done)); await publicIndex.close();uploadAdmission.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

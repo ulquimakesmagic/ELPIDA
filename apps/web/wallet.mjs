@@ -7,6 +7,7 @@ import { EVM_TEST_PAIRS } from '/pairs.mjs';
 import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
 import {nativeFundingError} from './payment-errors.mjs';
 import {supportsAtomicLaunch,waitAtomicLaunch} from './wallet-batch.mjs';
+import {prepareUploadProof} from './upload-proof.mjs';
 
 // EIP-6963: every installed EVM wallet announces itself, so Elpida can use the one the person picks
 // instead of whichever extension last claimed window.ethereum (Phantom, Coinbase and MetaMask all try).
@@ -476,7 +477,8 @@ export class TestnetWallet {
       let published;
       if(publishForLaunch({chain:this.net.key,publicEnabled:this.config.metadataPublishing?.publicEnabled,metadataSupported:!this.needsMetadataUpgrade})){
         this.onProgress('Preparing public token details for the launch transaction…');
-        const response=await fetch('/api/metadata/stage',{method:'POST',headers:{'Content-Type':'application/json','X-Elpida-Token':this.config.csrf},body:JSON.stringify({network:this.net.key,name,symbol,...details})});
+        const payload=JSON.stringify({network:this.net.key,name,symbol,...details}),proof=await prepareUploadProof(payload);
+        const response=await fetch('/api/metadata/stage',{method:'POST',headers:{'Content-Type':'application/json','X-Elpida-Token':this.config.csrf,...proof},body:payload});
         published=await response.json();if(!response.ok)throw new Error(published.error??'Metadata publishing failed.');
         if(!/^ipfs:\/\//.test(published.uri)||!['public-ipfs','elpida-hosted'].includes(published.storage))throw new Error('Token details were not staged safely. No launch was submitted.');
         metadataStorage=published.storage;
