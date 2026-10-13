@@ -116,7 +116,7 @@ async function connect(key, walletId, {silent=false}={}) {
     wallet.select(key);
     await wallet.connect(walletId,{silent}); connected = true; mode = 'testnet';
     try { localStorage.setItem('elpida:network', key); } catch {}
-    state = { wallet: wallet.address, balance: '0', tokens: [], activity: [] };
+    state = { ...(previousWallet === wallet && previousKey === key ? state : null), wallet: wallet.address, balance: previousWallet === wallet && previousKey === key ? state?.balance ?? '0' : '0', tokens: previousWallet === wallet && previousKey === key ? state?.tokens ?? [] : [], activity: [] };
     await refresh({walletRead:true});
     return true;
   } catch (error) {
@@ -412,6 +412,8 @@ async function init() {
   updateChrome(); route();
   // Return to the testnet used last time, but only silently: wallets that already trust Elpida reconnect
   // without a prompt. Anything else shows the local simulation first, so the page never waits on a popup.
+  // Show the public index before slow wallet/RPC reads; browsing must not wait for reconnection.
+  if (mode === 'testnet') { try { await refresh({ walletRead: false }); } catch {} }
   const previous = saved && saved !== 'local' ? networkByKey(saved) : null;
   if (previous) {
     let trusted = false;

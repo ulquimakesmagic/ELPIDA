@@ -40,6 +40,15 @@ test('USDC fees, paired trades and bounded conversion execute against local cont
  assert.equal(r.indexer.snapshot(launch.token).liquidityLocked,true,'USDC graduation locks the position permanently');
  await r.transact('buy',{token:launch.token,amount:'10'});
  assert.equal(r.indexer.trades(launch.token)[0].venue,'dexPool');
+ const beforeDexSell=await coin.balanceOf(owner);
+ await r.transact('sell',{token:launch.token,amount:'1000000'});
+ assert.ok(await coin.balanceOf(owner)>beforeDexSell,'post-graduation selling returns USDC');
+ assert.equal(r.indexer.trades(launch.token)[0].side,'sell');
+ await r.transact('withdraw',{token:launch.token});
+ const graduated=r.indexer.snapshot(launch.token);
+ assert.equal(graduated.liquidityLocked,true,'collecting fees never unlocks liquidity');
+ assert.ok(graduated.dexRewards.every(a=>Number(a.creator)===0),'position creator fees are paid out');
+ assert.equal(parseUnits(graduated.creatorFees,6),0n,'curve creator fees are paid out');
 });
 
 test('conversion refuses absent routes, bad slippage and expired quotes',async()=>{
