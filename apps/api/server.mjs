@@ -15,6 +15,9 @@ import { resolve } from 'node:path';
 import { createRuntime } from './curve-runtime.mjs';
 import {MetadataStore} from './metadata-store.mjs';
 import {UploadAdmission} from './upload-admission.mjs';
+import {configuredBackup} from './backup-runner.mjs';
+import {OperationsMonitor,evaluateOperations} from './operations-health.mjs';
+import {tmpdir} from 'node:os';
 import {keccak256} from 'ethers';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
 import { MAX_METADATA_REQUEST_BYTES } from '../web/metadata.mjs';
@@ -129,6 +132,12 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const solana = solanaConfig();
   const connectSources = [...evmTestnets.map(net => net.rpcUrl), solana.rpcUrl, solana.wsUrl].filter(url => /^(https?|wss?):/.test(url ?? '')).join(' ');
   const rpcProxy = solana.mainnet ? createRpcProxy(process.env.SOLANA_RPC_URL) : null;
+  const operationsStartedAt=Date.now();
+  const backupRunner=configuredBackup({env:port===0?{}:process.env,dataDir,statePath:port===0?null:dataFile('ops-backup-state.json'),workDir:process.env.ELPIDA_BACKUP_WORK_DIR??resolve(tmpdir(),'elpida-backups-'+dataPrefix.replace(/[^a-z0-9-]/gi,'')),log:console.log});
+  const operationsInput=()=>({startedAt:operationsStartedAt,durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),storage:metadataStore.status().storage,networks:Object.fromEntries([...publicIndex.entries.keys()].map(key=>[key,publicIndex.status(key)])),prices:priceSnapshot(),backup:backupRunner.status()});
+  const monitor=new OperationsMonitor({read:operationsInput});
+  const operationsTimer=port===0?null:setInterval(()=>monitor.tick(),60000);operationsTimer?.unref();
+  if(port!==0){backupRunner.start();monitor.tick();}
   const server = createServer(async (req, res) => {
     const actualPort = server.address().port;
     const requestId=randomBytes(8).toString('hex');res.setHeader('X-Request-Id',requestId);
@@ -142,6 +151,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
       if (req.method === 'GET') {
+        if(url.pathname==='/api/operations/status'){const result=evaluateOperations(operationsInput());return send(result.status==='critical'?503:200,{...result,backup:backupRunner.status(),metadataStorage:metadataStore.status().storage});}
         if(url.pathname==='/api/metadata/challenge'){
           let client=String(req.headers.cookie??'').split(';').map(v=>v.trim()).find(v=>v.startsWith('elpida_upload='))?.slice(14);
           if(!/^[a-f0-9]{64}$/.test(client??'')){client=randomBytes(32).toString('hex');res.setHeader('Set-Cookie',`elpida_upload=${client}; HttpOnly; SameSite=Strict; Path=/api/metadata; Max-Age=86400${cookieSecurity}`);}
@@ -242,7 +252,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   });
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, async close() {clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done)); await publicIndex.close();uploadAdmission.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, async close() {clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close(); await publicIndex.close();uploadAdmission.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

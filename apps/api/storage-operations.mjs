@@ -7,6 +7,7 @@ import {validCid} from './metadata-store.mjs';
 const digest=file=>createHash('sha256').update(readFileSync(file)).digest('hex');
 const publicFile=p=>/^public-[0-9]+-0x[a-fA-F0-9]{40}\.sqlite$/.test(p)||/^public-metadata-[0-9]+-0x[a-fA-F0-9]{40}\.json$/.test(p)||/^public-solana-(devnet|mainnet|localnet)-[1-9A-HJ-NP-Za-km-z]{32,44}\.sqlite$/.test(p);
 const allowed=p=>p==='ipfs-content/retention.json'||p.startsWith('ipfs-content/')&&p.endsWith('.json')&&validCid(p.slice(13,-5))||publicFile(p);
+export const allowedBackupPath=allowed;
 function checked(root,p){if(!allowed(p))throw new Error('Backup contains an unexpected file path.');const file=resolve(root,p);if(!file.startsWith(resolve(root)+'/')&&!file.startsWith(resolve(root)+'\\'))throw new Error('Backup path escaped its directory.');let part=resolve(root);for(const name of p.split('/')){part=join(part,name);if(lstatSync(part).isSymbolicLink())throw new Error('Backup symlinks are not supported.');}return file;}
 export async function createPublicBackup(dataDir,destination){
  dataDir=resolve(dataDir);destination=resolve(destination);if(existsSync(destination))throw new Error('Backup destination already exists. Refusing to overwrite.');

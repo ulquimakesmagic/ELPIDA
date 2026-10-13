@@ -18,6 +18,9 @@
     "testnet:check": "node scripts/testnet-readiness.mjs",
     "test:base-fork": "node scripts/base-fork-lifecycle.mjs",
     "security:package": "node scripts/security-package.mjs",
+    "test:operations": "node --test tests/operations-monitoring.test.mjs tests/storage-operations.test.mjs",
+    "backup:key": "node scripts/backup-key.mjs",
+    "backup:offsite": "node --env-file-if-exists=.env scripts/offsite-backup.mjs",
     "test:indexer": "node --test tests/indexer.test.mjs tests/public-indexer.test.mjs tests/solana-indexer.test.mjs",
     "test:dex": "node --test --test-concurrency=1 tests/dex-migration.test.mjs tests/dex-runtime.test.mjs"
   },
@@ -43,6 +46,7 @@
     "node": ">=22.18.0"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "3.1151.0",
     "@circle-fin/developer-controlled-wallets": "10.8.1"
   }
 }

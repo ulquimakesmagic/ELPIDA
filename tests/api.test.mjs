@@ -28,6 +28,7 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal((await fetch(`${base}/launch`)).status,200);
     assert.equal((await fetch(`${base}/analytics`)).status,200);
     assert.equal((await fetch(`${base}/analytics-view.mjs`)).status,200);
+    const operations=await(await fetch(`${base}/api/operations/status`)).json();assert.equal(operations.backup.enabled,false);assert.ok(operations.incidents.some(i=>i.code==='backup_disabled'));assert.ok(!JSON.stringify(operations).includes('secretAccessKey'));
     assert.equal((await fetch(`${base}/chain-ui.mjs`)).status,200);
     assert.equal((await fetch(`${base}/wallet-discovery.mjs`)).status,200);
     assert.equal((await fetch(`${base}/wallet-batch.mjs`)).status,200);

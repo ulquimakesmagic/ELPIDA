@@ -28,7 +28,7 @@ Solidity is 0.8.24, optimizer enabled with one run, EVM target Shanghai; reprodu
 | Treasury | Existing test deployment uses a wallet address | Choose a reviewed treasury/multisig and ensure it can receive native fees and make one-time configuration/quote approvals; test intended role and emergency procedures before deployment |
 | Upload abuse/storage | Chain-authorized retention, quotas, bounded cache and durable payload-bound anonymous admission are implemented | Review edge/DoS protections, proxy grouping, production traffic limits and provider budgets; see STORAGE_OPERATIONS.md; no new wallet signature is required |
 | Metadata availability | Public IPFS pinning absent | Establish pinning/hosting retention, quotas, provider failure behavior, integrity checks and monitoring; document what happens if hosting is lost |
-| Operations | Metadata/public-index backup and restoration verified on the local mirror; Railway-volume drill, off-site backup and alerts remain pending | Complete Railway staging restore and index replay, private credential recovery, off-site retention and monitoring for index lag/oracle/RPC/storage/fee failures |
+| Operations | Encrypted S3-compatible backup automation, restoration and incident monitoring are implemented and tested locally; actual bucket activation and Railway drill remain pending | Follow RAILWAY_BACKUPS_AND_MONITORING.md, verify a real backup and staging restore, configure retention/external alert delivery and private credential recovery |
 | Release identity | Current tests target Sepolia | Produce a frozen release manifest, verify build/source parity, obtain a deployer-controlled mainnet runbook and keep test faucets/impersonation/simulation funding unreachable on mainnet |
 
 ## Reviewer threat model
