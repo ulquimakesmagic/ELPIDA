@@ -6,6 +6,7 @@ import { join } from 'node:path';
 import * as web3 from '@solana/web3.js';
 import { SolanaIndexer, programEventLogs } from '../packages/indexer/solana-indexer.mjs';
 import { EVENTS } from '../packages/solana/client.mjs';
+import { SOLANA_GENESIS, validateSolanaRpc } from '../packages/solana/rpc-config.mjs';
 
 const programId = web3.Keypair.generate().publicKey.toBase58();
 const pool = web3.Keypair.generate().publicKey.toBase58();
@@ -26,6 +27,7 @@ function fixture(path = ':memory:') {
   let transaction = null;
   const signature = { signature: 'transaction-one', slot: 10, err: null, blockTime: 100 };
   const connection = {
+    async getGenesisHash() { return SOLANA_GENESIS.devnet; },
     async getSignaturesForAddress(_, options) { return options.until === signature.signature ? [] : [signature]; },
     async getTransaction() { return transaction; },
   };
@@ -92,5 +94,27 @@ test('Solana worker reports the failing phase without exposing RPC error details
     assert.equal(f.index.status().errorPhase, null);
     assert.equal(f.index.status().error, null);
     assert.ok(f.index.status().lastSuccess);
+  } finally { f.index.close(); }
+});
+
+test('Solana RPC configuration rejects pasted endpoint lists without leaking credentials', () => {
+  for (const value of ['https://example.com/?api-key=secret,https://other.com', 'https://example.com\nhttps://other.com', 'not-a-url', 'http://remote.example.com', 'https://user:secret@example.com']) {
+    assert.throws(() => validateSolanaRpc(value), e => e.code === 'RPC_CONFIG_INVALID' && !e.message.includes('secret'));
+  }
+  assert.equal(validateSolanaRpc('https://devnet.helius-rpc.com/?api-key=secret'), 'https://devnet.helius-rpc.com/?api-key=secret');
+  assert.equal(validateSolanaRpc('http://127.0.0.1:8899'), 'http://127.0.0.1:8899/');
+});
+
+test('Solana RPC cluster mismatch prevents all pool reads and checkpoint changes', async () => {
+  const f = fixture(); let reads = 0;
+  f.index.connection.getGenesisHash = async () => SOLANA_GENESIS.mainnet;
+  f.index.syncPools = async () => { reads++; };
+  try {
+    await assert.rejects(f.index.sync(), { code: 'RPC_CLUSTER_MISMATCH' });
+    assert.equal(reads, 0); assert.equal(f.index.status().cursorSlot, null);
+    assert.equal(f.index.status().errorPhase, 'network_identity');
+    f.index.connection.getGenesisHash = async () => SOLANA_GENESIS.devnet;
+    f.setTransaction(success()); await f.index.sync();
+    assert.equal(reads, 2); assert.equal(f.index.status().error, null);
   } finally { f.index.close(); }
 });

@@ -3,6 +3,7 @@ import { protocolAnalytics } from './protocol-analytics.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
 import { PublicIndexer } from './public-indexer.mjs';
 import { SolanaIndexer } from '../../packages/indexer/solana-indexer.mjs';
+import { validateSolanaRpc } from '../../packages/solana/rpc-config.mjs';
 import * as solanaWeb3 from '@solana/web3.js';
 import { createCircleFunding } from './circle-test-wallets.mjs';
 import { createServer } from 'node:http';
@@ -66,7 +67,8 @@ export function solanaConfig() {
 export const RPC_METHODS = new Set(['getAccountInfo', 'getMultipleAccounts', 'getProgramAccounts', 'getBalance', 'getLatestBlockhash', 'getBlockHeight', 'getSlot', 'getBlockTime', 'getSignatureStatuses', 'simulateTransaction', 'sendTransaction', 'getMinimumBalanceForRentExemption', 'getTransaction', 'getEpochInfo', 'getVersion', 'getGenesisHash', 'getFeeForMessage', 'isBlockhashValid', 'getTokenAccountBalance']);
 export function createRpcProxy(target, { perSecond = 15, burst = 60 } = {}) {
   // https only, except a local validator used to rehearse a mainnet deployment.
-  if (!target || !/^https:\/\/|^http:\/\/(127\.0\.0\.1|localhost)[:/]/.test(target)) { console.warn('Solana mainnet needs SOLANA_RPC_URL (https) for the RPC proxy.'); return null; }
+  try { target = validateSolanaRpc(target); }
+  catch { console.warn('Solana needs one valid HTTPS SOLANA_RPC_URL for the RPC proxy.'); return null; }
   const buckets = new Map();
   return async (req, res, send) => {
     const ip = req.socket.remoteAddress ?? 'unknown', now = Date.now();
@@ -100,7 +102,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   let solanaIndex=null,solanaTimer=null;
   if(port!==0&&solanaNet.deployment&&solanaRpc&&process.env.ELPIDA_SOLANA_INDEXER!=='off'){
     try{
-      solanaIndex=new SolanaIndexer({web3:solanaWeb3,connection:new solanaWeb3.Connection(solanaRpc,'confirmed'),deployment:solanaNet.deployment,network:solanaNet,path:dataFile(`public-solana-${solanaNet.cluster}-${solanaNet.deployment.programId}.sqlite`)});
+      solanaIndex=new SolanaIndexer({web3:solanaWeb3,connection:new solanaWeb3.Connection(validateSolanaRpc(solanaRpc),'confirmed'),deployment:solanaNet.deployment,network:solanaNet,path:dataFile(`public-solana-${solanaNet.cluster}-${solanaNet.deployment.programId}.sqlite`)});
       const tick=()=>solanaIndex.sync().then(()=>console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}))).catch(()=>console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,message:'Indexing unavailable; retrying.'})));
       tick();solanaTimer=setInterval(tick,20000);solanaTimer.unref();
     }catch(error){console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:String(error.name??'INIT').slice(0,40),message:error.message.slice(0,120)}));}

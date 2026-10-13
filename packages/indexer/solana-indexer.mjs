@@ -7,6 +7,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
+import { SOLANA_GENESIS } from '../solana/rpc-config.mjs';
 import { createElpidaSolana, decodeEvents, poolStats, quoteBuy, formatAmount, TOKEN_DECIMALS, TOKEN_SUPPLY, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, WSOL_MINT } from '../solana/client.mjs';
 
 const MAX_U64 = (1n << 64n) - 1n;
@@ -150,8 +151,17 @@ export class SolanaIndexer {
   async sync() {
     if (this.running) return this.running;
     this.running = (async () => {
-      let phase = 'pool_snapshot';
+      let phase = 'network_identity';
       try {
+        const expected = SOLANA_GENESIS[this.network.cluster];
+        if (expected && !this.networkValidated) {
+          if (await this.connection.getGenesisHash() !== expected) {
+            const error = new Error('Solana RPC does not match the configured cluster.');
+            error.code = 'RPC_CLUSTER_MISMATCH'; throw error;
+          }
+          this.networkValidated = true;
+        }
+        phase = 'pool_snapshot';
         await this.syncPools(); phase = 'transaction_history';
         await this.syncTrades(); phase = 'pool_refresh'; await this.syncPools();
         this.lastError = null; this.lastErrorPhase = null; this.lastSuccess = new Date().toISOString();

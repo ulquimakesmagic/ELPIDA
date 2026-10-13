@@ -1,4 +1,4 @@
-# Current release gates — 12 October 2026
+# Current release gates — 13 October 2026
 
 Elpida remains a testnet product. Mainnet deployment scripts are preparation tools, not security approval. Older model-specific documents describe historical behavior; verify current code and deployment records before relying on their fee or network settings.
 
@@ -20,3 +20,11 @@ The fix prevents future skipped transactions. It does not reconstruct history al
 - Keep advanced holder rewards, buybacks, tokenized-stock rewards and identity claims explicitly unavailable until their public contracts/services are implemented and reviewed.
 
 Begin with one validated chain and creator-wallet rewards. No mainnet deployment or real-fund transaction is authorized by this document.
+
+## Railway RPC recovery — 13 October
+
+The live Solana worker failed at `pool_snapshot`. Railway's `SOLANA_RPC_URL` contained four comma-separated Helius mainnet endpoints while the application used devnet. The value was corrected to a single Helius devnet endpoint with an existing credential. Following the configuration deployment, public status reported a successful sync, cursor slot 510311400, no error, and zero indexed launches/trades. Zero activity is not evidence of a completed launch test.
+
+The server now rejects endpoint lists and invalid URLs without logging their contents. Before reading public pool state, the indexer checks the RPC genesis hash against the configured devnet/mainnet cluster and fails closed with `RPC_CLUSTER_MISMATCH`. Local validator networks are exempt from the fixed public-cluster hashes. Tests exercise malformed configuration, cluster mismatch, and recovery after correction.
+
+The Base Sepolia test wallet still holds approximately 0.000499384 ETH. A funded public launch remains pending; no launch, trade, or wallet signature was submitted in this recovery pass.

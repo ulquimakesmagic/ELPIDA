@@ -15,6 +15,7 @@ test('Solana RPC proxy forwards allowed methods only and rate limits each addres
   t.after(() => upstream.close());
   const target = `http://127.0.0.1:${upstream.address().port}/?api-key=SECRET`;
   assert.equal(createRpcProxy('http://example.com'), null, 'plain http outside localhost is refused');
+  assert.equal(createRpcProxy('https://example.com/?api-key=SECRET,https://other.example.com'), null, 'multiple endpoints cannot be forwarded as one URL');
   const proxy = createRpcProxy(target, { perSecond: 0.001, burst: 3 });
   const app = createServer((req, res) => proxy(req, res, (code, data) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); }));
   await new Promise(r => app.listen(0, '127.0.0.1', r));
