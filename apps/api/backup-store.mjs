@@ -1,4 +1,4 @@
-import {S3Client,PutObjectCommand,GetObjectCommand} from '@aws-sdk/client-s3';
+import {S3Client,PutObjectCommand,GetObjectCommand,ListObjectsV2Command} from '@aws-sdk/client-s3';
 import {createReadStream,createWriteStream,statSync} from 'node:fs';
 import {pipeline} from 'node:stream/promises';
 import {Transform} from 'node:stream';
@@ -19,6 +19,16 @@ export class BackupStore{
   const response=await this.client.send(new GetObjectCommand({Bucket:this.bucket,Key:key}),{abortSignal:AbortSignal.timeout(120000)});if(Number(response.ContentLength)>maxBytes)throw new Error('Backup object exceeds download limit');let size=0;
   const limiter=new Transform({transform(chunk,encoding,done){size+=chunk.length;done(size>maxBytes?new Error('Backup object exceeds download limit'):null,chunk);}});
   await pipeline(response.Body,limiter,createWriteStream(file,{flags:'wx',mode:0o600}));
+ }
+ async inventory(){
+  const objects=[],seen=new Set();let token;
+  do{
+   const response=await this.client.send(new ListObjectsV2Command({Bucket:this.bucket,Prefix:'elpida-backups/',MaxKeys:1000,...(token?{ContinuationToken:token}:{})}),{abortSignal:AbortSignal.timeout(120000)});
+   for(const object of response.Contents??[]){if(typeof object.Key!=='string'||!Number.isSafeInteger(object.Size)||object.Size<0)throw new Error('Invalid backup inventory');objects.push({key:object.Key,size:object.Size});if(objects.length>100000)throw new Error('Backup inventory exceeds review capacity');}
+   if(!response.IsTruncated)break;
+   token=response.NextContinuationToken;if(!token||seen.has(token))throw new Error('Invalid backup inventory pagination');seen.add(token);
+  }while(true);
+  return objects;
  }
  close(){this.client.destroy?.();}
 }

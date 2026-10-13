@@ -18,7 +18,7 @@
     "testnet:check": "node scripts/testnet-readiness.mjs",
     "test:base-fork": "node scripts/base-fork-lifecycle.mjs",
     "security:package": "node scripts/security-package.mjs",
-    "test:operations": "node --test tests/operations-monitoring.test.mjs tests/storage-operations.test.mjs",
+    "test:operations": "node --test tests/operations-monitoring.test.mjs tests/storage-operations.test.mjs tests/backup-retention.test.mjs",
     "backup:key": "node scripts/backup-key.mjs",
     "backup:offsite": "node --env-file-if-exists=.env scripts/offsite-backup.mjs",
     "test:indexer": "node --test tests/indexer.test.mjs tests/public-indexer.test.mjs tests/solana-indexer.test.mjs",

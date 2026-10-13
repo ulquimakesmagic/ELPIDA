@@ -1,0 +1,8 @@
+{
+  "provider": "Better Stack",
+  "activation": "pending-account-login",
+  "monitors": [
+    {"pronounceable_name":"Elpida availability","url":"https://elpida-production.up.railway.app/health","monitor_type":"status","check_frequency":180,"confirmation_period":60,"recovery_period":60,"request_timeout":15,"verify_ssl":true,"email":true,"sms":false,"call":false},
+    {"pronounceable_name":"Elpida operations and backups","url":"https://elpida-production.up.railway.app/api/operations/status","monitor_type":"status","check_frequency":180,"confirmation_period":60,"recovery_period":60,"request_timeout":15,"verify_ssl":true,"email":true,"sms":false,"call":false}
+  ]
+}

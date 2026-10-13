@@ -39,7 +39,7 @@ Backups include metadata (including provisional drafts), retention state and rec
 
 The backup format supports up to 50,000 files, a 16 MB manifest and 2 GB per encrypted object. Larger snapshots fail visibly rather than being reported as recoverable. Streaming encryption limits memory use. Local work folders are registered persistently; older registered work copies are removed only after a newer remote copy has been verified, with paths checked against the selected work directory. Unknown folders and symlinks are never deleted. Three unfinished working folders stop further attempts for operator review, preventing uncontrolled local growth.
 
-No bucket objects are automatically deleted. Configure an explicit bucket retention/lifecycle policy after reviewing recovery requirements and costs. Partial remote uploads can remain without a committed manifest; the operator must review their cleanup. Bucket upload/download and retained objects incur provider usage; configure budgets and access controls before activating production automation.
+No bucket objects are automatically deleted. Railway does not currently support bucket lifecycle rules. `npm run backup:offsite -- review` produces a read-only 30-day/seven-snapshot retention proposal for operator review; see OPERATIONS_ALERTS_AND_RETENTION.md. Partial remote uploads can remain without a committed manifest and are never age-based deletion candidates. Bucket upload/download and retained objects incur provider usage; review budgets and access controls.
 
 ## Restore drill in a separate Railway staging service
 
