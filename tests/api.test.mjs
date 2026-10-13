@@ -131,4 +131,10 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal((await request('sell', {token:token.address, amount:held,account:'1'})).status, 200);
     assert.equal((await request('launch', {name:'Bad',symbol:'BAD',pair:'unknown',firstBuy:'1'})).status, 400);
   });
+  await t.test('legacy publishing cannot bypass the shared metadata upload limit',async()=>{
+    // The earlier rejected stage request consumed one of the twenty requests.
+    for(let i=0;i<19;i++)assert.notEqual((await request('metadata/publish',{})).status,429);
+    assert.equal((await request('metadata/publish',{})).status,429);
+    assert.equal((await request('metadata/stage',{network:'base-sepolia'})).status,429);
+  });
 });

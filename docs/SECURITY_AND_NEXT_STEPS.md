@@ -1,5 +1,7 @@
 # Scope and security blockers
 
+Historical status below is retained for reference. For the current Base model-9 implementation and release gates, use [Base mainnet review](BASE_MAINNET_REVIEW.md).
+
 **11 October model:** separate USDC launch fee, native/USDC virtual curves, and graduation into a locked custom test pool. Direct-pool launch entries below are historical. Production DEX adapters and the updated Solana program are pending; see [current specification](VIRTUAL_CURVE_AND_PAIRS.md).
 
 ## Implemented prototype

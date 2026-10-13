@@ -17,6 +17,7 @@
     "indexer": "node scripts/indexer.mjs",
     "testnet:check": "node scripts/testnet-readiness.mjs",
     "test:base-fork": "node scripts/base-fork-lifecycle.mjs",
+    "security:package": "node scripts/security-package.mjs",
     "test:indexer": "node --test tests/indexer.test.mjs tests/public-indexer.test.mjs tests/solana-indexer.test.mjs",
     "test:dex": "node --test --test-concurrency=1 tests/dex-migration.test.mjs tests/dex-runtime.test.mjs"
   },

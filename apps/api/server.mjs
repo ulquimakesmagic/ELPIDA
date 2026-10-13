@@ -198,10 +198,12 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         try { return send(200, await circle.execute(req.headers.authorization, body)); }
         catch (error) { return send(error.status ?? 502, { error: error.message }); }
       }
-      if(action==='metadata/publish')return send(200,await metadataStore.publish(body,true));
-      if(action==='metadata/stage'){
+      if(['metadata/publish','metadata/stage'].includes(action)){
         if(Date.now()-metadataWindow>=60000){metadataWindow=Date.now();metadataCount=0;}
         if(++metadataCount>20)return send(429,{error:'Metadata upload limit reached. Wait a minute before retrying; no launch was submitted.'});
+      }
+      if(action==='metadata/publish')return send(200,await metadataStore.publish(body,true));
+      if(action==='metadata/stage'){
         const net=evmTestnets.find(n=>n.key===body.network);
         if(!net||net.mainnet||net.shared?.model!=='curve-dex-v9')return send(400,{error:'On-chain launch metadata staging is unavailable on this network.'});
         const pinned=metadataStore.status().publicEnabled;
