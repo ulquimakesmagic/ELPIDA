@@ -8,6 +8,8 @@ Challenges expire after two minutes; the browser stops work after ninety seconds
 
 Fixed-window limits: 10 uploads per session/hour; 50 uploads per connection group/hour; 20 uploads server-wide/minute; 1,000 uploads/day. Challenge issuance is limited to 60 per connection group/minute and 2,000/day server-wide. Existing storage quotas and the legacy publishing block remain in effect. These are intentionally conservative beta limits. A shared Railway proxy can group multiple users; production needs a reviewed trusted-edge policy and traffic-appropriate limits. Computation raises admission cost but does not make bots impossible. Rejected requests consume admitted work budgets, and resetting a browser cookie does not reset the connection-group budget.
 
+The disabled public metadata/publish route is rejected before reading its body and does not consume the protected staging budget. This prevents legacy-route flooding from exhausting the admission quota without solving challenges.
+
 Only one application replica should serve a shared admission database and metadata directory. A deployment must preserve the mounted volume. Close the service gracefully before relocating its storage. Existing launch-page tabs should be refreshed after this deployment; saved small drafts survive refresh.
 
 ## Backup and restore commands

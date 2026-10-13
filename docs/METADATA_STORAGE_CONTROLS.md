@@ -2,7 +2,7 @@
 
 Public staging remains available before the launch signature. A confirmed factory launch transaction is the authorization for retained storage; no separate creator signature is added. The validated public indexer replays canonical factory metadata references and retains the document and its uploaded logo. A failed chain synchronization cannot authorize retention. The creator-signed recovery flow for older tokens remains available.
 
-Each public-server upload starts provisionally, including public simulation uploads. The legacy metadata/publish route is disabled on a public server so it cannot independently grant retention. Staging and legacy attempts share the existing process-local 20/minute request limit. Caller-supplied addresses do not authorize permanent retention.
+Each public-server upload starts provisionally, including public simulation uploads. The legacy metadata/publish route is disabled before reading its body on a public server so it cannot independently grant retention or exhaust protected staging budgets. Staging uses durable anonymous admission plus a process-local 20/minute limit. Caller-supplied addresses do not authorize permanent retention. See STORAGE_OPERATIONS.md for the admission limits and recovery procedure.
 
 Stored blob files have a **512 MB** aggregate limit and provisional blobs have a **100 MB** limit by default. Configure ELPIDA_METADATA_MAX_BYTES and ELPIDA_METADATA_MAX_PENDING_BYTES with positive integer byte values. Capacity is recalculated from stored blob files on restart; retention state uses a persistent atomic-write ledger. Existing files predating the ledger remain protected and count toward total capacity. The ledger and temporary-write overhead are additional to the blob quota.
 

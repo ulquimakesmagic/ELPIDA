@@ -194,6 +194,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if (req.method === 'POST' && url.pathname === '/api/solana-rpc') return rpcProxy ? rpcProxy(req, res, send) : send(404, { error: 'Not found.' });
       if (req.method !== 'POST' || !url.pathname.startsWith('/api/')) return send(405, { error: 'Method not allowed.' });
       if (req.headers['x-elpida-token'] !== csrf || req.headers['content-type'] !== 'application/json') return send(403, { error: 'Refresh this page before submitting.' });
+      // A disabled route must not parse large bodies or spend the protected upload budget.
+      if(publicUrl&&url.pathname==='/api/metadata/publish')return send(410,{error:'Public metadata uploads must use the launch staging flow; retention is verified from the launch transaction.'});
       let uploadDigest;
       if(url.pathname==='/api/metadata/stage'){
         const client=String(req.headers.cookie??'').split(';').map(v=>v.trim()).find(v=>v.startsWith('elpida_upload='))?.slice(14)??'';
