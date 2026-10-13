@@ -1,6 +1,8 @@
 {
   "provider": "Better Stack",
-  "activation": "pending-account-login",
+  "activation": "active-verified-up-2026-10-14",
+  "provider_monitor_ids": {"availability":"5065878","operations":"5065887"},
+  "notification_test": "Provider confirmed test alert sent; inbox receipt not independently verified",
   "monitors": [
     {"pronounceable_name":"Elpida availability","url":"https://elpida-production.up.railway.app/health","monitor_type":"status","check_frequency":180,"confirmation_period":60,"recovery_period":60,"request_timeout":15,"verify_ssl":true,"email":true,"sms":false,"call":false},
     {"pronounceable_name":"Elpida operations and backups","url":"https://elpida-production.up.railway.app/api/operations/status","monitor_type":"status","check_frequency":180,"confirmation_period":60,"recovery_period":60,"request_timeout":15,"verify_ssl":true,"email":true,"sms":false,"call":false}
