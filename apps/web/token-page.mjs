@@ -81,7 +81,7 @@ export function renderToken(ctx, address) {
   const head=h('header.token-terminal-bar',
     h('div.terminal-identity',avatar(token,'avatar-lg'),h('div.terminal-identity-copy',h('h1',token.symbol,h('span.token-full-name',{title:token.name},token.name)),byline)),
     stats,h('details.terminal-context',h('summary',h('span.status-dot'),token.graduated?dex:life.label,icon('chevron-down','icon-sm')),
-      h('div.terminal-context-popover',h('p',ctx.envLabel()),h('p',`Trading pair: ${q}`),h('p',priceSource),h('p','Market cap uses total supply. Circulating market cap and FDV are shown in Technical details.'),h('p','Holders: ',holdersValue,' · Trades: ',tradesValue))));
+      h('div.terminal-context-popover',h('p',ctx.envLabel()),h('p',`Trading pair: ${q}`),h('p',priceSource),h('p','Market cap uses price × total supply. Calculation details are shown in Technical details.'),h('p','Holders: ',holdersValue,' · Trades: ',tradesValue))));
 
   const addresses = h('section.address-row', { 'aria-label': 'Contract addresses and dates' },
     h('div', h('span', 'Token'), h('a', { href: addressUrl(token.address) ?? '#', target: '_blank', rel: 'noopener noreferrer' }, short(token.address))),
