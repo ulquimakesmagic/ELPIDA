@@ -23,7 +23,7 @@ On Windows, `npm.cmd ci` now works: the lockfile was out of sync before.
    - the USDC adapter and **Approve USDC trading**.
 3. Copy the new factory address and deployment block from the success message (or the browser's saved record) and send them over. They get pinned in `packages/core/networks.mjs` as `model: 'curve-dex-v10'`.
 
-Funds: deployment gas only. Base Sepolia gas is cheap; the wallet's ~0.005 test ETH (13 October) should cover it, but top up from the Base faucet if a step reports low balance. The PR merge has its own merge step on GitHub: Phase 1 is open as pull request #1. A full public lifecycle test at the $50 size needs about **$120 of test funds** (about 0.05 test ETH for a native curve, or 120 test USDC from faucet.circle.com for a USDC curve), plus gas.
+Funds: deployment gas only. Base Sepolia gas is cheap; the wallet's ~0.005 test ETH (13 October) should cover it, but top up from the Base faucet if a step reports low balance. A full public lifecycle test at the $50 size needs about **$120 of test funds** (about 0.05 test ETH for a native curve, or 120 test USDC from faucet.circle.com for a USDC curve), plus gas.
 
 ## Not needed for Phase 1
 
