@@ -691,3 +691,31 @@ button.link-button,.copy { min-height:44px; }
 .price-sources summary { min-height:44px; display:flex; align-items:center; cursor:pointer; text-decoration:underline; text-underline-offset:4px; }
 @media(max-width:600px) { .tabbar { grid-template-columns:none; grid-auto-flow:column; grid-auto-columns:minmax(0,1fr); } }
 @media(max-width:600px) { .top-actions { min-width:0; width:100%; } .chain-selector { flex:1; min-width:0; } #env-button { width:100%; min-width:0; max-width:none; gap:6px; padding:8px 10px; } #env-button>span { min-width:0; } .account-button { flex-shrink:0; } }
+/* Token trading terminal: market context first, then execution and holder context. */
+.token-page .token-hero{padding:20px;background:var(--surface-1);border:1px solid var(--line);border-radius:18px;margin-bottom:0;}
+.token-page .token-hero h1{font-size:clamp(1.4rem,3vw,2rem);}
+.token-page>.stat-row{grid-template-columns:repeat(7,minmax(0,1fr));gap:16px;padding:18px 20px;margin:0 0 20px;background:var(--surface-1);border:1px solid var(--line);border-top:0;border-radius:0 0 18px 18px;}
+.token-page>.stat-row .stat strong{font-size:clamp(1rem,1.8vw,1.35rem);white-space:nowrap;}
+.token-page .token-layout{grid-template-columns:minmax(0,1fr) minmax(300px,350px);gap:20px;}
+.token-page .trade-aside{grid-column:2;grid-row:1/span 2;position:static;}
+.terminal-detail{grid-column:1;min-width:0;}
+.terminal-chart{height:460px;width:100%;min-width:0;}
+.chart-readout{min-height:20px;font-size:12px;font-variant-numeric:tabular-nums;color:var(--ink-2);}
+.chart-credit{font-size:11px;color:var(--ink-3);margin-bottom:0;}
+.position-panel h2{font-size:20px;margin-bottom:16px;}
+.position-grid{display:grid;grid-template-columns:1fr 1fr;gap:16px;}
+.position-stat{display:grid;gap:5px;min-width:0;}
+.position-stat strong{font-size:15px;overflow-wrap:anywhere;}
+.position-pnl{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:14px;margin-top:18px;background:var(--surface-2);border-radius:10px;}
+.position-pnl[data-dir=up] strong{color:var(--positive);}.position-pnl[data-dir=down] strong{color:var(--negative);}
+.thesis-editor{padding-top:16px;border-top:1px solid var(--line);margin-top:16px;}
+.thesis-editor textarea{width:100%;resize:vertical;min-height:120px;margin-top:10px;}
+.holder-thesis{padding:20px 0;border-top:1px solid var(--line);}
+.thesis-byline{display:flex;align-items:center;flex-wrap:wrap;gap:10px;}
+.thesis-byline>strong{color:var(--primary);}.thesis-byline>.meta{margin-left:auto;}
+.thesis-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;}
+.thesis-version{border-left:2px solid var(--line);padding-left:14px;margin-top:14px;}
+.holder-thesis summary{cursor:pointer;min-height:44px;display:flex;align-items:center;color:var(--ink-2);}
+@media(max-width:1100px){.token-page>.stat-row{grid-template-columns:repeat(4,minmax(0,1fr));}.terminal-chart{height:400px;}}
+@media(max-width:780px){.token-page .token-layout{grid-template-columns:1fr;}.token-page .trade-aside{grid-column:1;grid-row:auto;order:0;}.terminal-detail{grid-column:1;}.terminal-chart{height:340px;}.token-page>.stat-row{grid-template-columns:repeat(3,minmax(0,1fr));padding:16px;}.token-page .token-hero{padding:16px;}.thesis-byline>.meta{margin-left:0;}}
+@media(max-width:420px){.token-page>.stat-row{grid-template-columns:repeat(2,minmax(0,1fr));}.terminal-chart{height:300px;}.chart-readout{font-size:11px;}}

@@ -18,7 +18,9 @@ import {UploadAdmission} from './upload-admission.mjs';
 import {configuredBackup} from './backup-runner.mjs';
 import {OperationsMonitor,evaluateOperations} from './operations-health.mjs';
 import {tmpdir} from 'node:os';
-import {keccak256} from 'ethers';
+import {keccak256,formatUnits,parseUnits} from 'ethers';
+import {HolderTheses,thesisIdentity} from './holder-theses.mjs';
+import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
 import { MAX_METADATA_REQUEST_BYTES } from '../web/metadata.mjs';
 import { evmTestnets, solanaDevnet, solanaLocalnet, solanaMainnet } from '../../packages/core/networks.mjs';
@@ -28,6 +30,8 @@ const ethersFile = fileURLToPath(new URL('../../node_modules/ethers/dist/ethers.
 const resources = new Map([['/', ['index.html', 'text/html']], ['/launch', ['index.html', 'text/html']], ['/reward-policy.mjs', ['reward-policy.mjs', 'text/javascript']], ['/reward-ui.mjs', ['reward-ui.mjs', 'text/javascript']], ['/metadata.mjs', ['metadata.mjs', 'text/javascript']], ['/launch-capabilities.mjs', ['launch-capabilities.mjs', 'text/javascript']], ['/styles.css', ['styles.css', 'text/css']], ['/app.mjs', ['app.mjs', 'text/javascript']], ['/wallet.mjs', ['wallet.mjs', 'text/javascript']], ['/solana-wallet.mjs', ['solana-wallet.mjs', 'text/javascript']], ['/ui.mjs', ['ui.mjs', 'text/javascript']], ['/launch-flow.mjs', ['launch-flow.mjs', 'text/javascript']], ['/token-page.mjs', ['token-page.mjs', 'text/javascript']], ['/amounts.mjs', ['amounts.mjs', 'text/javascript']], ['/rewards-view.mjs', ['rewards-view.mjs', 'text/javascript']]]);
 // Static design assets (brand, fonts, icon sprite): only these extensions, only inside apps/web/assets.
 const assetRoot = fileURLToPath(new URL('../web/assets/', import.meta.url));
+resources.set('/terminal-chart.mjs',['terminal-chart.mjs','text/javascript']);
+resources.set('/holder-terminal.mjs',['holder-terminal.mjs','text/javascript']);
 resources.set('/wallet-discovery.mjs', ['wallet-discovery.mjs','text/javascript']);
 resources.set('/discovery.mjs', ['discovery.mjs','text/javascript']);
 resources.set('/chain-ui.mjs', ['chain-ui.mjs','text/javascript']);
@@ -43,6 +47,7 @@ resources.set('/upload-proof-worker.mjs', ['upload-proof-worker.mjs', 'text/java
 resources.set('/circle-funding.mjs', ['circle-funding.mjs', 'text/javascript']);
 const assetTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8' };
 const vendorFiles = new Map([
+  ['/vendor/lightweight-charts.js', fileURLToPath(new URL('../../node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js', import.meta.url))],
   ['/vendor/ethers.js', ethersFile],
   ['/vendor/solana-web3.js', fileURLToPath(new URL('../../node_modules/@solana/web3.js/lib/index.iife.min.js', import.meta.url))],
   ['/elpida-solana.mjs', fileURLToPath(new URL('../../packages/solana/client.mjs', import.meta.url))],
@@ -126,6 +131,16 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const priceSnapshot=()=>({...priceKeeper.snapshot(),local:runtime.config.local.price});
   const cookieSecurity = publicUrl ? '; Secure' : '';
   const csrf = randomBytes(24).toString('hex');
+  function indexedMarket(network,address){
+    if(network==='local'){const token=runtime.indexer.listings().find(t=>t.address===address.toLowerCase());if(!token)throw new Error('Token not indexed.');return {token,index:runtime.indexer,sol:false};}
+    if(network.startsWith('solana-')){if(!solanaIndex||solanaIndex.network.key!==network||solanaIndex.status().error||!solanaIndex.status().lastSuccess||Date.now()-Date.parse(solanaIndex.status().lastSuccess)>180000)throw new Error('Network not indexed.');const token=solanaIndex.token(address);if(!token)throw new Error('Token not indexed.');return {token,index:solanaIndex,sol:true};}
+    const e=publicIndex.entries.get(network);if(!e?.validated||e.error||Date.now()-Date.parse(e.lastSuccess)>180000)throw new Error('Indexing is behind. Retry shortly.');const token=e.index.listings().find(t=>t.address===address.toLowerCase());if(!token)throw new Error('Token not indexed.');return {token,index:e.index,sol:false};
+  }
+  async function heldBalance(i){const {index,sol}=indexedMarket(i.network,i.token);if(!sol)return index.holders(i.token,Number.MAX_SAFE_INTEGER).find(h=>h.address===i.author)?.balance??'0';
+    const accounts=await index.connection.getTokenAccountsByOwner(new solanaWeb3.PublicKey(i.author),{mint:new solanaWeb3.PublicKey(i.token)},'confirmed');return formatUnits(accounts.value.reduce((n,a)=>n+(a.account.data.length>=72?a.account.data.readBigUInt64LE(64):0n),0n),6);
+  }
+  const theses=new HolderTheses({path:port===0?':memory:':dataFile('public-theses.sqlite'),origin:publicUrl??`http://${host}:${port}`,holding:async i=>Number(await heldBalance(i))>0});
+  let terminalWindow=Date.now(),terminalCount=0,thesisCount=0;
   const uploadAdmission=new UploadAdmission({path:port===0?':memory:':dataFile('metadata-admission.sqlite')});
   let diagnosticWindow=Date.now(),diagnosticCount=0;
   let metadataWindow=Date.now(),metadataCount=0;
@@ -151,6 +166,20 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
       if (req.method === 'GET') {
+        if(url.pathname==='/api/terminal'){
+          if(Date.now()-terminalWindow>=60000){terminalWindow=Date.now();terminalCount=0;thesisCount=0;}if(++terminalCount>120)return send(429,{error:'Terminal data is busy. Retry shortly.'});
+          const network=url.searchParams.get('network')??'local',rawToken=url.searchParams.get('token'),author=url.searchParams.get('author'),i=thesisIdentity(network,rawToken,author??(network.startsWith('solana-')?rawToken:rawToken)),{token,index,sol}=indexedMarket(network,i.token);
+          const holders=sol?await index.holders(i.token):index.holders(i.token,Number.MAX_SAFE_INTEGER),balances=new Map();for(const h of holders)balances.set(h.address,formatUnits(parseUnits(balances.get(h.address)??'0',18)+parseUnits(h.balance,18),18));
+          let position=null;
+          if(author){const balance=await heldBalance(i),rows=sol?index.db.prepare("SELECT data FROM trades WHERE mint=? AND json_extract(data,'$.account')=? ORDER BY slot,idx").iterate(i.token,i.author):index.db.prepare("SELECT data FROM trades WHERE address=? AND lower(json_extract(data,'$.account'))=? ORDER BY height,idx").iterate(i.token,i.author),trades=[];for(const r of rows){if(trades.length>=100000)throw new Error('Position history exceeds review capacity.');trades.push(JSON.parse(r.data));}
+            const tradeHashes=new Set(trades.map(t=>t.hash));let untrackedTransfers=sol;if(!sol)for(const r of index.db.prepare("SELECT tx,data FROM events WHERE lower(json_extract(data,'$.address'))=? AND json_extract(data,'$.name')='Transfer'").iterate(i.token)){const event=JSON.parse(r.data);if(event.args.slice(0,2).some(a=>String(a).toLowerCase()===i.author)&&!tradeHashes.has(r.tx)){untrackedTransfers=true;break;}}
+            position=positionSummary({trades,balance,price:token.spotPrice??'0',supply:token.supply??'1000000000',untrackedTransfers});balances.set(i.author,balance);
+          }
+          const feed=theses.list(network,i.token).map(r=>({...r,balance:balances.get(r.author)??(sol?null:'0')})).filter(r=>r.balance===null||Number(r.balance)>0).sort((a,b)=>Number(b.balance??-1)-Number(a.balance??-1)||a.author.localeCompare(b.author)).slice(0,100);
+          let volume=0;const volumeRows=sol?index.db.prepare('SELECT data FROM trades WHERE mint=? AND timestamp>=?').iterate(i.token,Math.floor(Date.now()/1000)-86400):index.db.prepare('SELECT data FROM trades WHERE address=? AND timestamp>=?').iterate(i.token,Math.floor(Date.now()/1000)-86400);for(const r of volumeRows)volume+=Number(JSON.parse(r.data).quoteAmount);
+          return send(200,{position,theses:feed,volume24hQuote:String(volume),holderCoverage:sol?'Solana ranking covers the largest indexed token accounts; other authors are unranked.':'Ranked by current confirmed indexed wallet balances.',indexedBlock:sol?index.status().cursorSlot:index.tip()?.height,own:author?theses.latest(i):null});
+        }
+        if(url.pathname==='/api/theses/history'){const i=thesisIdentity(url.searchParams.get('network'),url.searchParams.get('token'),url.searchParams.get('author'));indexedMarket(i.network,i.token);return send(200,theses.history(i));}
         if(url.pathname==='/api/operations/status'){const result=evaluateOperations(operationsInput());return send(result.status==='critical'?503:200,{...result,backup:backupRunner.status(),metadataStorage:metadataStore.status().storage});}
         if(url.pathname==='/api/metadata/challenge'){
           let client=String(req.headers.cookie??'').split(';').map(v=>v.trim()).find(v=>v.startsWith('elpida_upload='))?.slice(14);
@@ -219,6 +248,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       try { body = JSON.parse(rawBody.toString()); } catch { return send(400, { error: 'Invalid request.' }); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) return send(400, { error: 'Invalid request.' });
       const action = url.pathname.slice('/api/'.length);
+      if(['theses/prepare','theses/save'].includes(action)){if(Date.now()-terminalWindow>=60000){terminalWindow=Date.now();terminalCount=0;thesisCount=0;}if(++thesisCount>30)return send(429,{error:'Thesis publishing is busy. Retry in a minute.'});return send(200,action==='theses/prepare'?await theses.prepare(body):await theses.save(body));}
       if(action==='public/metadata/prepare')return send(200,{message:publicIndex.metadataMessage(body).message});
       if(action==='public/metadata/save')return send(200,publicIndex.saveMetadata(body));
       if(action==='client-error'){if(Date.now()-diagnosticWindow>=60000){diagnosticWindow=Date.now();diagnosticCount=0;}if(++diagnosticCount>60)return send(429,{error:'Diagnostics request limit reached.'});const stage=String(body.stage??'unknown').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40),code=String(body.code??'UNKNOWN').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40),rpcMethod=/^eth_[a-zA-Z]{1,40}$/.test(body.rpcMethod??'')?body.rpcMethod:undefined,rpcCode=Number.isSafeInteger(body.rpcCode)?body.rpcCode:undefined;console.error(JSON.stringify({event:'client_error',requestId,stage,code,rpcMethod,rpcCode}));return send(200,{recorded:true,requestId});}
@@ -252,7 +282,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   });
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, async close() {clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close(); await publicIndex.close();uploadAdmission.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, async close() {clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close(); await publicIndex.close();uploadAdmission.close();theses.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -47,6 +47,7 @@
   },
   "dependencies": {
     "@aws-sdk/client-s3": "3.1151.0",
-    "@circle-fin/developer-controlled-wallets": "10.8.1"
+    "@circle-fin/developer-controlled-wallets": "10.8.1",
+    "lightweight-charts": "5.2.1"
   }
 }

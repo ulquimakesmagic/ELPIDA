@@ -105,6 +105,14 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.deepEqual((await (await fetch(`${base}/api/tokens/${address}`)).json()).metadata,metadata);
     assert.deepEqual((await (await fetch(`${base}/api/tokens`)).json())[0].metadata,metadata);
   });
+  await t.test('terminal returns indexed position and validates wallet-signed holder publishing', async () => {
+    const owner=await state(),url=`${base}/api/terminal?network=local&token=${address}&author=${owner.wallet}`;
+    const response=await fetch(url);assert.equal(response.status,200);const terminal=await response.json();assert.ok(terminal.position.basisKnown);assert.ok(Number(terminal.position.balance)>0);assert.ok(Number(terminal.volume24hQuote)>0);
+    assert.equal((await fetch(`${base}/terminal-chart.mjs`)).status,200);assert.equal((await fetch(`${base}/vendor/lightweight-charts.js`)).status,200);
+    const body={network:'local',token:address,author:owner.wallet,text:'Simulation integration test thesis.'},prepared=await request('theses/prepare',body);assert.equal(prepared.status,200);
+    assert.equal((await request('theses/save',{...body,nonce:prepared.body.nonce,signature:'0x00'})).status,400);
+    const signer=await app.runtime.provider.getSigner(owner.wallet);{const signature=await signer.signMessage(prepared.body.message);assert.equal((await request('theses/save',{...body,nonce:prepared.body.nonce,signature})).status,200);assert.equal((await (await fetch(url)).json()).theses.length,1);}
+  });
   await t.test('quotes and executes a buy and full sell from the trader account', async () => {
     const quote = await request('quote', { token: address, side: 'buy', amount: '0.01' });
     assert.equal(quote.status, 200);

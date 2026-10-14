@@ -5,12 +5,12 @@ import { usdcFunding } from './usdc-funding.mjs';
 import { h, icon, short, number, compact, avatar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, copyButton, errorText, toast, usdRate, formatPrice, bar } from './ui.mjs';
 import { withWalletTimeout, walletErrorText } from './wallet.mjs';
 import { exceedsRemaining } from './amounts.mjs';
+import {terminalChart} from './terminal-chart.mjs';
+import {holderTerminal} from './holder-terminal.mjs';
 export { exceedsRemaining };
 
 const metadataRequests = new Map();
 
-const SVGNS = 'http://www.w3.org/2000/svg';
-function svg(tag, attrs) { const n = document.createElementNS(SVGNS, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; }
 
 function dexName(ctx, token) {
   if (token.venue) return token.venue;
@@ -71,10 +71,12 @@ export function renderToken(ctx, address) {
     !token.graduated ? h('p.small.muted', token.complete ? `Anyone can graduate it: the ${number(reserve, 4)} ${q} reserve and the remaining tokens open a ${dex} pool with permanently locked liquidity.` : `Virtual bonding curve: purchases build the reserve. About ${number(token.remainingBuy, 4)} ${q} more completes it, then the liquidity moves into a locked ${dex} pool.`) : null);
 
   const stat = (label, value, extra) => h('div.stat', h('span', label), h('strong', value), extra ?? null);
-  const holdersValue = h('strong', '—'), tradesValue = h('strong', '—');
+  const holdersValue = h('strong', '—'), tradesValue = h('strong', '—'),volumeValue=h('strong','—');
   const creatorFees = Number(token.creatorFees || 0);
   const stats = h('section.stat-row', { 'aria-label': 'Token statistics' },
-    stat('Market cap', fmtValue(p.marketCap, token)),
+    stat('Price',fmtPrice(token)),
+    h('div.stat',{title:'Actual quote assets in the curve or pool; virtual reserves are excluded.'},h('span','Liquidity'),h('strong',fmtValue(Number(token.reserve??0),token))),
+    h('div.stat',h('span','24h volume'),volumeValue),
     h('div.stat', h('span', 'Holders'), holdersValue),
     h('div.stat', h('span', 'Trades'), tradesValue),
     stat('Supply', compact(token.supply || 1e9)),
@@ -131,44 +133,9 @@ export function renderToken(ctx, address) {
     token.metadataURI ? [h('dt', 'Metadata URI'), h('dd', token.metadataURI)] : null));
 
   const activity = marketActivity(ctx, token, q, { addressUrl, isCreator, onCounts: ({ holders, trades }) => { holdersValue.textContent = holders ?? '—'; tradesValue.textContent = trades ?? '—'; } });
+  const desk=holderTerminal(ctx,token,{onVolume:v=>volumeValue.textContent=fmtValue(v,token)});
   return h('div.token-page', h('a.back-link', { href: '#/' }, icon('arrow-left', 'icon-sm'), 'Launches'), head,
-    h('div.token-layout', h('div.stack', priceHistory(ctx,token,q), curve, stats, addresses, about, activity, tech), h('aside.trade-aside', tradePanel(ctx, token, { dex, solana }))));
-}
-
-function priceHistory(ctx,token,q){
-  let interval=60,basis='cap',style='candles',revision=0;
-  const content=h('div',h('p.muted.small','Loading indexed price history…'));
-  const explanation=h('p.small.muted');
-  const controls=h('div.chart-controls');
-  const headline=h('strong.chart-value',fmtValue(pricing(token).marketCap,token)),change=h('span.chart-change');
-  const panel=h('section.panel.price-history',{'aria-label':'Market cap chart'},h('div.chart-top',h('div',headline,change),controls),content,explanation);
-  const endpoint=ctx.mode==='local'?`tokens/${token.address}`:`public/tokens/${token.address}`;
-  const network=ctx.mode==='local'?'':`&network=${encodeURIComponent(ctx.currentChain())}`;
-  const buttons=(label,values,current,update)=>h('div.chart-options',{role:'group','aria-label':label},values.map(([value,text])=>h('button.btn.btn-secondary.btn-sm',{type:'button','aria-pressed':String(value===current),on:{click:()=>{update(value);drawControls();load();}}},text)));
-  function drawControls(){controls.replaceChildren(buttons('Chart value',[['cap','MC'],['price','Price']],basis,v=>basis=v),buttons('Chart style',[['line','Line'],['candles','Candles']],style,v=>style=v),buttons('Chart interval',[[60,'1m'],[300,'5m'],[3600,'1h'],[86400,'1D']],interval,v=>interval=v));}
-  const load=async()=>{
-    const request=++revision;content.setAttribute('aria-busy','true');
-    try{
-      const data=await ctx.api(`${endpoint}/candles?interval=${interval}${network}`);
-      if(!panel.isConnected||request!==revision)return;
-      const points=data.filter(p=>Number.isFinite(Number(p.close))&&Number(p.close)>0&&Number.isSafeInteger(p.timestamp)).slice(-100);
-      if(!points.length){content.replaceChildren(h('p.muted.small','No indexed trades yet. The chart appears after the first trade.'));return;}
-      const rate=usdRate(token),multiplier=(basis==='cap'?Number(token.supply):1)*(rate??1),unit=rate===null?q:'USD';
-      explanation.textContent=`${basis==='cap'?'Market cap (price × 1B supply)':'Price'} in ${unit}, from executed trades.${rate===null?'':' Past trades are converted at the current USD rate.'}`;
-      const first=Number(points[0].open),last=Number(points.at(-1).close),move=first>0?(last-first)/first*100:0;
-      headline.textContent=basis==='cap'?fmtValue(pricing(token).marketCap,token):fmtPrice(token);
-      change.textContent=`${move>=0?'+':''}${number(move,2)}% · ${{60:'1m',300:'5m',3600:'1h',86400:'1D'}[interval]} candles`;change.dataset.dir=move>=0?'up':'down';
-      const bars=points.map(p=>({...p,open:Number(p.open)*multiplier,high:Number(p.high)*multiplier,low:Number(p.low)*multiplier,close:Number(p.close)*multiplier}));
-      const low=Math.min(...bars.map(p=>p.low)),high=Math.max(...bars.map(p=>p.high)),span=high-low||high*.02;
-      const t0=points[0].timestamp,t1=points.at(-1).timestamp,x=i=>t0===t1?300:24+(points[i].timestamp-t0)*530/(t1-t0),y=v=>200-(v-low)*160/span;
-      const plot=svg('svg',{viewBox:'0 0 640 240',role:'img','aria-label':`${points.length} indexed intervals. Latest ${basis==='cap'?'market cap':'price'} ${bars.at(-1).close} ${unit}.`});
-      for(const yy of [40,120,200]){plot.append(svg('line',{x1:'24',x2:'555',y1:String(yy),y2:String(yy),class:'chart-grid'}));const label=svg('text',{x:'565',y:String(yy+4),class:'chart-axis'});label.textContent=(rate===null?'':'$')+compact(low+(200-yy)*span/160);plot.append(label);}
-      if(style==='line')plot.append(svg('polyline',{points:bars.map((v,i)=>`${x(i)},${y(v.close)}`).join(' '),class:'chart-line',fill:'none'}));
-      else for(const [i,b]of bars.entries()){const width=Math.max(2,Math.min(12,360/bars.length)),cls=b.close>=b.open?'candle-up':'candle-down';plot.append(svg('line',{x1:String(x(i)),x2:String(x(i)),y1:String(y(b.high)),y2:String(y(b.low)),class:cls}),svg('rect',{x:String(x(i)-width/2),y:String(Math.min(y(b.open),y(b.close))),width:String(width),height:String(Math.max(2,Math.abs(y(b.open)-y(b.close)))),class:cls}));}
-      content.replaceChildren(plot,h('div.chart-caption',h('span',new Date(t0*1000).toLocaleString()),h('span',`${points.length} traded interval${points.length===1?'':'s'}`),h('span',new Date(t1*1000).toLocaleTimeString())));
-    }catch{if(request===revision)content.replaceChildren(h('p.muted.small','Price history is temporarily unavailable or still indexing.'),h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:load}},'Retry chart'));}
-    finally{if(request===revision)content.setAttribute('aria-busy','false');}
-  };drawControls();load();return panel;
+    stats,h('div.token-layout',terminalChart(ctx,token,q),h('aside.trade-aside.stack',desk.position,tradePanel(ctx, token, { dex, solana })),h('div.stack.terminal-detail',curve,activity,desk.feed,addresses,about,tech)));
 }
 
 function marketActivity(ctx,token,q,{addressUrl,isCreator,onCounts}){
