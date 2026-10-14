@@ -7,7 +7,7 @@ import solc from 'solc';
 
 const root=fileURLToPath(new URL('../',import.meta.url));
 const git=(...args)=>execFileSync('git',args,{cwd:root,encoding:'utf8'}).trim();
-const files=git('ls-files').split('\n').filter(p=>/^(contracts\/evm\/.*\.sol|apps\/(api|web)\/.*\.(mjs|html|css|svg|png|woff2|webmanifest|txt)|packages\/.*\.(mjs|json)|tests\/.*\.(mjs|sol)|scripts\/.*\.mjs)$/.test(p)||['package.json','package-lock.json','hardhat.config.js','hardhat.config.mjs','config/native-pricing.json','docs/TRADING_TERMINAL.md','docs/BASE_MAINNET_REVIEW.md','docs/METADATA_STORAGE_CONTROLS.md','docs/STORAGE_OPERATIONS.md','docs/RAILWAY_BACKUPS_AND_MONITORING.md','docs/OPERATIONS_ALERTS_AND_RETENTION.md','config/uptime-monitors.json','docs/BASE_FORK_LIFECYCLE.md','docs/LAUNCH_CONFIRMATION.md','docs/TESTNET_LIFECYCLE_VERIFICATION.md'].includes(p));
+const files=git('ls-files').split('\n').filter(p=>/^(contracts\/evm\/.*\.sol|apps\/(api|web)\/.*\.(mjs|html|css|svg|png|woff2|webmanifest|txt)|packages\/.*\.(mjs|json)|tests\/.*\.(mjs|sol)|scripts\/.*\.mjs)$/.test(p)||['package.json','package-lock.json','hardhat.config.js','hardhat.config.mjs','config/native-pricing.json','docs/MOBILE_LAYOUT_VERIFICATION.md','docs/TRADING_TERMINAL.md','docs/BASE_MAINNET_REVIEW.md','docs/METADATA_STORAGE_CONTROLS.md','docs/STORAGE_OPERATIONS.md','docs/RAILWAY_BACKUPS_AND_MONITORING.md','docs/OPERATIONS_ALERTS_AND_RETENTION.md','config/uptime-monitors.json','docs/BASE_FORK_LIFECYCLE.md','docs/LAUNCH_CONFIRMATION.md','docs/TESTNET_LIFECYCLE_VERIFICATION.md'].includes(p));
 const stamp=new Date().toISOString().replace(/[:.]/g,'-');
 const output=join(root,'backups','security-review',stamp);mkdirSync(output,{recursive:true});
 const hashes=[];
