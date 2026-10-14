@@ -18,7 +18,7 @@ import {UploadAdmission} from './upload-admission.mjs';
 import {configuredBackup} from './backup-runner.mjs';
 import {OperationsMonitor,evaluateOperations} from './operations-health.mjs';
 import {tmpdir} from 'node:os';
-import {keccak256,formatUnits,parseUnits} from 'ethers';
+import {Contract,keccak256,formatUnits,parseUnits} from 'ethers';
 import {HolderTheses,thesisIdentity} from './holder-theses.mjs';
 import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
@@ -136,10 +136,10 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     if(network.startsWith('solana-')){if(!solanaIndex||solanaIndex.network.key!==network||solanaIndex.status().error||!solanaIndex.status().lastSuccess||Date.now()-Date.parse(solanaIndex.status().lastSuccess)>180000)throw new Error('Network not indexed.');const token=solanaIndex.token(address);if(!token)throw new Error('Token not indexed.');return {token,index:solanaIndex,sol:true};}
     const e=publicIndex.entries.get(network);if(!e?.validated||e.error||Date.now()-Date.parse(e.lastSuccess)>180000)throw new Error('Indexing is behind. Retry shortly.');const token=e.index.listings().find(t=>t.address===address.toLowerCase());if(!token)throw new Error('Token not indexed.');return {token,index:e.index,sol:false};
   }
-  async function heldBalance(i){const {index,sol}=indexedMarket(i.network,i.token);if(!sol)return index.holders(i.token,Number.MAX_SAFE_INTEGER).find(h=>h.address===i.author)?.balance??'0';
+  async function heldBalance(i,live=false){const {index,sol}=indexedMarket(i.network,i.token);if(!sol&&live)return formatUnits(await new Contract(i.token,['function balanceOf(address) view returns (uint256)'],index.provider).balanceOf(i.author),18);if(!sol)return index.holders(i.token,Number.MAX_SAFE_INTEGER).find(h=>h.address===i.author)?.balance??'0';
     const accounts=await index.connection.getTokenAccountsByOwner(new solanaWeb3.PublicKey(i.author),{mint:new solanaWeb3.PublicKey(i.token)},'confirmed');return formatUnits(accounts.value.reduce((n,a)=>n+(a.account.data.length>=72?a.account.data.readBigUInt64LE(64):0n),0n),6);
   }
-  const theses=new HolderTheses({path:port===0?':memory:':dataFile('public-theses.sqlite'),origin:publicUrl??`http://${host}:${port}`,holding:async i=>Number(await heldBalance(i))>0});
+  const theses=new HolderTheses({path:port===0?':memory:':dataFile('public-theses.sqlite'),origin:publicUrl??`http://${host}:${port}`,holding:async i=>Number(await heldBalance(i,true))>0});
   let terminalWindow=Date.now(),terminalCount=0,thesisCount=0;
   const uploadAdmission=new UploadAdmission({path:port===0?':memory:':dataFile('metadata-admission.sqlite')});
   let diagnosticWindow=Date.now(),diagnosticCount=0;
