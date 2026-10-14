@@ -208,6 +208,7 @@ function tradePanel(ctx, token, { dex, solana }) {
   const slippage = h('select.select#trade-slippage', [['0.5', '0.5%'], ['1', '1%'], ['3', '3%'], ['5', '5%']].map(([v, l]) => h('option', { value: v, selected: v === '1' }, l)));
   const submit = h('button.btn.btn-block.btn-lg', { type: 'submit', disabled:true });
   const updateSubmit = () => { submit.disabled = !quoteReady || submitting; };
+  const remainingDisplay = token.remainingBase ?? token.remainingBuy;
   const remaining = !token.complete && !token.graduated && Number(token.remainingBuy) > 0;
   const remainingHint = h('p.hint', remaining ? `About ${number(remainingDisplay,8)} ${q} remains to complete the curve. Further trading continues after graduation into the locked pool.` : '');
   const useRemaining = h('button.btn.btn-secondary.btn-sm.curve-limit-action', {type:'button',hidden:true,on:{click:()=>{amount.value=token.remainingBuy;quote();}}}, 'Use remaining amount');
