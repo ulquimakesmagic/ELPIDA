@@ -24,15 +24,6 @@
     "test:indexer": "node --test tests/indexer.test.mjs tests/public-indexer.test.mjs tests/solana-indexer.test.mjs",
     "test:dex": "node --test --test-concurrency=1 tests/dex-migration.test.mjs tests/dex-runtime.test.mjs"
   },
-  "devDependencies": {
-    "@openzeppelin/contracts": "^5.4.0",
-    "@solana/web3.js": "1.98.4",
-    "@uniswap/v3-core": "^1.0.1",
-    "@uniswap/v3-periphery": "^1.4.4",
-    "ethers": "6.17.0",
-    "hardhat": "3.19.0",
-    "solc": "0.8.24"
-  },
   "overrides": {
     "solc": {
       "tmp": "0.2.7"
@@ -48,6 +39,13 @@
   "dependencies": {
     "@aws-sdk/client-s3": "3.1151.0",
     "@circle-fin/developer-controlled-wallets": "10.8.1",
-    "lightweight-charts": "5.2.1"
+    "@openzeppelin/contracts": "^5.4.0",
+    "@solana/web3.js": "1.98.4",
+    "@uniswap/v3-core": "^1.0.1",
+    "@uniswap/v3-periphery": "^1.4.4",
+    "ethers": "6.17.0",
+    "hardhat": "3.19.0",
+    "lightweight-charts": "5.2.1",
+    "solc": "0.8.24"
   }
 }

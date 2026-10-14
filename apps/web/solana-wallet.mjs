@@ -235,6 +235,8 @@ export class SolanaWallet {
         supply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS), balance: formatAmount(this.client.tokenAmount(holdings[index]?.data), TOKEN_DECIMALS),
         spotPrice: stats.price, marketCap: stats.marketCap, progress: stats.progress, remainingBuy: formatAmount(remainingBuy, d),
         feeBps: Number(feeBps), antiSnipeActive: !complete && feeBps > BigInt(config.baseFeeBps),
+        // Live anti-snipe schedule for the trade panel's fee window countdown.
+        launchedAt: Number(pool.createdAt), feeSchedule: { base: Number(config.baseFeeBps), start: Number(config.snipeStartBps), window: Number(config.snipeWindowSecs) },
         // `complete`: the curve sold out; `graduated`: its liquidity is now in the locked PumpSwap pool.
         complete, graduated: pool.status === STATUS_MIGRATED, completedAt: Number(pool.graduatedAt),
         protocolFees: formatAmount(pool.protocolFees, d), creatorFees: formatAmount(pool.creatorFees, d), liquidityLocked: true,

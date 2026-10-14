@@ -59,6 +59,8 @@ test('USDC fees, paired trades and bounded conversion execute against local cont
  assert.ok(spent>0n&&spent<=parseUnits(quote.maxUsdc,6));
  await r.transact('buy',{token:native.token,amount:'0.01'});
  await(await coin.connect(await r.provider.getSigner(0)).mint(owner,25_000_000_000n)).wait();
+ // Finish the curve after the one-minute anti-snipe window, at the base fee.
+ await r.provider.send('evm_increaseTime',[61]);await r.provider.send('evm_mine',[]);await r.indexer.sync();
  await r.transact('buy',{token:launch.token,amount:r.indexer.snapshot(launch.token).remainingBuy});
  await r.transact('graduate',{token:launch.token});
  assert.equal(r.indexer.snapshot(launch.token).liquidityLocked,true,'USDC graduation locks the position permanently');

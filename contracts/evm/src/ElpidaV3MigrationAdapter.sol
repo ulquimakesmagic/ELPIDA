@@ -20,6 +20,11 @@ interface IV3MigrationPool {
     function swap(address,bool,int256,uint160,bytes calldata) external returns(int256,int256);
 }
 interface IWrappedMigrationAsset {function deposit() external payable;}
+/// @notice Graduates a completed curve into a permanently locked full-range Uniswap v3 position. NOT AUDITED.
+/// @dev If the pool already exists at a different price (for example, created by a griefer), the adapter
+/// swaps it back to the curve's terminal price, spending at most MAX_REBALANCE_BPS of each migrating asset.
+/// Whatever the swap spends stays in the pool. If the price still differs, migration reverts and the curve's
+/// escape hatch applies.
 contract ElpidaV3MigrationAdapter {
     struct Request {address token;address quote;uint256 tokenAmount;uint256 quoteAmount;address treasury;address creator;}
     struct Result {address pool;address locker;address splitter;uint256 positionId;uint256 tokenUsed;uint256 quoteUsed;}
@@ -28,10 +33,16 @@ contract ElpidaV3MigrationAdapter {
     address public immutable weth;
     address public immutable usdc;
     uint24 public immutable fee;
+    /// Maximum share of each migrating asset the adapter may spend to correct a mispriced pool.
+    uint256 public constant MAX_REBALANCE_BPS = 200;
     mapping(address=>Result) public migrations;
     bool private entered;
     address private repricePool;
+    address private repriceAsset;
+    uint256 private repriceBudget;
     event Migrated(address indexed curve,address indexed token,address indexed pool,address locker,address splitter,uint256 positionId,uint256 tokenUsed,uint256 quoteUsed);
+    /// Pool-side deltas of the corrective swap: positive amounts were paid into the pool.
+    event PoolRebalanced(address indexed pool,int256 amount0,int256 amount1);
     constructor(address manager_,address usdc_,uint24 fee_) {
         require(manager_.code.length>0 && usdc_.code.length>0,"deployment code");
         manager=IV3MigrationManager(manager_);dexFactory=manager.factory();weth=manager.WETH9();usdc=usdc_;fee=fee_;
@@ -41,7 +52,6 @@ contract ElpidaV3MigrationAdapter {
         require(!entered && migrations[msg.sender].pool==address(0),"reentrancy/repeat");entered=true;
         require(r.token.code.length>0 && r.tokenAmount>0 && r.quoteAmount>0 && r.treasury!=address(0) && r.creator!=address(0),"request");
         require(r.quote==address(0) || r.quote==usdc,"quote asset");
-        {
         address quoteAsset=r.quote==address(0)?weth:r.quote;
         require(r.token!=quoteAsset,"same asset");
         _pull(r.token,r.tokenAmount);
@@ -50,39 +60,72 @@ contract ElpidaV3MigrationAdapter {
         bool tokenFirst=r.token<quoteAsset;
         address a=tokenFirst?r.token:quoteAsset;address b=tokenFirst?quoteAsset:r.token;
         uint256 x=tokenFirst?r.tokenAmount:r.quoteAmount;uint256 y=tokenFirst?r.quoteAmount:r.tokenAmount;
+        {
         uint160 expected=initialSqrtPrice(x,y);
         result.pool=manager.createAndInitializePoolIfNecessary(a,b,fee,expected);
-        (uint160 actual,,,,,,)=IV3MigrationPool(result.pool).slot0();
-        // Empty initialized pools can be repriced without spending funds. An active mismatched pool is rejected.
-        if(actual!=expected && IV3MigrationPool(result.pool).liquidity()==0){
-            repricePool=result.pool;
-            IV3MigrationPool(result.pool).swap(address(this),actual>expected,1,expected,"");
-            repricePool=address(0);(actual,,,,,,)=IV3MigrationPool(result.pool).slot0();
+        (uint256 mx,uint256 my)=_rebalance(result.pool,a,b,x,y,expected);
+        result=_mint(r,result,a,b,mx,my);
         }
-        require((actual>expected?actual-expected:expected-actual)<=uint256(expected)/1_000_000,"pool price mismatch");
-        result=_mint(r,result,a,b,x,y);
-        uint256 used0=result.tokenUsed;uint256 used1=result.quoteUsed;
+        result=_settle(result,a,b,x,y,tokenFirst);
+        migrations[msg.sender]=result;
+        emit Migrated(msg.sender,r.token,result.pool,result.locker,result.splitter,result.positionId,result.tokenUsed,result.quoteUsed);entered=false;
+    }
+    /// Refunds unused assets. Whatever is not refunded went into the pool (rebalancing swap or position).
+    function _settle(Result memory result,address a,address b,uint256 x,uint256 y,bool tokenFirst) private returns(Result memory) {
+        uint256 used0=x-_refund(a,x);uint256 used1=y-_refund(b,y);
         result.tokenUsed=tokenFirst?used0:used1;
         result.quoteUsed=tokenFirst?used1:used0;
-        migrations[msg.sender]=result;
-        if(x>used0)require(IFeeToken(a).transfer(msg.sender,x-used0),"refund0");
-        if(y>used1)require(IFeeToken(b).transfer(msg.sender,y-used1),"refund1");
+        return result;
+    }
+    /// Returns the caller's unused `asset` (never more than it supplied) and reports the refunded amount.
+    function _refund(address asset,uint256 supplied) private returns(uint256 amount) {
+        amount=IFeeToken(asset).balanceOf(address(this));
+        if(amount>supplied)amount=supplied;
+        if(amount>0)require(IFeeToken(asset).transfer(msg.sender,amount),"refund");
+    }
+    /// Moves an existing pool to `expected`, spending at most MAX_REBALANCE_BPS of the input asset.
+    /// Returns the asset amounts left for minting.
+    function _rebalance(address pool,address a,address b,uint256 x,uint256 y,uint160 expected) private returns(uint256,uint256) {
+        (uint160 actual,,,,,,)=IV3MigrationPool(pool).slot0();
+        if(actual!=expected){
+            // Price too high (token1 per token0): sell token0. Too low: sell token1.
+            bool zeroForOne=actual>expected;
+            uint256 budget=(zeroForOne?x:y)*MAX_REBALANCE_BPS/10000;
+            if(budget==0)budget=1;
+            repricePool=pool;repriceAsset=zeroForOne?a:b;repriceBudget=budget;
+            // Pool deltas: positive amounts were paid in by the adapter, negative amounts were paid out to it.
+            (int256 d0,int256 d1)=IV3MigrationPool(pool).swap(address(this),zeroForOne,int256(budget),expected,"");
+            repricePool=address(0);repriceAsset=address(0);repriceBudget=0;
+            x=d0>=0?x-uint256(d0):x+uint256(-d0);
+            y=d1>=0?y-uint256(d1):y+uint256(-d1);
+            if(d0!=0||d1!=0)emit PoolRebalanced(pool,d0,d1);
+            (actual,,,,,,)=IV3MigrationPool(pool).slot0();
         }
-        emit Migrated(msg.sender,r.token,result.pool,result.locker,result.splitter,result.positionId,result.tokenUsed,result.quoteUsed);entered=false;
+        require((actual>expected?actual-expected:expected-actual)<=uint256(expected)/1_000_000,"pool price mismatch");
+        return (x,y);
     }
     function _mint(Request calldata r,Result memory result,address a,address b,uint256 x,uint256 y) private returns(Result memory) {
         ElpidaV3FeeLocker locker=new ElpidaV3FeeLocker(address(manager),address(this),a,b,fee,IV3MigrationFactory(dexFactory).feeAmountTickSpacing(fee),r.treasury,r.creator);
         result.locker=address(locker);result.splitter=address(locker.splitter());
         _approve(a,x);_approve(b,y);
         uint256 used0;uint256 used1;
-        (result.positionId,,used0,used1)=manager.mint(IV3MigrationManager.MintParams(a,b,fee,locker.lower(),locker.upper(),x,y,x*9999/10000,y*9999/10000,address(this),block.timestamp));
+        // The price was verified in this transaction, so the position cannot be sandwiched. At least one side
+        // must be almost fully deposited; a rebalanced pool leaves part of the other side as refundable dust.
+        (result.positionId,,used0,used1)=manager.mint(IV3MigrationManager.MintParams(a,b,fee,locker.lower(),locker.upper(),x,y,0,0,address(this),block.timestamp));
+        require(used0*10000>=x*9990 || used1*10000>=y*9990,"mint ratio");
         _approve(a,0);_approve(b,0);
         manager.safeTransferFrom(address(this),address(locker),result.positionId);
         require(locker.locked(),"position lock");
         result.tokenUsed=used0;result.quoteUsed=used1;return result;
     }
-    function uniswapV3SwapCallback(int256 amount0,int256 amount1,bytes calldata) external view {
-        require(entered && msg.sender==repricePool && repricePool!=address(0) && amount0==0 && amount1==0,"empty pool callback");
+    /// Pays only the pool being rebalanced, only during a migration, only in the input asset and only up to the budget.
+    function uniswapV3SwapCallback(int256 amount0,int256 amount1,bytes calldata) external {
+        require(entered && repricePool!=address(0) && msg.sender==repricePool,"rebalance callback");
+        uint256 owed=amount0>0?uint256(amount0):amount1>0?uint256(amount1):0;
+        if(owed==0)return;
+        require(owed<=repriceBudget,"rebalance budget");
+        repriceBudget-=owed;
+        require(IFeeToken(repriceAsset).transfer(msg.sender,owed),"rebalance payment");
     }
     function initialSqrtPrice(uint256 x,uint256 y) public pure returns(uint160) {
         uint256 root=y<=x?Math.sqrt(Math.mulDiv(y,uint256(1)<<192,x)):Math.sqrt(Math.mulDiv(x,uint256(1)<<192,y));

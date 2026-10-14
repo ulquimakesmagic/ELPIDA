@@ -1,5 +1,7 @@
 # Virtual curve, pair selection and graduation
 
+> **Superseded for current economics by [MODEL_10.md](MODEL_10.md)** (15 October 2026): every chain now uses a $5,000 → $50,000 (10x) curve with anti-snipe fees and a graduation escape hatch. The figures below describe older models and are kept for history.
+
 **Model 3 historical guide:** the default UI now uses model 4 beta economics and durable indexing. See [current implementation](INDEXER_AND_POST_MIGRATION_FEES.md). Existing model 3 source remains unchanged.
 
 Current design: 11 October 2026. This supersedes the direct-pool/deposit design recorded on 10 October. Work lives in `C:\Users\user\Desktop\OneForAll\ELPIDA\elpida-v1`; synced ChatGPT sources remain untouched.
