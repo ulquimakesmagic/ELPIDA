@@ -218,6 +218,8 @@ function rerender(reason) {
   if(['portfolio','rewards'].includes(r.name)&&(mode!=='testnet'||!wallet.address)){view.replaceChildren(h('div.empty',h('h1',r.name==='rewards'?'Rewards':'Portfolio'),h('p','Connect your wallet to see your '+r.name+'.'),h('p.small.muted','Connecting lets you interact—it does not give us access to your funds.'),h('button.btn.btn-primary',{type:'button',on:{click:connectCurrent}},'Connect wallet')));return;}
   if (!state) { view.replaceChildren(loadingView()); return; }
   if (r.name === 'token') {
+    // Keep the editor and wallet-signing state intact while a holder is writing.
+    if(reason==='background'&&(document.activeElement?.id==='holder-thesis'||view.querySelector('.thesis-editor[data-pending="true"]')))return;
     const previous = reason === 'background' ? {
       side: view.querySelector('[data-side][role=tab][aria-selected=true]')?.dataset.side,
       amount: view.querySelector('#trade-amount')?.value,
