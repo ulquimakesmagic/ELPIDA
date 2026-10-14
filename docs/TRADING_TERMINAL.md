@@ -1,6 +1,6 @@
 # Token trading terminal
 
-The token page keeps market cap, spot price, actual liquidity, trailing 24-hour volume, holders and supply above an interactive TradingView Lightweight Charts chart. TradingView attribution and the Apache 2.0 license are retained. This is Lightweight Charts 5.2.1 using Elpida indexer candles, not TradingView Advanced Charts or an external TradingView listing. Advanced indicators, drawing tools and a licensed Advanced Charts integration are not included.
+The token page uses an 80-pixel desktop ribbon: compact token identity, market cap, spot price, actual liquidity, trailing 24-hour volume, supply and creator fees sit above an interactive TradingView Lightweight Charts chart. Holder/trade counts, chain context and price provenance are disclosed in the status dropdown. Mobile uses two compact rows with horizontally scrollable metrics. TradingView attribution and the Apache 2.0 license are retained. This is Lightweight Charts 5.2.1 using Elpida indexer candles, not TradingView Advanced Charts or an external TradingView listing. Advanced indicators, drawing tools and a licensed Advanced Charts integration are not included.
 
 ## Wallet position
 

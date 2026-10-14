@@ -719,3 +719,42 @@ button.link-button,.copy { min-height:44px; }
 @media(max-width:1100px){.token-page>.stat-row{grid-template-columns:repeat(4,minmax(0,1fr));}.terminal-chart{height:400px;}}
 @media(max-width:780px){.token-page .token-layout{grid-template-columns:1fr;}.token-page .trade-aside{grid-column:1;grid-row:auto;order:0;}.terminal-detail{grid-column:1;}.terminal-chart{height:340px;}.token-page>.stat-row{grid-template-columns:repeat(3,minmax(0,1fr));padding:16px;}.token-page .token-hero{padding:16px;}.thesis-byline>.meta{margin-left:0;}}
 @media(max-width:420px){.token-page>.stat-row{grid-template-columns:repeat(2,minmax(0,1fr));}.terminal-chart{height:300px;}.chart-readout{font-size:11px;}}
+
+/* Compact terminal ribbon, matching the dense two-line token headers used by trading terminals. */
+main:has(.token-page){max-width:none;padding:12px 16px 64px;}
+.token-terminal-bar{display:flex;align-items:center;gap:20px;min-height:80px;padding:10px 14px;margin-bottom:10px;background:var(--surface);border:1px solid var(--line);border-radius:8px;}
+.terminal-identity{display:flex;align-items:center;gap:10px;flex:0 1 310px;min-width:190px;}
+.terminal-identity .avatar-lg{width:46px;height:46px;border-radius:6px;flex-shrink:0;}
+.terminal-identity .avatar-lg .initials{font-size:18px;}
+.terminal-identity-copy{min-width:0;flex:1;}
+.terminal-identity h1{display:flex;gap:8px;align-items:baseline;margin:0;font-family:var(--font-body);font-size:17px;line-height:22px;white-space:nowrap;}
+.token-full-name{min-width:0;font-size:14px;font-weight:400;color:var(--ink-3);overflow:hidden;text-overflow:ellipsis;}
+.terminal-byline{display:flex;align-items:center;gap:9px;overflow-x:auto;scrollbar-width:none;height:28px;color:var(--ink-3);font-size:12px;}
+.terminal-byline>*{flex-shrink:0;}
+.terminal-byline .chain-icon,.terminal-byline .asset-icon{width:16px;height:16px;}
+.terminal-byline .icon-link,.terminal-byline .copy{display:inline-flex;align-items:center;justify-content:center;width:22px;height:24px;min-height:24px;padding:2px;border:0;background:none;border-radius:3px;color:var(--ink-3);}
+.token-terminal-bar .stat-row{display:flex;align-items:center;flex:1;min-width:0;overflow-x:auto;gap:24px;margin:0;padding:0;border:0;scrollbar-width:thin;}
+.token-terminal-bar .stat{display:flex;flex-direction:column;position:relative;gap:3px;flex-shrink:0;min-width:70px;padding:0;border:0;font-size:12px;}
+.token-terminal-bar .stat>span{font-size:12px;color:var(--ink-3);white-space:nowrap;}
+.token-terminal-bar .stat strong{font-size:16px;line-height:21px;white-space:nowrap;font-variant-numeric:tabular-nums;}
+.terminal-claim{position:absolute;right:-18px;bottom:0;color:var(--primary);display:inline-flex;}
+.terminal-context{position:relative;flex-shrink:0;font-size:12px;}
+.terminal-context>summary{display:flex;align-items:center;gap:7px;cursor:pointer;list-style:none;padding:8px 10px;border:1px solid var(--line);border-radius:5px;background:var(--surface-2);white-space:nowrap;}
+.terminal-context>summary::-webkit-details-marker{display:none;}
+.terminal-context .status-dot{width:6px;height:6px;border-radius:50%;background:var(--primary);}
+.terminal-context-popover{position:absolute;right:0;top:100%;margin-top:8px;width:290px;max-width:80vw;z-index:5;padding:14px;background:var(--surface-2);border:1px solid var(--line);border-radius:8px;box-shadow:0 8px 24px #0008;}
+.terminal-context-popover p{font-size:12px;line-height:1.5;margin:0 0 8px;}
+.terminal-context-popover strong{font-size:12px;}
+.token-page .token-layout{gap:10px;grid-template-columns:minmax(0,1fr) minmax(280px,320px);}
+.token-page .token-layout .panel{padding:14px;border-radius:8px;}
+.token-page .price-history .chart-top{margin-bottom:6px;align-items:center;gap:6px;}
+.token-page .chart-readout{margin:4px 0;font-size:11px;min-height:16px;}
+.token-page .chart-top>strong{font-size:13px;}
+.token-page .chart-options .btn{font-size:12px;min-height:28px;padding:0 9px;}
+.token-page .chart-controls{gap:5px;}
+.token-page .position-panel h2{font-size:15px;margin-bottom:12px;}
+.token-page .position-grid{gap:12px;}.token-page .position-stat .meta{font-size:11px;}.token-page .position-stat strong{font-size:13px;}
+.token-page .position-pnl{margin-top:12px;padding:10px;font-size:12px;}
+.token-page .position-panel .small,.token-page .position-panel .hint{font-size:11px;}
+@media(max-width:900px){.token-terminal-bar{gap:12px;flex-wrap:wrap;}.terminal-identity{flex:1;}.terminal-context{margin-left:auto;}.token-terminal-bar .stat-row{order:3;flex-basis:100%;gap:22px;padding-top:8px;border-top:1px solid var(--line);}.token-page .token-layout{grid-template-columns:minmax(0,1fr) minmax(260px,290px);}}
+@media(max-width:780px){main:has(.token-page){padding:10px 10px 96px;}.token-page .token-layout{grid-template-columns:1fr;}.token-terminal-bar{padding:8px 10px;gap:8px;}.terminal-identity{min-width:0;}.terminal-identity h1{font-size:15px;}.token-full-name{max-width:160px;font-size:12px;}.terminal-identity .avatar-lg{width:40px;height:40px;}.terminal-context>summary{font-size:11px;padding:7px;}.token-terminal-bar .stat-row{gap:20px;}.token-terminal-bar .stat strong{font-size:14px;}.token-page .chart-options .btn{min-height:36px;}.terminal-byline .icon-link,.terminal-byline .copy{min-height:28px;}.token-page .terminal-chart{height:340px;}}

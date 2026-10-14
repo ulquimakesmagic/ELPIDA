@@ -48,19 +48,13 @@ export function renderToken(ctx, address) {
   const external = (href, label) => href ? h('a.icon-link', { href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': label, title: label }, icon('external-link', 'icon-sm')) : null;
   const social = token.metadata ?? {};
 
-  const byline = h('div.byline',
-    token.creator ? h('span', 'by ', h('a.creator-link', { href: addressUrl(token.creator) ?? '#', target: '_blank', rel: 'noopener noreferrer' }, short(token.creator))) : null,
-    created ? h('span', `${ago(created)} ago`) : null,
-    h('span.chain-context',assetIcon(q),`${q} pair`),
-    h('span.addr', short(token.address), copyButton(token.address, '')),
-    external(token.url ?? addressUrl(token.address), 'Open in explorer'),
-    ...[['twitter', 'X'], ['telegram', 'Telegram'], ['website', 'Website'], ['discord', 'Discord']].filter(([k]) => social[k]).map(([k, label]) => h('a.chip.chip-link', { href: social[k], target: '_blank', rel: 'noopener noreferrer' }, label)));
-  const head = h('header.token-hero', avatar(token, 'avatar-lg'),
-    h('div.token-identity', h('h1', token.name, h('span.sym', token.symbol)), byline,
-      h('div.chips', h(`span.chip${life.chip ? '.' + life.chip : ''}`, life.label), h(`span.chip.${ctx.mode === 'local' ? 'chip-sim' : 'chip-testnet'}`, chainIcon(token.network??ctx.wallet.net.key),ctx.envLabel()))),
-    h('div.market-headline', h('span.meta', 'Market cap'), h('strong', fmtValue(p.marketCap, token)), h('span.meta', `${fmtPrice(token)} price`),
-      h('span.meta', usdRate(token)===null ? `USD conversion unavailable or stale. Values are shown in ${q}.` : `USD estimate · ${token.usdReference.source ?? 'Price reference'} · updated ${new Date(token.usdReference.updatedAt*1000).toLocaleTimeString()}`)));
-
+  const priceSource=usdRate(token)===null?`USD conversion unavailable or stale; values shown in ${q}.`:`USD estimate · ${token.usdReference.source??'Price reference'} · updated ${new Date(token.usdReference.updatedAt*1000).toLocaleTimeString()}`;
+  const byline=h('div.terminal-byline',created?h('span',{title:new Date(created*1000).toLocaleString()},ago(created)):null,
+    h('span.chain-context',{title:ctx.envLabel(),'aria-label':ctx.envLabel()},chainIcon(token.network??ctx.wallet.net.key)),
+    h('span.chain-context',{title:`Trading pair: ${q}`,'aria-label':`Trading pair: ${q}`},assetIcon(q)),
+    token.creator?h('a.icon-link',{href:addressUrl(token.creator)??'#',target:'_blank',rel:'noopener noreferrer',title:`Creator ${token.creator}`,'aria-label':`Creator ${short(token.creator)}`},icon('wallet','icon-sm')):null,
+    copyButton(token.address,''),external(token.url??addressUrl(token.address),'Open token in explorer'),
+    ...[['twitter','X','at-sign'],['telegram','Telegram','send'],['website','Website','globe'],['discord','Discord','message-circle']].filter(([k])=>social[k]).map(([k,label,glyph])=>h('a.icon-link',{href:social[k],target:'_blank',rel:'noopener noreferrer',title:label,'aria-label':label},icon(glyph,'icon-sm'))));
   // Curve progress: real reserve raised toward the reserve that completes the curve (net of the fee).
   const reserve = Number(token.reserve || 0), remainingNet = Number(token.remainingBuy || 0) * (1 - 0.0125);
   const target = reserve + remainingNet, raisedPct = token.complete || token.graduated ? 100 : target > 0 ? reserve / target * 100 : pct;
@@ -74,15 +68,20 @@ export function renderToken(ctx, address) {
   const holdersValue = h('strong', '—'), tradesValue = h('strong', '—'),volumeValue=h('strong','—');
   const creatorFees = Number(token.creatorFees || 0);
   const stats = h('section.stat-row', { 'aria-label': 'Token statistics' },
+    stat('Market cap',fmtValue(p.marketCap,token)),
     stat('Price',fmtPrice(token)),
     h('div.stat',{title:'Actual quote assets in the curve or pool; virtual reserves are excluded.'},h('span','Liquidity'),h('strong',fmtValue(Number(token.reserve??0),token))),
     h('div.stat',h('span','24h volume'),volumeValue),
-    h('div.stat', h('span', 'Holders'), holdersValue),
-    h('div.stat', h('span', 'Trades'), tradesValue),
     stat('Supply', compact(token.supply || 1e9)),
     token.graduated || creatorFees > 0
-      ? stat('Creator unclaimed', usdRate(token) !== null ? '$' + number(creatorFees * usdRate(token), 2) : `${number(creatorFees, 6)} ${q}`, h('a.small', { href: '#/rewards' }, creatorFees > 0 ? 'Claim in Rewards' : 'Open Rewards'))
-      : stat('Creator fee', '0.625%', h('small.muted', 'Half of the 1.25% trade fee')));
+      ? stat('Creator unclaimed', usdRate(token) !== null ? '$' + number(creatorFees * usdRate(token), 2) : `${number(creatorFees, 6)} ${q}`, h('a.terminal-claim', { href: '#/rewards',title:'Claim creator fees','aria-label':'Claim creator fees' },icon('arrow-right','icon-sm')))
+      : stat('Creator fee', '0.625%', null));
+
+  stats.title=priceSource;
+  const head=h('header.token-terminal-bar',
+    h('div.terminal-identity',avatar(token,'avatar-lg'),h('div.terminal-identity-copy',h('h1',token.symbol,h('span.token-full-name',{title:token.name},token.name)),byline)),
+    stats,h('details.terminal-context',h('summary',h('span.status-dot'),token.graduated?dex:life.label,icon('chevron-down','icon-sm')),
+      h('div.terminal-context-popover',h('p',ctx.envLabel()),h('p',`Trading pair: ${q}`),h('p',priceSource),h('p','Market cap uses total supply. Circulating market cap and FDV are shown in Technical details.'),h('p','Holders: ',holdersValue,' · Trades: ',tradesValue))));
 
   const addresses = h('section.address-row', { 'aria-label': 'Contract addresses and dates' },
     h('div', h('span', 'Token'), h('a', { href: addressUrl(token.address) ?? '#', target: '_blank', rel: 'noopener noreferrer' }, short(token.address))),
@@ -134,8 +133,8 @@ export function renderToken(ctx, address) {
 
   const activity = marketActivity(ctx, token, q, { addressUrl, isCreator, onCounts: ({ holders, trades }) => { holdersValue.textContent = holders ?? '—'; tradesValue.textContent = trades ?? '—'; } });
   const desk=holderTerminal(ctx,token,{onVolume:v=>volumeValue.textContent=fmtValue(v,token)});
-  return h('div.token-page', h('a.back-link', { href: '#/' }, icon('arrow-left', 'icon-sm'), 'Launches'), head,
-    stats,h('div.token-layout',terminalChart(ctx,token,q),h('aside.trade-aside.stack',desk.position,tradePanel(ctx, token, { dex, solana })),h('div.stack.terminal-detail',curve,activity,desk.feed,addresses,about,tech)));
+  return h('div.token-page', head,
+    h('div.token-layout',terminalChart(ctx,token,q),h('aside.trade-aside.stack',desk.position,tradePanel(ctx, token, { dex, solana })),h('div.stack.terminal-detail',curve,activity,desk.feed,addresses,about,tech)));
 }
 
 function marketActivity(ctx,token,q,{addressUrl,isCreator,onCounts}){
