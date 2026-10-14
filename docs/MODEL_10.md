@@ -50,7 +50,7 @@ A griefer who creates the Uniswap pool early with a sliver of liquidity at a wro
 
 - Trade panel: a live "Launch fee window: 47.1% → 1.25% in 31 s" line on both chains, the fee rate in quotes, and a "Reopen curve trading" button once a stuck curve passes its grace time.
 - Creator transparency: the indexer records the creator's first buy and live holding. The token page shows "Dev 4.73% → 4.73%" (bought at launch → holds now), and discovery cards show the same chip. Solana data arrives in Phase 2.
-- `remainingBuy` shows the cost to finish the curve at the base fee. During the first minute a larger buy is partially filled rather than reverting.
+- `remainingBuy` is an amount that completes the curve at the current fee; any excess is refunded by the partial fill, so "Complete curve" works even during the first minute. `remainingBase` (model 10) is the cost at the 1.25% base fee, used for progress and hints so the first minute's fee does not inflate the display.
 - Legacy model 9 records keep their old behaviour: no fee window, no partial fill, no escape hatch.
 
 ## Tests

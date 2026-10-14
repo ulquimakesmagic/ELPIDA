@@ -57,13 +57,15 @@ export function renderToken(ctx, address) {
     copyButton(token.address,''),external(token.url??addressUrl(token.address),'Open token in explorer'),
     ...[['twitter','X','at-sign'],['telegram','Telegram','send'],['website','Website','globe'],['discord','Discord','message-circle']].filter(([k])=>social[k]).map(([k,label,glyph])=>h('a.icon-link',{href:social[k],target:'_blank',rel:'noopener noreferrer',title:label,'aria-label':label},icon(glyph,'icon-sm'))));
   // Curve progress: real reserve raised toward the reserve that completes the curve (net of the fee).
-  const reserve = Number(token.reserve || 0), remainingNet = Number(token.remainingBuy || 0) * (1 - 0.0125);
+  // Model 10 shows the cost at the 1.25% base fee: during the first minute the anti-snipe fee would inflate it.
+  const remainingDisplay = token.remainingBase ?? token.remainingBuy;
+  const reserve = Number(token.reserve || 0), remainingNet = Number(remainingDisplay || 0) * (1 - 0.0125);
   const target = reserve + remainingNet, raisedPct = token.complete || token.graduated ? 100 : target > 0 ? reserve / target * 100 : pct;
   const curve = h('section.curve-strip', { 'aria-label': 'Bonding curve progress' },
     h('div.curve-line', h('span', token.graduated ? `Graduated to ${dex === 'test' ? 'a locked test pool' : dex}` : token.complete ? 'Curve complete · ready to graduate' : 'Curve'),
       h('span.meta', token.graduated ? 'Liquidity locked permanently' : target > 0 ? `${number(raisedPct, raisedPct < 1 ? 2 : 1)}% of ${number(target, 2)} ${q}` : `${number(pct, 1)}% sold`)),
     bar(raisedPct, token.complete || token.graduated, 'Bonding curve progress'),
-    !token.graduated ? h('p.small.muted', token.complete ? `Anyone can graduate it: the ${number(reserve, 4)} ${q} reserve and the remaining tokens open a ${dex} pool with permanently locked liquidity.` : `Virtual bonding curve: purchases build the reserve. About ${number(token.remainingBuy, 4)} ${q} more completes it, then the liquidity moves into a locked ${dex} pool.`) : null);
+    !token.graduated ? h('p.small.muted', token.complete ? `Anyone can graduate it: the ${number(reserve, 4)} ${q} reserve and the remaining tokens open a ${dex} pool with permanently locked liquidity.` : `Virtual bonding curve: purchases build the reserve. About ${number(remainingDisplay, 4)} ${q} more completes it, then the liquidity moves into a locked ${dex} pool.`) : null);
 
   const stat = (label, value, extra) => h('div.stat', h('span', label), h('strong', value), extra ?? null);
   const holdersValue = h('strong', '—'), tradesValue = h('strong', '—'),volumeValue=h('strong','—');
@@ -207,7 +209,7 @@ function tradePanel(ctx, token, { dex, solana }) {
   const submit = h('button.btn.btn-block.btn-lg', { type: 'submit', disabled:true });
   const updateSubmit = () => { submit.disabled = !quoteReady || submitting; };
   const remaining = !token.complete && !token.graduated && Number(token.remainingBuy) > 0;
-  const remainingHint = h('p.hint', remaining ? `About ${number(token.remainingBuy,8)} ${q} remains to complete the curve. Further trading continues after graduation into the locked pool.` : '');
+  const remainingHint = h('p.hint', remaining ? `About ${number(remainingDisplay,8)} ${q} remains to complete the curve. Further trading continues after graduation into the locked pool.` : '');
   const useRemaining = h('button.btn.btn-secondary.btn-sm.curve-limit-action', {type:'button',hidden:true,on:{click:()=>{amount.value=token.remainingBuy;quote();}}}, 'Use remaining amount');
   const funding=token.pair==='native'?usdcFunding(ctx,{amount:()=>amount.value,symbol:q,context:token.address}):null;
   const tabs = h('div.segmented', { role: 'tablist', 'aria-label': 'Trade side' }, ['buy', 'sell'].map(s => h('button', { type: 'button', role: 'tab', 'data-side': s, 'aria-selected': String(s === side), on: { click: () => setSide(s) } }, s === 'buy' ? 'Buy' : 'Sell')));
