@@ -1,9 +1,11 @@
 # Public markets and Railway persistence
 
 The application now starts a read-only public EVM indexer alongside the web server.
-Base Sepolia uses the existing v9 factory `0xe605787F7260F5Dae2768d2F9E93E7F18EE14f91`.
-Its bounded backfill starts at block 47994800 (before deployment). No wallet key is
-used by the indexer. Other EVM networks are enabled when their verified shared
+Base Sepolia uses the model 10 factory `0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2`
+(backfill from block 48209837). The earlier model 9 factory
+`0xe605787F7260F5Dae2768d2F9E93E7F18EE14f91` (from block 47994800) is listed under `legacy` and
+stays indexed in its own database, so its tokens remain listed, tradable and claimable; new
+launches go only to the current factory. No wallet key is used by the indexer. Other EVM networks are enabled when their verified shared
 factory and start block are configured in `packages/core/networks.mjs`.
 Solana pools and trades are indexed by a separate worker, `packages/indexer/solana-indexer.mjs` (see `USD_PRICING_AND_UX.md`).
 

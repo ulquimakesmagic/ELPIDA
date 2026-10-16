@@ -4,13 +4,18 @@
 //
 // shared: fill in after one team deployment so every tester uses the same launchpad instead of a
 // per-browser factory. Leave null to let each browser deploy its own.
+// legacy: earlier team factories on the same network. They stay indexed (listings, trading, fees)
+// but take no new launches.
 export const testnets = [
   {
     key: 'base-sepolia', name: 'Base Sepolia', short: 'BASE SEPOLIA', kind: 'evm', enabled: true,
     chainId: 84532, rpcUrl: 'https://sepolia.base.org', explorer: 'https://sepolia.basescan.org',
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     gasFaucet: 'https://docs.base.org/get-started/get-funds',
-    shared: { factory: '0xe605787F7260F5Dae2768d2F9E93E7F18EE14f91', block: 47994800, model: 'curve-dex-v9', metadataVersion: 1 },
+    // Model 10 team launchpad, deployed 16 Oct 2026 ($50 start FDV, 24 h graduation grace, treasury 0xf5B0…639D).
+    shared: { factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 48209837, model: 'curve-dex-v10', metadataVersion: 1 },
+    // Earlier team launchpads stay indexed so their tokens remain listed and tradable. No new launches go here.
+    legacy: [{ factory: '0xe605787F7260F5Dae2768d2F9E93E7F18EE14f91', block: 47994800, model: 'curve-dex-v9', metadataVersion: 1 }],
   },
   {
     key: 'ethereum-sepolia', name: 'Ethereum Sepolia', short: 'ETH SEPOLIA', kind: 'evm', enabled: true,

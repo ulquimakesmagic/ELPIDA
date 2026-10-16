@@ -50,3 +50,34 @@ test('only successful validated index synchronization authorizes staged metadata
  await service.tick();assert.equal(retained.length,2,'retention is replayed even with cached metadata');
  e.index.sync=async()=>{throw new Error('Unverified chain state');};await service.tick();assert.equal(retained.length,2,'failed synchronization cannot grant retention');
 });
+
+test('a legacy team factory stays listed, tradable and signable next to the current one',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'elpida-legacy-')),creator=Wallet.createRandom();
+  const current='0x'+'aa'.repeat(20),old='0x'+'bb'.repeat(20),newToken='0x'+'01'.repeat(20),oldToken='0x'+'02'.repeat(20);
+  const net={key:'test',chainId:84532,shared:{factory:current,block:10,model:'curve-dex-v10'},legacy:[{factory:old,block:1,model:'curve-dex-v9'},{factory:current,block:10,model:'curve-dex-v10'}],nativeCurrency:{symbol:'ETH'},explorer:'https://example.com'};
+  let destroyed=0;
+  const options={dataDir:dir,networks:[net],contracts:Object.fromEntries(['dexFactory','dexCurve','factory','curve','pool','token'].map(n=>[n,{abi:[]}])),providerFactory:()=>({destroy(){destroyed++;}}),metadataStore:{},log(){}};
+  const service=new PublicIndexer(options);
+  try{
+    assert.equal(service.all('test').length,2,'the current factory is never duplicated as legacy');
+    const [now,legacy]=service.all('test');
+    assert.equal(legacy.deployment.factory,old);assert.equal(legacy.legacy,true);assert.equal(now.legacy,false);
+    now.index.db.prepare('INSERT INTO tokens VALUES(?,?,?)').run(newToken,20,JSON.stringify({address:newToken,creator:creator.address,curve:'0x'+'03'.repeat(20),metadataURI:'',name:'New'}));
+    legacy.index.db.prepare('INSERT INTO tokens VALUES(?,?,?)').run(oldToken,5,JSON.stringify({address:oldToken,creator:creator.address,curve:'0x'+'04'.repeat(20),metadataURI:'',name:'Old'}));
+    const list=service.listings('test',e=>({source:e.deployment.factory}));
+    assert.deepEqual(list.map(t=>[t.name,t.factory,t.deploymentModel,t.legacyDeployment,t.source]),[['New',current,'curve-dex-v10',false,current],['Old',old,'curve-dex-v9',true,old]]);
+    assert.equal(service.entryFor('test',oldToken.toUpperCase().replace('0X','0x')),legacy);
+    assert.equal(service.entryFor('test',newToken),now);
+    assert.equal(service.entryFor('test','0x'+'09'.repeat(20)),null);
+    assert.equal(service.detail('test',oldToken).name,'Old');
+    // Signed fallback metadata names the factory that created the token.
+    const {message}=service.metadataMessage({network:'test',token:oldToken,expires:Math.floor(Date.now()/1000)+200,metadata:{description:'Old token'}});
+    assert.match(message,new RegExp('Factory: '+old));
+    // Trade rows from both deployments merge in time order.
+    for(const [e,ts,id] of [[now,30,'c'],[legacy,10,'a'],[legacy,20,'b']])e.index.db.prepare('INSERT INTO trades(tx,idx,address,height,timestamp,data) VALUES(?,?,?,?,?,?)').run(id,0,'t',1,ts,JSON.stringify({id}));
+    assert.deepEqual([...service.tradeRows('test')].map(r=>JSON.parse(r.data).id),['a','b','c']);
+    // Pair discovery stays on the current factory only.
+    assert.equal(service.quotes('test'),null,'unvalidated current factory');
+  }finally{await service.close();rmSync(dir,{recursive:true,force:true});}
+  assert.equal(destroyed,1,'one shared provider per network is closed once');
+});

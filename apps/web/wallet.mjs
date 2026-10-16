@@ -103,6 +103,10 @@ export class TestnetWallet {
   /** True when this network still uses a legacy model 9 launchpad and model 10 can be deployed. */
   get modelUpgradeAvailable() { return !!this.dex && this.deployment?.model === LEGACY_DEX_MODEL;
   }
+  /** A token's own curve model: tokens from a legacy team factory keep that factory's model. */
+  modelOf(item) { return item?.deploymentModel ?? this.model; }
+  /** Factory that created `item`: its legacy team factory, or the current launchpad. */
+  factoryOf(item) { return item?.factory && item.factory.toLowerCase() !== this.deployment?.factory.toLowerCase() ? new Contract(item.factory, this.artifacts.factory.abi, this.provider) : this.factoryContract(); }
   get eth() { return this._eth ?? evmProvider(); }
   get walletName() { const eth = this.eth; const entry = [...announced.values()].find(d => d.provider === eth); return entry?.info.name ?? (eth?.isMetaMask ? 'MetaMask' : 'your wallet'); }
   /** Connects with the chosen EVM wallet (`walletId`, an EIP-6963 rdns), remembered for next time. */
@@ -389,7 +393,7 @@ export class TestnetWallet {
       Object.assign(item, asset ? { pair: asset.kind, quoteSymbol: asset.symbol, quoteDecimals: asset.decimals } : { pair: 'token', quoteSymbol: 'paired token', quoteDecimals: 18 });
     }
     const tokens = await Promise.all([...this.launches.values()].reverse().map(async item => {
-      item = {...item,metadata:await readMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,item.address)) ?? item.metadata ?? {}};
+      item = {...item,metadata:await readMetadataCache(metadataKey(this.net.chainId,item.factory??this.deployment.factory,item.address)) ?? item.metadata ?? {}};
       if(item.metadataURI){try{const response=await fetch('/api/metadata/resolve?uri='+encodeURIComponent(item.metadataURI));if(!response.ok)throw new Error('unavailable');item.metadata=normalizeMetadata(await response.json());item.metadataStatus='published';}catch{item.metadataStatus='unavailable';}}
       const d = this.qd(item);
       const token = new Contract(item.address, this.config.contracts.token.abi, this.provider);
@@ -404,8 +408,8 @@ export class TestnetWallet {
       const circulation = supply - await token.balanceOf("0x000000000000000000000000000000000000dead") - await token.balanceOf(item.curve) - (graduated ? await token.balanceOf(pool) : 0n);
       // Model 10: anti-snipe schedule, partial-fill final buys and the graduation escape hatch.
       let v10 = {};
-      if (this.model === DEX_MODEL) { const [launchedAt, completedAt, grace] = await Promise.all([curve.launchedAt(), curve.completedAt(), curve.graduationGrace()]); v10 = { launchedAt: Number(launchedAt), partialFill: true, feeSchedule: { base: BASE_FEE_BPS, start: SNIPE_START_BPS, window: SNIPE_WINDOW_SECONDS }, reopenableAt: complete && !graduated && completedAt > 0n ? Number(completedAt + grace) : null }; }
-      return { ...item, ...v10, pool, graduated, complete, liquidityLocked: graduated, quoteSymbol: this.qsym(item), quoteDecimals: d, spotPrice: Number(formatUnits(priceQ,d)) / Number(formatUnits(priceT,18)), circulatingSupply:formatUnits(circulation,18),saleCap: formatUnits(await curve.SALE_CAP(),18), remainingBuy: complete ? '0' : formatUnits(await curve.completionQuote(),d), remainingBase: complete || this.model !== DEX_MODEL ? undefined : formatUnits(await curve.remainingAtBaseFee(),d), name, symbol, reward, reserve: formatUnits(reserve, d), sold: formatUnits(sold, 18), supply: formatUnits(supply, 18), balance: formatUnits(held, 18), protocolFees: formatUnits(protocol+p, d), creatorFees: formatUnits(creator+c, d) };
+      if (this.modelOf(item) === DEX_MODEL) { const [launchedAt, completedAt, grace] = await Promise.all([curve.launchedAt(), curve.completedAt(), curve.graduationGrace()]); v10 = { launchedAt: Number(launchedAt), partialFill: true, feeSchedule: { base: BASE_FEE_BPS, start: SNIPE_START_BPS, window: SNIPE_WINDOW_SECONDS }, reopenableAt: complete && !graduated && completedAt > 0n ? Number(completedAt + grace) : null }; }
+      return { ...item, ...v10, pool, graduated, complete, liquidityLocked: graduated, quoteSymbol: this.qsym(item), quoteDecimals: d, spotPrice: Number(formatUnits(priceQ,d)) / Number(formatUnits(priceT,18)), circulatingSupply:formatUnits(circulation,18),saleCap: formatUnits(await curve.SALE_CAP(),18), remainingBuy: complete ? '0' : formatUnits(await curve.completionQuote(),d), remainingBase: complete || this.modelOf(item) !== DEX_MODEL ? undefined : formatUnits(await curve.remainingAtBaseFee(),d), name, symbol, reward, reserve: formatUnits(reserve, d), sold: formatUnits(sold, 18), supply: formatUnits(supply, 18), balance: formatUnits(held, 18), protocolFees: formatUnits(protocol+p, d), creatorFees: formatUnits(creator+c, d) };
     }));
     const pairBalances = {};
     for (const a of this.approvedQuotes ?? []) { try { pairBalances[a.id] = formatUnits(await new Contract(a.address, this.config.contracts.quote.abi, this.provider).balanceOf(this.address), a.decimals); } catch {} }
@@ -416,7 +420,7 @@ export class TestnetWallet {
   }
   async publicTokens(){
     const response=await fetch('/api/public/tokens?network='+encodeURIComponent(this.net.key));if(!response.ok)throw new Error('Public token discovery is unavailable.');
-    const entries=await response.json();return Promise.all(entries.map(async item=>({...item,metadata:this.deployment&&!item.metadataURI?await readMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,item.address))??item.metadata:item.metadata})));
+    const entries=await response.json();return Promise.all(entries.map(async item=>({...item,metadata:this.deployment&&!item.metadataURI?await readMetadataCache(metadataKey(this.net.chainId,item.factory??this.deployment.factory,item.address))??item.metadata:item.metadata})));
   }
   async dexState(item,token,curve,pool,d){
     const market=new Contract(pool,this.config.contracts.dexPool.abi,this.provider),[slot,a,b,name,symbol,supply,sold,held,reward,cp,cc,locker,splitter]=await Promise.all([market.slot0(),market.token0(),market.token1(),token.name(),token.symbol(),token.totalSupply(),curve.sold(),token.balanceOf(this.address),curve.creatorRewardVault(),curve.protocolFees(),curve.creatorFees(),curve.locker(),curve.feeSplitter()]);
@@ -450,7 +454,7 @@ export class TestnetWallet {
     const curve = await this.market(item);
     const d = this.qd(item);
     if(this.dex&&await new Contract(item.curve,this.artifacts.curve.abi,this.provider).pool()!==ZeroAddress){const input=parseUnits(amount,side==='buy'?d:18),out=await this.dexQuote(item,side,input);return {out:formatUnits(out,side==='buy'?18:d),fee:formatUnits(input/100n,side==='buy'?d:18),feeSymbol:side==='buy'?this.qsym(item):await new Contract(item.address,this.config.contracts.token.abi,this.provider).symbol()};}
-    if (side === 'buy' && this.model === DEX_MODEL) {
+    if (side === 'buy' && this.modelOf(item) === DEX_MODEL) {
       // Model 10 partially fills a buy larger than the rest of the curve and charges only what it uses.
       const input = parseUnits(amount, d), [out, fee, spent] = await curve.previewBuy(input);
       return { out: formatUnits(out, 18), fee: formatUnits(fee, d), spend: formatUnits(spent, d), completesCurve: spent < input, ...await this.feeSchedule(item) };
@@ -460,7 +464,7 @@ export class TestnetWallet {
   }
   /** Model 10 anti-snipe schedule for the trade panel; legacy curves always charge the base fee. */
   async feeSchedule(item) {
-    if (this.model !== DEX_MODEL) return { feeBps: BASE_FEE_BPS, antiSnipeActive: false };
+    if (this.modelOf(item) !== DEX_MODEL) return { feeBps: BASE_FEE_BPS, antiSnipeActive: false };
     const curve = new Contract(item.curve, this.artifacts.curve.abi, this.provider);
     const [feeBps, launchedAt] = await Promise.all([curve.currentFeeBps(), curve.launchedAt()]);
     return { feeBps: Number(feeBps), launchedAt: Number(launchedAt), antiSnipeActive: Number(feeBps) > BASE_FEE_BPS };
@@ -569,11 +573,11 @@ export class TestnetWallet {
       if (!item) throw new Error('Token not found.');
       const curve = await this.market(item, this.signer);
       const original = new Contract(item.curve, this.artifacts.curve.abi, this.signer);
-      if (action === 'reopen') { if (this.model !== DEX_MODEL) throw new Error('Only model 10 curves can be reopened.'); result = await this.wait(original.reopen(), 'Confirm reopening the curve for trading…'); }
+      if (action === 'reopen') { if (this.modelOf(item) !== DEX_MODEL) throw new Error('Only model 10 curves can be reopened.'); result = await this.wait(original.reopen(), 'Confirm reopening the curve for trading…'); }
       else if (action === 'graduate') result = await this.wait(original.graduate(), this.dex?'Confirm graduation into Uniswap v3…':'Confirm graduation into the locked test pool…');
       else if (action === 'withdraw') {
         result = await this.wait(original.withdrawFees(), 'Claim bonding-curve fees…');
-        if(await original.pool()!==ZeroAddress){if(this.dex){const locker=new Contract(await original.locker(),this.config.contracts.locker.abi,this.signer);result=await this.wait(locker.collectFees(),'Collect Uniswap position fees…');const splitter=new Contract(await original.feeSplitter(),this.config.contracts.splitter.abi,this.signer);for(const asset of [item.address,this.qaddr(item)])for(const recipient of [await factory.treasury(),await original.creatorRewardVault()])if(await splitter.claimable(asset,recipient)>0n)result=await this.wait(splitter.claim(asset,recipient),'Pay fees to their fixed recipient…');}else result=await this.wait(curve.withdrawFees(),'Claim locked-pool fees…');}
+        if(await original.pool()!==ZeroAddress){if(this.dex){const locker=new Contract(await original.locker(),this.config.contracts.locker.abi,this.signer);result=await this.wait(locker.collectFees(),'Collect Uniswap position fees…');const splitter=new Contract(await original.feeSplitter(),this.config.contracts.splitter.abi,this.signer);for(const asset of [item.address,this.qaddr(item)])for(const recipient of [await this.factoryOf(item).treasury(),await original.creatorRewardVault()])if(await splitter.claimable(asset,recipient)>0n)result=await this.wait(splitter.claim(asset,recipient),'Pay fees to their fixed recipient…');}else result=await this.wait(curve.withdrawFees(),'Claim locked-pool fees…');}
       }
       else if(this.dex&&await original.pool()!==ZeroAddress)result=await this.dexTrade(item,action,body);
       else {
