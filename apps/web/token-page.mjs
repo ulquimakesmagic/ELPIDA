@@ -1,3 +1,4 @@
+import { nowSeconds } from './clock.mjs';
 import { snipeLabel, devLabel } from '/curve-model.mjs';
 import { assetIcon, chainIcon } from './chain-ui.mjs';
 import { usdcFunding } from './usdc-funding.mjs';
@@ -21,7 +22,7 @@ function dexName(ctx, token) {
 
 /** "3m ago" style relative age, used by the header and the trades table. */
 export function ago(seconds) {
-  const s = Math.max(0, Math.floor(Date.now() / 1000 - seconds));
+  const s = Math.max(0, Math.floor(nowSeconds() - seconds));
   if (s < 60) return `${s}s`;
   if (s < 3600) return `${Math.floor(s / 60)}m`;
   if (s < 86400) return `${Math.floor(s / 3600)}h`;
@@ -109,7 +110,7 @@ export function renderToken(ctx, address) {
       update('Preparing token details for your signature…');
       try{
         await ctx.wallet.checkNetwork();
-        const body={network:ctx.currentChain(),token:token.address,metadata:token.metadata,expires:Math.floor(Date.now()/1000)+240};
+        const body={network:ctx.currentChain(),token:token.address,metadata:token.metadata,expires:Math.floor(nowSeconds())+240};
         const prepared=await ctx.api('public/metadata/prepare',body);
         update(`Waiting for ${ctx.wallet.walletName}. Open its Chrome extension and sign “Elpida public token metadata”. This publishes token details only; no gas or token transfer.`);
         const signature=await withWalletTimeout(ctx.wallet.signer.signMessage(prepared.message),ctx.wallet.walletName);
@@ -178,7 +179,7 @@ function tradePanel(ctx, token, { dex, solana }) {
     const error = h('p.error-text', { role: 'alert' });
     const label = token.dex === 'PumpSwap' ? 'Migrate to PumpSwap' : `Graduate to ${dex === 'test' ? 'a locked test pool' : dex}`;
     // Model 10 escape hatch: if graduation keeps failing for 24 h, anyone can reopen the curve for trading.
-    const reopenAt = Number(token.reopenableAt) || null, canReopen = reopenAt && Date.now() / 1000 >= reopenAt;
+    const reopenAt = Number(token.reopenableAt) || null, canReopen = reopenAt && nowSeconds() >= reopenAt;
     const reopenNote = reopenAt ? h('p.small.muted', canReopen ? 'Graduation has not happened within 24 hours of completion, so anyone can reopen the curve and every holder can trade again.' : `If graduation keeps failing, anyone can reopen the curve for trading from ${new Date(reopenAt * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.`) : null;
     const reopen = canReopen ? h('button.btn.btn-secondary.btn-block', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await ctx.run('reopen', { token: token.address }); } catch (e) { error.textContent = errorText(e); } } } }, 'Reopen curve trading') : null;
     return h('section.panel.trade-panel', h('h2', 'Curve complete'), h('p.muted', `Curve trading has stopped. ${label} to open the DEX pool. ${solana ? 'You advance about 0.05 SOL of account rent; the unused part is refunded in the same transaction.' : 'You pay the network fee.'}`),
@@ -194,7 +195,7 @@ function tradePanel(ctx, token, { dex, solana }) {
   const feeWindow = h('p.hint.fee-window', { role: 'status', 'aria-live': 'off' });
   let feeTicks = 0;
   const tickFeeWindow = () => {
-    const label = token.launchedAt && !token.complete && !token.graduated ? snipeLabel(token.launchedAt, Date.now() / 1000, token.feeSchedule ?? {}) : null;
+    const label = token.launchedAt && !token.complete && !token.graduated ? snipeLabel(token.launchedAt, nowSeconds(), token.feeSchedule ?? {}) : null;
     feeWindow.textContent = label ?? ''; feeWindow.hidden = !label;
     if (label) {
       feeTicks++;

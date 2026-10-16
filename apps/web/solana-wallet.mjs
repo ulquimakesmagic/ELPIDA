@@ -1,3 +1,4 @@
+import { nowSeconds } from './clock.mjs';
 import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut } from '/elpida-solana.mjs';
 import {normalizeMetadata} from './metadata.mjs';
 import { PAIR_LIMITS } from '/pairs.mjs';
@@ -40,7 +41,7 @@ const web3 = globalThis.solanaWeb3;
 // the config they were launched with.
 const MAX_U64 = (1n << 64n) - 1n;
 // Quote with a clock two seconds early: a slightly higher anti-snipe fee, so slippage limits stay safe.
-const chainNow = () => Math.floor(Date.now() / 1000) - 2;
+const chainNow = () => Math.floor(nowSeconds()) - 2;
 export class SolanaWallet {
   constructor(config, onProgress) {
     this.config = config; this.net = config.solana; this.onProgress = onProgress;
@@ -150,7 +151,7 @@ export class SolanaWallet {
     const info = await this.connection.getAccountInfo(bound.priceFeed);
     const oracle = info?.owner.toBase58() === PYTH_RECEIVER ? parsePriceUpdate(info.data) : null;
     if (!oracle || oracle.feedId !== bound.feedId) { this.price = { status: 'unavailable', source: 'Pyth SOL/USD (on-chain)' }; return null; }
-    const usd = Number(oracle.price) * 10 ** oracle.exponent, age = Date.now() / 1000 - oracle.publishTime;
+    const usd = Number(oracle.price) * 10 ** oracle.exponent, age = nowSeconds() - oracle.publishTime;
     this.price = { symbol: 'SOL', usd, updatedAt: oracle.publishTime, source: 'Pyth SOL/USD (verified on-chain)', maxAge: bound.maxAgeSecs, status: age <= bound.maxAgeSecs && Number(oracle.conf) * 10000 <= Number(oracle.price) * bound.maxConfBps ? 'fresh' : 'stale' };
     this.usdPricing = { oracle, priceFeed: bound.priceFeed };
     return this.usdPricing;

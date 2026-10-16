@@ -1,3 +1,4 @@
+import { nowSeconds } from './clock.mjs';
 import { assetIcon, chainIcon } from './chain-ui.mjs';
 // Guided token creation: details → network and trading pair → creator rewards → first purchase →
 // review. The draft survives step changes, failed requests and page reloads (session storage).
@@ -47,7 +48,7 @@ export function renderLaunch(ctx) {
   const isPublic = () => draft.chain && draft.chain !== 'local';
   const solana = () => draft.chain?.startsWith('solana');
   const connected = () => !!draft.chain && ctx.currentChain() === draft.chain && (draft.chain === 'local' || !!ctx.wallet.address);
-  const freshPrice = p => p?.status === 'fresh' && Number(p.usd) > 0 && Date.now()/1000-p.updatedAt <= (p.maxAge ?? 180);
+  const freshPrice = p => p?.status === 'fresh' && Number(p.usd) > 0 && nowSeconds()-p.updatedAt <= (p.maxAge ?? 180);
   // Solana: the program verifies the bound Pyth SOL/USD account itself; launches need it active and fresh.
   const solanaPriced = () => !!ctx.wallet?.deployment?.usdPricing;
   const ready = () => solana() ? connected() && !!ctx.wallet.deployment && solanaPriced() && freshPrice(ctx.wallet.price) : (draft.chain==='local'||!!ctx.config.oracles?.[draft.chain]?.available) && connected() && (draft.chain === 'local' || (!!ctx.wallet.deployment&&freshPrice(ctx.wallet.price)));

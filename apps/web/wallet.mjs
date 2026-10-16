@@ -1,3 +1,4 @@
+import { nowSeconds } from './clock.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, parseUnits, formatUnits, isAddress, ZeroAddress } from '/vendor/ethers.js';
 
 import { normalizeMetadata } from './metadata.mjs';
@@ -218,7 +219,7 @@ export class TestnetWallet {
     if(await coin.balanceOf(this.address)<ceiling)throw new Error('Add at least '+body.maxUsdc+' USDC on this network. Native gas is also required.');
     if(await coin.allowance(this.address,this.dex.router)<ceiling)await this.wait(coin.approve(this.dex.router,ceiling),'Approve at most '+body.maxUsdc+' USDC for conversion only…');
     await this.checkNetwork();
-    const router=new Contract(this.dex.router,CONVERSION_ROUTER_ABI,this.signer),deadline=Math.floor(Date.now()/1000)+120;
+    const router=new Contract(this.dex.router,CONVERSION_ROUTER_ABI,this.signer),deadline=Math.floor(nowSeconds())+120;
     const calls=conversionCalls({Contract,router:this.dex.router,dex:this.dex,usdc:this.feeUsdc,owner:this.address,quote:q});
     const gas=await router['multicall(uint256,bytes[])'].estimateGas(deadline,calls),data=await this.provider.getFeeData();
     if(await this.provider.getBalance(this.address)<gas*(data.maxFeePerGas??data.gasPrice??0n))throw new Error('Add native currency for conversion gas. USDC cannot pay gas.');

@@ -1,3 +1,4 @@
+import { nowSeconds, syncClock } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
 import { discoveryTokens } from './discovery.mjs';
 import { assetIcon, chainIcon, chainSelector } from './chain-ui.mjs';
@@ -257,7 +258,7 @@ function stats() {
     h('div', h('span', mode === 'local' ? 'Your simulated balance' : 'Your balance'), h('strong', state.disconnected ? '—' : balance)),
     h('div', h('span', 'Trading fee'), h('strong', solana ? '1.25% → 0.30%' : dex ? '1.25% → 1%' : '1.25%'), h('small', solana ? 'Curve, then PumpSwap pool' : dex ? 'Curve, then Uniswap v3 pool' : 'Bonding curve')));
 }
-function age(created){const seconds=Math.max(0,(Date.now()-created)/1000);return seconds<60?`${Math.floor(seconds)}s`:seconds<3600?`${Math.floor(seconds/60)}m`:seconds<86400?`${Math.floor(seconds/3600)}h`:`${Math.floor(seconds/86400)}d`;}
+function age(created){const seconds=Math.max(0,(nowSeconds()*1000-created)/1000);return seconds<60?`${Math.floor(seconds)}s`:seconds<3600?`${Math.floor(seconds/60)}m`:seconds<86400?`${Math.floor(seconds/3600)}h`:`${Math.floor(seconds/86400)}d`;}
 function tokenCard(token) {
   const life = lifecycle(token), pct = progressOf(token), p = pricing(token);
   const chain=networkByKey(token.network);
@@ -290,8 +291,8 @@ function exploreView() {
     h('section.intro', h('div', h('h1', 'Create a token. Build your community.'), h('p', 'Launch a token, choose its trading pair and decide where creator fees go.')),
       h('div.intro-actions', h('a.btn.btn-primary.btn-lg', { href: '#/launch' }, icon('plus'), 'Create token'), h('button.btn.btn-secondary.btn-lg', { type: 'button', on: { click: () => $('#how-dialog').showModal() } }, 'How it works'))),
     discoveryErrors.length?h('p.small.error-text',`Some networks could not load: ${discoveryErrors.join(', ')}. Refresh to retry.`):null,
-    h('div.price-ticker',{'aria-label':'Native asset USD reference prices'}, ['ETH','BNB','SOL'].map(symbol=>{const p=Object.values(config.prices??{}).find(p=>p.symbol===symbol&&!p.simulation&&p.status==='fresh'&&Date.now()/1000-p.updatedAt<=(p.maxAge??180));return h('span',{title:p?.updatedAt?`${p.source} — Updated ${new Date(p.updatedAt*1000).toLocaleString()}`:'Price unavailable'},assetIcon(symbol),h('strong',symbol),p?.status==='fresh'?'$'+number(p.usd):'Price unavailable');})),
-    h('details.price-sources',h('summary','Price sources & freshness'),['ETH','BNB','SOL'].map(symbol=>{const p=Object.values(config.prices??{}).find(p=>p.symbol===symbol&&!p.simulation&&p.status==='fresh'&&Date.now()/1000-p.updatedAt<=(p.maxAge??180));return h('p.small.muted',`${symbol}: ${p?.source??'Unavailable'}${p?.updatedAt?' · '+new Date(p.updatedAt*1000).toLocaleString():''}. Display reference; launch fees are verified separately by the contract.`);})),
+    h('div.price-ticker',{'aria-label':'Native asset USD reference prices'}, ['ETH','BNB','SOL'].map(symbol=>{const p=Object.values(config.prices??{}).find(p=>p.symbol===symbol&&!p.simulation&&p.status==='fresh'&&nowSeconds()-p.updatedAt<=(p.maxAge??180));return h('span',{title:p?.updatedAt?`${p.source} — Updated ${new Date(p.updatedAt*1000).toLocaleString()}`:'Price unavailable'},assetIcon(symbol),h('strong',symbol),p?.status==='fresh'?'$'+number(p.usd):'Price unavailable');})),
+    h('details.price-sources',h('summary','Price sources & freshness'),['ETH','BNB','SOL'].map(symbol=>{const p=Object.values(config.prices??{}).find(p=>p.symbol===symbol&&!p.simulation&&p.status==='fresh'&&nowSeconds()-p.updatedAt<=(p.maxAge??180));return h('p.small.muted',`${symbol}: ${p?.source??'Unavailable'}${p?.updatedAt?' · '+new Date(p.updatedAt*1000).toLocaleString():''}. Display reference; launch fees are verified separately by the contract.`);})),
     h('section', { 'aria-labelledby': 'tokens-title' },
       h('div.page-head', h('div', h('h2#tokens-title', 'Tokens'), count), h('button.btn.btn-ghost.btn-sm', { type: 'button', on: { click: () => refresh().then(() => toast('Updated.')).catch(e => toast(errorText(e), { kind: 'error' })) } }, icon('refresh-cw', 'icon-sm'), 'Refresh')),
       h('div.toolbar', h('label.search', icon('search'), search)),stages, grid, empty),
@@ -393,7 +394,9 @@ function openTools() {
 
 /* ---------- Start ---------- */
 async function init() {
+  const configSent = Date.now();
   config = await api('config');
+  syncClock(config.serverTime, configSent);
   setInterval(()=>{if(!busy&&document.visibilityState==='visible'&&!(currentRoute.name==='rewards'&&document.activeElement?.closest('form')))refresh({preserveInput:true}).catch(()=>{});},60000);
   if (config.solana?.mainnet) {
     $('#footer-note').textContent = 'Solana mainnet beta: real funds, new contracts. Other networks are test networks with no monetary value.';
