@@ -4,11 +4,20 @@ Status: **not approved for mainnet**. This document supersedes the historical im
 
 ## Review scope
 
-Review the current Solidity source and its dependency lockfile: ElpidaDexFactory, ElpidaUsdPricing, ElpidaDexCurve, ElpidaToken, ElpidaV3MigrationAdapter, ElpidaV3FeeLocker and ElpidaFeeSplitter. Include the browser wallet, batch recovery, metadata staging, price keeper, public indexer and API request policy in the application review. Older Beta/custom-pool contracts are compatibility code, not the proposed Base release.
+Review the current Solidity source and its dependency lockfile: ElpidaDexFactory (model 10), ElpidaDexCurveDeployer, ElpidaUsdPricing, ElpidaDexCurve, ElpidaToken, ElpidaV3MigrationAdapter, ElpidaV3FeeLocker and ElpidaFeeSplitter. The model 10 rules are in [MODEL_10.md](MODEL_10.md). Include the browser wallet, batch recovery, metadata staging, price keeper, public indexer and API request policy in the application review. Older Beta/custom-pool contracts are compatibility code, not the proposed Base release.
 
-Solidity is 0.8.24, optimizer enabled with one run, EVM target Shanghai; reproduce the exact build using npm ci and npm run compile. The source registry currently configures a Base Sepolia model-9 factory, not a Base mainnet deployment. Constructor arguments, oracle configuration, approved quotes and adapters are part of the review: source hashes alone cannot validate immutable deployment values.
+Solidity is 0.8.24, optimizer enabled with one run, EVM target Shanghai; reproduce the exact build using npm ci and npm run compile. The source registry currently pins the earlier Base Sepolia model-9 factory; the model 10 factory has not been deployed to any public chain yet, and there is no Base mainnet deployment. Constructor arguments, oracle configuration, approved quotes and adapters are part of the review: source hashes alone cannot validate immutable deployment values.
 
 ## Implemented and verified
+
+**15 October 2026 (model 10, Phase 1):**
+- Graduation griefing fixed: the adapter rebalances a mispriced pre-existing pool within a 2% budget, and a completed curve that has not graduated 24 hours later can be reopened by anyone so holders can sell. Tests cover a 1 USDC grief, a ~1% reserve grief, a grief beyond the budget, reopen timing, and reserve and fee conservation through complete → reopen → trade → complete.
+- Fee payouts are failure-isolated: a rejecting or blacklisted recipient keeps its balance owed and cannot block the other side.
+- Curve shape matches the Solana program ($5,000 → $50,000, 10×). Start FDV and graduation grace are immutable constructor arguments; mainnet tooling enforces $5,000 and 24 h.
+- Anti-snipe fee (90% → 1.25% over 60 s) with the surplus locked into graduation liquidity. Creator first buy at base fee, uncapped and publicly shown.
+- Factory split: ElpidaDexFactory runtime is 11.4 KB (was 23.8 KB); a size test enforces a 24,000-byte release margin.
+
+**Earlier (model 9):**
 
 - Native $10-equivalent and 10-USDC fees are enforced by contracts, with round validity, maximum age and native refund checks. Native curves snapshot starting valuation at launch.
 - Exact requested ERC-20 approvals; first-buy failures revert creation; metadata reference is authorized by the creation transaction on compatible Base deployments.
@@ -37,7 +46,7 @@ Assume malicious traders, launch creators, transaction ordering, untrusted token
 
 Check conservation of curve reserves and fee liabilities across buy/sell/withdraw; sale cap and terminal price continuity; migration failure rollback; NFT custody and allowance cleanup; fee collection that cannot extract principal; beneficiary failure isolation; launch reentrancy guards and refunds; immutable quote approval implications; and batch ID/chain/receipt verification without duplicate launches. Review the oracle freshness dependency even when the user elects to pay the fixed USDC fee.
 
-An existing active pool at a mismatched price can block migration. The code deliberately reverts rather than depositing at the wrong price; this remains a liveness/griefing concern requiring review. A permanently locked position has no recovery escape hatch. Fees earned by third-party liquidity positions are not Elpida fees.
+An existing active pool at a mismatched price is rebalanced within a 2% budget. Beyond that, migration reverts rather than depositing at the wrong price, and the 24-hour escape hatch reopens curve trading. Reviewers should check the rebalance budget, the callback restrictions and whether 24 hours is the right grace period. A permanently locked position has no recovery escape hatch. Fees earned by third-party liquidity positions are not Elpida fees.
 
 Market cap currently uses price times total 1B supply as the product's display convention. Indexer circulating supply excludes curve/pool inventory and known dead-address balances. Review and document this distinction before marketing valuation figures.
 
@@ -49,7 +58,7 @@ Base is the first proposed beta scope. Advanced holder distributions, buybacks, 
 
 On 13 October 2026, the focused security suite passed **25 tests, zero failures and zero skips**:
 
-`node --test --test-concurrency=1 tests/usd-pricing.test.mjs tests/beta-curve.test.mjs tests/dex-migration.test.mjs tests/post-migration-fees.test.mjs tests/api.test.mjs tests/price-keeper.test.mjs tests/wallet-batch.test.mjs`
+`node --test --test-concurrency=1 tests/usd-pricing.test.mjs tests/beta-curve.test.mjs tests/dex-migration.test.mjs tests/graduation-safety.test.mjs tests/contract-size.test.mjs tests/post-migration-fees.test.mjs tests/api.test.mjs tests/price-keeper.test.mjs tests/wallet-batch.test.mjs` (the 13 October run of the earlier list passed 25 tests)
 
 `npm audit --json` and `npm audit --omit=dev --json` both reported zero known vulnerabilities. This only checks known dependency advisories; it does not audit contract logic. Some server runtime packages are currently listed as devDependencies, so the full scan matters and a production install that omits devDependencies is not yet a supported runtime image.
 

@@ -1,5 +1,7 @@
 # Beta curve, durable indexing and post-migration fee rights
 
+> **Superseded for current economics by [MODEL_10.md](MODEL_10.md)** (15 October 2026): every chain now uses a $5,000 → $50,000 (10x) curve with anti-snipe fees and a graduation escape hatch. The figures below describe older models and are kept for history.
+
 This page describes the preserved model 4 implementation. Localhost and Base Sepolia now use model 5 with actual Uniswap v3 migration, permanent NFT custody, DEX indexing and fee claims. See [current DEX testing guide](BASE_SEPOLIA_DEX_TESTING.md) for the active behavior and limitations.
 
 Implemented locally on 11 October 2026. Development prototypes; no production DEX transaction or mainnet deployment has been made.

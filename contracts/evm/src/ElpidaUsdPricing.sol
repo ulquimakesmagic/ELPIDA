@@ -43,7 +43,8 @@ abstract contract ElpidaUsdPricing {
         return Math.mulDiv(dollars*1 ether,10**d,answer,Math.Rounding.Ceil);
     }
     function launchFee() public view returns(uint256){return nativeUsdAmount(10);}
-    function nativeVirtualQuote() public view returns(uint256){return Math.mulDiv(nativeUsdAmount(5000),16,15,Math.Rounding.Ceil);}
+    /// Model 8 default ($5,000 start, 16x curve). Model 10 overrides it with its own start and 10/9 shape.
+    function nativeVirtualQuote() public view virtual returns(uint256){return Math.mulDiv(nativeUsdAmount(5000),16,15,Math.Rounding.Ceil);}
     function _chargeLaunchFee(uint256 firstBuyValue,bool inUsdc) internal {
         if(address(usdFeed)==address(0))revert OracleUnavailable();
         uint256 fee=launchFee();uint256 requiredValue=firstBuyValue+(inUsdc?0:fee);

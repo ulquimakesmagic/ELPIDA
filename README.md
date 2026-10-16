@@ -6,16 +6,18 @@ For an online test preview, see [Railway setup](docs/RAILWAY_TESTING.md). The in
 
 Independent multichain memecoin launchpad targeting Solana, Ethereum, Base, BNB Chain and Robinhood Chain. New EVM factories enforce a $10 creation fee using an execution-time on-chain USD oracle, with optional 10 USDC payment independent of the trading pair. Native curves start at approximately $5,000 FDV before the first purchase. See [USD pricing, chain readiness and verification](docs/USD_PRICING_AND_UX.md); older native-pricing guides and configuration describe legacy deployments.
 
-The localhost preview uses model 9: an oracle-priced native virtual curve (graduation at 16× the starting FDV), then actual Uniswap v3 graduation with a permanently locked full-range position. The SQLite indexer reads both curve and DEX trades. Base Sepolia wallet deployment is prepared; it requires your signatures and test funds. Model 8 (basic, no external DEX) serves other configured EVM previews. Solana and Robinhood USD-priced launches remain blocked pending verified pricing integrations. See [DEX testing guide](docs/BASE_SEPOLIA_DEX_TESTING.md).
+The localhost preview uses model 10 ([spec](docs/MODEL_10.md)): an oracle-priced virtual curve from $5,000 to $50,000 FDV (10×, the same shape as the Solana program), a 90% → 1.25% anti-snipe fee over the first minute, no cap on the creator's first buy (shown as a "Dev bought" badge), then actual Uniswap v3 graduation with a permanently locked full-range position. A griefed graduation pool is rebalanced within a 2% budget, and a curve that cannot graduate within 24 hours can be reopened for trading. Base Sepolia's pinned team launchpad is still model 9 until the model 10 factory is deployed. The SQLite indexer reads both curve and DEX trades. Base Sepolia wallet deployment is prepared; it requires your signatures and test funds. Model 8 (basic, no external DEX) serves other configured EVM previews. Solana and Robinhood USD-priced launches remain blocked pending verified pricing integrations. See [DEX testing guide](docs/BASE_SEPOLIA_DEX_TESTING.md).
 
 See [current curve/pair guide](docs/VIRTUAL_CURVE_AND_PAIRS.md), [launchpad research](docs/LAUNCHPAD_RESEARCH.md) and [wallet/funding architecture](docs/WALLET_AND_CROSS_CHAIN_ARCHITECTURE.md). The direct-pool guide is historical.
 
 ## Agreed product requirements
 - $10 token creation fee to protocol, calculated from a verified native USD feed at execution; optional 10 USDC payment on configured EVM networks.
-- Mandatory developer first buy of any **valid positive** amount, atomic with launch.
+- Mandatory developer first buy of any **valid positive** amount, atomic with launch, at the 1.25% base fee and with no cap. The creator's launch buy and live holding are shown publicly.
 - Virtual curve first, then locked liquidity funded by accumulated trades; no separate liquidity deposit.
 - Native-asset pairing by default, or an approved paired token / tokenized stock; creation-fee payment is independent of the pair.
-- 1.25% eligible trade fee; 50% protocol, 50% creator reward allocation.
+- 1.25% eligible trade fee; 50% protocol, 50% creator reward allocation. During the first 60 seconds the fee starts at 90% and decays to 1.25%; the surplus is locked into graduation liquidity.
+- Curve from $5,000 to $50,000 FDV on every chain ($50 to $500 on testnets), then permanently locked DEX liquidity.
+- Token metadata is fixed in the launch transaction and cannot be edited afterwards.
 - Creator reward recipients: wallets, verified X/social identities and domains.
 - Holder rewards: creator-configurable minimum holdings, automatic accumulation and automatic batch distribution.
 - Optional reward conversion into supported tokens or eligible tokenized stocks at configured thresholds.

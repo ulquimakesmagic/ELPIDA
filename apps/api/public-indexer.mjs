@@ -3,6 +3,7 @@ import { join } from 'node:path';
 import { readFileSync, existsSync, writeFileSync, renameSync } from 'node:fs';
 import { EvmIndexer } from '../../packages/indexer/evm-indexer.mjs';
 import { normalizeMetadata } from '../web/metadata.mjs';
+import { isDexModel, MODEL_VERSIONS } from '../../packages/core/curve-model.mjs';
 
 // A read-only worker per configured deployment. Never accepts user RPCs or private keys.
 export class PublicIndexer {
@@ -10,7 +11,7 @@ export class PublicIndexer {
     this.entries=new Map();this.metadataStore=metadataStore;this.log=log;this.stopping=false;
     for(const net of networks.filter(n=>n.shared?.factory)){
       const provider=providerFactory(process.env['ELPIDA_RPC_'+net.chainId]??net.rpcUrl);
-      const dex=net.shared.model==='curve-dex-v9';
+      const dex=isDexModel(net.shared.model);
       const index=new EvmIndexer({provider,factory:net.shared.factory,contracts:{...contracts,factory:dex?contracts.dexFactory:contracts.legacyFactory,curve:dex?contracts.dexCurve:contracts.legacyCurve,...(!dex?{dexPool:undefined}:{})},path:join(dataDir,`public-${net.chainId}-${net.shared.factory.toLowerCase()}.sqlite`),chainId:net.chainId,fromBlock:net.shared.block,confirmations:2,nativeSymbol:net.nativeCurrency.symbol,batchSize:100});
       const metadataPath=join(dataDir,`public-metadata-${net.chainId}-${net.shared.factory.toLowerCase()}.json`);
       const metadata=new Map(existsSync(metadataPath)?Object.entries(JSON.parse(readFileSync(metadataPath,'utf8'))):[]);
@@ -21,7 +22,7 @@ export class PublicIndexer {
     if(this.running||this.stopping)return;this.running=true;
     try{for(const e of this.entries.values()){
       try{
-        if(!e.validated){const chain=Number((await e.provider.getNetwork()).chainId),v=Number(await new Contract(e.net.shared.factory,['function MODEL_VERSION() view returns(uint256)'],e.provider).MODEL_VERSION());if(chain!==e.net.chainId||v!==(e.net.shared.model==='curve-dex-v9'?9:8))throw new Error('Deployment identity mismatch');e.validated=true;}
+        if(!e.validated){const chain=Number((await e.provider.getNetwork()).chainId),v=Number(await new Contract(e.net.shared.factory,['function MODEL_VERSION() view returns(uint256)'],e.provider).MODEL_VERSION());if(chain!==e.net.chainId||v!==MODEL_VERSIONS[e.net.shared.model])throw new Error('Deployment identity mismatch');e.validated=true;}
         await e.index.sync();e.error=null;e.lastSuccess=new Date().toISOString();
         for(const t of e.index.tokens())if(t.metadataURI){
           // Only factory events synchronized by the validated chain index authorize retention.
@@ -38,6 +39,8 @@ export class PublicIndexer {
   metadataMessage(body){
     const e=this.entries.get(body.network),token=e?.index.tokens().find(t=>t.address===String(body.token).toLowerCase());
     if(!token||token.metadataURI)throw new Error('Only indexed tokens without on-chain metadata can publish this signed fallback.');
+    // Token details are final once published (D11): the signed fallback can be used once, never to edit.
+    if(e.metadata.has(token.address))throw new Error('Token details are already published and cannot be changed.');
     if(!Number.isSafeInteger(body.expires)||body.expires<Date.now()/1000||body.expires>Date.now()/1000+300)throw new Error('Metadata signature expired. Prepare it again.');
     const metadata=normalizeMetadata(body.metadata),digest=keccak256(toUtf8Bytes(JSON.stringify(metadata)));
     return {e,token,metadata,message:`Elpida public token metadata\nChain: ${e.net.chainId}\nFactory: ${e.net.shared.factory.toLowerCase()}\nToken: ${token.address}\nMetadata hash: ${digest}\nExpires: ${body.expires}\nThis signature publishes token details to Elpida. It does not authorize a transfer.`};

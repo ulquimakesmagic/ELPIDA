@@ -15,7 +15,7 @@ import { parseArgs } from 'node:util';
 import * as web3 from '@solana/web3.js';
 import { solanaDevnet } from '../packages/core/networks.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
-import { loadPricing, solanaPricing, evmPricing, EVM_END_MULTIPLE } from '../packages/core/pricing.mjs';
+import { loadPricing, solanaPricing, evmPricing, EVM_LEGACY_END_MULTIPLE } from '../packages/core/pricing.mjs';
 import { send, pricingUpdates, upgradeAuthority, exportInstruction } from '../packages/solana/deploy.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -28,7 +28,8 @@ const chain = args.chain ?? '';
 if (!chain) {
   console.log('Native pricing (config/native-pricing.json):');
   for (const [cluster, p] of Object.entries(pricing.solana)) console.log(`  solana-${cluster.padEnd(18)} fee ${p.launchFee} SOL, FDV ${p.startFdv} → ${p.endFdv} SOL`);
-  for (const [key, p] of Object.entries(pricing.evm)) console.log(`  ${key.padEnd(25)} fee ${p.launchFee}, FDV ${p.startFdv} → ${Number(p.startFdv) * EVM_END_MULTIPLE} (native coin)`);
+  for (const [key, p] of Object.entries(pricing.evm)) console.log(`  ${key.padEnd(25)} fee ${p.launchFee}, FDV ${p.startFdv} → ${Number(p.startFdv) * EVM_LEGACY_END_MULTIPLE} (native coin, legacy model 8 only)`);
+  console.log('\nModel 10 EVM factories are oracle-priced: $10 fee, fixed USD starting FDV and a 10x curve (packages/core/curve-model.mjs).');
   console.log('\nApply with --chain <name> (Solana) or from the site as the launchpad owner (EVM).');
   process.exit(0);
 }

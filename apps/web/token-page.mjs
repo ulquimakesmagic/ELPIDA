@@ -1,3 +1,4 @@
+import { snipeLabel, devLabel } from '/curve-model.mjs';
 import { assetIcon, chainIcon } from './chain-ui.mjs';
 import { usdcFunding } from './usdc-funding.mjs';
 // Token detail page: market figures with plain definitions, bonding-curve progress, trade panel,
@@ -56,13 +57,15 @@ export function renderToken(ctx, address) {
     copyButton(token.address,''),external(token.url??addressUrl(token.address),'Open token in explorer'),
     ...[['twitter','X','at-sign'],['telegram','Telegram','send'],['website','Website','globe'],['discord','Discord','message-circle']].filter(([k])=>social[k]).map(([k,label,glyph])=>h('a.icon-link',{href:social[k],target:'_blank',rel:'noopener noreferrer',title:label,'aria-label':label},icon(glyph,'icon-sm'))));
   // Curve progress: real reserve raised toward the reserve that completes the curve (net of the fee).
-  const reserve = Number(token.reserve || 0), remainingNet = Number(token.remainingBuy || 0) * (1 - 0.0125);
+  // Model 10 shows the cost at the 1.25% base fee: during the first minute the anti-snipe fee would inflate it.
+  const remainingDisplay = token.remainingBase ?? token.remainingBuy;
+  const reserve = Number(token.reserve || 0), remainingNet = Number(remainingDisplay || 0) * (1 - 0.0125);
   const target = reserve + remainingNet, raisedPct = token.complete || token.graduated ? 100 : target > 0 ? reserve / target * 100 : pct;
   const curve = h('section.curve-strip', { 'aria-label': 'Bonding curve progress' },
     h('div.curve-line', h('span', token.graduated ? `Graduated to ${dex === 'test' ? 'a locked test pool' : dex}` : token.complete ? 'Curve complete · ready to graduate' : 'Curve'),
       h('span.meta', token.graduated ? 'Liquidity locked permanently' : target > 0 ? `${number(raisedPct, raisedPct < 1 ? 2 : 1)}% of ${number(target, 2)} ${q}` : `${number(pct, 1)}% sold`)),
     bar(raisedPct, token.complete || token.graduated, 'Bonding curve progress'),
-    !token.graduated ? h('p.small.muted', token.complete ? `Anyone can graduate it: the ${number(reserve, 4)} ${q} reserve and the remaining tokens open a ${dex} pool with permanently locked liquidity.` : `Virtual bonding curve: purchases build the reserve. About ${number(token.remainingBuy, 4)} ${q} more completes it, then the liquidity moves into a locked ${dex} pool.`) : null);
+    !token.graduated ? h('p.small.muted', token.complete ? `Anyone can graduate it: the ${number(reserve, 4)} ${q} reserve and the remaining tokens open a ${dex} pool with permanently locked liquidity.` : `Virtual bonding curve: purchases build the reserve. About ${number(remainingDisplay, 4)} ${q} more completes it, then the liquidity moves into a locked ${dex} pool.`) : null);
 
   const stat = (label, value, extra) => h('div.stat', h('span', label), h('strong', value), extra ?? null);
   const holdersValue = h('strong', '—'), tradesValue = h('strong', '—'),volumeValue=h('strong','—');
@@ -73,6 +76,8 @@ export function renderToken(ctx, address) {
     h('div.stat',{title:'Actual quote assets in the curve or pool; virtual reserves are excluded.'},h('span','Liquidity'),h('strong',fmtValue(Number(token.reserve??0),token))),
     h('div.stat',h('span','24h volume'),volumeValue),
     stat('Supply', compact(token.supply || 1e9)),
+    // Creator transparency: there is no cap on the creator's first buy, so show what they bought and hold now.
+    token.devBoughtPct != null ? h('div.stat.dev-stat', { title: devLabel(token.devBoughtPct, token.devHoldingPct) }, h('span', 'Dev'), h('strong', `${number(token.devBoughtPct, 2)}% → ${token.devHoldingPct != null ? number(token.devHoldingPct, 2) + '%' : '—'}`)) : null,
     token.graduated || creatorFees > 0
       ? stat('Creator unclaimed', usdRate(token) !== null ? '$' + number(creatorFees * usdRate(token), 2) : `${number(creatorFees, 6)} ${q}`, h('a.terminal-claim', { href: '#/rewards',title:'Claim creator fees','aria-label':'Claim creator fees' },icon('arrow-right','icon-sm')))
       : stat('Creator fee', '0.625%', null));
@@ -172,8 +177,12 @@ function tradePanel(ctx, token, { dex, solana }) {
   if (token.complete && !token.graduated) {
     const error = h('p.error-text', { role: 'alert' });
     const label = token.dex === 'PumpSwap' ? 'Migrate to PumpSwap' : `Graduate to ${dex === 'test' ? 'a locked test pool' : dex}`;
+    // Model 10 escape hatch: if graduation keeps failing for 24 h, anyone can reopen the curve for trading.
+    const reopenAt = Number(token.reopenableAt) || null, canReopen = reopenAt && Date.now() / 1000 >= reopenAt;
+    const reopenNote = reopenAt ? h('p.small.muted', canReopen ? 'Graduation has not happened within 24 hours of completion, so anyone can reopen the curve and every holder can trade again.' : `If graduation keeps failing, anyone can reopen the curve for trading from ${new Date(reopenAt * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.`) : null;
+    const reopen = canReopen ? h('button.btn.btn-secondary.btn-block', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await ctx.run('reopen', { token: token.address }); } catch (e) { error.textContent = errorText(e); } } } }, 'Reopen curve trading') : null;
     return h('section.panel.trade-panel', h('h2', 'Curve complete'), h('p.muted', `Curve trading has stopped. ${label} to open the DEX pool. ${solana ? 'You advance about 0.05 SOL of account rent; the unused part is refunded in the same transaction.' : 'You pay the network fee.'}`),
-      h('button.btn.btn-primary.btn-block', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await ctx.run('graduate', { token: token.address }); } catch (e) { error.textContent = errorText(e); } } } }, label), error);
+      h('button.btn.btn-primary.btn-block', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await ctx.run('graduate', { token: token.address }); } catch (e) { error.textContent = errorText(e); } } } }, label), reopenNote, reopen, error);
   }
   let side = 'buy', revision = 0, timer, quoteReady = false, submitting = false;
   const amount = h('input.input#trade-amount', { type: 'number', min: '0', step: 'any', inputmode: 'decimal', placeholder: '0.00', required: true, 'aria-describedby': 'trade-balance' });
@@ -181,12 +190,27 @@ function tradePanel(ctx, token, { dex, solana }) {
   const balance = h('p.hint#trade-balance');
   const shortcuts = h('div.shortcuts', { role: 'group', 'aria-label': 'Amount shortcuts' });
   const out = h('strong', 'Enter an amount'), fee = h('strong', '—'), feeNote = h('p.hint');
+  // Live anti-snipe countdown ("Launch fee window: 47% → 1.25% in 31 s") while the first minute lasts.
+  const feeWindow = h('p.hint.fee-window', { role: 'status', 'aria-live': 'off' });
+  let feeTicks = 0;
+  const tickFeeWindow = () => {
+    const label = token.launchedAt && !token.complete && !token.graduated ? snipeLabel(token.launchedAt, Date.now() / 1000, token.feeSchedule ?? {}) : null;
+    feeWindow.textContent = label ?? ''; feeWindow.hidden = !label;
+    if (label) {
+      feeTicks++;
+      // Refresh an entered quote every 5 s while the fee falls; stop once the panel leaves the page.
+      if (feeTicks % 5 === 0 && Number(amount.value) > 0) quote();
+      if (feeTicks < 3 || feeWindow.isConnected) setTimeout(tickFeeWindow, 1000);
+    } else if (feeTicks) { feeTicks = 0; if (Number(amount.value) > 0) quote(); }
+  };
+
   const error = h('p.error-text', { role: 'alert' });
   const slippage = h('select.select#trade-slippage', [['0.5', '0.5%'], ['1', '1%'], ['3', '3%'], ['5', '5%']].map(([v, l]) => h('option', { value: v, selected: v === '1' }, l)));
   const submit = h('button.btn.btn-block.btn-lg', { type: 'submit', disabled:true });
   const updateSubmit = () => { submit.disabled = !quoteReady || submitting; };
+  const remainingDisplay = token.remainingBase ?? token.remainingBuy;
   const remaining = !token.complete && !token.graduated && Number(token.remainingBuy) > 0;
-  const remainingHint = h('p.hint', remaining ? `About ${number(token.remainingBuy,8)} ${q} remains to complete the curve. Further trading continues after graduation into the locked pool.` : '');
+  const remainingHint = h('p.hint', remaining ? `About ${number(remainingDisplay,8)} ${q} remains to complete the curve. Further trading continues after graduation into the locked pool.` : '');
   const useRemaining = h('button.btn.btn-secondary.btn-sm.curve-limit-action', {type:'button',hidden:true,on:{click:()=>{amount.value=token.remainingBuy;quote();}}}, 'Use remaining amount');
   const funding=token.pair==='native'?usdcFunding(ctx,{amount:()=>amount.value,symbol:q,context:token.address}):null;
   const tabs = h('div.segmented', { role: 'tablist', 'aria-label': 'Trade side' }, ['buy', 'sell'].map(s => h('button', { type: 'button', role: 'tab', 'data-side': s, 'aria-selected': String(s === side), on: { click: () => setSide(s) } }, s === 'buy' ? 'Buy' : 'Sell')));
@@ -230,7 +254,7 @@ function tradePanel(ctx, token, { dex, solana }) {
     const value = amount.value, rev = ++revision; clearTimeout(timer); error.textContent = '';
     quoteReady = false; updateSubmit(); useRemaining.hidden = true;
     if (!(Number(value) > 0)) { out.textContent = 'Enter an amount'; fee.textContent = '—'; feeNote.textContent = ''; return; }
-    if (side === 'buy' && remaining && exceedsRemaining(value,token.remainingBuy) && !solana) {
+    if (side === 'buy' && remaining && exceedsRemaining(value,token.remainingBuy) && !solana && !token.partialFill) {
       out.textContent = 'Amount exceeds the curve limit'; fee.textContent = '—'; feeNote.textContent = '';
       error.textContent = `About ${number(token.remainingBuy,8)} ${q} remains on the bonding curve. Use the remaining-amount button to fill the exact limit, then graduate to the locked pool.`;
       useRemaining.hidden = false; return;
@@ -244,7 +268,7 @@ function tradePanel(ctx, token, { dex, solana }) {
         quoteReady = true; updateSubmit();
         out.textContent = `${number(result.out, side === 'buy' ? 2 : 6)} ${side === 'buy' ? token.symbol : q}`;
         fee.textContent = `${number(result.fee, 6)} ${result.feeSymbol ?? q}`;
-        feeNote.textContent = result.antiSnipeActive ? `Launch protection is active: the fee is ${number(result.feeBps / 100, 2)}% for the first minute and falls to 1.25%. The amount above 1.25% is added to the token's locked liquidity.` : result.completesCurve ? `This purchase completes the curve. Only ${number(result.spend, 4)} ${q} will be charged.` : '';
+        feeNote.textContent = result.antiSnipeActive ? `Launch protection is active: the fee is ${number(result.feeBps / 100, 2)}% right now and falls to 1.25% by the end of the first minute. The amount above 1.25% is added to the token's locked liquidity.` : result.completesCurve ? `This purchase completes the curve. Only ${number(result.spend, 4)} ${q} will be charged.` : '';
       } catch (e) { if (rev !== revision) return; out.textContent = 'Quote unavailable'; fee.textContent = '—'; error.textContent = errorText(e); }
     }, 300);
   }
@@ -266,7 +290,7 @@ function tradePanel(ctx, token, { dex, solana }) {
     h('div.receive', h('span', 'You receive'), out),
     h('div.trade-meta', h('span', 'Trading fee'), fee),
     h('div.trade-meta', h('label', { for: 'trade-slippage' }, 'Slippage'), slippage),
-    feeNote, error, submit);
+    feeWindow, feeNote, error, submit);
   form.querySelector('label[for=trade-amount]').dataset.dynamic = 'true';
   tabs.addEventListener('click', () => { form.querySelector('label[for=trade-amount]').textContent = side === 'buy' ? 'Pay' : 'Sell'; });
   tabs.addEventListener('keydown', event => {
@@ -276,7 +300,8 @@ function tradePanel(ctx, token, { dex, solana }) {
     tabs.querySelector(`[data-side=${side}]`).focus();
   });
   setSide('buy');
+  tickFeeWindow();
   return h('section.panel.trade-panel', { 'aria-labelledby': 'trade-title' }, h('h2#trade-title.visually-hidden', 'Trade'),
-    h('p.small.muted', token.graduated ? `Trades on the locked ${dex} pool since graduation.` : 'Trades on the bonding curve. Each trade pays 1.25%.'),
+    h('p.small.muted', token.graduated ? `Trades on the locked ${dex} pool since graduation.` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'),
     form);
 }

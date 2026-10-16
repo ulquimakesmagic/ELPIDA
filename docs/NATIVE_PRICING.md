@@ -1,5 +1,7 @@
 # Native pricing
 
+> **Legacy.** Current launches are priced in US dollars by on-chain oracles ($10 fee, $5,000 → $50,000 curve); see [MODEL_10.md](MODEL_10.md) and [USD_PRICING_AND_UX.md](USD_PRICING_AND_UX.md). This file only applies to legacy model 8 EVM factories and to Solana configs without USD pricing.
+
 Elpida charges and prices every launch in each chain's own coin: SOL on Solana, ETH on Base, Ethereum and Robinhood Chain, BNB on BNB Chain. There are no dollar (USDC) pairs and no dollar fees. The team sets the numbers in one file, and nothing moves with the dollar price unless the team changes it.
 
 ## The file
@@ -10,7 +12,7 @@ Elpida charges and prices every launch in each chain's own coin: SOL on Solana, 
 |---|---|
 | `launchFee` | Creation fee the creator pays to the treasury on every launch, whatever the trading pair. |
 | `startFdv` | Fully diluted value of a new token at launch (price × 1B supply). |
-| `endFdv` | Solana only. The FDV at which the curve completes and migrates to PumpSwap. EVM curves have a fixed shape and complete at 16 × `startFdv`. |
+| `endFdv` | Solana only. The FDV at which the curve completes and migrates to PumpSwap. Legacy model 8 EVM curves have a fixed shape and complete at 16 × `startFdv`; model 10 completes at 10 × its USD start. |
 
 The mainnet values in the file are examples. Set them from the current coin price before deploying. For instance, at SOL = $150, a $5k → $50k curve is about 33 → 333 SOL, and a $7.50 fee is 0.05 SOL.
 

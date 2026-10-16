@@ -3,10 +3,12 @@ import assert from 'node:assert/strict';
 import {createRuntime} from '../apps/api/curve-runtime.mjs';
 import {EvmIndexer} from '../packages/indexer/evm-indexer.mjs';
 import {MetadataStore} from '../apps/api/metadata-store.mjs';
-test('model 5 runtime indexes v3 trades, unwraps ETH sells and distributes position fees',async t=>{
+test('model 10 runtime indexes v3 trades, unwraps ETH sells and distributes position fees',async t=>{
  const store=new MetadataStore({jwt:null}),r=await createRuntime({dex:true,seed:false,metadataStore:store});t.after(()=>r.close());
  const launch=await r.transact('launch',{name:'DEX indexed',symbol:'DEX',pair:'native',firstBuy:'0.01',description:'Shared token details',image:'https://example.com/logo.png'}),token=launch.token;
  const uri=r.indexer.listings().find(t=>t.address===token).metadataURI;assert.match(uri,/^ipfs:\/\//);assert.equal((await store.resolve(uri)).description,'Shared token details');
+ // Complete after the one-minute anti-snipe window so no surplus raises the opening pool price.
+ await r.provider.send('evm_increaseTime',[61]);await r.provider.send('evm_mine',[]);await r.indexer.sync();
  const terminal=r.indexer.snapshot(token).remainingBuy;await r.transact('buy',{token,amount:terminal});const price=Number(r.indexer.snapshot(token).spotPrice);
  await r.transact('graduate',{token});assert.ok(Math.abs(Number(r.indexer.snapshot(token).spotPrice)/price-1)<1e-6);assert.equal(r.indexer.snapshot(token).liquidityLocked,true);
  assert.ok(Number((await r.getQuote({token,side:'buy',amount:'0.1'})).out)>0);

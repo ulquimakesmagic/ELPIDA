@@ -1,5 +1,7 @@
 # Curve economics, DEX migration and indexing
 
+> **Superseded for current economics by [MODEL_10.md](MODEL_10.md)** (15 October 2026): every chain now uses a $5,000 → $50,000 (10x) curve with anti-snipe fees and a graduation escape hatch. The figures below describe older models and are kept for history.
+
 Implementation update: model 4 beta economics, local SQLite indexing and separate fee splitter/v3 locker prototypes are now implemented. See [current implementation and limitations](INDEXER_AND_POST_MIGRATION_FEES.md). The recommendations below predate the fee-preserving route refinement.
 
 Research date: 11 October 2026. Recommendations for Elpida (assuming the user's reference to Helm means Elpida). This is a design proposal; it does not change deployed contracts, select production addresses or implement a production indexer.

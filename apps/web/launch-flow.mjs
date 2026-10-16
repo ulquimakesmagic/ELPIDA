@@ -8,6 +8,7 @@ import { launchProfile } from './launch-capabilities.mjs';
 import { STRATEGIES } from './rewards-view.mjs';
 import { usdcFunding } from './usdc-funding.mjs';
 import { PAIR_KINDS, PAIR_INFO } from '/pairs.mjs';
+import { curveShape, DEX_MODEL, BETA_MODEL, BASE_FEE_BPS, LOCAL_START_FDV_USD } from '/curve-model.mjs';
 
 const DRAFT_KEY = 'elpida:launch-draft';
 const STEPS = [
@@ -62,13 +63,16 @@ export function renderLaunch(ctx) {
     // Simulation uses the same fee enforcement with an explicitly labelled mock oracle.
     const fee = { feeAmount: ctx.config.local?.launchFee ?? '0.004', feeSymbol: 'ETH' };
     const startFdv = Number(ctx.config.pricing?.local?.startFdv ?? 2);
-    const nativeCurve = { vq: startFdv * 16 / 15, vt: 1066666666.6667, cap: 8e8, feeBps: 125 };
+    // One curve shape for every chain (packages/core/curve-model.mjs); the basic local launchpad keeps model 8.
+    const shape = curveShape(ctx.config.dex ? DEX_MODEL : BETA_MODEL);
+    const curveFor = startValue => ({ vq: startValue * shape.virtualFactor, vt: shape.virtualTokens, cap: shape.saleCap, feeBps: BASE_FEE_BPS });
+    const nativeCurve = curveFor(startFdv);
     const assets = rewardData?.assets ?? [];
     const loading = rewardData ? null : 'Loading the approved assets…';
     const paired = (list, empty) => !ctx.config.dex ? { assets: [], unavailable: 'Needs the local DEX environment, which graduates into Uniswap v3.' } : list.length ? { assets: list } : { assets: [], unavailable: loading ?? empty };
     return {
       native: { assets: [{ id: 'native', symbol: 'ETH', name: 'Local test ETH', decimals: 18, curve: nativeCurve, ...fee }] },
-      usdc: ctx.config.dex ? { assets: [{ id:ctx.config.local.feeUsdc,symbol:'USDC',name:'Simulated USDC (test only)',decimals:6,curve:{vq:5000*16/15,vt:1066666666.6667,cap:8e8,feeBps:125},...fee }] } : { assets:[],unavailable:'USDC trading pairs need the local DEX environment.' },
+      usdc: ctx.config.dex ? { assets: [{ id:ctx.config.local.feeUsdc,symbol:'USDC',name:'Simulated USDC (test only)',decimals:6,curve:curveFor(LOCAL_START_FDV_USD),...fee }] } : { assets:[],unavailable:'USDC trading pairs need the local DEX environment.' },
       xstock: paired(assets.filter(a => a.kind === 'simulation').map(a => ({ id: a.address, symbol: 'TEST-STOCK', name: 'Simulated stock (test only, not an issued xStock)', decimals: 18, test: true, ...fee, faucet: { label: 'Get 1 TEST-STOCK for 0.04 local ETH', action: 'reward-stock-faucet', body: {} } })), 'The simulated stock is not available.'),
       token: paired(assets.filter(a => a.kind === 'elpida' && a.pairEligible).map(a => ({ id: a.address, symbol: a.symbol, name: `${a.symbol}, a graduated Elpida token`, decimals: 18, ...fee })), 'No graduated ETH-paired Elpida token yet. Graduate one first, and it can become a pair.'),
     };
@@ -120,6 +124,7 @@ export function renderLaunch(ctx) {
     const buy = Number(draft.firstBuy), curve = selectedAsset()?.curve;
     if (!(buy > 0) || !curve) return null;
     // Same virtual-reserve curve the contracts use: tokens = Vt × net / (Vq + net), net of the base fee.
+    // The creator's first buy always pays the 1.25% base fee; the anti-snipe fee applies to other traders only.
     const net = buy * (1 - (curve.feeBps ?? 125) / 10000), tokens = curve.vt * net / (curve.vq + net);
     return { tokens: Math.min(tokens, curve.cap),exceeds:tokens>curve.cap, completes: tokens >= curve.cap, share: Math.min(tokens, curve.cap) / 1e9 * 100 };
   }

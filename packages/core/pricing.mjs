@@ -4,8 +4,12 @@ import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
 export const PRICING_PATH = fileURLToPath(new URL('../../config/native-pricing.json', import.meta.url));
-/** EVM curves complete when 800M of the 1B supply is sold, at 16x the starting FDV. */
-export const EVM_END_MULTIPLE = 16;
+/**
+ * LEGACY model 8 (ElpidaBetaFactory) only: those curves complete when 800M of the 1B supply is sold, at 16x the
+ * starting FDV. Model 10 (ElpidaDexFactory) is oracle-priced at a fixed USD start and ends at 10x; its shape lives
+ * in packages/core/curve-model.mjs.
+ */
+export const EVM_LEGACY_END_MULTIPLE = 16;
 
 const amount = (value, label) => {
   const text = String(value ?? '').trim();
@@ -37,8 +41,8 @@ export function solanaPricing(cluster, pricing = loadPricing()) {
 }
 
 /**
- * EVM factory values in wei: `virtualQuote` is the curve's virtual native reserve that gives `startFdv`
- * (FDV = virtualQuote x supply / virtualToken, and virtualToken / supply = 16/15).
+ * LEGACY model 8 EVM factory values in wei: `virtualQuote` is the curve's virtual native reserve that gives
+ * `startFdv` (FDV = virtualQuote x supply / virtualToken, and virtualToken / supply = 16/15 for model 8).
  */
 export function evmPricing(key, pricing = loadPricing()) {
   const p = pricing.evm[key];

@@ -13,9 +13,9 @@ if(!rpc || !/^0x[a-fA-F0-9]{40}$/.test(factory??'') || !Number.isSafeInteger(fro
 const provider=new JsonRpcProvider(rpc,undefined,{cacheTimeout:-1});
 const chainId=Number((await provider.getNetwork()).chainId);
 const version=Number(await new Contract(factory,['function MODEL_VERSION() view returns(uint256)'],provider).MODEL_VERSION());
-if(![3,4,5,8,9].includes(version))throw new Error('Only Elpida models 3, 4, 5, 8 and 9 are supported.');
+if(![3,4,5,8,9,10].includes(version))throw new Error('Only Elpida models 3, 4, 5, 8, 9 and 10 are supported.');
 const compiled=compileContracts(),artifact=n=>({abi:compiled[`contracts/evm/src/${n}.sol`][n].abi});
-const dex=[5,9].includes(version),beta=[4,8].includes(version);
+const dex=[5,9,10].includes(version),beta=[4,8].includes(version);
 const contracts={factory:artifact(dex?'ElpidaDexFactory':beta?'ElpidaBetaFactory':'ElpidaLaunchFactory'),curve:artifact(dex?'ElpidaDexCurve':beta?'ElpidaBetaCurve':'ElpidaLaunchCurve'),pool:artifact('ElpidaLockedPool'),token:artifact('ElpidaToken'),...(dex?{dexPool:{abi:v3Artifacts.pool.abi},locker:artifact('ElpidaV3FeeLocker'),splitter:artifact('ElpidaFeeSplitter')}:{})};
 const root=fileURLToPath(new URL('../',import.meta.url));
 const path=process.env.ELPIDA_INDEX_DB??resolve(root,`local-data/index-${chainId}-${factory.toLowerCase()}.sqlite`);

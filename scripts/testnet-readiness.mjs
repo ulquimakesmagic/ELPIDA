@@ -1,6 +1,7 @@
 // Read-only public lifecycle inspection. Never loads keys or submits transactions.
 import {Contract,JsonRpcProvider,formatEther,formatUnits,isAddress} from 'ethers';
 import {evmTestnets} from '../packages/core/networks.mjs';
+import {MODEL_VERSIONS} from '../packages/core/curve-model.mjs';
 
 const site=(process.env.ELPIDA_CHECK_URL??'https://elpida-production.up.railway.app').replace(/\/$/,'');
 const account=process.argv[2];
@@ -13,7 +14,9 @@ const report={checkedAt:new Date().toISOString(),site,network:net.key,storageDur
 try{
  if(Number((await rpc.getNetwork()).chainId)!==net.chainId)throw new Error('RPC chain mismatch');
  const factory=new Contract(net.shared.factory,config.contracts.dexFactory.abi,rpc);
- if(Number(await factory.MODEL_VERSION())!==9)throw new Error('Factory model mismatch');
+ const version=Number(await factory.MODEL_VERSION());
+ if(version!==MODEL_VERSIONS[net.shared.model])throw new Error('Factory model mismatch');
+ report.modelVersion=version;
  report.metadataVersion=Number(await factory.METADATA_VERSION());
  if(account){
   const usdc=new Contract('0x036CbD53842c5426634e7929541eC2318f3dCF7e',['function balanceOf(address) view returns(uint256)','function decimals() view returns(uint8)'],rpc);

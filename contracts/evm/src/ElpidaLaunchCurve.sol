@@ -25,6 +25,7 @@ contract ElpidaLaunchCurve {
     event Bought(address indexed payer, address indexed recipient, uint256 quoteIn, uint256 tokensOut);
     event Sold(address indexed seller, uint256 tokensIn, uint256 quoteOut);
     event FeesWithdrawn(address indexed recipient, uint256 amount);
+    event FeePayoutFailed(address indexed recipient, uint256 amount);
     event CurveCompleted(uint256 realQuote);
     event Graduated(address indexed pool, uint256 quoteLiquidity, uint256 tokenLiquidity, uint256 burned);
     modifier nonReentrant() { require(!entered, "reentrancy"); entered = true; _; entered = false; }
@@ -79,10 +80,18 @@ contract ElpidaLaunchCurve {
         sold -= input; realReserve -= out + fee; protocolFees += fee / 2; creatorFees += fee - fee / 2;
         _pay(msg.sender,out); emit Sold(msg.sender,input,out);
     }
+    /// Failure-isolated payouts: a recipient that cannot receive keeps its balance owed and never blocks the other.
     function withdrawFees() external nonReentrant {
         uint256 p = protocolFees; uint256 c = creatorFees; protocolFees = 0; creatorFees = 0;
-        if (p > 0) { _pay(protocolTreasury,p); emit FeesWithdrawn(protocolTreasury,p); }
-        if (c > 0) { _pay(creatorRewardVault,c); emit FeesWithdrawn(creatorRewardVault,c); }
+        protocolFees = _tryPayout(protocolTreasury, p); creatorFees = _tryPayout(creatorRewardVault, c);
+    }
+    function _tryPayout(address to, uint256 amount) private returns (uint256 owed) {
+        if (amount == 0) return 0;
+        bool ok; bytes memory data;
+        if (address(quote) == address(0)) (ok,) = to.call{value: amount}("");
+        else { (ok, data) = address(quote).call(abi.encodeWithSelector(IERC20Minimal.transfer.selector, to, amount)); ok = ok && (data.length == 0 || abi.decode(data, (bool))); }
+        if (ok) { emit FeesWithdrawn(to, amount); return 0; }
+        emit FeePayoutFailed(to, amount); return amount;
     }
     function graduate() external nonReentrant returns (address) {
         require(complete && pool == address(0), "not complete/already migrated");

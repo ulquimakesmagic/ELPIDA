@@ -2,6 +2,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { Contract, Interface, ZeroAddress, formatUnits, parseUnits } from 'ethers';
+import { supplyPercent } from '../core/curve-model.mjs';
 
 const dead = '0x000000000000000000000000000000000000dead';
 const json = value => JSON.stringify(value, (_, v) => typeof v === 'bigint' ? v.toString() : v);
@@ -92,10 +93,13 @@ export class EvmIndexer {
       const quote = await curve.quote(call);
       const d=native?18:Number(await new Contract(quote,['function decimals() view returns(uint8)'],this.provider).decimals(call));
       const [name,symbol,reward,virtualQuote,virtualToken,saleCap] = await Promise.all([token.name(call),token.symbol(call),curve.creatorRewardVault(call),curve.virtualQuote(call),curve.virtualToken(call),curve.SALE_CAP(call)]);
+      // Model 10 curves expose their launch time and anti-snipe schedule; legacy curves do not.
+      let schedule=null;
+      try{const [launchedAt,base,start,window,grace]=await Promise.all([curve.launchedAt(call),curve.FEE_BPS(call),curve.SNIPE_START_BPS(call),curve.SNIPE_WINDOW(call),curve.graduationGrace(call)]);schedule={launchedAt:Number(launchedAt),feeSchedule:{base:Number(base),start:Number(start),window:Number(window)},graduationGrace:Number(grace)};}catch{/* Legacy model 9 or earlier. */}
       let kind=native?'native':'token';
       if(custom){try{kind=await new Contract(quote,['function pairKind() view returns(string)'],this.provider).pairKind(call)==='xstock'?'xstock':'token';}catch{kind='token';}}
       if(!native){try{if((await new Contract(this.factory,['function feeUsdc() view returns(address)'],this.provider).feeUsdc(call)).toLowerCase()===quote.toLowerCase())kind='usdc';}catch{/* Older deployments lack independent USDC payment. */}}
-      fresh.push({address:e.args.token.toLowerCase(),metadataURI:metadataURIs.get(e.args.token.toLowerCase())??'',curve:e.args.curve.toLowerCase(),creator:e.args.creator,reward,name,symbol,pair:kind,quoteAddress:quote,quoteDecimals:d,quoteSymbol:native?this.nativeSymbol:await new Contract(quote,['function symbol() view returns(string)'],this.provider).symbol(call),virtualQuote:virtualQuote.toString(),virtualToken:virtualToken.toString(),saleCapRaw:saleCap.toString(),created:block.timestamp*1000,creationBlock:height,hash:log.transactionHash});
+      fresh.push({address:e.args.token.toLowerCase(),metadataURI:metadataURIs.get(e.args.token.toLowerCase())??'',curve:e.args.curve.toLowerCase(),creator:e.args.creator,reward,name,symbol,pair:kind,quoteAddress:quote,quoteDecimals:d,quoteSymbol:native?this.nativeSymbol:await new Contract(quote,['function symbol() view returns(string)'],this.provider).symbol(call),virtualQuote:virtualQuote.toString(),virtualToken:virtualToken.toString(),saleCapRaw:saleCap.toString(),created:block.timestamp*1000,creationBlock:height,hash:log.transactionHash,curveModel:schedule?10:null,partialFill:!!schedule,...(schedule??{})});
     }
     const records=[...known,...fresh], addressMap=new Map();
     for(const r of records) {
@@ -111,6 +115,11 @@ export class EvmIndexer {
       if(e?.name==='Graduated' && !addressMap.has(e.args.pool.toLowerCase())) {addressMap.set(e.args.pool.toLowerCase(),{r:info.r,kind:this.contracts.dexPool?'dexPool':'pool'});newPools.push(e.args.pool);}
     }
     if(newPools.length) logs.push(...await this.provider.getLogs({address:newPools,fromBlock:height,toBlock:height}));
+    // Creator transparency: the atomic first buy is the curve's Bought event inside the launch transaction.
+    for(const r of fresh){
+      const first=logs.filter(l=>l.address.toLowerCase()===r.curve&&l.transactionHash===r.hash).map(l=>this.parse('curve',l)).find(e=>e?.name==='Bought');
+      r.devBoughtRaw=(first?.args.tokensOut??0n).toString();r.devBoughtPct=supplyPercent(r.devBoughtRaw);
+    }
     const snapshots=[];
     for(const r of records) snapshots.push([r,await this.readSnapshot(r,height,block)]);
     // Refuse to commit an inconsistent history if the block was replaced mid-read.
@@ -140,9 +149,12 @@ export class EvmIndexer {
   parse(kind,log){try{return this.interfaces[kind].parseLog(log);}catch{return null;}}
   async readSnapshot(r,height,block) {
     const call={blockTag:height},c=new Contract(r.curve,this.contracts.curve.abi,this.provider),t=new Contract(r.address,this.contracts.token.abi,this.provider);
-    const [pool,sold,complete,supply,deadBalance] = await Promise.all([c.pool(call),c.sold(call),c.complete(call),t.totalSupply(call),t.balanceOf(dead,call)]);
+    const [pool,sold,complete,supply,deadBalance,devHolding] = await Promise.all([c.pool(call),c.sold(call),c.complete(call),t.totalSupply(call),t.balanceOf(dead,call),t.balanceOf(r.creator,call)]);
+    // Live creator holding and, for model 10, the locked anti-snipe bonus and graduation escape-hatch timing.
+    const dev={devHoldingRaw:devHolding.toString(),devHoldingPct:supplyPercent(devHolding,supply)};
+    if(r.curveModel===10){const [bonus,completedAt]=await Promise.all([c.liquidityBonus(call),c.completedAt(call)]);Object.assign(dev,{liquidityBonus:formatUnits(bonus,r.quoteDecimals),completedAt:Number(completedAt),reopenableAt:complete&&pool===ZeroAddress&&completedAt>0n?Number(completedAt)+r.graduationGrace:null});}
     const graduated=pool!==ZeroAddress,m=graduated?new Contract(pool,this.contracts.pool.abi,this.provider):c;
-    if(graduated && this.contracts.dexPool)return this.readDexSnapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance});
+    if(graduated && this.contracts.dexPool)return {...await this.readDexSnapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance}),...dev};
     const [reserve,cp,cc] = await Promise.all([m.realReserve(call),c.protocolFees(call),c.creatorFees(call)]);
     const poolTokens=graduated?await m.tokenReserve(call):0n;
     const q=graduated?reserve:BigInt(r.virtualQuote)+reserve,base=graduated?poolTokens:BigInt(r.virtualToken)-sold,d=r.quoteDecimals;
@@ -151,7 +163,7 @@ export class EvmIndexer {
     const inventory=await t.balanceOf(r.curve,call)+(graduated?await t.balanceOf(pool,call):0n),circulating=supply-deadBalance-inventory;
     const marketCap=ratio(q*circulating,base*10n**BigInt(d)),fdv=ratio(q*supply,base*10n**BigInt(d));
     const pf=graduated?await m.protocolFees(call):0n,cf=graduated?await m.creatorFees(call):0n;
-    return {pool,graduated,complete,liquidityLocked:graduated,reserve:formatUnits(reserve,d),sold:formatUnits(sold,18),supply:formatUnits(supply,18),circulatingSupply:formatUnits(circulating,18),deadSupply:formatUnits(deadBalance,18),saleCap:formatUnits(BigInt(r.saleCapRaw),18),spotPrice:price,fdvQuote:fdv,circulatingMarketCapQuote:marketCap,supplyPolicy:'exclude curve/pool inventory and known dead address v1',priceUsd:null,usdBasis:null,protocolFees:formatUnits(cp+pf,d),creatorFees:formatUnits(cc+cf,d),remainingBuy:complete?'0':formatUnits(await c.completionQuote(call),d),indexedBlock:height,indexedBlockHash:block.hash,priceTimestamp:block.timestamp};
+    return {pool,graduated,complete,liquidityLocked:graduated,reserve:formatUnits(reserve,d),sold:formatUnits(sold,18),supply:formatUnits(supply,18),circulatingSupply:formatUnits(circulating,18),deadSupply:formatUnits(deadBalance,18),saleCap:formatUnits(BigInt(r.saleCapRaw),18),spotPrice:price,fdvQuote:fdv,circulatingMarketCapQuote:marketCap,supplyPolicy:'exclude curve/pool inventory and known dead address v1',priceUsd:null,usdBasis:null,protocolFees:formatUnits(cp+pf,d),creatorFees:formatUnits(cc+cf,d),remainingBuy:complete?'0':formatUnits(await c.completionQuote(call),d),...(r.curveModel===10?{remainingBase:complete?'0':formatUnits(await c.remainingAtBaseFee(call),d)}:{}),indexedBlock:height,indexedBlockHash:block.hash,priceTimestamp:block.timestamp,...dev};
   }
   async readDexSnapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance}) {
     const call={blockTag:height},m=new Contract(pool,this.contracts.dexPool.abi,this.provider),[slot,asset0,asset1,liquidity,fee,lockerAddress,splitterAddress,positionId,cp,cc]=await Promise.all([m.slot0(call),m.token0(call),m.token1(call),m.liquidity(call),m.fee(call),c.locker(call),c.feeSplitter(call),c.positionId(call),c.protocolFees(call),c.creatorFees(call)]);

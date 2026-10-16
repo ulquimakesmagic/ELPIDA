@@ -19,9 +19,12 @@ test('public registry survives restart and accepts metadata only from the indexe
     assert.throws(()=>service.saveMetadata({...body,signature:other.signingKey.sign('0x'+'00'.repeat(32)).serialized}));
     assert.throws(()=>service.saveMetadata({...body,signature:'bad'}));
     await assert.rejects(async()=>service.saveMetadata({...body,signature:await other.signMessage(message)}),/creator/);
+    assert.throws(()=>service.metadataMessage({...body,expires:1}),/expired/);
     service.saveMetadata({...body,signature:await creator.signMessage(message)});
     assert.equal(service.listings('test')[0].metadataStatus,'creator-signed');
-    assert.throws(()=>service.metadataMessage({...body,expires:1}),/expired/);
+    // D11: published details are final; the creator cannot sign a replacement.
+    assert.throws(()=>service.metadataMessage({...body,metadata:{description:'Edited'}}),/already published/);
+    await assert.rejects(async()=>service.saveMetadata({...body,signature:await creator.signMessage(message)}),/already published/);
     await service.close();service=new PublicIndexer(options);
     assert.equal(service.listings('test')[0].metadata.description,'Public creator details');
     assert.equal(service.listings('test')[0].name,'Public token');

@@ -24,6 +24,7 @@ import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
 import { MAX_METADATA_REQUEST_BYTES } from '../web/metadata.mjs';
 import { evmTestnets, solanaDevnet, solanaLocalnet, solanaMainnet } from '../../packages/core/networks.mjs';
+import { isDexModel } from '../../packages/core/curve-model.mjs';
 
 const webRoot = fileURLToPath(new URL('../web/', import.meta.url));
 const ethersFile = fileURLToPath(new URL('../../node_modules/ethers/dist/ethers.min.js', import.meta.url));
@@ -52,6 +53,7 @@ const vendorFiles = new Map([
   ['/vendor/solana-web3.js', fileURLToPath(new URL('../../node_modules/@solana/web3.js/lib/index.iife.min.js', import.meta.url))],
   ['/elpida-solana.mjs', fileURLToPath(new URL('../../packages/solana/client.mjs', import.meta.url))],
   ['/pairs.mjs', fileURLToPath(new URL('../../packages/core/pairs.mjs', import.meta.url))],
+  ['/curve-model.mjs', fileURLToPath(new URL('../../packages/core/curve-model.mjs', import.meta.url))],
 ]);
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
@@ -263,7 +265,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if(action==='metadata/publish'){if(publicUrl)return send(410,{error:'Public metadata uploads must use the launch staging flow; retention is verified from the launch transaction.'});return send(200,await metadataStore.publish(body,true));}
       if(action==='metadata/stage'){
         const net=evmTestnets.find(n=>n.key===body.network);
-        if(!net||net.mainnet||net.shared?.model!=='curve-dex-v9')return send(400,{error:'On-chain launch metadata staging is unavailable on this network.'});
+        if(!net||net.mainnet||!isDexModel(net.shared?.model))return send(400,{error:'On-chain launch metadata staging is unavailable on this network.'});
         const pinned=metadataStore.status().publicEnabled;
         if(!pinned&&!process.env.RAILWAY_VOLUME_MOUNT_PATH)return send(503,{error:'Configure public IPFS pinning or a persistent testnet data volume before launching with metadata.'});
         return send(200,{...(await metadataStore.publish(body,pinned,{provisional:true})),storage:pinned?'public-ipfs':'elpida-hosted',retention:'pending-chain-verification'});
@@ -272,7 +274,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if (action === 'quote') return send(200, await runtime.getQuote(body));
       if (action === 'conversion-quote') return send(200, await runtime.getConversionQuote(body));
       if (action === 'convert-usdc') return send(200, await runtime.transact(action,body));
-      if (!['launch', 'buy', 'sell', 'withdraw', 'graduate', 'reward-claim', 'reward-challenge', 'reward-verify', 'reward-process', 'reward-stock-faucet'].includes(action)) return send(404, { error: 'Action not found.' });
+      if (!['launch', 'buy', 'sell', 'withdraw', 'graduate', 'reopen', 'reward-claim', 'reward-challenge', 'reward-verify', 'reward-process', 'reward-stock-faucet'].includes(action)) return send(404, { error: 'Action not found.' });
       return send(200, await runtime.transact(action, body));
     } catch (error) {
       const message = error.reason ?? error.shortMessage ?? error.message ?? 'Request failed.';

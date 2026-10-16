@@ -1,6 +1,6 @@
 # Scope and security blockers
 
-Historical status below is retained for reference. For the current Base model-9 implementation and release gates, use [Base mainnet review](BASE_MAINNET_REVIEW.md).
+Historical status below is retained for reference. The current EVM model is described in [MODEL_10.md](MODEL_10.md). Legacy model 8 (`ElpidaBetaCurve`, `ElpidaLockedPool`) still pays protocol and creator fees in one transaction, so a reward address that rejects the payout blocks both; the fix does not fit under `ElpidaBetaFactory`'s size limit. Model 8 is testnet-only and is replaced by model 10 in Phase 3. Never deploy it to mainnet. For the current Base model-9 implementation and release gates, use [Base mainnet review](BASE_MAINNET_REVIEW.md).
 
 **11 October model:** separate USDC launch fee, native/USDC virtual curves, and graduation into a locked custom test pool. Direct-pool launch entries below are historical. Production DEX adapters and the updated Solana program are pending; see [current specification](VIRTUAL_CURVE_AND_PAIRS.md).
 
