@@ -1,6 +1,6 @@
 # Model 10 — current EVM launch model
 
-Status: implemented and tested locally on 15 October 2026 (Phase 1 of the fix-and-finish plan). **Not audited, not deployed to any public chain yet.** Base Sepolia's pinned team launchpad is still the model 9 factory `0xe605…4f91` until the model 10 factory is deployed (see [HUMAN_ACTIONS.md](HUMAN_ACTIONS.md)). Model 9 stays fully readable and tradable in the app as a legacy model.
+Status: implemented and tested on 15 October 2026 (Phase 1 of the fix-and-finish plan). **Not audited.** Deployed to Base Sepolia on 16 October 2026: factory `0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2` (block 48209837), migration adapter `0xF3A249E1Abf044bee5324d02B99Ee0fECB34d887`, $50 start FDV, 24 h graduation grace, treasury `0xf5B0cE04241f9518dfA3CBfbaafC7E40638E639D`. Verified on-chain after deployment: `MODEL_VERSION` 10, USD feed set, USDC fee asset set, `METADATA_VERSION` 1. The previous model 9 factory `0xe605…4f91` is kept as a `legacy` deployment: the public indexer follows both, and model 9 tokens stay listed and tradable with their own rules (no fee window, no partial fill, no escape hatch).
 
 This page supersedes the curve numbers in older guides (VIRTUAL_CURVE_AND_PAIRS, INDEXER_AND_POST_MIGRATION_FEES, CURVE_MIGRATION_INDEXER_PLAN), which describe models 3–9.
 
