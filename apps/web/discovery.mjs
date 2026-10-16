@@ -1,5 +1,6 @@
-export function freshUsd(token,now=Date.now()/1000){const p=token.usdReference;return p?.status==='fresh'&&Number.isFinite(p.usd)&&p.usd>0&&now-p.updatedAt<=(p.maxAge??180)?p.usd:null;}
-export function discoveryTokens(tokens,{query='',category='all'}={},now=Date.now()/1000){
+import { nowSeconds } from './clock.mjs';
+export function freshUsd(token,now=nowSeconds()){const p=token.usdReference;return p?.status==='fresh'&&Number.isFinite(p.usd)&&p.usd>0&&now-p.updatedAt<=(p.maxAge??180)?p.usd:null;}
+export function discoveryTokens(tokens,{query='',category='all'}={},now=nowSeconds()){
   const items=tokens.filter(t=>`${t.name} ${t.symbol}`.toLowerCase().includes(query.trim().toLowerCase())).filter(t=>category==='migrating'?t.complete&&!t.graduated:category==='graduated'?t.graduated:true);
   const identity=t=>`${t.network??'local'}:${t.address}`;
   return items.sort((a,b)=>{

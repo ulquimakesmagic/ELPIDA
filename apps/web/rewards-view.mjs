@@ -1,3 +1,4 @@
+import { nowSeconds } from './clock.mjs';
 // Rewards: creator-fee distribution for the tokens you created, plus the local reward treasuries
 // (threshold progress, completed holder distributions, claims, identity verification, vesting).
 import { $, h, icon, short, number, avatar, callout, errorText, toast, copyButton } from './ui.mjs';
@@ -89,7 +90,7 @@ function treasury(ctx, row, data) {
     for (const b of balances) ready.push(h('div.alloc-card', h('div.row', h('strong', amount(b.claimable, b.symbol)), h('span.muted', `${kindLabel} ${label}`)),
       h('span.muted', `Paid to ${short(recipient.verified)}`), h('div', busyButton(`Claim ${b.symbol}`, () => ctx.api('reward-claim', { token: row.token, index: recipient.index, asset: b.asset }), 'btn-primary'))));
   }
-  const now = Date.now() / 1000;
+  const now = nowSeconds();
   const vesting = row.grants.map(g => {
     const unlocked = Number(g.total) * Math.min(1, Math.max(0, (now - g.start) / g.duration));
     const claimable = Math.max(0, unlocked - Number(g.claimed));

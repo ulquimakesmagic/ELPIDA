@@ -1,3 +1,4 @@
+import { nowSeconds } from './clock.mjs';
 // Small DOM and formatting helpers shared by every Elpida view. All dynamic text goes through
 // textContent; no untrusted value is ever inserted as HTML.
 import { normalizeMetadata } from './metadata.mjs';
@@ -59,7 +60,7 @@ export function pricing(token) {
 }
 export function usdRate(token) {
   const p=token.usdReference;
-  return p?.status==='fresh'&&Number.isFinite(p.usd)&&p.usd>0&&Date.now()/1000-p.updatedAt<=(p.maxAge??180)?p.usd:null;
+  return p?.status==='fresh'&&Number.isFinite(p.usd)&&p.usd>0&&nowSeconds()-p.updatedAt<=(p.maxAge??180)?p.usd:null;
 }
 export const fmtPrice = token => usdRate(token)!==null ? formatPrice(pricing(token).price*usdRate(token)) : `${formatPrice(pricing(token).price, '')} ${token.quoteSymbol ?? ''}`.trim();
 export const fmtValue = (value, token) => usdRate(token)!==null ? '$'+compact(value*usdRate(token)) : `${compact(value)} ${token.quoteSymbol ?? ''}`.trim();
