@@ -69,3 +69,17 @@ test('quota rejects before provider billing, exact content deduplicates and publ
  assert.throws(()=>limited.put(rawCid(Buffer.alloc(100)),Buffer.alloc(100),'text/plain'),/storage limit/);
  limited.retainPublished('ipfs://'+cid);assert.equal(limited.status().storage.pendingBytes,0);assert.equal(limited.get(cid).data,bytes.toString('base64'));
 });
+
+test('a mistyped optional IPFS gateway is repaired or ignored, never fatal at startup',async()=>{
+  const {ipfsGateway,DEFAULT_IPFS_GATEWAY,MetadataStore}=await import('../apps/api/metadata-store.mjs');
+  const warnings=[],warn=m=>warnings.push(m);
+  // The 16 Oct 2026 Railway crash: scheme omitted.
+  assert.equal(ipfsGateway('turquoise-glamorous-xerinae-570.mypinata.cloud/ipfs/',{warn}),'https://turquoise-glamorous-xerinae-570.mypinata.cloud/ipfs/');
+  assert.equal(ipfsGateway('https://name.mypinata.cloud',{warn}),'https://name.mypinata.cloud/ipfs/');
+  assert.equal(ipfsGateway('  https://name.mypinata.cloud/ipfs  ',{warn}),'https://name.mypinata.cloud/ipfs/');
+  assert.equal(ipfsGateway(undefined,{warn}),DEFAULT_IPFS_GATEWAY);assert.equal(ipfsGateway('',{warn}),DEFAULT_IPFS_GATEWAY);
+  assert.equal(warnings.length,0);
+  for(const bad of ['http://name.mypinata.cloud/ipfs/','https://user:pass@gw.example/ipfs/','https://gw.example/ipfs/?token=secret','not a url','localhost'])assert.equal(ipfsGateway(bad,{warn}),DEFAULT_IPFS_GATEWAY,bad);
+  assert.equal(warnings.length,5);assert.ok(warnings.every(w=>!w.includes('secret')&&!w.includes('pass')),'warnings never echo the configured value');
+  assert.doesNotThrow(()=>new MetadataStore({gateway:'turquoise-glamorous-xerinae-570.mypinata.cloud/ipfs/'}));
+});
