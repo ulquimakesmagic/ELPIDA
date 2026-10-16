@@ -5,12 +5,22 @@ import {normalizeMetadata} from '../web/metadata.mjs';
 export const validCid = value => typeof value === 'string' && /^(b[a-z2-7]{30,100}|Qm[1-9A-HJ-NP-Za-km-z]{44})$/.test(value);
 const base32 = bytes => {let result='',bits=0,value=0;for(const byte of bytes){value=(value<<8)|byte;bits+=8;while(bits>=5){bits-=5;result+='abcdefghijklmnopqrstuvwxyz234567'[(value>>>bits)&31];}}if(bits)result+='abcdefghijklmnopqrstuvwxyz234567'[(value<<(5-bits))&31];return result;};
 export const rawCid = bytes => 'b'+base32(Buffer.concat([Buffer.from([1,0x55,0x12,0x20]),createHash('sha256').update(bytes).digest()]));
+export const DEFAULT_IPFS_GATEWAY='https://ipfs.io/ipfs/';
+/** Normalizes the optional gateway setting. A missing scheme or /ipfs/ path is added; anything still
+ * unsafe falls back to the public gateway with a warning, so an optional typo cannot stop the server. */
+export function ipfsGateway(value,{warn=message=>console.warn(JSON.stringify({event:'ipfs_gateway_invalid',message}))}={}){
+  let text=String(value??'').trim();if(!text)return DEFAULT_IPFS_GATEWAY;
+  if(!/^[a-z][a-z0-9+.-]*:\/\//i.test(text))text='https://'+text;
+  let url=null;try{url=new URL(text);}catch{}
+  if(!url||url.protocol!=='https:'||url.username||url.password||url.search||url.hash||!url.hostname.includes('.')){warn('ELPIDA_IPFS_GATEWAY must be an HTTPS gateway address such as https://NAME.mypinata.cloud/ipfs/ (no credentials or query parameters). Using '+DEFAULT_IPFS_GATEWAY+' instead.');return DEFAULT_IPFS_GATEWAY;}
+  if(url.pathname==='/')url.pathname='/ipfs/';
+  return url.href.replace(/\/?$/,'/');
+}
 export class MetadataStore {
-  constructor({path=null,jwt=process.env.PINATA_JWT,gateway=process.env.ELPIDA_IPFS_GATEWAY??'https://ipfs.io/ipfs/',fetcher=fetch,maxBytes=512*1024*1024,maxPendingBytes=100*1024*1024,pendingAge=7*86400000,now=Date.now,chainBound=false}={}) {
+  constructor({path=null,jwt=process.env.PINATA_JWT,gateway=process.env.ELPIDA_IPFS_GATEWAY,fetcher=fetch,maxBytes=512*1024*1024,maxPendingBytes=100*1024*1024,pendingAge=7*86400000,now=Date.now,chainBound=false}={}) {
     for(const n of [maxBytes,maxPendingBytes,pendingAge])if(!Number.isSafeInteger(n)||n<=0)throw new Error('Invalid metadata storage limits.');
     this.path=path?resolve(path):null;this.jwt=jwt;this.fetcher=fetcher;this.cache=new Map();this.maxBytes=maxBytes;this.maxPendingBytes=maxPendingBytes;this.pendingAge=pendingAge;this.now=now;this.chainBound=chainBound;this.records=new Map();this.retention={};
-    const url=new URL(gateway);if(url.protocol!=='https:'||url.username||url.password||url.search||url.hash)throw new Error('Use an HTTPS IPFS gateway without credentials or query parameters.');
-    this.gateway=url.href.replace(/\/?$/,'/');if(this.path){mkdirSync(this.path,{recursive:true});this.ledger=join(this.path,'retention.json');if(existsSync(this.ledger))this.retention=JSON.parse(readFileSync(this.ledger,'utf8'));for(const f of readdirSync(this.path)){const cid=f.replace(/\.json$/,'');if(f.endsWith('.json')&&validCid(cid))this.records.set(cid,statSync(join(this.path,f)).size);}}
+    this.gateway=ipfsGateway(gateway);if(this.path){mkdirSync(this.path,{recursive:true});this.ledger=join(this.path,'retention.json');if(existsSync(this.ledger))this.retention=JSON.parse(readFileSync(this.ledger,'utf8'));for(const f of readdirSync(this.path)){const cid=f.replace(/\.json$/,'');if(f.endsWith('.json')&&validCid(cid))this.records.set(cid,statSync(join(this.path,f)).size);}}
   }
   status(){return {publicEnabled:!!this.jwt,provider:this.jwt?'Pinata':'local',gateway:this.gateway,storage:{bytes:[...this.records.values()].reduce((a,b)=>a+b,0),pendingBytes:[...this.records].reduce((a,[cid,size])=>a+(this.retention[cid]?.state==='pending'?size:0),0),expiredPendingBytes:[...this.records].reduce((a,[cid,size])=>a+(this.retention[cid]?.state==='pending'&&this.now()-this.retention[cid].createdAt>this.pendingAge?size:0),0),maxBytes:this.maxBytes,maxPendingBytes:this.maxPendingBytes,pendingAge:this.pendingAge}};}
   saveRetention(){if(this.ledger){writeFileSync(this.ledger+'.tmp',JSON.stringify(this.retention));renameSync(this.ledger+'.tmp',this.ledger);}}
