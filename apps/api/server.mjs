@@ -1,3 +1,4 @@
+import {CreatorFeeTotals} from './creator-fees.mjs';
 import { indexedChange, indexedActivity, activityOf } from '../web/discovery.mjs';
 import { protocolAnalytics } from './protocol-analytics.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
@@ -151,6 +152,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   if(port!==0)updatePrices().catch(()=>{});
   const priceSnapshot=()=>({...priceKeeper.snapshot(),local:runtime.config.local.price});
   const cookieSecurity = publicUrl ? '; Secure' : '';
+  const creatorFeeTotals=new CreatorFeeTotals();
   const csrf = randomBytes(24).toString('hex');
   function indexedMarket(network,address){
     if(network==='local'){const token=runtime.indexer.listings().find(t=>t.address===address.toLowerCase());if(!token)throw new Error('Token not indexed.');return {token,index:runtime.indexer,sol:false};}
@@ -193,6 +195,11 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
       if (req.method === 'GET') {
+        if(url.pathname==='/api/creator-fees'){
+          if(chatLimit(false))return send(429,{error:'Fee history is busy. Retry shortly.'});
+          const network=url.searchParams.get('network')??'local',address=url.searchParams.get('token'),{index,sol}=indexedMarket(network,address);
+          return send(200,sol?{status:'unavailable'}:creatorFeeTotals.read({index,provider:index.provider},address));
+        }
         if(url.pathname==='/api/chat'){
           if(chatLimit(false))return send(429,{error:'Chat is busy. Retry shortly.'});
           const network=url.searchParams.get('network'),token=url.searchParams.get('token'),author=url.searchParams.get('author');
@@ -352,7 +359,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   });
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, vanity, async close() {vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, vanity, async close() {vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

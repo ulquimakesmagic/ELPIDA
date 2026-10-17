@@ -146,6 +146,23 @@ contract ElpidaDexCurve {
     function _claim(address recipient) private returns (bool paid) {
         bool protocolSide = recipient == protocolTreasury;
         require(protocolSide || recipient == creatorRewardVault, "fee recipient");
+        // One wallet can be both beneficiaries; pay both ledgers together.
+        if (protocolSide && recipient == creatorRewardVault) {
+            uint256 protocolAmount = protocolFees;
+            uint256 creatorAmount = creatorFees;
+            uint256 combined = protocolAmount + creatorAmount;
+            if (combined == 0) return true;
+            protocolFees = 0;
+            creatorFees = 0;
+            paid = _trySend(recipient, combined);
+            if (paid) emit FeesWithdrawn(recipient, combined);
+            else {
+                protocolFees = protocolAmount;
+                creatorFees = creatorAmount;
+                emit FeePayoutFailed(recipient, combined);
+            }
+            return paid;
+        }
         uint256 amount = protocolSide ? protocolFees : creatorFees;
         if (amount == 0) return true;
         if (protocolSide) protocolFees = 0; else creatorFees = 0;

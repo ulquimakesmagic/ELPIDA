@@ -42,3 +42,17 @@ test('native fee claims isolate a rejecting recipient and same-wallet split rema
  const same=await f.deploy(art('ElpidaFeeSplitter'),f.addresses[3],f.addresses[3]);await mined(same.depositNative({value:101n}));
  assert.equal(await same.claimable(ZeroAddress,f.addresses[3]),101n);await mined(same.claim(ZeroAddress,f.addresses[3]));assert.equal(await f.provider.getBalance(same.target),0n);
 });
+
+test('curve restores both shared ledgers if native payout fails and still isolates distinct recipients',async t=>{
+ const f=await setup(t),reject=await f.deploy(compiled['tests/fixtures/MockPositionManager.sol'].RejectNativeFees);
+ const token=await f.deploy(compiled['tests/fixtures/MockUSDC.sol'].MockUSDC);
+ for(const treasury of [reject.target,f.addresses[0]]){
+  const curve=await f.deploy(art('ElpidaDexCurve'),ZeroAddress,token.target,f.addresses[0],treasury,reject.target,10n**18n,2_000_000_000n*10n**18n,token.target,60);
+  await mined(token.mint(curve.target,1_000_000_000n*10n**18n));
+  await mined(curve.buy(10n**16n,0,{value:10n**16n}));
+  const p=await curve.protocolFees(),c=await curve.creatorFees(),reserve=await curve.realReserve();assert.ok(p>0n&&c>0n);
+  assert.equal(await curve.claimFees.staticCall(reject.target),false);
+  await mined(curve.claimFees(reject.target));assert.equal(await curve.protocolFees(),p);assert.equal(await curve.creatorFees(),c);
+  await mined(curve.withdrawFees());assert.equal(await curve.creatorFees(),c);assert.equal(await curve.protocolFees(),treasury===reject.target?p:0n);assert.equal(await curve.realReserve(),reserve);
+ }
+});
