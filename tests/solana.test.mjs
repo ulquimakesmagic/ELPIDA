@@ -795,7 +795,8 @@ test('Solana upgrade is a no-op when the deployed program already matches the bu
 
 test('Solana public indexer: pools, launch/buy/sell trades, candles and holders from chain', { skip }, async () => {
   const { SolanaIndexer } = await import('../packages/indexer/solana-indexer.mjs');
-  const index = new SolanaIndexer({ web3, connection: f.connection, deployment: { programId: f.programId.toBase58(), pairs: [] }, network: { key: 'solana-localnet', cluster: 'localnet', explorer: 'https://explorer.solana.com' }, spacingMs: 0, backfill: 5000 });
+  const retained = [];
+  const index = new SolanaIndexer({ web3, connection: f.connection, deployment: { programId: f.programId.toBase58(), pairs: [] }, network: { key: 'solana-localnet', cluster: 'localnet', explorer: 'https://explorer.solana.com' }, metadataStore: { retainPublished: uri => retained.push(uri), resolve: async uri => ({ name: 'resolved', uri }) }, spacingMs: 0, backfill: 5000 });
   try {
     await index.sync();
     const listings = index.listings();
@@ -811,6 +812,29 @@ test('Solana public indexer: pools, launch/buy/sell trades, candles and holders 
     const holders = await index.holders(token.address);
     assert.ok(holders.some(h => h.address === f.creator.publicKey.toBase58()), 'creator holds tokens');
     assert.ok(!holders.some(h => h.address === token.pool), 'curve vault excluded');
+    // Full holder list from getProgramAccounts, largest first, paged.
+    const count = await index.holderCount(token.address);
+    assert.ok(count >= 1 && (await index.holders(token.address, { offset: 0, limit: 1 })).length === 1);
+    const shares = holders.map(h => Number(h.supplyShare));
+    assert.deepEqual(shares, [...shares].sort((x, y) => y - x), 'sorted by balance');
+    // Dev badge (D6): launch buy and live creator holding, % of supply.
+    const launchBuy = trades.find(t => t.launch);
+    assert.equal(token.devBoughtRaw, String(launchBuy.tokenRaw));
+    assert.equal(token.devBoughtPct, Number(BigInt(launchBuy.tokenRaw) * 1_000_000n / TOKEN_SUPPLY) / 10_000);
+    assert.equal(typeof token.devHoldingPct, 'number');
+    // Immutable Metaplex metadata (D11): the URI is read from chain and resolved through the store.
+    assert.equal(token.metadataURI, TEST_URI);
+    const meta = listings.find(t => t.symbol === 'META');
+    assert.equal(meta.metadataURI, TEST_URI);
+    // A graduated, unmigrated curve advertises when it can be reopened (D7).
+    const waiting = listings.find(t => t.complete && !t.graduated);
+    if (waiting) assert.equal(waiting.reopenableAt, waiting.completedAt + GRADUATION_GRACE_SECS);
+    // Migrated tokens are priced from the PumpSwap pool, not the emptied curve.
+    for (const migrated of listings.filter(t => t.graduated)) {
+      assert.ok(migrated.pumpPool && Number(migrated.liquidity) > 0 && migrated.spotPrice > 0, `${migrated.symbol} priced from PumpSwap`);
+    }
+    assert.ok(retained.includes(TEST_URI), 'published metadata retained once seen on chain');
+    assert.equal(index.listings().find(t => t.symbol === 'META').metadata.name, 'resolved');
     // Idempotent: a second sync adds nothing new.
     const before = index.status().trades;
     await index.sync();

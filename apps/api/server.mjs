@@ -121,7 +121,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   let solanaIndex=null,solanaTimer=null;
   if(port!==0&&solanaNet.deployment&&solanaRpc&&process.env.ELPIDA_SOLANA_INDEXER!=='off'){
     try{
-      solanaIndex=new SolanaIndexer({web3:solanaWeb3,connection:new solanaWeb3.Connection(validateSolanaRpc(solanaRpc),'confirmed'),deployment:solanaNet.deployment,network:solanaNet,path:dataFile(`public-solana-${solanaNet.cluster}-${solanaNet.deployment.programId}.sqlite`)});
+      solanaIndex=new SolanaIndexer({web3:solanaWeb3,connection:new solanaWeb3.Connection(validateSolanaRpc(solanaRpc),'confirmed'),deployment:solanaNet.deployment,network:solanaNet,metadataStore,path:dataFile(`public-solana-${solanaNet.cluster}-${solanaNet.deployment.programId}.sqlite`)});
       const tick=()=>solanaIndex.sync().then(()=>console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}))).catch(()=>console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,message:'Indexing unavailable; retrying.'})));
       tick();solanaTimer=setInterval(tick,20000);solanaTimer.unref();
     }catch(error){console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:String(error.name??'INIT').slice(0,40),message:error.message.slice(0,120)}));}
@@ -196,7 +196,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/prices')return send(200,priceSnapshot());
         if(url.pathname==='/api/public/analytics'){
           const sources=evmTestnets.map(net=>({key:net.key,name:net.name,status:publicIndex.status(net.key),tokens:publicIndex.listings(net.key),trades:publicIndex.tradeRows(net.key)}));
-          if(solanaIndex)sources.push({key:solanaIndex.network.key,name:solanaIndex.network.name,status:{enabled:true,...solanaIndex.status(),scope:'Elpida curves; PumpSwap trades are not yet indexed'},tokens:solanaIndex.listings(),trades:solanaIndex.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()});
+          if(solanaIndex)sources.push({key:solanaIndex.network.key,name:solanaIndex.network.name,status:{enabled:true,...solanaIndex.status(),scope:'Elpida curves and PumpSwap swaps on migrated Elpida pools'},tokens:solanaIndex.listings(),trades:solanaIndex.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()});
           if(!solanaIndex)sources.push({key:solanaNet.key,name:solanaNet.name,status:{enabled:false,reason:'No public Solana deployment configured.'},tokens:[],trades:[]});
           for(const source of sources){const rows=source.trades;source.trades=(function*(){for(const row of rows)yield JSON.parse(row.data);})();}
           try{return send(200,protocolAnalytics({sources,prices:priceSnapshot(),period:url.searchParams.get('period')??'7d',network:url.searchParams.get('network')??'all'}));}catch(error){return send(400,{error:error.message});}
@@ -266,7 +266,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if(action==='metadata/publish'){if(publicUrl)return send(410,{error:'Public metadata uploads must use the launch staging flow; retention is verified from the launch transaction.'});return send(200,await metadataStore.publish(body,true));}
       if(action==='metadata/stage'){
         const net=evmTestnets.find(n=>n.key===body.network);
-        if(!net||net.mainnet||!isDexModel(net.shared?.model))return send(400,{error:'On-chain launch metadata staging is unavailable on this network.'});
+        // Solana launches write the staged IPFS URI into immutable Metaplex metadata (program D11 build).
+        const solana=body.network===solanaNet.key&&Boolean(solanaNet.deployment);
+        if(!solana&&(!net||net.mainnet||!isDexModel(net.shared?.model)))return send(400,{error:'On-chain launch metadata staging is unavailable on this network.'});
         const pinned=metadataStore.status().publicEnabled;
         if(!pinned&&!process.env.RAILWAY_VOLUME_MOUNT_PATH)return send(503,{error:'Configure public IPFS pinning or a persistent testnet data volume before launching with metadata.'});
         return send(200,{...(await metadataStore.publish(body,pinned,{provisional:true})),storage:pinned?'public-ipfs':'elpida-hosted',retention:'pending-chain-verification'});

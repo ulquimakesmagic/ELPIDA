@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as web3 from '@solana/web3.js';
-import { SolanaIndexer, programEventLogs } from '../packages/indexer/solana-indexer.mjs';
+import { SolanaIndexer, programEventLogs, pumpSwapTrade, metadataUri } from '../packages/indexer/solana-indexer.mjs';
 import { EVENTS } from '../packages/solana/client.mjs';
 import { SOLANA_GENESIS, validateSolanaRpc } from '../packages/solana/rpc-config.mjs';
 
@@ -117,4 +117,35 @@ test('Solana RPC cluster mismatch prevents all pool reads and checkpoint changes
     f.setTransaction(success()); await f.index.sync();
     assert.equal(reads, 2); assert.equal(f.index.status().error, null);
   } finally { f.index.close(); }
+});
+
+test('PumpSwap swaps are read from the pool vault balance changes; liquidity moves are not trades', () => {
+  const [poolBase, poolQuote, trader, payer, other] = Array.from({ length: 5 }, () => web3.Keypair.generate().publicKey.toBase58());
+  const keys = [payer, poolBase, poolQuote, trader, other].map(k => new web3.PublicKey(k));
+  const bal = (accountIndex, amount, owner, m = mint) => ({ accountIndex, mint: m, owner, uiTokenAmount: { amount: String(amount) } });
+  const tx = (pre, post) => ({ transaction: { message: { staticAccountKeys: keys } }, meta: { err: null, preTokenBalances: pre, postTokenBalances: post } });
+  const ids = { poolBase, poolQuote, baseMint: mint };
+  // Buy: 1,000 tokens leave the pool, 2,500 quote units arrive; trader (account 3) receives the tokens.
+  const buy = pumpSwapTrade(tx([bal(1, 10_000, 'pool'), bal(2, 50_000, 'pool', 'Q'), bal(3, 0, trader)], [bal(1, 9_000, 'pool'), bal(2, 52_500, 'pool', 'Q'), bal(3, 1_000, trader)]), ids);
+  assert.deepEqual(buy, { side: 'buy', tokenRaw: 1_000n, quoteRaw: 2_500n, account: trader });
+  // Sell routed through an aggregator: tokens arrive, quote leaves; the seller is the owner whose tokens fell.
+  const sell = pumpSwapTrade(tx([bal(1, 9_000, 'pool'), bal(2, 52_500, 'pool', 'Q'), bal(4, 400, other)], [bal(1, 9_400, 'pool'), bal(2, 51_500, 'pool', 'Q'), bal(4, 0, other)]), ids);
+  assert.deepEqual(sell, { side: 'sell', tokenRaw: 400n, quoteRaw: 1_000n, account: other });
+  // Migration / deposits (both vaults up) and LP-fee harvests (both down) are not swaps.
+  assert.equal(pumpSwapTrade(tx([bal(1, 0, 'pool'), bal(2, 0, 'pool', 'Q')], [bal(1, 9_000, 'pool'), bal(2, 50_000, 'pool', 'Q')]), ids), null);
+  assert.equal(pumpSwapTrade(tx([bal(1, 9_000, 'pool'), bal(2, 50_000, 'pool', 'Q')], [bal(1, 8_990, 'pool'), bal(2, 49_900, 'pool', 'Q')]), ids), null);
+  // A transaction that does not touch this pool's vaults.
+  assert.equal(pumpSwapTrade(tx([bal(3, 0, trader)], [bal(3, 5, trader)]), ids), null);
+  // Unknown trader falls back to the fee payer.
+  assert.equal(pumpSwapTrade(tx([bal(1, 100, 'pool'), bal(2, 100, 'pool', 'Q')], [bal(1, 90, 'pool'), bal(2, 120, 'pool', 'Q')]), ids).account, payer);
+});
+
+test('Metaplex metadata URI is read from a MetadataV1 account and ignored otherwise', () => {
+  const data = Buffer.alloc(679); data[0] = 4;
+  const uri = 'ipfs://bafkreih6ilp3u4ue7fmqjnxdnq4ejxn6s5edsxqy7y5c3x2tsnkacsm4zu';
+  data.writeUInt32LE(200, 115); data.write(uri, 119, 'utf8');
+  assert.equal(metadataUri(data), uri, 'padding removed');
+  assert.equal(metadataUri(Buffer.alloc(679)), '', 'wrong account key');
+  assert.equal(metadataUri(Buffer.alloc(100)), '', 'too short');
+  assert.equal(metadataUri(null), '');
 });
