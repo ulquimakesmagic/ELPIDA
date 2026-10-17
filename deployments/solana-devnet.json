@@ -36,6 +36,20 @@
       "faucet": null
     },
     {
+      "kind": "usdc",
+      "key": "usdc",
+      "symbol": "USDC",
+      "name": "Circle test USDC (no value)",
+      "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "config": "CGuXRR8eU2fuzWXrGT6aktbxtNhBensp3oaJPqWmEHBQ",
+      "decimals": 6,
+      "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "test": false,
+      "wsol": false,
+      "testSized": true,
+      "faucet": null
+    },
+    {
       "kind": "token",
       "key": "test-meme",
       "symbol": "TEST-MEME",
@@ -61,7 +75,7 @@
     "usdcMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
   },
   "deployer": "FeUWFps7CYtrXNXosirwJCfFQM5Na6PamEV6hpFcKaH8",
-  "recordedAt": "2026-10-12T15:38:14.801Z",
+  "recordedAt": "2026-10-17T09:22:03.889Z",
   "build": "testnet",
   "betaGate": null,
   "upgradeAuthority": "FeUWFps7CYtrXNXosirwJCfFQM5Na6PamEV6hpFcKaH8"
