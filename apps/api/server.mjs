@@ -36,6 +36,7 @@ const resources = new Map([['/', ['index.html', 'text/html']], ['/launch', ['ind
 const assetRoot = fileURLToPath(new URL('../web/assets/', import.meta.url));
 resources.set('/terminal-chart.mjs',['terminal-chart.mjs','text/javascript']);
 resources.set('/holder-terminal.mjs',['holder-terminal.mjs','text/javascript']);
+resources.set('/chat-signature.mjs',['chat-signature.mjs','text/javascript']);
 resources.set('/holder-chat.mjs',['holder-chat.mjs','text/javascript']);
 resources.set('/trade-filter.mjs',['trade-filter.mjs','text/javascript']);
 resources.set('/wallet-discovery.mjs', ['wallet-discovery.mjs','text/javascript']);
@@ -308,6 +309,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       try { body = JSON.parse(rawBody.toString()); } catch { return send(400, { error: 'Invalid request.' }); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) return send(400, { error: 'Invalid request.' });
       const action = url.pathname.slice('/api/'.length);
+      if(['chat/report/prepare','chat/report/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat reporting is busy. Retry shortly.'});return send(200,action==='chat/report/prepare'?await chat.prepareReport(body):await chat.saveReport(body));}
       if(['chat/prepare','chat/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat publishing is busy. Retry shortly.'});return send(200,action==='chat/prepare'?await chat.prepare(body):await chat.save(body));}
       if(['theses/prepare','theses/save'].includes(action)){if(Date.now()-terminalWindow>=60000){terminalWindow=Date.now();terminalCount=0;thesisCount=0;}if(++thesisCount>30)return send(429,{error:'Thesis publishing is busy. Retry in a minute.'});return send(200,action==='theses/prepare'?await theses.prepare(body):await theses.save(body));}
       if(action==='public/metadata/prepare')return send(200,{message:publicIndex.metadataMessage(body).message});

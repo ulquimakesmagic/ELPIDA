@@ -1,3 +1,4 @@
+import {signChatText} from './chat-signature.mjs';
 import {h,short,errorText} from './ui.mjs';
 import {withWalletTimeout} from './wallet.mjs';
 const drafts=new Map();
@@ -21,7 +22,7 @@ export function holderChat(ctx,token){
  function drawMessages(){
   const height=list.scrollHeight,atBottom=height-list.scrollTop-list.clientHeight<48;
   const sorted=[...messages.values()].sort((a,b)=>a.id-b.id);
-  list.replaceChildren(...(sorted.length?sorted.map(m=>h('article.chat-message',h('div.chat-byline',h('strong',{title:m.author},short(m.author)),h('time',{dateTime:new Date(m.created).toISOString()},new Date(m.created).toLocaleString())),m.reply?h('blockquote',`${short(m.reply.author)} · ${m.reply.text}`):null,h('p.chat-text',m.text),h('button.link-button',{type:'button',disabled:!canPost||draft.pending,on:{click:()=>{draft.replyTo=m.id;drawComposer();input.focus();}}},'Reply'))):[h('p.muted','No messages yet. Hold this token and start the conversation.')]));
+  list.replaceChildren(...(sorted.length?sorted.map(m=>h('article.chat-message',h('div.chat-byline',h('strong',{title:m.author},short(m.author)),h('time',{dateTime:new Date(m.created).toISOString()},new Date(m.created).toLocaleString())),m.reply?h('blockquote',`${short(m.reply.author)} · ${m.reply.text}`):null,h('p.chat-text',m.text),h('button.link-button',{type:'button',disabled:m.hidden||!canPost||draft.pending,on:{click:()=>{draft.replyTo=m.id;drawComposer();input.focus();}}},'Reply'),reportControl(m))):[h('p.muted','No messages yet. Hold this token and start the conversation.')]));
   older.hidden=!nextBefore;
   if(browsingHistory)list.scrollTop+=list.scrollHeight-height;
   else if(atBottom)list.scrollTop=list.scrollHeight;
@@ -45,14 +46,16 @@ export function holderChat(ctx,token){
   try{
    const body={network,token:token.address,author,text:draft.text,replyTo:draft.replyTo},prepared=await ctx.api('chat/prepare',body);
    status.textContent='Confirm “Elpida holder chat” in your selected wallet. This posts text publicly; it does not move funds.';let signature;
-   if(ctx.wallet===ctx.solWallet){
-    if(!ctx.wallet.provider.signMessage)throw new Error('This Solana wallet does not support message signing.');
-    const result=await withWalletTimeout(ctx.wallet.provider.signMessage(new TextEncoder().encode(prepared.message),'utf8'),ctx.wallet.walletName);signature=btoa(String.fromCharCode(...(result.signature??result)));
-   }else{await ctx.wallet.checkNetwork();signature=await withWalletTimeout(ctx.wallet.signer.signMessage(prepared.message),ctx.wallet.walletName);}
+   signature=await signChatText(ctx,prepared.message,withWalletTimeout);
    if(ctx.wallet.address!==author||ctx.currentChain()!==network)throw new Error('Wallet or network changed. Reopen this token before sending.');
    await ctx.api('chat/save',{...body,nonce:prepared.nonce,signature});draft.text='';draft.replyTo=null;input.value='';status.textContent='Message posted.';await load();
   }catch(error){status.textContent=errorText(error);}finally{draft.pending=false;if(alive){drawComposer();drawMessages();}if(!box.isConnected)ctx.refresh();}
  });
+ async function reportMessage(m,reason){
+  if(draft.pending||!canPost)return;draft.pending=true;drawComposer();drawMessages();status.textContent='Preparing a private report…';
+  try{const body={network,token:token.address,author,messageId:m.id,reason},prepared=await ctx.api('chat/report/prepare',body);const signature=await signChatText(ctx,prepared.message,withWalletTimeout);if(ctx.wallet.address!==author||ctx.currentChain()!==network)throw new Error('Wallet or network changed.');await ctx.api('chat/report/save',{...body,nonce:prepared.nonce,signature});status.textContent='Report submitted for moderator review.';}catch(error){status.textContent=errorText(error);}finally{draft.pending=false;if(alive){drawComposer();drawMessages();}}
+ }
+ function reportControl(m){if(m.hidden)return null;const reasons=h('select.input',{'aria-label':'Report reason'},...['spam','scam','harassment','other'].map(value=>h('option',{value},value)));return h('details.chat-report',h('summary','Report'),h('p.hint','Reports are private and reviewed by moderators. Sign with your holder wallet.'),reasons,h('button.link-button',{type:'button',disabled:!canPost||draft.pending,on:{click:()=>reportMessage(m,reasons.value)}},'Submit report'));}
  function poll(){timer=setTimeout(async()=>{if(!alive||!box.isConnected){alive=false;return;}if(!document.hidden&&!draft.pending&&!browsingHistory)await load();if(alive)poll();},15000);}
  drawComposer();queueMicrotask(()=>{load();poll();});
  return {element:box,dispose(){alive=false;clearTimeout(timer);}};

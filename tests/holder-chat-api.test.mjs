@@ -17,6 +17,11 @@ test('chat HTTP routes check live token holdings, wallet signatures, origin and 
  const signed={...body,nonce:prepared.body.nonce,signature:await signer.signMessage(prepared.body.message)};
  assert.equal((await post('chat/save',signed)).status,200);assert.equal((await post('chat/save',signed)).status,400);
  const page=await (await fetch(app.url+'/api/chat?network=local&token='+launch.token)).json();assert.equal(page.canPost,false);assert.equal(page.messages.length,1);assert.equal(page.messages[0].text,body.text);
+ const report={network:'local',token:launch.token,author,messageId:page.messages[0].id,reason:'spam'};
+ assert.equal((await post('chat/report/prepare',report,{Origin:'https://evil.example'})).status,403);
+ assert.equal((await post('chat/report/prepare',report,{'X-Elpida-Token':'bad'})).status,403);
+ const rp=await post('chat/report/prepare',report);assert.equal(rp.status,200);
+ const signedReport={...report,nonce:rp.body.nonce,signature:await signer.signMessage(rp.body.message)};assert.equal((await post('chat/report/save',signedReport)).status,200);assert.equal((await post('chat/report/save',signedReport)).status,400);
  await app.runtime.transact('buy',{token:launch.token,amount:'0.01',account:'1'});
  const second={...body,author:await other.getAddress(),text:'I hold too',replyTo:page.messages[0].id},p2=await post('chat/prepare',second);assert.equal(p2.status,200);
  const token=new Contract(launch.token,app.runtime.config.contracts.token.abi,other);await(await token.transfer(author,await token.balanceOf(await other.getAddress()))).wait();
