@@ -73,7 +73,8 @@ export function renderToken(ctx, address) {
 
   const stat = (label, value, extra) => h('div.stat', h('span', label), h('strong', value), extra ?? null);
   const holdersValue = h('strong', '—'), tradesValue = h('strong', '—'),volumeValue=h('strong','—');
-  const creatorFees = Number(token.creatorFees || 0);
+  const creatorFeesTotal=h('strong','Loading…');
+  const creatorFeesStat=h('div.stat',{title:'Lifetime creator fees, including claimed amounts. LP fees include collected and currently collectible fees. Assets are shown separately.'},h('span','Creator fees'),creatorFeesTotal,h('a.terminal-claim',{href:'#/rewards',title:'Claim available creator fees','aria-label':'Claim available creator fees'},icon('arrow-right','icon-sm')));
   const stats = h('section.stat-row', { 'aria-label': 'Token statistics' },
     stat('Market cap',fmtValue(p.marketCap,token)),
     stat('Price',fmtPrice(token)),
@@ -82,9 +83,7 @@ export function renderToken(ctx, address) {
     stat('Supply', compact(token.supply || 1e9)),
     // Creator transparency: there is no cap on the creator's first buy, so show what they bought and hold now.
     token.devBoughtPct != null ? h('div.stat.dev-stat', { title: devLabel(token.devBoughtPct, token.devHoldingPct) }, h('span', 'Dev'), h('strong', `${number(token.devBoughtPct, 2)}% → ${token.devHoldingPct != null ? number(token.devHoldingPct, 2) + '%' : '—'}`)) : null,
-    token.graduated || creatorFees > 0
-      ? stat('Creator unclaimed', usdRate(token) !== null ? '$' + number(creatorFees * usdRate(token), 2) : `${number(creatorFees, 6)} ${q}`, h('a.terminal-claim', { href: '#/rewards',title:'Claim creator fees','aria-label':'Claim creator fees' },icon('arrow-right','icon-sm')))
-      : stat('Creator fee', '0.625%', null));
+    creatorFeesStat);
 
   stats.title=priceSource;
   const head=h('header.token-terminal-bar',
@@ -160,8 +159,11 @@ export function renderToken(ctx, address) {
 
   const activity = marketActivity(ctx, token, q, { addressUrl, isCreator, onCounts: ({ holders, trades }) => { holdersValue.textContent = holders ?? '—'; tradesValue.textContent = trades ?? '—'; } });
   const desk=holderTerminal(ctx,token,{onVolume:v=>volumeValue.textContent=fmtValue(v,token)});
-  return h('div.token-page', head,
+  const page=h('div.token-page', head,
     h('div.token-layout',terminalChart(ctx,token,q),h('aside.trade-aside.stack',desk.position,tradePanel(ctx, token, { dex, solana })),h('div.stack.terminal-detail',curve,activity,addresses,about,tech)));
+  async function loadCreatorFees(){if(!page.isConnected)return;try{const result=await ctx.api(`creator-fees?network=${encodeURIComponent(token.network??ctx.currentChain())}&token=${encodeURIComponent(token.address)}`);if(!page.isConnected)return;if(result.status==='ready'){creatorFeesTotal.textContent=result.assets.filter(a=>Number(a.amount)>0).map(a=>`${number(a.amount,6)} ${a.symbol}`).join(' + ')||`0 ${q}`;creatorFeesStat.title=`Lifetime creator fees through indexed block ${result.indexedBlock}, including claimed amounts. Token and quote assets are shown separately.`;}else{creatorFeesTotal.textContent=result.status==='loading'?'Loading…':'Unavailable';}}catch{creatorFeesTotal.textContent='Unavailable';}if(page.isConnected)setTimeout(loadCreatorFees,15000);}
+  queueMicrotask(loadCreatorFees);
+  return page;
 }
 
 function marketActivity(ctx,token,q,{addressUrl,isCreator,onCounts}){
