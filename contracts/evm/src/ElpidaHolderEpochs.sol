@@ -10,7 +10,7 @@ import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 ///      recipient set. A Merkle proof verifies consistency with its immutable commitment,
 ///      not that the publisher's historical balances are truthful. Unrestricted assets
 ///      and unsupervised mainnet funding are NOT supported by this prototype.
-///      Existing curve fees/FDV, vault and wallet funding are unchanged.
+///      Existing curve fees/FDV and separate chain wallet ownership are unchanged.
 contract ElpidaHolderEpochs is ReentrancyGuard {
     using SafeERC20 for IERC20;
 
@@ -52,8 +52,8 @@ contract ElpidaHolderEpochs is ReentrancyGuard {
 
     /// @notice Pre-fund by transferring an approved, standard ERC20 directly to this
     ///         contract, then publish an epoch. Reservations prevent the same balance
-    ///         from being committed twice. Funding from a reward vault needs a separately
-    ///         audited adapter; do not treat pre-funding as an arbitrary wallet balance.
+    ///         from being committed twice. For atomic reward vault funding, deploy with
+    ///         publisher set to that vault and call its fundHolderEpoch entry point.
     function publishEpoch(
         uint256 epochId,
         address launchToken,

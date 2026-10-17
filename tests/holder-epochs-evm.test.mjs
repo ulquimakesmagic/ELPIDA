@@ -562,3 +562,136 @@ test(
     );
   }
 );
+
+test('Phase 3 vault funding is atomic, authorized and excludes allocated claims', async t=>{
+ const f=await fixture(t);
+ const a=getArtifact('contracts/evm/src/ElpidaRewardVault.sol','ElpidaRewardVault');
+ const deployVault=async(wallets=[],splits=[])=>{
+  const v=await new ContractFactory(a.abi,a.evm.bytecode.object,f.publisher).deploy(f.publisher.address,f.publisher.address,wallets.map(()=> '0x'+'00'.repeat(32)),wallets,splits);
+  await v.waitForDeployment();
+  await mined(v.initialize(f.launchToken,f.launchToken,f.payoutAsset));return v;
+ };
+ const v=await deployVault();
+ const d=getArtifact('contracts/evm/src/ElpidaHolderEpochs.sol','ElpidaHolderEpochs');
+ const dist=await new ContractFactory(d.abi,d.evm.bytecode.object,f.publisher).deploy(await v.getAddress(),0);await dist.waitForDeployment();
+ await assert.rejects(v.configureHolderDistributor.staticCall(f.distributor),/distributor publisher/);
+ await assert.rejects(v.connect(f.other).configureHolderDistributor.staticCall(await dist.getAddress()),/distributor config/);
+ await mined(v.configureHolderDistributor(await dist.getAddress()));
+ await assert.rejects(v.configureHolderDistributor.staticCall(await dist.getAddress()),/distributor config/);
+ await mined(f.quote.transfer(await v.getAddress(),100_000_000n));await mined(v.sync(f.payoutAsset));
+ const m=plan({...f,distributor:await dist.getAddress()});
+ const args=[m.epochId,m.payoutAsset,m.snapshotBlock,m.minimumHolding,m.root,m.manifestHash,m.budget,m.recipientCount];
+ await assert.rejects(v.connect(f.other).fundHolderEpoch.staticCall(...args),/holder funding authority/);
+ const bad=[...args];bad[0]=2;
+ await assert.rejects(mined(v.fundHolderEpoch(...bad,{gasLimit:2_000_000})));
+ assert.equal(await v.strategyBalance(f.payoutAsset),100_000_000n);
+ assert.equal(await f.quote.balanceOf(await dist.getAddress()),0n);
+ await mined(v.fundHolderEpoch(...args));
+ assert.equal(await v.strategyBalance(f.payoutAsset),40_000_000n);
+ assert.equal(await v.accounted(f.payoutAsset),40_000_000n);
+ assert.equal(await dist.reserved(f.payoutAsset),60_000_000n);
+ await assert.rejects(v.fundHolderEpoch.staticCall(...args));
+ await executeHolderEpoch(dist.connect(f.other),m);
+ assert.equal(await dist.reserved(f.payoutAsset),0n);
+ const allocated=await deployVault([f.other.address],[10000]);
+ const ad=await new ContractFactory(d.abi,d.evm.bytecode.object,f.publisher).deploy(await allocated.getAddress(),0);await ad.waitForDeployment();
+ await mined(allocated.configureHolderDistributor(await ad.getAddress()));
+ await mined(f.quote.transfer(await allocated.getAddress(),100_000_000n));await mined(allocated.sync(f.payoutAsset));
+ await assert.rejects(allocated.fundHolderEpoch.staticCall(...args),/holder budget/);
+ assert.equal(await allocated.claimable(f.other.address,f.payoutAsset),100_000_000n);
+});
+
+test('Phase 3 historical snapshot publishes through keeper after balances change',async t=>{
+ const f=await fixture(t);
+ const ta=getArtifact('contracts/evm/src/ElpidaToken.sol','ElpidaToken');
+ const token=await new ContractFactory(ta.abi,ta.evm.bytecode.object,f.publisher).deploy('Historical','HIST',1000n,f.holders[0].address);await token.waitForDeployment();
+ const va=getArtifact('contracts/evm/src/ElpidaRewardVault.sol','ElpidaRewardVault');
+ const vault=await new ContractFactory(va.abi,va.evm.bytecode.object,f.publisher).deploy(f.publisher.address,f.publisher.address,[],[],[]);await vault.waitForDeployment();
+ await mined(vault.initialize(await token.getAddress(),f.launchToken,f.payoutAsset));
+ const da=getArtifact('contracts/evm/src/ElpidaHolderEpochs.sol','ElpidaHolderEpochs');
+ const dist=await new ContractFactory(da.abi,da.evm.bytecode.object,f.publisher).deploy(await vault.getAddress(),0);await dist.waitForDeployment();
+ await mined(vault.configureHolderDistributor(await dist.getAddress()));
+ await mined(f.quote.transfer(await vault.getAddress(),100n));await mined(vault.sync(f.payoutAsset));
+ await mined(token.connect(f.holders[0]).transfer(f.holders[1].address,400n));
+ const snapshotBlock=await f.provider.getBlockNumber();
+ await mined(token.connect(f.holders[0]).transfer(f.holders[1].address,500n));
+ const {mkdtemp,rm}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const {join}=await import('node:path');
+ const dir=await mkdtemp(join(tmpdir(),'elpida-phase3-'));t.after(()=>rm(dir,{recursive:true,force:true}));
+ // Two adapters to one local chain exercise the dual-reader path; production needs independent RPC operators.
+ const adapter=()=>({getNetwork:()=>f.provider.getNetwork(),getBlockNumber:()=>f.provider.getBlockNumber(),getBlock:n=>f.provider.getBlock(n),getLogs:q=>f.provider.getLogs(q),call:q=>f.provider.call(q)});
+ const m=buildHolderEpoch({chainId:f.chainId,distributor:await dist.getAddress(),epochId:1,launchToken:await token.getAddress(),payoutAsset:f.payoutAsset,snapshotBlock,minimumHolding:1,rows:[{address:f.holders[0].address,holding:600,amount:60},{address:f.holders[1].address,holding:400,amount:40}]});
+ const {publishFundedHolderEpoch}=await import('../apps/api/holder-epoch-keeper.mjs');
+ const options={manifestPath:join(dir,'epoch.json'),snapshotOptions:{providers:[adapter(),adapter()],confirmations:1}};
+ const incomplete=buildHolderEpoch({...m,rows:[{address:f.holders[0].address,holding:600,amount:60}]});
+ await assert.rejects(publishFundedHolderEpoch(vault,dist,incomplete,options),/Incomplete eligible recipient set/);
+ const untrue=buildHolderEpoch({...m,rows:m.entries.map(row=>({...row,holding:500}))});
+ await assert.rejects(publishFundedHolderEpoch(vault,dist,untrue,options),/Historical token balance mismatch/);
+ const wrongChain={runner:{provider:{getNetwork:async()=>({chainId:1n})}}};
+ await assert.rejects(publishFundedHolderEpoch(wrongChain,dist,m,options),/Wrong vault chain/);
+ // Change the hash only on the final pre-send check, after both RPC audits finish.
+ const reorgReader=adapter();let hashReads=0;const getBlock=reorgReader.getBlock;
+ reorgReader.getBlock=async n=>{const b=await getBlock(n);return ++hashReads===3?{...b,hash:'0x'+'11'.repeat(32)}:b;};
+ await assert.rejects(publishFundedHolderEpoch(vault,dist,m,{...options,manifestPath:join(dir,'reorg.json'),snapshotOptions:{providers:[reorgReader,adapter()],confirmations:1}}),/Snapshot reorg/);
+ assert.equal(await dist.nextEpochId(),0n);
+ assert.equal(await vault.strategyBalance(f.payoutAsset),100n);
+ const lostReceiptVault={runner:vault.runner,getAddress:()=>vault.getAddress(),holderDistributor:()=>vault.holderDistributor(),mainToken:()=>vault.mainToken(),mainCurve:()=>vault.mainCurve(),fundHolderEpoch:async(...args)=>{
+  const tx=await vault.fundHolderEpoch(...args);return {wait:async()=>{await tx.wait();throw new Error('lost publication receipt');}};
+ }};
+ assert.equal((await publishFundedHolderEpoch(lostReceiptVault,dist,m,options)).alreadyPublished,true);
+ // A restart reads the same journal and matching immutable epoch, without sending again.
+ assert.equal((await publishFundedHolderEpoch(vault,dist,m,options)).alreadyPublished,true);
+ assert.equal(await dist.nextEpochId(),1n);
+ await executeHolderEpoch(dist.connect(f.other),m);
+ assert.equal(await f.quote.balanceOf(f.holders[0].address),60n);
+ assert.equal(await f.quote.balanceOf(f.holders[1].address),40n);
+ assert.equal(await vault.accounted(f.payoutAsset),0n);
+});
+
+test('Phase 3 rejects taxed funding and blocks reentrant sync without corrupting reserves',async t=>{
+ const f=await fixture(t);
+ const deploy=async(file,name,args=[])=>{const a=getArtifact(file,name);const c=await new ContractFactory(a.abi,a.evm.bytecode.object,f.publisher).deploy(...args);await c.waitForDeployment();return c;};
+ const asset=await deploy('tests/fixtures/AdversarialRewardToken.sol','AdversarialRewardToken');
+ const vault=await deploy('contracts/evm/src/ElpidaRewardVault.sol','ElpidaRewardVault',[f.publisher.address,f.publisher.address,[],[],[]]);
+ await mined(vault.initialize(f.launchToken,f.launchToken,await asset.getAddress()));
+ const dist=await deploy('contracts/evm/src/ElpidaHolderEpochs.sol','ElpidaHolderEpochs',[await vault.getAddress(),0]);
+ await mined(vault.configureHolderDistributor(await dist.getAddress()));
+ await mined(asset.mint(await vault.getAddress(),100_000_000n));await mined(vault.sync(await asset.getAddress()));
+ const m=plan({...f,distributor:await dist.getAddress(),payoutAsset:await asset.getAddress()});
+ const args=[m.epochId,m.payoutAsset,m.snapshotBlock,m.minimumHolding,m.root,m.manifestHash,m.budget,m.recipientCount];
+ await mined(asset.configure(true,'0x0000000000000000000000000000000000000000'));
+ await assert.rejects(mined(vault.fundHolderEpoch(...args,{gasLimit:2_000_000})));
+ assert.equal(await asset.balanceOf(await vault.getAddress()),100_000_000n);
+ assert.equal(await asset.balanceOf(await dist.getAddress()),0n);
+ assert.equal(await vault.accounted(m.payoutAsset),100_000_000n);
+ assert.equal(await vault.strategyBalance(m.payoutAsset),100_000_000n);
+ assert.equal(await vault.holderSnapshotFunded(m.payoutAsset,m.snapshotBlock),false);
+ assert.equal(await dist.nextEpochId(),0n);
+ await mined(asset.configure(false,await vault.getAddress()));
+ await mined(vault.fundHolderEpoch(...args));
+ assert.equal(await asset.callbackAttempted(),true);
+ assert.equal(await asset.callbackSucceeded(),false);
+ assert.equal(await vault.accounted(m.payoutAsset),40_000_000n);
+ assert.equal(await vault.strategyBalance(m.payoutAsset),40_000_000n);
+ assert.equal(await dist.reserved(m.payoutAsset),60_000_000n);
+ const replay=[...args];replay[0]=2;replay[6]=10n;
+ await assert.rejects(vault.fundHolderEpoch.staticCall(...replay),/snapshot already funded/);
+ await assert.rejects(vault.distribute.staticCall(m.payoutAsset,[f.holders[0].address],[1n],0,m.snapshotBlock),/snapshot already funded/);
+ // Taxed payouts also roll back all recipient, reservation and token changes.
+ await mined(asset.configure(true,'0x0000000000000000000000000000000000000000'));
+ await assert.rejects(executeHolderEpoch(dist,m));
+ assert.equal(await dist.epochPaid(m.epochId,m.entries[0].address),false);
+ assert.equal(await dist.reserved(m.payoutAsset),60_000_000n);
+ await mined(asset.configure(false,'0x0000000000000000000000000000000000000000'));
+ await executeHolderEpoch(dist,m);
+ const snapshot=await f.provider.getBlockNumber();
+ await mined(vault.distribute(m.payoutAsset,[f.holders[0].address],[1n],0,snapshot));
+ const legacyReplay=[...replay];legacyReplay[2]=snapshot;
+ await assert.rejects(vault.fundHolderEpoch.staticCall(...legacyReplay),/snapshot already funded/);
+ // Vesting reserves remain accounted but are no longer strategy funds.
+ await mined(vault.distribute(m.payoutAsset,[f.holders[1].address],[39_999_999n],3600,snapshot));
+ assert.equal(await vault.strategyBalance(m.payoutAsset),0n);
+ assert.equal(await vault.accounted(m.payoutAsset),39_999_999n);
+ assert.equal(await vault.grantCount(),1n);
+ const encumbered=[...replay];encumbered[2]=await f.provider.getBlockNumber();encumbered[6]=1n;
+ await assert.rejects(vault.fundHolderEpoch.staticCall(...encumbered),/holder budget/);
+});
