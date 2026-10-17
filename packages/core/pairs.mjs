@@ -9,6 +9,19 @@
 
 export const PAIR_KINDS = ['native', 'usdc', 'xstock', 'token'];
 
+/**
+ * USD reference for a token's quote asset, used to show prices, liquidity and market caps in dollars.
+ * Native pairs use the chain's oracle price (`nativeReference`). USDC pairs are valued at $1 per USDC:
+ * an explicit parity assumption, labelled as such, not an oracle reading. Other kinds keep whatever
+ * reference they already carry (usually none, so values stay in the pair asset).
+ */
+export const USDC_PARITY_SOURCE = 'USDC valued at $1 (assumed parity)';
+export function usdReferenceFor(token, nativeReference, now = Math.floor(Date.now() / 1000)) {
+  if (token?.pair === 'native') return nativeReference ?? null;
+  if (token?.pair === 'usdc') return { status: 'fresh', usd: 1, updatedAt: now, maxAge: Number.MAX_SAFE_INTEGER, source: USDC_PARITY_SOURCE };
+  return token?.usdReference ?? null;
+}
+
 export const PAIR_INFO = {
   native: { title: 'Native coin', glyph: 'coins', note: symbol => `Buyers pay in ${symbol}, the network’s own coin.` },
   usdc: { title: 'USDC', glyph: 'coins', note: () => 'Buyers pay in USDC. The curve and graduated pool stay paired with USDC; network gas is separate.' },

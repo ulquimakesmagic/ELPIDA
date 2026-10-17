@@ -21,3 +21,10 @@ test('empty and unavailable networks remain distinguishable; no zero-size trades
  const invalid=protocolAnalytics({sources:[{...source,trades:[{...trade,quoteAmount:'0'},{...trade,timestamp:now+1}]}],prices,now});assert.equal(invalid.totals.trades,0);
  assert.throws(()=>protocolAnalytics({sources:[source],prices,period:'bad',now}));assert.throws(()=>protocolAnalytics({sources:[source],prices,network:'bad',now}));
 });
+test('USDC pairs are valued at $1 per USDC; other paired tokens stay unpriced',()=>{
+ const usdc={...token,address:'UsdcToken',pair:'usdc',quoteSymbol:'USDC',quoteAddress:'usdc-mint',reserve:'120'};
+ const meme={...token,address:'MemeToken',pair:'token',quoteSymbol:'MEME',quoteAddress:'meme-mint'};
+ const r=protocolAnalytics({sources:[{...source,tokens:[usdc,meme],trades:[{...trade,token:'UsdcToken',quoteAmount:'25'},{...trade,token:'MemeToken',quoteAmount:'7'}]}],prices,now});
+ assert.equal(r.totals.volumeUsd,25);assert.equal(r.totals.unpricedTrades,1);
+ assert.equal(r.assets.find(a=>a.symbol==='USDC').priced,true);assert.equal(r.assets.find(a=>a.symbol==='MEME').priced,false);
+});

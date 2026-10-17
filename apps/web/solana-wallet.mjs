@@ -2,7 +2,7 @@ import { nowSeconds } from './clock.mjs';
 import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut } from '/elpida-solana.mjs';
 import {normalizeMetadata} from './metadata.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
-import { PAIR_LIMITS } from '/pairs.mjs';
+import { PAIR_LIMITS, usdReferenceFor } from '/pairs.mjs';
 import { withWalletTimeout, walletErrorText } from './wallet.mjs';
 
 import { standardSolanaWallets, standardSolanaProvider } from './wallet-discovery.mjs';
@@ -205,7 +205,7 @@ export class SolanaWallet {
   static SOL_HEADROOM = 30_000_000n;
   /** Public discovery: the server's indexer first (persistent, with history), else a direct read-only chain scan. */
   async publicTokens(){
-    try{const indexed=await this.indexedTokens();if(indexed.length)return indexed.map(t=>({...t,usdReference:t.pair==='native'?this.price:null}));}catch{}
+    try{const indexed=await this.indexedTokens();if(indexed.length)return indexed.map(t=>({...t,usdReference:usdReferenceFor({...t,usdReference:null},this.price)}));}catch{}
     return (await this.state({readOnly:true})).tokens;
   }
   async state({readOnly=false}={}) {
@@ -231,7 +231,7 @@ export class SolanaWallet {
       const remainingBuy = complete ? 0n : quoteBuy(pool, MAX_U64, config.baseFeeBps, config.baseFeeBps).gross;
       const token = {
         address, pool: pool.pubkey.toBase58(), name: pool.name, symbol: pool.symbol, creator: pool.creator.toBase58(), reward: pool.reward.toBase58(),
-        created: Number(pool.createdAt)*1000, metadata:await readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair: config.kind ?? 'native', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: 'PumpSwap', usdReference: config.wsol ? this.price : null,
+        created: Number(pool.createdAt)*1000, metadata:await readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair: config.kind ?? 'native', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: 'PumpSwap', usdReference: config.wsol ? this.price : usdReferenceFor({ pair: config.kind ?? 'native' }, null),
         reserve: formatAmount(pool.realQuote, d), liquidityBonus: formatAmount(pool.liquidityBonus, d), lockedLiquidity: formatAmount(stats.lockedLiquidity, d),
         sold: formatAmount(pool.sold, TOKEN_DECIMALS), circulatingSupply: formatAmount(pool.sold, TOKEN_DECIMALS), saleCap: formatAmount(pool.curveSupply, TOKEN_DECIMALS),
         supply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS), balance: formatAmount(this.client.tokenAmount(holdings[index]?.data), TOKEN_DECIMALS),
