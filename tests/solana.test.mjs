@@ -811,6 +811,25 @@ test('Solana mainnet build rejects test instructions; the upgrade authority can 
   await transferUpgradeAuthority({ connection: f.connection, payer: multisig, programId, newAuthority: f.authority.publicKey });
 });
 
+test('Solana compatibility: clients detect a program without metadata support and launch with the earlier layout', { skip }, async () => {
+  // The devnet program before this upgrade (build 319e2ffe…, committed as a fixture) stays usable until it is upgraded.
+  const previous = readFileSync(`${root}contracts/solana/fixtures/elpida_launchpad-pre-metadata.so`);
+  assert.equal(await f.client.supportsMetadata(f.connection, f.creator.publicKey), true, 'current build supports metadata');
+  await upgradeProgram({ connection: f.connection, payer: f.authority, programId: f.programId, elf: previous, sendsPerSecond: 200 });
+  try {
+    await sleep(1500); // the upgraded program becomes visible from the next slot
+    assert.equal(await f.client.supportsMetadata(f.connection, f.creator.publicKey), false, 'previous build detected');
+    const mint = Keypair.generate();
+    await send(f.connection, f.creator, [f.client.computeBudget(), f.client.launch({ legacy: true, creator: f.creator.publicKey, config: f.config, mint: mint.publicKey, name: 'Legacy', symbol: 'OLD', firstBuy: 5n * USDC, minTokensOut: 0n, reward: f.rewardWallet.publicKey })], [mint], 1);
+    assert.equal((await pool(mint.publicKey)).symbol, 'OLD', 'earlier layout launches on the previous program');
+    assert.equal(await f.connection.getAccountInfo(f.client.metadataPda(mint.publicKey)), null, 'no metadata on the previous program');
+  } finally {
+    await upgradeProgram({ connection: f.connection, payer: f.authority, programId: f.programId, elf: readFileSync(elfPath), sendsPerSecond: 200 });
+    await sleep(1500);
+  }
+  assert.equal(await f.client.supportsMetadata(f.connection, f.creator.publicKey), true, 'back on the current build');
+});
+
 test('Solana upgrade is a no-op when the deployed program already matches the build', { skip }, async () => {
   const result = await upgradeProgram({ connection: f.connection, payer: f.authority, programId: f.programId, elf: readFileSync(elfPath) });
   assert.equal(result.upgraded, false);

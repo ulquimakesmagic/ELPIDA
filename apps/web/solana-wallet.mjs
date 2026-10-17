@@ -308,6 +308,15 @@ export class SolanaWallet {
     return { ...extra, out: formatAmount(q.net, d), fee: formatAmount(q.fee, d), antiSnipeFee: formatAmount(q.antiSnipeFee, d) };
   }
   // Wallet signs first, then any extra signer (the new mint keypair), as Phantom recommends.
+  /**
+   * Whether the deployed program writes Metaplex metadata at launch (the D7/D11 upgrade). Detected once by
+   * simulating `reopen_curve` on an empty pool address: an upgraded program fails on the missing account,
+   * an older one with InstructionFallbackNotFound (101).
+   */
+  async supportsMetadata() {
+    this._metadataSupport ??= await this.client.supportsMetadata(this.connection, this.publicKey);
+    return this._metadataSupport;
+  }
   /** A reserved vanity mint (the server co-signs the launch after the wallet), or a fresh random keypair. */
   async mintFor() {
     const random = { mint: web3.Keypair.generate(), remote: null, vanityNote: '' };
@@ -409,23 +418,28 @@ export class SolanaWallet {
       }
       // Token details are published first: the program writes this IPFS URI into immutable Metaplex
       // metadata in the launch transaction (D11), so wallets and explorers show the name and image.
-      this.onProgress?.('Publishing token details for the launch…');
-      const payload = JSON.stringify({ network: this.net.key, name, symbol, ...metadata }), proof = await prepareUploadProof(payload);
-      const staged = await fetch('/api/metadata/stage', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': this.config.csrf, ...proof }, body: payload });
-      const published = await staged.json();
-      if (!staged.ok) throw new Error(published.error ?? 'Publishing token details failed. No launch was submitted.');
-      if (!/^ipfs:\/\//.test(published.uri ?? '') || !['public-ipfs', 'elpida-hosted'].includes(published.storage)) throw new Error('Token details were not staged safely. No launch was submitted.');
+      // A program not yet upgraded to metadata support keeps the earlier launch (details in this browser).
+      const withMetadata = await this.supportsMetadata();
+      let published = { metadata, storage: null };
+      if (withMetadata) {
+        this.onProgress?.('Publishing token details for the launch…');
+        const payload = JSON.stringify({ network: this.net.key, name, symbol, ...metadata }), proof = await prepareUploadProof(payload);
+        const staged = await fetch('/api/metadata/stage', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': this.config.csrf, ...proof }, body: payload });
+        published = await staged.json();
+        if (!staged.ok) throw new Error(published.error ?? 'Publishing token details failed. No launch was submitted.');
+        if (!/^ipfs:\/\//.test(published.uri ?? '') || !['public-ipfs', 'elpida-hosted'].includes(published.storage)) throw new Error('Token details were not staged safely. No launch was submitted.');
+      }
       // D9: a pre-ground mint address ending in "hope" when the server has one ready, else a random mint.
       const { mint, remote, vanityNote } = await this.mintFor();
       const signature = await this.sendInstructions([
         this.client.computeBudget(),
         ...await this.wrapFor(config, q.gross),
-        this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, priceUpdate: terms.priceFeed, maxFee, usdc }),
+        this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, legacy: !withMetadata, priceUpdate: terms.priceFeed, maxFee, usdc }),
         ...(config.wsol ? [this.client.unwrapSol(this.publicKey)] : []),
       ], remote ? [] : [mint], `Confirm your token launch in your wallet ($10 fee: ${inUsdc ? `${formatAmount(terms.usdcFee, 6)} USDC` : `${formatAmount(terms.fee, 9)} SOL, at most ${formatAmount(maxFee, 9)} SOL`})…`, remote ? [remote] : []);
       await writeMetadataCache(metadataKey(this.deployment.programId,mint.publicKey.toBase58()),published.metadata??metadata);
-      return { hash: signature, token: mint.publicKey.toBase58(), metadataPublished: true, metadataStorage: published.storage,
-        message: `Your token is live on ${this.net.name}.${vanityNote} ${published.storage === 'public-ipfs' ? 'Its details are pinned to public IPFS and written into immutable token metadata.' : 'Its details are hosted by Elpida and written into immutable token metadata; public IPFS pinning is not configured.'}` };
+      return { hash: signature, token: mint.publicKey.toBase58(), metadataPublished: withMetadata, metadataStorage: published.storage,
+        message: `Your token is live on ${this.net.name}.${vanityNote} ${!withMetadata ? 'Its details are saved in this browser (this network\'s program does not write token metadata yet).' : published.storage === 'public-ipfs' ? 'Its details are pinned to public IPFS and written into immutable token metadata.' : 'Its details are hosted by Elpida and written into immutable token metadata; public IPFS pinning is not configured.'}` };
     }
     const { mint, pool } = await this.freshPool(body.token);
     config = this.configOf(pool);

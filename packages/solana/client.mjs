@@ -377,7 +377,7 @@ const sameBytes = (data, expected) => expected.every((byte, i) => data[i] === by
 export const encodeCurveParams = p => concat(u64(p.virtualQuote), u64(p.virtualToken), u64(p.curveSupply), u16(p.baseFeeBps), u16(p.snipeStartBps), u32(p.snipeWindowSecs), u16(p.maxCreatorBuyBps), u64(p.launchFee ?? 0n));
 
 export function createElpidaSolana(web3, programIdInput) {
-  const { PublicKey, TransactionInstruction, SystemProgram, ComputeBudgetProgram } = web3;
+  const { PublicKey, TransactionInstruction, SystemProgram, ComputeBudgetProgram, Transaction, Keypair } = web3;
   const programId = new PublicKey(programIdInput);
   const tokenProgram = new PublicKey(TOKEN_PROGRAM);
   const ataProgram = new PublicKey(ATA_PROGRAM);
@@ -466,8 +466,13 @@ export function createElpidaSolana(web3, programIdInput) {
      * `maxFee`: lamport cap for the SOL fee (quote plus a margin). `usdc`: { mint, tokenProgram } to pay the
      * USD fee in USDC from the creator's associated account to the treasury's.
      */
-    launch({ creator, config, mint, name, symbol, firstBuy, minTokensOut, reward, uri, priceUpdate = null, maxFee = (1n << 64n) - 1n, usdc = null }) {
-      if (!validMetadataUri(uri)) throw new Error(PROGRAM_ERRORS[30]);
+    /**
+     * `uri`: the IPFS metadata document, written into immutable Metaplex metadata by the current program.
+     * `legacy: true` builds the pre-metadata layout (no uri, no Metaplex accounts) for programs that have
+     * not been upgraded yet; see `supportsMetadata` in the browser wallet.
+     */
+    launch({ creator, config, mint, name, symbol, firstBuy, minTokensOut, reward, uri, legacy = false, priceUpdate = null, maxFee = (1n << 64n) - 1n, usdc = null }) {
+      if (!legacy && !validMetadataUri(uri)) throw new Error(PROGRAM_ERRORS[30]);
       const pool = poolPda(mint), cfg = config.address ?? configPda;
       const usdcMetas = usdc ? [meta(usdc.mint), meta(ata(creator, usdc.mint, usdc.tokenProgram ?? tokenProgram), true), meta(ata(config.treasury, usdc.mint, usdc.tokenProgram ?? tokenProgram), true), meta(usdc.tokenProgram ?? tokenProgram)] : [];
       return ix([
@@ -475,8 +480,20 @@ export function createElpidaSolana(web3, programIdInput) {
         meta(mint, true, true), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true),
         meta(qata(creator, config), true), meta(ata(creator, mint), true), meta(tokenProgram), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId),
         meta(betaGatePda), meta(betaCreatorPda(creator)), meta(pricingPda(cfg)), meta(priceUpdate ?? SystemProgram.programId),
-        meta(metadataPda(mint), true), meta(mplProgram), meta(SYSVAR_RENT), ...usdcMetas,
-      ], concat(DISCRIMINATORS.launch, str(name), str(symbol), u64(firstBuy), u64(minTokensOut), key(reward).toBytes(), u64(maxFee), [usdc ? 1 : 0], str(uri)));
+        ...(legacy ? [] : [meta(metadataPda(mint), true), meta(mplProgram), meta(SYSVAR_RENT)]), ...usdcMetas,
+      ], concat(DISCRIMINATORS.launch, str(name), str(symbol), u64(firstBuy), u64(minTokensOut), key(reward).toBytes(), u64(maxFee), [usdc ? 1 : 0], ...(legacy ? [] : [str(uri)])));
+    },
+    /**
+     * Whether the deployed program has the D7/D11 upgrade (reopen_curve, Metaplex metadata at launch).
+     * Simulates reopen_curve on an empty pool address: an upgraded program fails on the missing account,
+     * an older one with InstructionFallbackNotFound (Anchor error 101).
+     */
+    async supportsMetadata(connection, feePayer) {
+      const { blockhash } = await connection.getLatestBlockhash('confirmed');
+      const probe = new Transaction({ feePayer: key(feePayer), recentBlockhash: blockhash }).add(this.reopenCurve({ mint: Keypair.generate().publicKey }));
+      const { value } = await connection.simulateTransaction(probe);
+      const custom = value.err?.InstructionError?.[1]?.Custom;
+      return custom !== 101 && !/InstructionFallbackNotFound|Fallback functions are not supported/i.test((value.logs ?? []).join(' '));
     },
     /** Permissionless D7 escape hatch: reopens a curve that completed GRADUATION_GRACE_SECS ago without migrating. */
     reopenCurve: ({ mint }) => ix([meta(poolPda(mint), true)], DISCRIMINATORS.reopenCurve),
