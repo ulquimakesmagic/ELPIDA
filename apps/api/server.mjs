@@ -1,7 +1,7 @@
 import { indexedChange } from '../web/discovery.mjs';
 import { protocolAnalytics } from './protocol-analytics.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
-import { PublicIndexer } from './public-indexer.mjs';
+import { PublicIndexer, recentTrade } from './public-indexer.mjs';
 import { SolanaIndexer } from '../../packages/indexer/solana-indexer.mjs';
 import { validateSolanaRpc } from '../../packages/solana/rpc-config.mjs';
 import * as solanaWeb3 from '@solana/web3.js';
@@ -48,6 +48,9 @@ resources.set('/upload-proof.mjs', ['upload-proof.mjs', 'text/javascript']);
 resources.set('/upload-proof-worker.mjs', ['upload-proof-worker.mjs', 'text/javascript']);
 resources.set('/circle-funding.mjs', ['circle-funding.mjs', 'text/javascript']);
 resources.set('/clock.mjs', ['clock.mjs', 'text/javascript']);
+resources.set('/theme.css', ['theme.css', 'text/css']);
+resources.set('/shell.mjs', ['shell.mjs', 'text/javascript']);
+resources.set('/theme-boot.js', ['theme-boot.js', 'text/javascript']);
 const assetTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8' };
 const vendorFiles = new Map([
   ['/vendor/lightweight-charts.js', fileURLToPath(new URL('../../node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js', import.meta.url))],
@@ -206,6 +209,12 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           try{return send(200,protocolAnalytics({sources,prices:priceSnapshot(),period:url.searchParams.get('period')??'7d',network:url.searchParams.get('network')??'all'}));}catch(error){return send(400,{error:error.message});}
         }
         if(url.pathname==='/api/public/status')return send(200,{storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),simulationEphemeral:!runtime.config.simulation?.durable,simulation:runtime.config.simulation},networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,publicIndex.status(n.key)])),...(solanaIndex?{[solanaIndex.network.key]:{enabled:true,...solanaIndex.status()}}:{})}});
+        if(url.pathname==='/api/public/recent-trades'){
+          // Newest trades across every public index, for the "Last sale" strip: token identity, side and time only.
+          const limit=Math.max(1,Math.min(50,Number(url.searchParams.get('limit'))||20)),list=publicIndex.recentTrades(limit);
+          if(solanaIndex){const tokens=new Map(solanaIndex.listings().map(t=>[t.address,t]));for(const trade of solanaIndex.recentTrades(limit)){const t=tokens.get(trade.token);if(t)list.push(recentTrade(solanaIndex.network.key,t,trade));}}
+          return send(200,list.sort((a,b)=>b.timestamp-a.timestamp).slice(0,limit));
+        }
         if(url.pathname==='/api/public/quotes'){const data=publicIndex.quotes(url.searchParams.get('network')??'base-sepolia');return data?send(200,data):send(503,{error:'Trading pair index is catching up. Retry shortly.'});}
         const solanaMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/([1-9A-HJ-NP-Za-km-z]{32,44})(?:\/(trades|candles|holders))?)?$/);
         if(solanaMatch&&url.searchParams.get('network')?.startsWith('solana-')){
