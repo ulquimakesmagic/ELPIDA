@@ -9,6 +9,7 @@ import { withWalletTimeout, walletErrorText } from './wallet.mjs';
 import { exceedsRemaining } from './amounts.mjs';
 import {terminalChart} from './terminal-chart.mjs';
 import {holderTerminal} from './holder-terminal.mjs';
+import {tokenWalletImage,watchEvmToken} from './wallet-token.mjs';
 export { exceedsRemaining };
 
 const metadataRequests = new Map();
@@ -99,6 +100,24 @@ export function renderToken(ctx, address) {
   const about = h('section.about', { 'aria-labelledby': 'about-title' }, h('h2#about-title', 'About'),
     h('p.section-text', token.metadata?.description || 'The creator has not added a description.'),
     token.metadataURI ? h('p.small.muted', token.metadataStatus === 'unavailable' ? 'Published metadata is temporarily unavailable.' : 'Metadata reference recorded on-chain.') : null);
+  if(ctx.mode==='testnet'&&!solana){
+    const walletToken={...token,network:ctx.wallet.net.key};
+    const image=tokenWalletImage(walletToken,location.origin);
+    const status=h('p.small.muted',{role:'status','aria-live':'polite'});
+    const add=h('button.btn.btn-secondary.btn-sm',{type:'button',disabled:!ctx.wallet.address,on:{click:async()=>{
+      add.disabled=true;status.textContent='Waiting for your wallet…';
+      try{
+        const result=await withWalletTimeout(watchEvmToken({provider:ctx.wallet.eth,chainId:ctx.wallet.net.chainId,token:walletToken,origin:location.origin}),ctx.wallet.walletName);
+        status.textContent=result.status==='added'?'Wallet accepted the token request. Image display depends on the wallet.':result.status==='unsupported'?'This wallet does not support adding tokens by request. Its own token-data service controls discovery and logos.':'Token request cancelled or not accepted.';
+      }catch(e){status.textContent=errorText(e);}finally{add.disabled=false;}
+    }}},icon('wallet','icon-sm'),'Add to wallet');
+    about.append(h('details',h('summary','Wallet logo and token metadata'),
+      h('p.small.muted',image?'A public logo URL is available. Wallets decide whether to use it.':'No public logo is available yet. Publish the token image before requesting wallet display.'),
+      image?h('a.link',{href:image,target:'_blank',rel:'noopener noreferrer'},'Open token image'):null,
+      h('p',h('a.link',{href:'/api/wallet-tokenlist.json?network='+encodeURIComponent(ctx.wallet.net.key),target:'_blank',rel:'noopener noreferrer'},'Open this network’s token list')),
+      h('p.small.muted','Phantom may use its own data providers. Publishing here does not guarantee a logo or a verified badge. Testnet indexing can differ from mainnet.'),
+      add,!ctx.wallet.address?h('p.hint','Connect an EVM wallet to request adding this token.'):null,status));
+  }
   if(ctx.mode==='testnet'&&!token.metadataURI&&token.metadataStatus!=='creator-signed'&&token.creator?.toLowerCase()===state.wallet?.toLowerCase()&&(token.metadata?.image||token.metadata?.description)){
     const key=`${ctx.currentChain()}:${token.address.toLowerCase()}`;
     const request=metadataRequests.get(key) ?? {pending:false,message:''};
