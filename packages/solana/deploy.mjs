@@ -391,7 +391,7 @@ export async function ensurePricing({ connection, payer, programId, config, orac
   const same = current && current.priceFeed.equals(priceUpdate) && current.feedId === oracle.feedId.replace(/^0x/, '') && current.maxAgeSecs === oracle.maxAgeSecs && current.maxConfBps === oracle.maxConfBps
     && current.feeUsdE6 === BigInt(oracle.feeUsdE6) && current.startFdvUsdE6 === BigInt(oracle.startFdvUsdE6) && current.usdcMint.equals(usdcMint ?? PublicKey.default);
   if (!same) {
-    onProgress(`${current ? 'Updating' : 'Turning on'} USD pricing ($${Number(oracle.feeUsdE6) / 1e6} fee, $${Number(oracle.startFdvUsdE6) / 1e6} starting FDV)…`);
+    onProgress(`${current ? 'Updating' : 'Turning on'} USD pricing ($${Number(oracle.feeUsdE6) / 1e6} fee, ${BigInt(oracle.startFdvUsdE6) > 0n ? `$${Number(oracle.startFdvUsdE6) / 1e6} starting FDV` : 'curve sized in the pair asset'})…`);
     await send(connection, payer, [client.setPricing({ authority: payer.publicKey, config: configKey, priceUpdate, feedId: oracle.feedId, maxAgeSecs: oracle.maxAgeSecs, maxConfBps: oracle.maxConfBps, feeUsdE6: BigInt(oracle.feeUsdE6), startFdvUsdE6: BigInt(oracle.startFdvUsdE6), usdcMint })]);
   }
   return { pricing: client.decodePricing((await connection.getAccountInfo(client.pricingPda(configKey))).data), created: !current, updated: !!current && !same, price };

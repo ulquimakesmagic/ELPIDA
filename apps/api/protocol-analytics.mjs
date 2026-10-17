@@ -1,4 +1,5 @@
 // Public, read-only analytics. Never includes simulation activity or wallet credentials.
+import { usdReferenceFor } from '../../packages/core/pairs.mjs';
 export function protocolAnalytics({sources, prices, period='7d', network='all', now=Math.floor(Date.now()/1000)}) {
   const windows={'24h':86400,'7d':604800,'30d':2592000,all:Infinity};
   if (!(period in windows)) throw new Error('Choose 24h, 7d, 30d or all.');
@@ -13,7 +14,7 @@ export function protocolAnalytics({sources, prices, period='7d', network='all', 
     for(const t of tokens.values()){
       totals.tokens++;if(t.graduated)totals.graduated++;
       if(t.created/1000>=start&&t.created/1000<=now){totals.launches++;activity.push({timestamp:t.created/1000,launches:1});}
-      const ref=t.pair==='native'?prices[source.key]:t.usdReference;
+      const ref=usdReferenceFor(t,prices[source.key],now);
       const rate=ref?.status==='fresh'&&Number.isFinite(ref.usd)&&ref.usd>0&&now-ref.updatedAt<=(ref.maxAge??180)&&ref.updatedAt<=now+60?ref.usd:null;
       const key=source.key+':'+(t.quoteAddress??t.quoteMint??t.quoteSymbol??'native');
       const a=assets.get(key)??{key,network:source.key,chain:source.name,symbol:t.quoteSymbol??'Quote asset',volume:0,volumeUsd:0,trades:0,reserve:0,creatorFees:0,protocolFees:0,priced:rate!==null};

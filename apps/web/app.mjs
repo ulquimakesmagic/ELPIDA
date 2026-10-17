@@ -1,5 +1,6 @@
 import { nowSeconds, syncClock } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
+import { usdReferenceFor } from '/pairs.mjs';
 import { discoveryTokens } from './discovery.mjs';
 import { assetIcon, chainIcon, chainSelector } from './chain-ui.mjs';
 import { renderAnalytics } from './analytics-view.mjs';
@@ -83,10 +84,10 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
   }}
   if (revision !== refreshRevision) return state;
   const reference=config.prices?.[currentChain()]??wallet.price;
-  for(const t of next.tokens??[])if(t.pair==='native')t.usdReference=reference;
+  for(const t of next.tokens??[])t.usdReference=usdReferenceFor(t,reference,nowSeconds());
   state = next; updateChrome(); rerender(preserveInput ? 'background' : 'data');
   if(mode==='testnet'){
-    const results=await Promise.allSettled(config.testnets.map(async net=>(await api(`public/tokens?network=${encodeURIComponent(net.key)}`)).map(t=>({...t,network:net.key,usdReference:t.pair==='native'?config.prices?.[net.key]:t.usdReference}))));
+    const results=await Promise.allSettled(config.testnets.map(async net=>(await api(`public/tokens?network=${encodeURIComponent(net.key)}`)).map(t=>({...t,network:net.key,usdReference:usdReferenceFor(t,config.prices?.[net.key],nowSeconds())}))));
     if(revision!==refreshRevision)return state;
     discoveryErrors=results.flatMap((r,i)=>r.status==='rejected'?[config.testnets[i].name]:[]);
     if(next.discoveryError)discoveryErrors.push(wallet.net.name);
