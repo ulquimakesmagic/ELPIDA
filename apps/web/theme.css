@@ -248,6 +248,10 @@ dialog::backdrop { background: var(--scrim); backdrop-filter: blur(6px); }
 .dock-env > small, .mobile-chain .env-button > small { font-size: 10px; color: var(--muted); }
 .dock-env > span, .dock-env > small, .dock-env > .icon:last-child { opacity: 0; visibility: hidden; transition: opacity 120ms var(--ease), visibility 0s linear 120ms; }
 .dock-env:disabled { opacity: .6; cursor: wait; }
+/* A compact chain selector is the chain's circular badge, with no inset square. */
+.app-shell:not([data-dock="open"]) .dock-env { width: 44px; height: 44px; min-height: 44px; padding: 0; gap: 0; margin-inline: auto; justify-content: center; border-radius: 50%; }
+.app-shell:not([data-dock="open"]) .dock-env > :not(:first-child) { display: none; }
+.app-shell:not([data-dock="open"]) .dock-env > .asset-icon { width: 100%; height: 100%; object-fit: cover; border-radius: 50%; }
 .dock-tools { display: flex; flex-direction: column; align-items: center; gap: 2px; margin-top: 10px; }
 .dock-tool { display: grid; place-items: center; width: 40px; height: 40px; border-radius: 50%; border: 0; background: none; color: var(--muted); cursor: pointer; }
 .dock-tool:hover { background: var(--hover); color: var(--ink); }
@@ -352,7 +356,7 @@ main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; 
 .tabbar { display: none; }
 
 /* Wallet dialog */
-.wallet-dialog { width: min(460px, calc(100vw - 24px)); padding: 26px; }
+.wallet-dialog { width: min(460px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 26px; }
 .wallet-head { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; gap: 16px; align-items: start; }
 .wallet-head h2 { font-size: 24px; font-weight: 650; letter-spacing: -.03em; }
 .wallet-head p { color: var(--muted); margin-top: 6px; line-height: 1.5; }
@@ -363,13 +367,21 @@ main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; 
 .wallet-row:hover { background: var(--hover); border-color: var(--line); }
 .wallet-row:disabled { opacity: .6; cursor: wait; }
 .wallet-row .wallet-logo { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 13px; background: var(--panel-2); border: .67px solid var(--line-faint); overflow: hidden; }
-.wallet-row .wallet-logo img { width: 28px; height: 28px; border-radius: 6px; }
+.wallet-row .wallet-logo img { width: 28px; height: 28px; border-radius: 6px; object-fit: contain; }
 .wallet-row strong { display: block; font-size: 14px; font-weight: 650; }
 .wallet-row small { display: block; color: var(--muted); font-size: 11.5px; margin-top: 3px; }
 .wallet-row > .icon { color: var(--muted); }
 .wallet-foot { display: flex; gap: 10px; align-items: flex-start; padding-top: 16px; border-top: .67px solid var(--line-faint); color: var(--muted); font-size: 12px; line-height: 1.55; }
 .wallet-foot .icon { color: var(--accent-text); margin-top: 1px; }
 .wallet-empty { padding: 18px; border-radius: 18px; border: .67px dashed var(--line); color: var(--muted); font-size: 13px; line-height: 1.55; }
+.wallet-more { border-top: .67px solid var(--line-faint); padding-top: 14px; }
+.wallet-more summary { cursor: pointer; color: var(--muted); font-size: 13px; }
+.wallet-catalog { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; margin: 12px 0; }
+.wallet-install { display: flex; align-items: center; gap: 9px; padding: 10px; color: var(--ink); text-decoration: none; border: .67px solid var(--line-soft); border-radius: 12px; font-size: 12px; }
+.wallet-install:hover { background: var(--hover); }
+.wallet-install img { object-fit: contain; border-radius: 6px; flex: none; }
+.wallet-install span { min-width: 0; flex: 1; }
+.wallet-install .icon { color: var(--muted); flex: none; }
 
 /* Search sheet (phones) */
 .search-dialog { width: min(560px, calc(100vw - 16px)); margin: 8px auto auto; padding: 8px; border-radius: 26px; }
