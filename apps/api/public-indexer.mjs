@@ -57,11 +57,15 @@ export class PublicIndexer {
   saveMetadata(body){const {e,token,metadata,message}=this.metadataMessage(body);if(verifyMessage(message,body.signature).toLowerCase()!==token.creator.toLowerCase())throw new Error('Only the on-chain creator can publish these token details.');
     const updated=new Map(e.metadata);updated.set(token.address,metadata);writeFileSync(e.metadataPath+'.tmp',JSON.stringify(Object.fromEntries(updated)));renameSync(e.metadataPath+'.tmp',e.metadataPath);e.metadata=updated;return {saved:true};
   }
+  /** Latest trades on every indexed network, each with the token's public name, symbol and image. */
+  recentTrades(limit=20){const out=[];for(const key of this.entries.keys()){const tokens=new Map(this.listings(key).map(t=>[t.address.toLowerCase(),t]));for(const e of this.all(key))for(const trade of e.index.recentTrades(limit)){const t=tokens.get(String(trade.token).toLowerCase());if(t)out.push(recentTrade(key,t,trade));}}return out.sort((a,b)=>b.timestamp-a.timestamp).slice(0,limit);}
   detail(key,address,kind,interval=60){const e=this.entryFor(key,address),token=this.listings(key).find(t=>t.address===address.toLowerCase());if(!token)return null;return kind==='trades'?e.index.trades(address):kind==='candles'?e.index.candles(address,interval):kind==='holders'?e.index.holders(address):token;}
   async close(){this.stopping=true;clearInterval(this.timer);while(this.running)await new Promise(r=>setTimeout(r,100));const providers=new Set();for(const e of [...this.entries.keys()].flatMap(key=>this.all(key))){await e.index.close();providers.add(e.provider);}for(const p of providers)p.destroy();}
 }
 
 const deploymentOf=e=>e.deployment??e.net.shared;
+/** A trade for public display: no amounts or accounts, only what the "Last sale" strip shows. */
+export const recentTrade=(network,token,trade)=>({network,address:token.address,name:token.metadata?.name??token.name,symbol:token.metadata?.symbol??token.symbol,image:token.metadata?.image??null,side:trade.side,timestamp:Number(trade.timestamp)});
 function openEntry({net,deployment,provider,contracts,dataDir,legacy=false}){
   const dex=isDexModel(deployment.model),factory=deployment.factory.toLowerCase();
   const index=new EvmIndexer({provider,factory:deployment.factory,contracts:{...contracts,factory:dex?contracts.dexFactory:contracts.legacyFactory,curve:dex?contracts.dexCurve:contracts.legacyCurve,...(!dex?{dexPool:undefined}:{})},path:join(dataDir,`public-${net.chainId}-${factory}.sqlite`),chainId:net.chainId,fromBlock:deployment.block,confirmations:2,nativeSymbol:net.nativeCurrency.symbol,batchSize:100});

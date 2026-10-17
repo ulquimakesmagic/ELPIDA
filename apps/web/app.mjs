@@ -13,10 +13,11 @@ import { renderLaunch } from './launch-flow.mjs';
 import { renderToken } from './token-page.mjs';
 import { renderRewards } from './rewards-view.mjs';
 import { circleFundingPanel } from './circle-funding.mjs';
+import { initShell, renderLastSale, syncSearch } from './shell.mjs';
 
 let config, evmWallet, solWallet, wallet;
 let mode = 'local', account = '0', state = null, busy = false, refreshRevision = 0, progressHook = null;
-let allTokens = [], discoveryErrors = [], chainControl, connecting=false;
+let allTokens = [], discoveryErrors = [], chainControls = [], connecting=false;
 const ui = { filter: 'all', query: '', sort: 'marketcap',stage:'all' };
 
 async function api(path, body, renewed = false) {
@@ -96,6 +97,7 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
     if(solWallet.deployment&&wallet!==solWallet){try{for(const t of await solWallet.publicTokens())merged.set(`${solWallet.net.key}:${t.address}`,{...t,network:solWallet.net.key});}catch{discoveryErrors.push(solWallet.net.name);}}
     allTokens=[...merged.values()];
     if(currentRoute.name==='explore')rerender('background');
+    refreshLastSale();
   }else allTokens=next.tokens;
   return state;
 }
@@ -127,7 +129,7 @@ async function connect(key, walletId, {silent=false}={}) {
   } finally { connecting=false;updateChrome(); }
 }
 async function useLocal() {
-  mode = 'local'; state = null;
+  mode = 'local'; state = null; refreshLastSale();
   try { localStorage.setItem('elpida:network', 'local'); } catch {}
   await refresh(); return true;
 }
@@ -159,12 +161,12 @@ const ctx = {
 
 function envLabel() { return mode === 'local' ? (config?.hostedSimulation ? 'Shared simulation' : 'Local simulation') : `${wallet.net.name} · ${wallet.net.mainnet ? 'mainnet beta' : 'testnet'}`; }
 function updateChrome() {
-  const envButton = $('#env-button');
-  envButton.dataset.env = mode;
-  chainControl?.update(busy||connecting);
+  for (const button of [$('#env-button'), $('#env-button-mobile')]) if (button) button.dataset.env = mode;
+  for (const control of chainControls) control.update(busy||connecting);
   $('#account-label').textContent = mode === 'local' ? (config?.accounts?.[Number(account)]?.name ? `Demo ${config.accounts[Number(account)].name.toLowerCase()}` : 'Demo account') : wallet.address ? short(wallet.address) : 'Connect wallet';
-  $('#account-button').setAttribute('aria-label', `${$('#account-label').textContent}. Open account and network settings.`);
-  $$('[data-nav="portfolio"], [data-nav="rewards"]').forEach(link=>{link.hidden=mode!=='testnet'||!wallet.address;});
+  $('#account-button').toggleAttribute('data-connected', mode === 'local' || !!wallet?.address);
+  $('#account-button').toggleAttribute('data-address', mode === 'testnet' && !!wallet?.address);
+  $('#account-button').setAttribute('aria-label', mode === 'testnet' && !wallet.address ? 'Connect wallet' : `${$('#account-label').textContent}. Open account and network settings.`);
   $$('[data-busy-disable]').forEach(button => { button.disabled = busy; });
 }
 function envBanner() {
@@ -186,7 +188,7 @@ function parseRoute() {
   const [hash,query] = (location.hash.replace(/^#/, '') || '/').split('?');
   const token = hash.match(/^\/token\/([A-Za-z0-9]{32,64})$/);
   if (token) return { name: 'token', address: token[1],network:new URLSearchParams(query).get('network') };
-  return { name: { '/': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics' }[hash] ?? 'explore' };
+  return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics' }[hash] ?? 'notfound' };
 }
 function route() {
   const next = parseRoute(); const changed = next.name !== currentRoute.name || next.address !== currentRoute.address;
@@ -194,7 +196,7 @@ function route() {
 
   if(next.network&&networkByKey(next.network)&&next.network!==currentChain()){chooseChain(next.network).catch(e=>toast(errorText(e),{kind:'error'}));return;}
   $$('[data-nav]').forEach(link => { if (link.dataset.nav === next.name) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
-  document.title = `Elpida · ${{ explore: 'Explore tokens', portfolio: 'Portfolio', rewards: 'Rewards', launch: 'Create a token', token: 'Token', analytics: 'Protocol analytics' }[next.name]}`;
+  document.title = { explore: 'Explore tokens across chains | Elpida', portfolio: 'Portfolio | Elpida', rewards: 'Creator rewards | Elpida', launch: 'Create a token | Elpida', token: 'Token | Elpida', analytics: 'Analytics — Launches, volume & fees | Elpida', notfound: 'Page not found | Elpida' }[next.name];
   rerender('route');
   if(changed&&wallet?.address&&!['explore','analytics'].includes(next.name))refresh({preserveInput:true,walletRead:true}).catch(e=>toast(errorText(e),{kind:'error'}));
   if (changed) { window.scrollTo({ top: 0 }); if (next.name !== 'launch') $('#main').focus({ preventScroll: true }); }
@@ -210,6 +212,7 @@ function rerender(reason) {
     return;
   }
   analyticsView?.dispose();analyticsView=null;
+  if(r.name==='notfound'){view.setAttribute('aria-busy','false');view.replaceChildren(notFoundView());return;}
   if (r.name === 'launch') {
     // The launch flow owns its own state; a data refresh only updates balances and connection status.
     if (!launchView || reason === 'route' && !view.contains(launchView.root)) { launchView = renderLaunch(ctx); view.replaceChildren(launchView.root); }
@@ -241,6 +244,7 @@ function rerender(reason) {
   else if (r.name === 'rewards') view.replaceChildren(renderRewards(ctx));
   else view.replaceChildren(exploreView());
 }
+function notFoundView() { return h('section.not-found', h('h1', 'Page not found.'), h('p', 'That page doesn’t exist. Every token, launch and chart starts from Explore.'), h('a.btn-accent', { href: '#/' }, icon('compass', 'icon-sm'), 'Explore tokens')); }
 function loadingView() { return h('div', h('div.page-head', h('div', h('h1', 'Explore tokens'), h('p', 'Loading the launchpad…'))), h('div.token-grid', [1, 2, 3].map(() => h('div.skeleton', { 'aria-hidden': 'true' })))); }
 
 /* ---------- Explore ---------- */
@@ -285,7 +289,7 @@ function exploreView() {
     count.textContent = `${items.length} ${items.length === 1 ? 'token' : 'tokens'}`;
   };
   const count = h('span.muted.small');
-  const search = h('input.input', { type: 'search', placeholder: 'Search by name or symbol', 'aria-label': 'Search tokens', value: ui.query, on: { input: e => { ui.query = e.target.value; draw(); } } });
+  const search = h('input.input', { type: 'search', placeholder: 'Search by name or symbol', 'aria-label': 'Search tokens', value: ui.query, on: { input: e => { ui.query = e.target.value; syncSearch(ui.query); draw(); } } });
   const stages=h('div.stage-filters',{role:'group','aria-label':'Launch stage'},[['all','All'],['migrating','Migrating'],['graduated','Graduated'],['new','New']].map(([key,label])=>h('button.btn.btn-ghost.btn-sm',{type:'button','aria-pressed':String(ui.stage===key),on:{click:e=>{ui.stage=key;stages.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b===e.currentTarget)));draw();}}},label)));
   const view = h('div',
     h('section.intro', h('div', h('h1', 'Create a token. Build your community.'), h('p', 'Launch a token, choose its trading pair and decide where creator fees go.')),
@@ -340,14 +344,38 @@ function portfolioView() {
 }
 
 /* ---------- Network and test funds ---------- */
-async function connectCurrent() {
-  const list = wallet.net.kind === 'solana' ? solanaWallets(wallet.net.mainnet?'solana:mainnet':'solana:devnet') : evmWallets();
-  if (list.length >= 1) {
-    const dialog=$('#tools-dialog'),error=h('p.error-text',{role:'alert'});
-    $('#tools-body').replaceChildren(h('h3',`Connect a wallet · ${wallet.net.name}`),walletButtons(wallet.net,{onDone:()=>dialog.close(),onError:e=>{error.textContent=errorText(e);}}),error);
-    dialog.showModal();return;
-  }
-  try { await connect(wallet.net.key); toast(`Connected to ${wallet.net.name}.`, { kind: 'success' }); } catch (error) { toast(errorText(error), { kind: 'error' }); }
+/** Wallet picker for the current network: one row per wallet this browser announces. */
+function openWalletDialog(net = wallet.net) {
+  const dialog = $('#wallet-dialog'), body = $('#wallet-body'), error = h('p.error-text', { role: 'alert' });
+  $('#wallet-intro').textContent = `Choose your wallet to connect on ${net.name}.`;
+  const draw = () => {
+    const solana = net.kind === 'solana';
+    const list = solana ? solanaWallets(net.mainnet ? 'solana:mainnet' : 'solana:devnet') : evmWallets();
+    const chosen = solana ? chosenSolanaWallet() : chosenEvmWallet();
+    const sorted = [...list].sort((a, b) => Number(b.id === chosen) - Number(a.id === chosen));
+    const again = h('button.round-button', { type: 'button', 'aria-label': 'Look for wallets again', on: { click: () => { window.dispatchEvent(new Event('eip6963:requestProvider')); setTimeout(draw, 250); } } }, icon('refresh-cw', 'icon-sm'));
+    const row = w => h('button.wallet-row', { type: 'button', 'data-busy-disable': '', on: { click: async event => {
+      const button = event.currentTarget, note = button.querySelector('small');
+      button.disabled = true; note.textContent = `Waiting for ${w.name}…`; error.textContent = '';
+      try { await connect(net.key, w.id); dialog.close(); toast(`Connected to ${net.name} with ${w.name}.`, { kind: 'success' }); }
+      catch (e) { error.textContent = errorText(e); note.textContent = w.id === chosen ? 'Last used' : 'Detected'; }
+      finally { button.disabled = false; }
+    } } },
+      h('span.wallet-logo', w.icon && (/^data:image\//.test(w.icon) || /^\/assets\/wallets\//.test(w.icon)) ? h('img', { src: w.icon, alt: '', width: 28, height: 28 }) : icon('wallet')),
+      h('span', h('strong', w.name), h('small', w.id === chosen ? 'Last used' : 'Detected')), icon('chevron-right'));
+    body.replaceChildren(h('div.wallet-list-head', h('span', 'Available in this browser'), again),
+      sorted.length ? sorted.map(row) : h('p.wallet-empty', solana ? 'No Solana wallet found in this browser. Install Phantom, Solflare or Backpack, then look again.' : 'No Ethereum wallet found in this browser. Install MetaMask, Rabby or another browser wallet, then look again.'),
+      error);
+  };
+  draw();
+  if (!dialog.open) dialog.showModal();
+}
+async function connectCurrent() { openWalletDialog(wallet.net); }
+
+/* ---------- Last sale strip ---------- */
+async function refreshLastSale() {
+  if (mode !== 'testnet') { renderLastSale([], { href: () => '#/' }); return; }
+  try { renderLastSale(await api('public/recent-trades?limit=16'), { href: t => `#/token/${t.address}?network=${encodeURIComponent(t.network)}` }); } catch {}
 }
 function openTools() {
   const body = $('#tools-body'); const error = h('p.error-text', { role: 'alert' });
@@ -398,6 +426,7 @@ async function init() {
   config = await api('config');
   syncClock(config.serverTime, configSent);
   setInterval(()=>{if(!busy&&document.visibilityState==='visible'&&!(currentRoute.name==='rewards'&&document.activeElement?.closest('form')))refresh({preserveInput:true}).catch(()=>{});},60000);
+  setInterval(()=>{if(document.visibilityState==='visible')refreshLastSale();},30000);
   if (config.solana?.mainnet) {
     $('#footer-note').textContent = 'Solana mainnet beta: real funds, new contracts. Other networks are test networks with no monetary value.';
     $('#how-network-note').textContent = 'Solana runs as a mainnet beta with real funds and new, unaudited contracts; launching is invite-only while the beta gate is on. The other networks are test networks.';
@@ -412,9 +441,10 @@ async function init() {
   if (location.pathname === '/analytics') history.replaceState({}, '', '/#/analytics');
   if (location.pathname === '/launch') history.replaceState({}, '', '/#/launch');
   $$('dialog').forEach(d => { closeOnBackdrop(d); d.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => d.close())); });
-  chainControl=chainSelector({button:$('#env-button'),networks,current:()=>mode==='local'?'local':currentChain(),onSelect:key=>chooseChain(key).catch(e=>{toast(errorText(e),{kind:'error'});updateChrome();})});
+  const selectChain=key=>chooseChain(key).catch(e=>{toast(errorText(e),{kind:'error'});updateChrome();});
+  chainControls=[['#env-button','chain-options'],['#env-button-mobile','chain-options-mobile']].filter(([id])=>$(id)).map(([id,listId])=>chainSelector({button:$(id),listId,networks,current:()=>mode==='local'?'local':currentChain(),onSelect:selectChain}));
   $('#account-button').addEventListener('click', () => (mode === 'testnet' && !wallet.address ? connectCurrent() : openTools()));
-  $('#how-button').addEventListener('click', () => $('#how-dialog').showModal());
+  initShell({ onHow: () => $('#how-dialog').showModal(), onSearch: query => { ui.query = query; if (currentRoute.name !== 'explore') { if (query) location.hash = '#/'; } else rerender('background'); } });
   window.addEventListener('hashchange', route);
   updateChrome(); route();
   // Return to the testnet used last time, but only silently: wallets that already trust Elpida reconnect

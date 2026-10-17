@@ -1,8 +1,8 @@
 import {h,icon} from './ui.mjs';
 export function assetIcon(symbol){const key={ETH:'ethereum',BNB:'bnb',tBNB:'bnb',SOL:'solana',WSOL:'solana'}[symbol];return key?h('img.asset-icon',{src:`/assets/chains/${key}.${key==='ethereum'?'png':'svg'}`,alt:'',width:20,height:20}):icon('coins','icon-sm');}
 export function chainIcon(key){const name=key?.startsWith('solana')?'solana':key?.startsWith('bnb')?'bnb':key?.startsWith('base')?'base':key?.startsWith('ethereum')?'ethereum':key?.startsWith('robinhood')?'robinhood':null;return name?h('img.asset-icon',{src:`/assets/chains/${name}.${['base','robinhood','ethereum'].includes(name)?'png':'svg'}`,alt:'',width:20,height:20}):icon('flask-conical','icon-sm');}
-export function chainSelector({button,networks,current,onSelect}){
-  const list=h('div.chain-options',{role:'listbox',id:'chain-options','aria-label':'Choose chain',hidden:true});button.after(list);button.setAttribute('aria-haspopup','listbox');button.setAttribute('aria-controls',list.id);
+export function chainSelector({button,networks,current,onSelect,listId='chain-options'}){
+  const list=h('div.chain-options',{role:'listbox',id:listId,'aria-label':'Choose chain',hidden:true});button.after(list);button.setAttribute('aria-haspopup','listbox');button.setAttribute('aria-controls',list.id);
   const close=()=>{list.hidden=true;button.setAttribute('aria-expanded','false');};
   const open=()=>{list.hidden=false;button.setAttribute('aria-expanded','true');const options=[...list.children];(options.find(o=>o.getAttribute('aria-selected')==='true')??options[0])?.focus();};
   button.addEventListener('click',()=>list.hidden?open():close());

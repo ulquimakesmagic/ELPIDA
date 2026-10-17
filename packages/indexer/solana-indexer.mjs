@@ -375,6 +375,8 @@ export class SolanaIndexer {
       balance: '0', network: this.network.key, url: `${this.network.explorer}/address/${t.address}${this.network.cluster === 'mainnet' ? '' : `?cluster=${this.network.cluster}`}` }));
   }
   token(mint) { return this.listings().find(t => t.address === mint) ?? null; }
+  /** Latest trades across every pool of this index, newest first (the "Last sale" strip). */
+  recentTrades(limit = 20) { return this.db.prepare('SELECT timestamp, data FROM trades ORDER BY timestamp DESC, slot DESC, idx DESC LIMIT ?').all(Math.max(1, Math.min(100, limit))).map(r => ({ ...JSON.parse(r.data), timestamp: r.timestamp })); }
   trades(mint, limit = 100) { return this.db.prepare('SELECT data FROM trades WHERE mint=? ORDER BY slot DESC, idx DESC LIMIT ?').all(mint, Math.max(1, Math.min(500, limit))).map(r => JSON.parse(r.data)); }
   candles(mint, interval = 60, limit = 100) {
     if (![60, 300, 3600, 86400].includes(interval)) throw new Error('Unsupported candle interval.');
