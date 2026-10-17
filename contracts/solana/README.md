@@ -47,6 +47,8 @@ The SOL pair's fee and curve come from `config/native-pricing.json`. On test net
 | `test_build_check` | Anyone | Succeeds only on the test build; lets scripts confirm a cluster runs the mainnet build |
 | `harvest_lp_fees` | Anyone, after migration | Withdraws LP fee growth and splits it 50/50; destination token accounts must exist (the client adds idempotent creation) |
 
+**Transaction size.** A launch is one legacy transaction, capped by Solana at 1,232 bytes. The client sends only bare `ipfs://<CIDv1>` links (66 characters, `MAX_LAUNCH_URI`); the largest supported launch, a SOL pair paying the fee in SPL-Token USDC with a 32-byte name, is 1,227 bytes. A Token-2022 USDC fee on a SOL pair would be 1,259 bytes, so the wallet refuses it before signing and suggests paying in SOL; it needs a v0 transaction with a lookup table if such a USDC mint is ever configured. Mainnet and devnet USDC are SPL-Token mints.
+
 **Accounts:**
 - One `CurveConfig` PDA `["curve-config", quote_mint]` per pair (the SOL pair uses the wrapped-SOL mint).
 - One `CurvePool` PDA `["curve", mint]` per token. Its associated token accounts hold the unsold supply and the quote.

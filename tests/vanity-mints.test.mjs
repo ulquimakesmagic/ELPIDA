@@ -43,10 +43,10 @@ test('keys are sealed with AES-256-GCM bound to the public key', () => {
   assert.equal(vanityKey('short'), null); assert.equal(vanityKey(''), null);
 });
 
-function launchMessage({ wallet, mint, program = PROGRAM, extra = [] }) {
+function launchMessage({ wallet, mint, program = PROGRAM, extra = [], before = [] }) {
   const client = createElpidaSolana(web3, new web3.PublicKey(program));
   const config = { address: web3.Keypair.generate().publicKey, quoteMint: web3.Keypair.generate().publicKey, treasury: web3.Keypair.generate().publicKey };
-  const tx = new web3.Transaction({ feePayer: wallet, recentBlockhash: base58(randomBytes(32)) }).add(client.computeBudget(),
+  const tx = new web3.Transaction({ feePayer: wallet, recentBlockhash: base58(randomBytes(32)) }).add(...before, client.computeBudget(),
     client.launch({ creator: wallet, config, mint, name: 'Hope', symbol: 'HOPE', firstBuy: 1n, minTokensOut: 0n, reward: wallet, uri: URI }), ...extra);
   return tx.serializeMessage();
 }
@@ -74,6 +74,9 @@ test('the pool reserves single-use keys, never stores them in plaintext and sign
     const drain = web3.SystemProgram.transfer({ fromPubkey: mint, toPubkey: other, lamports: 1 });
     assert.throws(() => pool.sign({ id: r.id, wallet: wallet.toBase58(), message: launchMessage({ wallet, mint, extra: [drain] }).toString('base64') }), /only sign an Elpida launch/);
     assert.throws(() => pool.sign({ id: r.id, wallet: wallet.toBase58(), message: Buffer.concat([Buffer.from([0x80]), launchMessage({ wallet, mint })]).toString('base64') }), /legacy|Invalid/);
+    // A durable-nonce launch would never expire: refused.
+    const nonce = web3.SystemProgram.nonceAdvance({ noncePubkey: other, authorizedPubkey: wallet });
+    assert.throws(() => pool.sign({ id: r.id, wallet: wallet.toBase58(), message: launchMessage({ wallet, mint, before: [nonce] }).toString('base64') }), /Durable-nonce/);
     // Accepted: the launch by the reserving wallet. The signature verifies with the mint's public key.
     const message = launchMessage({ wallet, mint });
     assert.equal(parseLegacyMessage(message).keys[0], wallet.toBase58());
@@ -88,11 +91,15 @@ test('the pool reserves single-use keys, never stores them in plaintext and sign
     assert.match(pool.reserve({ wallet: wallet.toBase58(), address: '1.2.3.4' }).reason, /limit/);
     clock += 61_000;
     assert.throws(() => pool.sign({ id: second.id, wallet: wallet.toBase58(), message: launchMessage({ wallet, mint: new web3.PublicKey(second.mint) }).toString('base64') }), /expired/);
-    // A restart keeps the remaining encrypted key; a different key cannot open it.
-    assert.equal(new VanityMintPool({ path, key: pool.key, programId: PROGRAM, suffix: 'h', autoStart: false }).status().available, 1);
+    assert.equal(pool.status().available, 2, 'an unused, expired reservation returns its key to the pool');
+    // A restart keeps the remaining encrypted keys; a different key cannot open them.
+    assert.equal(new VanityMintPool({ path, key: pool.key, programId: PROGRAM, suffix: 'h', autoStart: false }).status().available, 2);
     assert.equal(new VanityMintPool({ path: join(dir, 'other.json'), key: randomBytes(32), programId: PROGRAM, suffix: 'h', autoStart: false }).status().available, 0);
     const third = pool.reserve({ wallet: other.toBase58(), address: '5.6.7.8' });
     assert.ok(third.id);
+    assert.ok(pool.reserve({ wallet: web3.Keypair.generate().publicKey.toBase58(), address: '5.6.7.8' }).id);
+    // Invalid wallets are refused (an empty string used to decode to the zero key).
+    for (const bad of ['', '1', 'not-a-wallet', 'O'.repeat(44)]) assert.match(pool.reserve({ wallet: bad, address: '9.9.9.9' }).reason, /Invalid wallet/);
     assert.match(pool.reserve({ wallet: web3.Keypair.generate().publicKey.toBase58(), address: '5.6.7.8' }).reason, /ready yet|random/, 'empty pool falls back');
   } finally { pool.stop(); rmSync(dir, { recursive: true, force: true }); }
 });
@@ -110,4 +117,16 @@ test('client address: right-most X-Forwarded-For behind Railway, the socket else
   const req = { headers: { 'x-forwarded-for': 'spoofed, 9.9.9.9' }, socket: { remoteAddress: '10.0.0.1' } };
   assert.equal(clientAddress(req, { RAILWAY_ENVIRONMENT_NAME: 'production' }), '9.9.9.9');
   assert.equal(clientAddress(req, {}), '10.0.0.1');
+});
+
+test('rate limits survive a flood of new identities instead of resetting', () => {
+  const pool = new VanityMintPool({ path: null, key: null, programId: PROGRAM });
+  let now = 0; pool.now = () => now;
+  for (let i = 0; i < 2; i++) assert.equal(pool.limited('address', 'victim', 2), false);
+  assert.equal(pool.limited('address', 'victim', 2), true);
+  for (let i = 0; i < 50_000; i++) pool.limited('address', `junk-${i}`, 10);
+  assert.equal(pool.limited('address', 'victim', 2), true, 'live limit kept while the table is full');
+  assert.equal(pool.limited('address', 'newcomer', 2), true, 'new identities refused until old entries age out');
+  now += 3_600_001;
+  assert.equal(pool.limited('address', 'newcomer', 2), false, 'stale entries evicted after the window');
 });

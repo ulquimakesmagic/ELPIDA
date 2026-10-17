@@ -274,6 +274,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         const solana=body.network===solanaNet.key&&Boolean(solanaNet.deployment);
         if(!solana&&(!net||net.mainnet||!isDexModel(net.shared?.model)))return send(400,{error:'On-chain launch metadata staging is unavailable on this network.'});
         const pinned=metadataStore.status().publicEnabled;
+        // Mainnet tokens must point at publicly pinned IPFS content, never Elpida-hosted storage alone.
+        if(solana&&solanaNet.mainnet&&!pinned)return send(503,{error:'Mainnet token details need public IPFS pinning. Configure PINATA_JWT on the server first; no launch was submitted.'});
         if(!pinned&&!process.env.RAILWAY_VOLUME_MOUNT_PATH)return send(503,{error:'Configure public IPFS pinning or a persistent testnet data volume before launching with metadata.'});
         return send(200,{...(await metadataStore.publish(body,pinned,{provisional:true})),storage:pinned?'public-ipfs':'elpida-hosted',retention:'pending-chain-verification'});
       }

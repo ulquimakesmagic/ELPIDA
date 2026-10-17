@@ -50,6 +50,11 @@ export const SYSVAR_RENT = 'SysvarRent111111111111111111111111111111111';
 /** D7: a completed curve that has not migrated this long after completion can be reopened for trading. */
 export const GRADUATION_GRACE_SECS = 86_400;
 /** Same rule as the program: an ipfs:// URI of printable ASCII, at most 200 bytes. */
+/** Longest URI the client sends. The metadata store returns bare `ipfs://<CIDv1>` links, which are
+ *  66 characters; with that cap the largest supported launch (SOL pair, SPL-Token USDC fee, 32-byte
+ *  name) is 1,227 of Solana's 1,232 bytes. A Token-2022 USDC fee on a SOL pair does not fit (1,259)
+ *  and is refused by the wallet's size check before signing. */
+export const MAX_LAUNCH_URI = 66;
 export const validMetadataUri = uri => typeof uri === 'string' && uri.length > 7 && uri.length <= 200 && uri.startsWith('ipfs://') && /^[\x21-\x7e]+$/.test(uri);
 
 /** Default curve shape (FDVs are in whole units of the pair asset, SOL for native pairs; real
@@ -472,7 +477,7 @@ export function createElpidaSolana(web3, programIdInput) {
      * not been upgraded yet; see `supportsMetadata` in the browser wallet.
      */
     launch({ creator, config, mint, name, symbol, firstBuy, minTokensOut, reward, uri, legacy = false, priceUpdate = null, maxFee = (1n << 64n) - 1n, usdc = null }) {
-      if (!legacy && !validMetadataUri(uri)) throw new Error(PROGRAM_ERRORS[30]);
+      if (!legacy && (!validMetadataUri(uri) || uri.length > MAX_LAUNCH_URI)) throw new Error(PROGRAM_ERRORS[30]);
       const pool = poolPda(mint), cfg = config.address ?? configPda;
       const usdcMetas = usdc ? [meta(usdc.mint), meta(ata(creator, usdc.mint, usdc.tokenProgram ?? tokenProgram), true), meta(ata(config.treasury, usdc.mint, usdc.tokenProgram ?? tokenProgram), true), meta(usdc.tokenProgram ?? tokenProgram)] : [];
       return ix([
@@ -492,8 +497,11 @@ export function createElpidaSolana(web3, programIdInput) {
       const { blockhash } = await connection.getLatestBlockhash('confirmed');
       const probe = new Transaction({ feePayer: key(feePayer), recentBlockhash: blockhash }).add(this.reopenCurve({ mint: Keypair.generate().publicKey }));
       const { value } = await connection.simulateTransaction(probe);
-      const custom = value.err?.InstructionError?.[1]?.Custom;
-      return custom !== 101 && !/InstructionFallbackNotFound|Fallback functions are not supported/i.test((value.logs ?? []).join(' '));
+      const logs = (value.logs ?? []).join(' ');
+      // Positive evidence either way; anything else (for example an unfunded fee payer) is not an answer.
+      if (/Instruction: ReopenCurve/.test(logs)) return true;
+      if (value.err?.InstructionError?.[1]?.Custom === 101 || /InstructionFallbackNotFound|Fallback functions are not supported/i.test(logs)) return false;
+      throw new Error('Could not check this network\'s Elpida program version (your wallet may need SOL for network fees). Nothing was submitted.');
     },
     /** Permissionless D7 escape hatch: reopens a curve that completed GRADUATION_GRACE_SECS ago without migrating. */
     reopenCurve: ({ mint }) => ix([meta(poolPda(mint), true)], DISCRIMINATORS.reopenCurve),

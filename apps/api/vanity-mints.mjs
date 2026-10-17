@@ -18,6 +18,9 @@ export const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxy
 const PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
 const LAUNCH_DISCRIMINATOR = Buffer.from([153, 241, 93, 225, 22, 69, 74, 61]);
 const LAUNCH_MINT_INDEX = 4, LAUNCH_CREATOR_INDEX = 0;
+const SYSTEM_PROGRAM = '11111111111111111111111111111111';
+/** A Solana address: 32-44 base58 characters that decode to exactly 32 bytes. */
+export const validAddress = text => typeof text === 'string' && /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(text) && (() => { try { return base58(decodeBase58(text)) === text; } catch { return false; } })();
 
 /** The value a base58 string's last characters encode: N mod 58^len must equal it. */
 export function suffixTarget(suffix) {
@@ -149,19 +152,29 @@ export class VanityMintPool {
   limited(kind, id, max) {
     const key = `${kind}:${id}`, now = this.now(), recent = (this.hits.get(key) ?? []).filter(t => now - t < 3_600_000);
     if (recent.length >= max) return true;
+    // Bounded memory without ever resetting live limits: drop only entries older than the window, and
+    // refuse new identities while the table is still full.
+    if (!this.hits.has(key) && this.hits.size >= 50_000) {
+      for (const [k, times] of this.hits) if (!times.some(t => now - t < 3_600_000)) this.hits.delete(k);
+      if (this.hits.size >= 50_000) return true;
+    }
     recent.push(now); this.hits.set(key, recent);
-    if (this.hits.size > 50_000) this.hits.clear();
     return false;
   }
+  /** Unused reservations go back to the stored pool: their key never signed anything. */
   expire() {
     const now = this.now();
-    for (const [id, r] of this.reservations) if (r.expiresAt <= now) { r.seed.fill(0); this.reservations.delete(id); }
+    for (const [id, r] of this.reservations) if (r.expiresAt <= now) {
+      this.reservations.delete(id);
+      if (this.enabled && !this.stopped) { this.stored.push(seal(this.key, r.seed, decodeBase58(r.mint))); this.save(); }
+      r.seed.fill(0);
+    }
   }
   /** One key for one wallet's launch, or a fallback reason. The key leaves the stored pool now (single use). */
   reserve({ wallet, address }) {
     this.expire();
     if (!this.enabled) return { fallback: true, reason: 'Vanity mint addresses are not configured on this server.' };
-    try { decodeBase58(wallet); } catch { return { fallback: true, reason: 'Invalid wallet.' }; }
+    if (!validAddress(wallet)) return { fallback: true, reason: 'Invalid wallet.' };
     if (!this.stored.length) { this.fill(); return { fallback: true, reason: `No "${this.suffix}" address is ready yet; a random mint address is used.` }; }
     if (this.limited('wallet', wallet, this.perWallet) || this.limited('address', address, this.perAddress)) return { fallback: true, reason: 'Vanity address limit reached for now; a random mint address is used.' };
     const entry = this.stored.shift(); this.save(); this.fill();
@@ -183,6 +196,8 @@ export class VanityMintPool {
     let parsed; try { parsed = parseLegacyMessage(bytes); } catch (e) { throw Object.assign(new Error(e.message), { status: 400 }); }
     const signerKeys = parsed.keys.slice(0, parsed.requiredSignatures);
     if (signerKeys[0] !== wallet || !signerKeys.includes(r.mint)) throw Object.assign(new Error('The launch must be paid by your wallet and signed by the reserved mint.'), { status: 400 });
+    // A durable-nonce message (System AdvanceNonceAccount) would never expire; only recent-blockhash launches are signed.
+    if (parsed.instructions.some(ix => ix.program === SYSTEM_PROGRAM && ix.data.length >= 4 && ix.data.readUInt32LE(0) === 4)) throw Object.assign(new Error('Durable-nonce launches cannot use a reserved mint address.'), { status: 400 });
     const uses = parsed.instructions.filter(ix => ix.accounts.includes(r.mint) || ix.program === r.mint);
     const launch = uses.length === 1 && uses[0].program === this.programId && uses[0].data.subarray(0, 8).equals(LAUNCH_DISCRIMINATOR) ? uses[0] : null;
     if (!launch || launch.accounts[LAUNCH_MINT_INDEX] !== r.mint || launch.accounts[LAUNCH_CREATOR_INDEX] !== wallet) throw Object.assign(new Error('The reserved mint can only sign an Elpida launch for your wallet.'), { status: 400 });

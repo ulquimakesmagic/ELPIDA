@@ -9,6 +9,7 @@ import { EVENTS } from '../packages/solana/client.mjs';
 import { SOLANA_GENESIS, validateSolanaRpc } from '../packages/solana/rpc-config.mjs';
 
 const programId = web3.Keypair.generate().publicKey.toBase58();
+const bs58 = bytes => { let n = 0n; for (const b of bytes) n = (n << 8n) | BigInt(b); let out = ''; const A = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'; while (n > 0n) { out = A[Number(n % 58n)] + out; n /= 58n; } for (const b of bytes) { if (b) break; out = '1' + out; } return out; };
 const pool = web3.Keypair.generate().publicKey.toBase58();
 const mint = web3.Keypair.generate().publicKey.toBase58();
 const buyer = web3.Keypair.generate().publicKey.toBase58();
@@ -119,25 +120,31 @@ test('Solana RPC cluster mismatch prevents all pool reads and checkpoint changes
   } finally { f.index.close(); }
 });
 
-test('PumpSwap swaps are read from the pool vault balance changes; liquidity moves are not trades', () => {
-  const [poolBase, poolQuote, trader, payer, other] = Array.from({ length: 5 }, () => web3.Keypair.generate().publicKey.toBase58());
-  const keys = [payer, poolBase, poolQuote, trader, other].map(k => new web3.PublicKey(k));
-  const bal = (accountIndex, amount, owner, m = mint) => ({ accountIndex, mint: m, owner, uiTokenAmount: { amount: String(amount) } });
-  const tx = (pre, post) => ({ transaction: { message: { staticAccountKeys: keys } }, meta: { err: null, preTokenBalances: pre, postTokenBalances: post } });
-  const ids = { poolBase, poolQuote, baseMint: mint };
-  // Buy: 1,000 tokens leave the pool, 2,500 quote units arrive; trader (account 3) receives the tokens.
-  const buy = pumpSwapTrade(tx([bal(1, 10_000, 'pool'), bal(2, 50_000, 'pool', 'Q'), bal(3, 0, trader)], [bal(1, 9_000, 'pool'), bal(2, 52_500, 'pool', 'Q'), bal(3, 1_000, trader)]), ids);
-  assert.deepEqual(buy, { side: 'buy', tokenRaw: 1_000n, quoteRaw: 2_500n, account: trader });
-  // Sell routed through an aggregator: tokens arrive, quote leaves; the seller is the owner whose tokens fell.
-  const sell = pumpSwapTrade(tx([bal(1, 9_000, 'pool'), bal(2, 52_500, 'pool', 'Q'), bal(4, 400, other)], [bal(1, 9_400, 'pool'), bal(2, 51_500, 'pool', 'Q'), bal(4, 0, other)]), ids);
-  assert.deepEqual(sell, { side: 'sell', tokenRaw: 400n, quoteRaw: 1_000n, account: other });
-  // Migration / deposits (both vaults up) and LP-fee harvests (both down) are not swaps.
-  assert.equal(pumpSwapTrade(tx([bal(1, 0, 'pool'), bal(2, 0, 'pool', 'Q')], [bal(1, 9_000, 'pool'), bal(2, 50_000, 'pool', 'Q')]), ids), null);
-  assert.equal(pumpSwapTrade(tx([bal(1, 9_000, 'pool'), bal(2, 50_000, 'pool', 'Q')], [bal(1, 8_990, 'pool'), bal(2, 49_900, 'pool', 'Q')]), ids), null);
-  // A transaction that does not touch this pool's vaults.
-  assert.equal(pumpSwapTrade(tx([bal(3, 0, trader)], [bal(3, 5, trader)]), ids), null);
-  // Unknown trader falls back to the fee payer.
-  assert.equal(pumpSwapTrade(tx([bal(1, 100, 'pool'), bal(2, 100, 'pool', 'Q')], [bal(1, 90, 'pool'), bal(2, 120, 'pool', 'Q')]), ids).account, payer);
+test('PumpSwap swaps: one swap instruction on the pool, consistent price and reserves, trader from the instruction', () => {
+  const PUMP = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
+  const [pumpPool, poolBase, poolQuote, trader, payer, other] = Array.from({ length: 6 }, () => web3.Keypair.generate().publicKey.toBase58());
+  const keys = [payer, poolBase, poolQuote, trader, other, pumpPool, PUMP].map(k => new web3.PublicKey(k));
+  const BUY = [102, 6, 61, 18, 1, 218, 235, 234], SELL = [51, 230, 133, 164, 1, 127, 131, 173];
+  // Swap instruction accounts: pool, user, ... ; indexes into `keys`.
+  const swap = (disc, user = 3) => ({ programIdIndex: 6, accountKeyIndexes: [5, user, 1, 2], data: Uint8Array.from([...disc, ...new Array(16).fill(0)]) });
+  const bal = (accountIndex, amount) => ({ accountIndex, mint: mint, owner: 'x', uiTokenAmount: { amount: String(amount) } });
+  const tx = (ixs, pre, post, inner = []) => ({ transaction: { message: { staticAccountKeys: keys, compiledInstructions: ixs } }, meta: { err: null, preTokenBalances: pre, postTokenBalances: post, innerInstructions: inner } });
+  const ids = { pool: pumpPool, poolBase, poolQuote };
+  // Pool 1,000,000 base : 2,500,000 quote (price 2.5). A buy of 1,000 base for 2,506 quote (fees included).
+  const pre = [bal(1, 1_000_000), bal(2, 2_500_000)], postBuy = [bal(1, 999_000), bal(2, 2_502_506)];
+  assert.deepEqual(pumpSwapTrade(tx([swap(BUY)], pre, postBuy), ids), { side: 'buy', tokenRaw: 1_000n, quoteRaw: 2_506n, account: trader });
+  // A sell routed through an aggregator (inner instruction); the trader is the swap's user.
+  const inner = [{ index: 0, instructions: [{ programIdIndex: 6, accounts: [5, 4, 1, 2], data: bs58([...SELL, ...new Array(16).fill(0)]) }] }];
+  assert.deepEqual(pumpSwapTrade(tx([], pre, [bal(1, 1_000_400), bal(2, 2_499_002)], inner), ids), { side: 'sell', tokenRaw: 400n, quoteRaw: 998n, account: other });
+  // Two swaps on the pool in one transaction (buy X, sell X-1) are refused: the netted price would be fake.
+  assert.equal(pumpSwapTrade(tx([swap(BUY), swap(SELL)], pre, [bal(1, 999_999), bal(2, 2_500_015)]), ids), null);
+  // A swap plus a donation to a vault: the price falls outside the pool's range, or reserves grow too much.
+  assert.equal(pumpSwapTrade(tx([swap(BUY)], pre, [bal(1, 999_000), bal(2, 2_700_000)]), ids), null);
+  // No swap instruction (a plain transfer that moved vault balances), and liquidity moves, are not trades.
+  assert.equal(pumpSwapTrade(tx([], pre, postBuy), ids), null);
+  assert.equal(pumpSwapTrade(tx([swap(BUY)], pre, [bal(1, 1_100_000), bal(2, 2_750_000)]), ids), null);
+  // A swap on another pool does not count for this one.
+  assert.equal(pumpSwapTrade(tx([{ ...swap(BUY), accountKeyIndexes: [4, 3, 1, 2] }], pre, postBuy), ids), null);
 });
 
 test('Metaplex metadata URI is read from a MetadataV1 account and ignored otherwise', () => {

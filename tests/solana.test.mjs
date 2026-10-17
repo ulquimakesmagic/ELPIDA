@@ -17,7 +17,7 @@ import * as web3 from '@solana/web3.js';
 import {
   createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, curveParams, poolStats, encodeCurveParams,
   DISCRIMINATORS, EVENTS, LEGACY_EVENTS, TOKEN_SUPPLY, STATUS_GRADUATED, STATUS_MIGRATED, BPS, explainError, decodeEvents,
-  harvestableLp, harvestNow, MPL_TOKEN_METADATA, GRADUATION_GRACE_SECS, validMetadataUri, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint, PYTH_RECEIVER, SOL_USD_FEED_ID, SOL_USD_PRICE_ACCOUNT, parsePriceUpdate, usdToQuote, virtualQuoteForFdv,
+  harvestableLp, harvestNow, MPL_TOKEN_METADATA, MAX_LAUNCH_URI, GRADUATION_GRACE_SECS, validMetadataUri, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint, PYTH_RECEIVER, SOL_USD_FEED_ID, SOL_USD_PRICE_ACCOUNT, parsePriceUpdate, usdToQuote, virtualQuoteForFdv,
 } from '../packages/solana/client.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
@@ -186,6 +186,22 @@ test('Solana client discriminators, curve parameters and error decoding', () => 
   assert.ok(h > 90_000n && h < 91_000n, `harvest ${h}`);
   assert.ok(liquidityUnits(1_000_000n - 100n - h, { lpSupply: grown.lpSupply - h, base: grown.base - withdrawOut(h, grown).base, quote: grown.quote - withdrawOut(h, grown).quote }) >= principal);
   assert.equal(isqrt(10n ** 30n), 10n ** 15n);
+  // Worst-case supported launch (SPL-Token USDC fee on a SOL pair, 32-byte name, 10-byte symbol, longest
+  // client URI) fits Solana's 1,232 bytes; a Token-2022 USDC fee on a SOL pair does not, and is caught by size.
+  {
+    const client = createElpidaSolana(web3, new PublicKey('ANkA5pytoVkiKQbjzd5NdPWKgmwfsihNJvSfg3vtKLNz')), k = () => Keypair.generate().publicKey;
+    const creator = k(), config = { address: k(), quoteMint: new PublicKey(WSOL_MINT), treasury: k() };
+    const uri = 'ipfs://' + 'b'.repeat(MAX_LAUNCH_URI - 7);
+    const sizeWith = tokenProgram => {
+      const tx = new web3.Transaction({ feePayer: creator, recentBlockhash: k().toBase58() }).add(client.computeBudget(), ...client.wrapSol(creator, 1n),
+        client.launch({ creator, config, mint: k(), name: 'N'.repeat(32), symbol: 'SYMBOL1234', firstBuy: 1n, minTokensOut: 0n, reward: k(), uri, priceUpdate: k(), usdc: { mint: k(), tokenProgram: new PublicKey(tokenProgram) } }), client.unwrapSol(creator));
+      return tx.serializeMessage().length + 1 + 64 * tx.compileMessage().header.numRequiredSignatures;
+    };
+    assert.equal(MAX_LAUNCH_URI, 'ipfs://'.length + 59, 'a CIDv1 (sha-256, base32) link');
+    assert.ok(sizeWith(TOKEN_PROGRAM) <= 1232, `worst-case launch is ${sizeWith(TOKEN_PROGRAM)} bytes`);
+    assert.ok(sizeWith(TOKEN_2022_PROGRAM) > 1232, 'documented limit: Token-2022 USDC fee on a SOL pair needs a v0 transaction');
+    assert.throws(() => client.launch({ creator, config, mint: k(), name: 'N', symbol: 'S', firstBuy: 1n, minTokensOut: 0n, reward: k(), uri: uri + 'x' }), /IPFS/);
+  }
   const cfg = { baseFeeBps: 125, snipeStartBps: 9000, snipeWindowSecs: 60 };
   assert.deepEqual([0, 30, 59, 60, 600].map(t => currentFeeBps(cfg, 1000, 1000 + t)), [9000n, 4562n, 272n, 125n, 125n]);
 });

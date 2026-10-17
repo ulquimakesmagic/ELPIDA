@@ -339,6 +339,9 @@ export class SolanaWallet {
     this.checkWallet();
     const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
     const tx = new web3.Transaction({ feePayer: this.publicKey, blockhash, lastValidBlockHeight }).add(...instructions);
+    // Solana caps a transaction at 1,232 bytes: say so before asking the wallet to sign.
+    const size = tx.serializeMessage().length + 1 + 64 * tx.compileMessage().header.numRequiredSignatures;
+    if (size > 1232) throw new Error(`This transaction is too large for Solana (${size} of 1,232 bytes). Shorten the token name, or pay the launch fee in SOL instead of USDC, and try again. Nothing was submitted.`);
     try {
       const simulated = await this.connection.simulateTransaction(tx);
       if (simulated.value.err) throw Object.assign(new Error(`Simulation failed: ${JSON.stringify(simulated.value.err)}`), { logs: simulated.value.logs ?? [] });
