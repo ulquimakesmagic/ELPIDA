@@ -17,7 +17,7 @@ import * as web3 from '@solana/web3.js';
 import {
   createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, curveParams, poolStats, encodeCurveParams,
   DISCRIMINATORS, EVENTS, LEGACY_EVENTS, TOKEN_SUPPLY, STATUS_GRADUATED, STATUS_MIGRATED, BPS, explainError, decodeEvents,
-  harvestableLp, harvestNow, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint, PYTH_RECEIVER, SOL_USD_FEED_ID, SOL_USD_PRICE_ACCOUNT, parsePriceUpdate, usdToQuote, virtualQuoteForFdv,
+  harvestableLp, harvestNow, MPL_TOKEN_METADATA, GRADUATION_GRACE_SECS, validMetadataUri, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint, PYTH_RECEIVER, SOL_USD_FEED_ID, SOL_USD_PRICE_ACCOUNT, parsePriceUpdate, usdToQuote, virtualQuoteForFdv,
 } from '../packages/solana/client.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
@@ -30,7 +30,12 @@ const keyPath = `${root}contracts/solana/keys/elpida_launchpad-keypair.json`;
 const validatorBin = process.env.SOLANA_TEST_VALIDATOR ?? 'solana-test-validator';
 let skip = false;
 if (spawnSync(validatorBin, ['--version'], { stdio: 'ignore' }).status !== 0) skip = 'solana-test-validator not found (install the Solana CLI or set SOLANA_TEST_VALIDATOR).';
-else if (!existsSync(elfPath) || !existsSync(keyPath)) skip = 'Compiled Solana program or program keypair not found.';
+else if (!existsSync(elfPath)) skip = 'Compiled Solana program not found.';
+else if (!existsSync(`${root}contracts/solana/fixtures/mpl_token_metadata.so`)) skip = 'Metaplex token-metadata fixture missing (contracts/solana/fixtures/mpl_token_metadata.so).';
+// Without the private program keypair (git-ignored), the validator preloads the program at its fixed ID as an
+// upgradeable program whose authority is the test authority, so the suite runs without the deploy key.
+const PROGRAM_ID = 'ANkA5pytoVkiKQbjzd5NdPWKgmwfsihNJvSfg3vtKLNz';
+const preload = !existsSync(keyPath);
 const fixtures = `${root}contracts/solana/fixtures/`;
 const pumpSkip = skip || (!existsSync(`${fixtures}pump_amm.so`) || !existsSync(`${fixtures}pumpswap_global_config.json`) ? 'PumpSwap fixtures missing (run solana-pumpswap-fixtures.cmd or node scripts/solana-pumpswap-fixtures.mjs).' : false);
 
@@ -39,6 +44,8 @@ const USDC = 1_000_000n; // one whole unit of the 6-decimal test quote token
 const FEE_SOL = 10_000_000n; // 0.01 SOL creation fee
 const PARAMS = curveParams({ startFdv: 5_000, endFdv: 50_000, quoteDecimals: 6, launchFee: '0.01', snipeWindowSecs: 4 });
 const BASE = BigInt(PARAMS.baseFeeBps);
+const TEST_URI = 'ipfs://bafkreih6ilp3u4ue7fmqjnxdnq4ejxn6s5edsxqy7y5c3x2tsnkacsm4zu';
+const mplFixture = `${root}contracts/solana/fixtures/mpl_token_metadata.so`;
 const f = {};
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 /** A Full-verification Pyth PriceUpdateV2 account (133 bytes) as solana-test-validator --account JSON. */
@@ -58,6 +65,7 @@ test.before(async () => {
   f.ledger = mkdtempSync(join(tmpdir(), 'elpida-ledger-'));
   // Crafted Pyth PriceUpdateV2 accounts (owned by the Pyth receiver): a fresh SOL/USD price at the sponsored
   // account address, and stale, wide-confidence, wrong-feed and wrong-owner variants.
+  [f.authority, f.creator, f.trader, f.outsider, f.rewardWallet] = Array.from({ length: 5 }, () => Keypair.generate());
   f.oracleStart = Math.floor(Date.now() / 1000);
   f.oracleDir = mkdtempSync(join(tmpdir(), 'elpida-oracles-'));
   f.oracles = { fresh: new PublicKey(SOL_USD_PRICE_ACCOUNT), stale: Keypair.generate().publicKey, wide: Keypair.generate().publicKey, otherFeed: Keypair.generate().publicKey, notPyth: Keypair.generate().publicKey };
@@ -66,17 +74,22 @@ test.before(async () => {
     otherFeed: priceUpdate({ publishTime: f.oracleStart, feedId: 'e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43' }), notPyth: priceUpdate({ publishTime: f.oracleStart, owner: '11111111111111111111111111111111' }),
   }).flatMap(([name, account]) => { const file = join(f.oracleDir, `${name}.json`); writeFileSync(file, JSON.stringify({ pubkey: f.oracles[name].toBase58(), account })); return ['--account', f.oracles[name].toBase58(), file]; });
   f.validator = spawn(validatorBin, [...oracleArgs, '--reset', '--quiet', '--ledger', f.ledger, '--rpc-port', String(port), '--faucet-port', String(port + 2), '--dynamic-port-range', `${port + 10}-${port + 60}`, '--gossip-port', String(port + 3),
-    ...(pumpSkip ? [] : ['--bpf-program', PUMP_AMM_PROGRAM, `${fixtures}pump_amm.so`, '--account', PUMP_GLOBAL_CONFIG, `${fixtures}pumpswap_global_config.json`])], { stdio: 'ignore' });
+    ...(pumpSkip ? [] : ['--bpf-program', PUMP_AMM_PROGRAM, `${fixtures}pump_amm.so`, '--account', PUMP_GLOBAL_CONFIG, `${fixtures}pumpswap_global_config.json`]),
+    '--bpf-program', MPL_TOKEN_METADATA, mplFixture,
+    ...(preload ? ['--upgradeable-program', PROGRAM_ID, elfPath, f.authority.publicKey.toBase58()] : [])], { stdio: 'ignore' });
   f.connection = new web3.Connection(`http://127.0.0.1:${port}`, 'confirmed');
   for (let i = 0; ; i++) {
     try { await f.connection.getLatestBlockhash(); break; }
     catch { if (i > 120) throw new Error('solana-test-validator did not start'); await sleep(500); }
   }
-  [f.authority, f.creator, f.trader, f.outsider, f.rewardWallet] = Array.from({ length: 5 }, () => Keypair.generate());
   for (const kp of [f.authority, f.creator, f.trader, f.outsider]) await airdrop(f.connection, kp.publicKey, 20 * web3.LAMPORTS_PER_SOL);
-  f.programKeypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(keyPath, 'utf8'))));
-  await deployProgram({ connection: f.connection, payer: f.authority, programKeypair: f.programKeypair, elf: readFileSync(elfPath), sendsPerSecond: 200 });
-  f.client = createElpidaSolana(web3, f.programKeypair.publicKey);
+  if (preload) f.programId = new PublicKey(PROGRAM_ID);
+  else {
+    const programKeypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(keyPath, 'utf8'))));
+    await deployProgram({ connection: f.connection, payer: f.authority, programKeypair, elf: readFileSync(elfPath), sendsPerSecond: 200 });
+    f.programId = programKeypair.publicKey;
+  }
+  f.client = createElpidaSolana(web3, f.programId);
   // A 6-decimal test token as the main pair asset, minted to the creator and the trader.
   const spl = splTestMint(web3), quote = Keypair.generate();
   await send(f.connection, f.authority, await spl.createMintIxs(f.connection, f.authority.publicKey, quote.publicKey, 6, f.authority.publicKey), [quote]);
@@ -117,7 +130,7 @@ const freshPool = () => ({ virtualQuote: PARAMS.virtualQuote, virtualToken: PARA
 async function launch({ firstBuy = 25n * USDC, minOut, symbol = 'SOLG', name = 'Solana Garden', creator = f.creator } = {}) {
   const mint = Keypair.generate();
   const expected = firstBuy > 0n ? quoteBuy(freshPool(), firstBuy, BASE) : { tokens: 1n };
-  const signature = await send(f.connection, creator, [f.client.computeBudget(), f.client.launch({ creator: creator.publicKey, config: f.config, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: minOut ?? expected.tokens, reward: f.rewardWallet.publicKey })], [mint], 1);
+  const signature = await send(f.connection, creator, [f.client.computeBudget(), f.client.launch({ uri: TEST_URI, creator: creator.publicKey, config: f.config, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: minOut ?? expected.tokens, reward: f.rewardWallet.publicKey })], [mint], 1);
   return { mint: mint.publicKey, expected, signature };
 }
 async function invariant(mint) {
@@ -131,7 +144,7 @@ async function invariant(mint) {
 
 test('Solana client discriminators, curve parameters and error decoding', () => {
   const disc = name => [...createHash('sha256').update(name).digest().subarray(0, 8)];
-  for (const [key, name] of [['updateCurveConfig', 'global:update_curve_config'], ['initializeCurve', 'global:initialize_curve'], ['launch', 'global:launch'], ['buy', 'global:buy'], ['sell', 'global:sell'], ['withdrawFees', 'global:withdraw_fees'], ['CurveConfig', 'account:CurveConfig'], ['CurvePool', 'account:CurvePool'], ['migrateToPumpswap', 'global:migrate_to_pumpswap'], ['harvestLpFees', 'global:harvest_lp_fees'], ['PumpMigration', 'account:PumpMigration'], ['setBetaGate', 'global:set_beta_gate'], ['allowBetaCreator', 'global:allow_beta_creator'], ['revokeBetaCreator', 'global:revoke_beta_creator'], ['BetaGate', 'account:BetaGate'], ['BetaCreator', 'account:BetaCreator'], ['testBuildCheck', 'global:test_build_check']]) {
+  for (const [key, name] of [['updateCurveConfig', 'global:update_curve_config'], ['initializeCurve', 'global:initialize_curve'], ['launch', 'global:launch'], ['buy', 'global:buy'], ['sell', 'global:sell'], ['withdrawFees', 'global:withdraw_fees'], ['CurveConfig', 'account:CurveConfig'], ['CurvePool', 'account:CurvePool'], ['migrateToPumpswap', 'global:migrate_to_pumpswap'], ['harvestLpFees', 'global:harvest_lp_fees'], ['PumpMigration', 'account:PumpMigration'], ['setBetaGate', 'global:set_beta_gate'], ['allowBetaCreator', 'global:allow_beta_creator'], ['revokeBetaCreator', 'global:revoke_beta_creator'], ['BetaGate', 'account:BetaGate'], ['BetaCreator', 'account:BetaCreator'], ['testBuildCheck', 'global:test_build_check'], ['reopenCurve', 'global:reopen_curve']]) {
     assert.deepEqual(DISCRIMINATORS[key], disc(name), key);
   }
   for (const [name, { discriminator }] of [...Object.entries(EVENTS), ...Object.entries(LEGACY_EVENTS)]) assert.deepEqual(discriminator, disc(`event:${name}`), name);
@@ -220,12 +233,49 @@ test('Solana launch charges the fee, fixes supply and does the creator buy at th
   assert.equal(launched.virtualQuote, p.virtualQuote + p.realQuote); assert.equal(launched.tokenReserve, p.virtualToken - p.sold);
 });
 
+/** Metaplex MetadataV1 fields Elpida writes (fixed offsets: name 32, symbol 10, uri 200, padded). */
+function decodeMetadata(data) {
+  const str = (o, max) => data.subarray(o + 4, o + 4 + Math.min(data.readUInt32LE(o), max)).toString('utf8').replace(/\0+$/, '');
+  return { key: data[0], updateAuthority: new PublicKey(data.subarray(1, 33)).toBase58(), mint: new PublicKey(data.subarray(33, 65)).toBase58(),
+    name: str(65, 32), symbol: str(101, 10), uri: str(115, 200), sellerFeeBps: data.readUInt16LE(319), hasCreators: data[321], isMutable: data[323] };
+}
+
+test('Solana launch writes immutable Metaplex metadata that nobody can change', { skip }, async () => {
+  const { mint } = await launch({ symbol: 'META', name: 'Hope Meta' });
+  const address = f.client.metadataPda(mint);
+  const account = await f.connection.getAccountInfo(address);
+  assert.equal(account.owner.toBase58(), MPL_TOKEN_METADATA, 'created by Metaplex');
+  const m = decodeMetadata(account.data);
+  assert.deepEqual({ key: m.key, mint: m.mint, name: m.name, symbol: m.symbol, uri: m.uri, sellerFeeBps: m.sellerFeeBps, hasCreators: m.hasCreators, isMutable: m.isMutable },
+    { key: 4, mint: mint.toBase58(), name: 'Hope Meta', symbol: 'META', uri: TEST_URI, sellerFeeBps: 0, hasCreators: 0, isMutable: 0 });
+  assert.equal(m.updateAuthority, f.client.poolPda(mint).toBase58(), 'update authority is the curve PDA, which never signs for Metaplex');
+  // The creator (former mint authority) cannot rewrite it: UpdateMetadataAccountV2 with new data fails.
+  const nameBytes = Buffer.from('Rug'), uriBytes = Buffer.from('ipfs://changed');
+  const newData = Buffer.concat([Buffer.from([15, 1]), Buffer.from(new Uint32Array([nameBytes.length]).buffer), nameBytes, Buffer.from(new Uint32Array([3]).buffer), Buffer.from('RUG'),
+    Buffer.from(new Uint32Array([uriBytes.length]).buffer), uriBytes, Buffer.from([0, 0, 0, 0, 0]), Buffer.from([0, 0, 0])]);
+  const update = new web3.TransactionInstruction({ programId: new PublicKey(MPL_TOKEN_METADATA), data: newData, keys: [{ pubkey: address, isSigner: false, isWritable: true }, { pubkey: f.creator.publicKey, isSigner: true, isWritable: false }] });
+  await failsWith(send(f.connection, f.creator, [update]), /custom program error|Update Authority|immutable|failed/i);
+  assert.deepEqual(decodeMetadata((await f.connection.getAccountInfo(address)).data).name, 'Hope Meta', 'metadata unchanged');
+  // The mint authority was revoked after the metadata was written.
+  assert.equal((await f.connection.getAccountInfo(mint)).data.readUInt32LE(0), 0, 'no mint authority');
+});
+
 test('Solana launch rejects bad input and leaves no partial state', { skip }, async () => {
   const before = await balance(f.client.ata(f.creator.publicKey, f.quoteMint));
   const treasuryBefore = await f.connection.getBalance(f.treasury);
   await failsWith(launch({ firstBuy: 0n }), /0x1775/);
   await failsWith(launch({ symbol: 'bad!' }), /0x1773/);
   await failsWith(launch({ minOut: TOKEN_SUPPLY }), /0x1777/);
+  // Metadata must be an ipfs:// URI. The client refuses first; the program refuses a patched instruction too.
+  assert.equal(validMetadataUri('https://example.com/x.json'), false); assert.equal(validMetadataUri(TEST_URI), true);
+  assert.throws(() => f.client.launch({ creator: f.creator.publicKey, config: f.config, mint: Keypair.generate().publicKey, name: 'Bad', symbol: 'BAD', firstBuy: USDC, minTokensOut: 0n, reward: f.rewardWallet.publicKey, uri: 'https://x.io/meta.json' }), /IPFS/);
+  const bad = Keypair.generate();
+  const patched = f.client.launch({ creator: f.creator.publicKey, config: f.config, mint: bad.publicKey, name: 'Bad', symbol: 'BAD', firstBuy: USDC, minTokensOut: 0n, reward: f.rewardWallet.publicKey, uri: TEST_URI });
+  const at = patched.data.length - TEST_URI.length; patched.data.write('https:/', at, 'utf8');
+  await failsWith(send(f.connection, f.creator, [f.client.computeBudget(), patched], [bad], 1), /0x178e/);
+  assert.equal(await f.connection.getAccountInfo(bad.publicKey), null, 'no mint left behind');
+  assert.equal(await f.connection.getAccountInfo(f.client.poolPda(bad.publicKey)), null, 'no pool left behind');
+  assert.equal(await f.connection.getAccountInfo(f.client.metadataPda(bad.publicKey)), null, 'no metadata left behind');
   // A creator without the pair asset cannot launch (a buy larger than the curve is capped, not rejected).
   await failsWith(launch({ creator: f.outsider }), /AccountNotInitialized|0xbc4|insufficient funds|0x1\b/);
   assert.equal(await balance(f.client.ata(f.creator.publicKey, f.quoteMint)), before);
@@ -309,6 +359,10 @@ test('Solana curve graduates exactly at the curve supply ($50k FDV) and then sto
   assert.ok(Math.abs(Number(g.realQuote) / Number(graduated.lpTokens) / poolStats(g).price - 1) < 1e-6, 'DEX opens at the graduation price');
   await failsWith(buy(f.trader, mint, 1n * USDC, 1n), /0x177c/);
   await failsWith(sell(f.trader, mint, 1_000_000n, 0n), /0x177c/);
+  // D7: the escape hatch opens only 24 h after completion (the 24 h path runs in contracts/solana/host-tests).
+  assert.equal(GRADUATION_GRACE_SECS, 86_400);
+  await failsWith(send(f.connection, f.outsider, [f.client.reopenCurve({ mint })]), /0x178f/);
+  assert.equal((await pool(mint)).status, STATUS_GRADUATED);
   // Fees stay claimable after graduation; liquidity does not move.
   await withdraw(mint);
   const after = await invariant(mint);
@@ -323,6 +377,11 @@ test('Solana creator first buy larger than the curve is capped and graduates at 
   const p = await invariant(mint);
   assert.equal(p.status, STATUS_GRADUATED); assert.equal(p.sold, p.curveSupply);
   assert.ok((await eventsOf(signature)).some(e => e.name === 'CurveGraduated'));
+});
+
+test('Solana reopen is refused for a curve that is still trading', { skip }, async () => {
+  const { mint } = await launch({ symbol: 'OPEN' });
+  await failsWith(send(f.connection, f.outsider, [f.client.reopenCurve({ mint })]), /0x1780/);
 });
 
 test('Solana reserve and inventory invariants hold across mixed trades and payouts', { skip }, async () => {
@@ -497,7 +556,7 @@ test('Solana native repricing: only the upgrade authority, fee schedule fixed, l
   assert.equal((await pool(before)).virtualQuote, PARAMS.virtualQuote);
   const treasuryBefore = await f.connection.getBalance(f.treasury);
   const mint = Keypair.generate();
-  await send(f.connection, f.creator, [f.client.computeBudget(), f.client.launch({ creator: f.creator.publicKey, config: f.config, mint: mint.publicKey, name: 'New Price', symbol: 'NEWP', firstBuy: USDC, minTokensOut: 1n, reward: f.rewardWallet.publicKey })], [mint], 1);
+  await send(f.connection, f.creator, [f.client.computeBudget(), f.client.launch({ uri: TEST_URI, creator: f.creator.publicKey, config: f.config, mint: mint.publicKey, name: 'New Price', symbol: 'NEWP', firstBuy: USDC, minTokensOut: 1n, reward: f.rewardWallet.publicKey })], [mint], 1);
   assert.equal((await pool(mint.publicKey)).virtualQuote, repriced.virtualQuote);
   assert.equal(await f.connection.getBalance(f.treasury) - treasuryBefore, 20_000_000);
   await afterSnipeWindow(before);
@@ -508,7 +567,7 @@ test('Solana native repricing: only the upgrade authority, fee schedule fixed, l
 });
 
 test('Solana pairs: SOL, a paired token and a Token-2022 token each launch, trade, complete, migrate and harvest', { skip: pumpSkip }, async () => {
-  const programId = f.programKeypair.publicKey;
+  const programId = f.programId;
   // Token-2022 pair assets without blocked extensions work end to end (PumpSwap included).
   const native = solanaPricing('localnet');
   const templates = [...solanaPairTemplates(native, { test: true }), { kind: 'token', key: 'test-t22', symbol: 'TEST-T22', name: 'Token-2022 test pair', decimals: 6, token2022: true, permanentDelegate: false, startFdv: '1000', endFdv: '10000', launchFee: native.launchFee, faucet: '20000' }];
@@ -554,7 +613,7 @@ test('Solana pairs: SOL, a paired token and a Token-2022 token each launch, trad
     const treasuryBefore = await f.connection.getBalance(f.treasury);
     const mint = Keypair.generate();
     const firstBuy = parseAmountWhole(template.startFdv, unit) / 50n;
-    await send(f.connection, user, [f.client.computeBudget(), f.client.launch({ creator: user.publicKey, config: cfg, mint: mint.publicKey, name: `Pair ${pair.symbol}`, symbol: pair.key.replace(/[^a-z]/g, '').slice(0, 8).toUpperCase(), firstBuy, minTokensOut: 1n, reward: user.publicKey })], [mint], 1);
+    await send(f.connection, user, [f.client.computeBudget(), f.client.launch({ uri: TEST_URI, creator: user.publicKey, config: cfg, mint: mint.publicKey, name: `Pair ${pair.symbol}`, symbol: pair.key.replace(/[^a-z]/g, '').slice(0, 8).toUpperCase(), firstBuy, minTokensOut: 1n, reward: user.publicKey })], [mint], 1);
     assert.equal(BigInt(await f.connection.getBalance(f.treasury) - treasuryBefore), onchain.launchFee, `${pair.symbol} launch pays the creation fee in SOL`);
     const launched = await pool(mint.publicKey);
     assert.equal(launched.config.toBase58(), cfg.address.toBase58());
@@ -597,7 +656,7 @@ test('Solana pairs: SOL, a paired token and a Token-2022 token each launch, trad
 });
 
 test('Solana USD pricing: Pyth-verified $10 fee in SOL or USDC and a $5,000 starting FDV', { skip: pumpSkip }, async () => {
-  const programId = f.programKeypair.publicKey, sol = new PublicKey(WSOL_MINT), solConfig = f.client.configFor(sol);
+  const programId = f.programId, sol = new PublicKey(WSOL_MINT), solConfig = f.client.configFor(sol);
   assert.ok(await f.connection.getAccountInfo(solConfig), 'the SOL pair config exists (created by the pairs test)');
   const parsed = parsePriceUpdate((await f.connection.getAccountInfo(f.oracles.fresh)).data);
   assert.equal(parsed.feedId, SOL_USD_FEED_ID); assert.equal(parsed.price, 11_106_000_000n); assert.equal(parsed.exponent, -8);
@@ -625,7 +684,7 @@ test('Solana USD pricing: Pyth-verified $10 fee in SOL or USDC and a $5,000 star
   const fee = usdToQuote(10_000_000n, parsed, 9), vq = virtualQuoteForFdv(5_000_000_000n, parsed, onchain.virtualToken);
   assert.equal(fee, 90_041_419n + 1n, '$10 at $111.06 = 0.090041420 SOL, rounded up');
   const firstBuy = 100_000_000n;
-  const launchIx = (mint, extra = {}) => [f.client.computeBudget(), ...f.client.wrapSol(user.publicKey, firstBuy), f.client.launch({ creator: user.publicKey, config: cfg, mint: mint.publicKey, name: 'Priced', symbol: 'USD', firstBuy, minTokensOut: 1n, reward: user.publicKey, priceUpdate: f.oracles.fresh, maxFee: fee, ...extra }), f.client.unwrapSol(user.publicKey)];
+  const launchIx = (mint, extra = {}) => [f.client.computeBudget(), ...f.client.wrapSol(user.publicKey, firstBuy), f.client.launch({ uri: TEST_URI, creator: user.publicKey, config: cfg, mint: mint.publicKey, name: 'Priced', symbol: 'USD', firstBuy, minTokensOut: 1n, reward: user.publicKey, priceUpdate: f.oracles.fresh, maxFee: fee, ...extra }), f.client.unwrapSol(user.publicKey)];
   // The fee cap protects the creator from price moves between quote and confirmation.
   const capped = Keypair.generate();
   await failsWith(send(f.connection, user, launchIx(capped, { maxFee: fee - 1n }), [capped], 1), /0x178c/);
@@ -649,7 +708,7 @@ test('Solana USD pricing: Pyth-verified $10 fee in SOL or USDC and a $5,000 star
   assert.equal(await f.connection.getBalance(f.treasury), lamportsBefore);
   // USDC fee on a pair without pricing is refused.
   const plain = Keypair.generate();
-  await failsWith(send(f.connection, f.creator, [f.client.computeBudget(), f.client.launch({ creator: f.creator.publicKey, config: f.config, mint: plain.publicKey, name: 'Plain', symbol: 'PLN', firstBuy: USDC, minTokensOut: 1n, reward: f.rewardWallet.publicKey, usdc: { mint: usdc.publicKey } })], [plain], 1), /0x178d/);
+  await failsWith(send(f.connection, f.creator, [f.client.computeBudget(), f.client.launch({ uri: TEST_URI, creator: f.creator.publicKey, config: f.config, mint: plain.publicKey, name: 'Plain', symbol: 'PLN', firstBuy: USDC, minTokensOut: 1n, reward: f.rewardWallet.publicKey, usdc: { mint: usdc.publicKey } })], [plain], 1), /0x178d/);
   // A price older than the configured age is rejected at launch time.
   const age = Math.floor(Date.now() / 1000) - f.oracleStart + 6;
   await set(f.authority, f.oracles.fresh, { maxAgeSecs: age, usdcMint: usdc.publicKey });
@@ -672,7 +731,7 @@ test('Solana pairs reject quote tokens that would break the curve or never gradu
 });
 
 test('Solana beta gate: invite-only launches, allowlist managed by the beta admin, then open again', { skip }, async () => {
-  const programId = f.programKeypair.publicKey;
+  const programId = f.programId;
   const admin = Keypair.generate(), outsider = Keypair.generate();
   for (const kp of [admin, outsider]) await airdrop(f.connection, kp.publicKey, 2 * web3.LAMPORTS_PER_SOL);
   // Only the upgrade authority creates or changes the gate.
@@ -700,7 +759,7 @@ test('Solana beta gate: invite-only launches, allowlist managed by the beta admi
 
 test('Solana mainnet build rejects test instructions; the upgrade authority can move to a multisig', { skip }, async () => {
   if (!existsSync(mainnetElfPath)) return;
-  const programId = f.programKeypair.publicKey;
+  const programId = f.programId;
   assert.equal(await rejectsTestInstructions({ connection: f.connection, payer: f.authority, programId }), false, 'the test build accepts them');
   await upgradeProgram({ connection: f.connection, payer: f.authority, programId, elf: readFileSync(mainnetElfPath), sendsPerSecond: 200 });
   assert.equal(await rejectsTestInstructions({ connection: f.connection, payer: f.authority, programId }), true, 'the mainnet build rejects them');
@@ -729,14 +788,14 @@ test('Solana mainnet build rejects test instructions; the upgrade authority can 
 });
 
 test('Solana upgrade is a no-op when the deployed program already matches the build', { skip }, async () => {
-  const result = await upgradeProgram({ connection: f.connection, payer: f.authority, programId: f.programKeypair.publicKey, elf: readFileSync(elfPath) });
+  const result = await upgradeProgram({ connection: f.connection, payer: f.authority, programId: f.programId, elf: readFileSync(elfPath) });
   assert.equal(result.upgraded, false);
-  await assert.rejects(upgradeProgram({ connection: f.connection, payer: f.outsider, programId: f.programKeypair.publicKey, elf: readFileSync(elfPath) }), /upgrade authority/);
+  await assert.rejects(upgradeProgram({ connection: f.connection, payer: f.outsider, programId: f.programId, elf: readFileSync(elfPath) }), /upgrade authority/);
 });
 
 test('Solana public indexer: pools, launch/buy/sell trades, candles and holders from chain', { skip }, async () => {
   const { SolanaIndexer } = await import('../packages/indexer/solana-indexer.mjs');
-  const index = new SolanaIndexer({ web3, connection: f.connection, deployment: { programId: f.programKeypair.publicKey.toBase58(), pairs: [] }, network: { key: 'solana-localnet', cluster: 'localnet', explorer: 'https://explorer.solana.com' }, spacingMs: 0, backfill: 5000 });
+  const index = new SolanaIndexer({ web3, connection: f.connection, deployment: { programId: f.programId.toBase58(), pairs: [] }, network: { key: 'solana-localnet', cluster: 'localnet', explorer: 'https://explorer.solana.com' }, spacingMs: 0, backfill: 5000 });
   try {
     await index.sync();
     const listings = index.listings();
