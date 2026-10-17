@@ -23,7 +23,8 @@ import {Contract,keccak256,formatUnits,parseUnits} from 'ethers';
 import {HolderTheses,thesisIdentity} from './holder-theses.mjs';
 import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
-import { MAX_METADATA_REQUEST_BYTES } from '../web/metadata.mjs';
+import { MAX_METADATA_REQUEST_BYTES, normalizeMetadata } from '../web/metadata.mjs';
+import { WalletTokenLists, walletTokenEntries } from './wallet-tokenlist.mjs';
 import { evmTestnets, solanaDevnet, solanaLocalnet, solanaMainnet } from '../../packages/core/networks.mjs';
 import { isDexModel } from '../../packages/core/curve-model.mjs';
 
@@ -35,6 +36,7 @@ const assetRoot = fileURLToPath(new URL('../web/assets/', import.meta.url));
 resources.set('/terminal-chart.mjs',['terminal-chart.mjs','text/javascript']);
 resources.set('/holder-terminal.mjs',['holder-terminal.mjs','text/javascript']);
 resources.set('/wallet-discovery.mjs', ['wallet-discovery.mjs','text/javascript']);
+resources.set('/wallet-token.mjs', ['wallet-token.mjs','text/javascript']);
 resources.set('/discovery.mjs', ['discovery.mjs','text/javascript']);
 resources.set('/chain-ui.mjs', ['chain-ui.mjs','text/javascript']);
 resources.set('/usdc-conversion.mjs', ['usdc-conversion.mjs','text/javascript']);
@@ -117,6 +119,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const dataFile=name=>resolve(dataDir,dataPrefix+name);
   const circle = circleFunding ?? createCircleFunding({ path: port === 0 ? null : dataFile('circle-test-wallets.json') });
   const metadataStore=new MetadataStore({path:port===0?null:dataFile('ipfs-content'),chainBound:Boolean(publicUrl),...(process.env.ELPIDA_METADATA_MAX_BYTES?{maxBytes:Number(process.env.ELPIDA_METADATA_MAX_BYTES)}:{}),...(process.env.ELPIDA_METADATA_MAX_PENDING_BYTES?{maxPendingBytes:Number(process.env.ELPIDA_METADATA_MAX_PENDING_BYTES)}:{})});
+  const walletTokenLists=new WalletTokenLists({path:port===0?null:dataFile('wallet-tokenlists.json')});
   // The simulation is rebuilt from its action journal on the data volume, so its index can stay in memory.
   const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:dataFile('token-metadata.json'), dex:port!==0, indexerPath:":memory:", journalPath:port===0?null:dataFile('simulation-journal-v2.jsonl'), log:console.log });
   const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore}).start();
@@ -171,11 +174,33 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' ${connectSources}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
-    if (!acceptsRequest({host:req.headers.host,origin:req.headers.origin,method:req.method,path:req.url,port:actualPort,publicUrl})) return send(403, { error: 'Host or origin not allowed.' });
+    // Public read-only wallet assets allow cross-origin consumers; mutations retain origin checks.
+    const walletRead=req.method==='GET'&&(String(req.url).split('?')[0]==='/api/wallet-tokenlist.json'||/^\/api\/wallet-logo\/[a-z0-9-]+\/0x[0-9a-fA-F]{40}$/.test(req.url)||/^\/api\/content\/(b[a-z2-7]{30,100}|Qm[1-9A-HJ-NP-Za-km-z]{44})$/.test(req.url));
+    if (!acceptsRequest({host:req.headers.host,origin:walletRead?undefined:req.headers.origin,method:req.method,path:req.url,port:actualPort,publicUrl})) return send(403, { error: 'Host or origin not allowed.' });
+    if(walletRead)res.setHeader('Access-Control-Allow-Origin','*');
     if (req.method === 'GET' && req.url === '/health') return send(200, {status:'ok',mode:'simulation'});
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
       if (req.method === 'GET') {
+        const logoMatch=url.pathname.match(/^\/api\/wallet-logo\/([a-z0-9-]+)\/(0x[0-9a-fA-F]{40})$/);
+        if(logoMatch){
+          const [_,key,address]=logoMatch;
+          if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown EVM network.'});
+          const entry=publicIndex.entryFor(key,address),token=publicIndex.detail(key,address);
+          if(!entry?.validated||!token||!['creator-signed','published'].includes(token.metadataStatus))return send(404,{error:'No published token image.'});
+          const image=normalizeMetadata(token.metadata).image;
+          const data=image.match(/^data:(image\/(?:png|jpeg|webp|gif|avif|bmp));base64,([A-Za-z0-9+/]+=*)$/);
+          if(!data)return send(404,{error:'Use the public image URL in the token list.'});
+          res.writeHead(200,{'Content-Type':data[1],'Cache-Control':'public, max-age=3600'});return res.end(Buffer.from(data[2],'base64'));
+        }
+        if(url.pathname==='/api/wallet-tokenlist.json'){
+          if(!publicUrl)return send(503,{error:'Configure ELPIDA_PUBLIC_URL or RAILWAY_PUBLIC_DOMAIN for public wallet metadata.'});
+          const key=url.searchParams.get('network');
+          if(key&&!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown EVM network.'});
+          const networks=evmTestnets.filter(n=>n.shared?.factory&&(!key||n.key===key));
+          if(networks.some(n=>!publicIndex.all(n.key).length||publicIndex.all(n.key).some(e=>!e.validated||e.index.status().indexedBlock==null)))return send(503,{error:'Token index is not ready. Retry after synchronization.'});
+          return send(200,walletTokenLists.publish(key??'all',walletTokenEntries(networks,n=>publicIndex.listings(n),publicUrl)));
+        }
         if(url.pathname==='/api/terminal'){
           if(Date.now()-terminalWindow>=60000){terminalWindow=Date.now();terminalCount=0;thesisCount=0;}if(++terminalCount>120)return send(429,{error:'Terminal data is busy. Retry shortly.'});
           const network=url.searchParams.get('network')??'local',rawToken=url.searchParams.get('token'),author=url.searchParams.get('author'),i=thesisIdentity(network,rawToken,author??(network.startsWith('solana-')?rawToken:rawToken)),{token,index,sol}=indexedMarket(network,i.token);
