@@ -379,7 +379,8 @@ export function createExplore(source) {
     /** Recent buys for the Live feed (newest first, the /recent-trades shape). */
     setTrades(trades) { state.trades = Array.isArray(trades) ? trades : []; drawFeed(source.tokens() ?? []); },
     /** A query typed in the top bar search. */
-    setQuery(query) { if (query === state.query) return; Object.assign(state, { query, page: 1 }); if (filter.value !== query) filter.value = query; writeUrl(); draw(); },
+    setQuery(query,{reveal=false}={}) { if(query!==state.query||reveal){Object.assign(state,{query,page:1,...(reveal?{chain:'all',pair:'all',tab:'trending'}:{})});if(filter.value!==query)filter.value=query;writeUrl();draw();}if(reveal)jumpToList(); },
+    revealSearch(){jumpToList();},
     /** The hash changed (a pasted or shared link): adopt its view state. */
     readUrl() { const next = exploreStateFromHash(location.hash); const changed = ['tab', 'pair', 'chain', 'query', 'page'].some(k => next[k] !== state[k]); if (!changed) return; Object.assign(state, next); if (filter.value !== state.query) filter.value = state.query; source.onQuery?.(state.query); draw(); },
     get query() { return state.query; },

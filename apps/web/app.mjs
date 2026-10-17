@@ -172,7 +172,7 @@ function updateChrome() {
   $$('[data-busy-disable]').forEach(button => { button.disabled = busy; });
 }
 /* ---------- Routing ---------- */
-let currentRoute = { name: 'explore' };
+let currentRoute = { name: 'explore' }, pendingSearchReveal=false;
 function parseRoute() {
   const [hash,query] = (location.hash.replace(/^#/, '') || '/').split('?');
   const token = hash.match(/^\/token\/([A-Za-z0-9]{32,64})$/);
@@ -188,7 +188,8 @@ function route() {
   document.title = { explore: 'Explore tokens across chains | Elpida', portfolio: 'Portfolio | Elpida', rewards: 'Creator rewards | Elpida', launch: 'Create a token | Elpida', token: 'Token | Elpida', analytics: 'Analytics — Launches, volume & fees | Elpida', notfound: 'Page not found | Elpida' }[next.name];
   rerender('route');
   if(changed&&wallet?.address&&!['explore','analytics'].includes(next.name))refresh({preserveInput:true,walletRead:true}).catch(e=>toast(errorText(e),{kind:'error'}));
-  if (changed) { window.scrollTo({ top: 0 }); if (next.name !== 'launch') $('#main').focus({ preventScroll: true }); }
+  if (changed) { window.scrollTo({ top: 0 }); if (next.name !== 'launch'&&!['top-search-input','sheet-search-input'].includes(document.activeElement?.id)) $('#main').focus({ preventScroll: true }); }
+  if(next.name==='explore'&&pendingSearchReveal&&exploreView){pendingSearchReveal=false;exploreView.setQuery(exploreView.query,{reveal:true});}
 }
 let launchView = null, analyticsView = null, exploreView = null;
 const freshPrice = p => !!p && p.status === 'fresh' && Number.isFinite(p.usd) && nowSeconds() - p.updatedAt <= (p.maxAge ?? 180);
@@ -426,7 +427,7 @@ async function init() {
   const selectChain=key=>chooseChain(key).catch(e=>{toast(errorText(e),{kind:'error'});updateChrome();});
   chainControls=[['#env-button','chain-options'],['#env-button-mobile','chain-options-mobile']].filter(([id])=>$(id)).map(([id,listId])=>chainSelector({button:$(id),listId,networks,current:()=>mode==='local'?'local':currentChain(),onSelect:selectChain}));
   $('#account-button').addEventListener('click', () => (mode === 'testnet' && !wallet.address ? connectCurrent() : openTools()));
-  initShell({ onHow: () => $('#how-dialog').showModal(), onSearch: query => { if (currentRoute.name === 'explore' && exploreView) exploreView.setQuery(query); else if (query || currentRoute.name === 'explore') location.hash = exploreHash({ query }); } });
+  initShell({ onHow: () => $('#how-dialog').showModal(), onSearch: (query,{submit=false}={}) => { if(currentRoute.name==='explore'&&exploreView)exploreView.setQuery(query,{reveal:submit});else if(query||submit||currentRoute.name==='explore'){pendingSearchReveal=submit;location.hash=exploreHash({query});} } });
   window.addEventListener('hashchange', route);
   updateChrome(); route();
   // Return to the testnet used last time, but only silently: wallets that already trust Elpida reconnect

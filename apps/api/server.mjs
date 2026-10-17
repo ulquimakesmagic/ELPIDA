@@ -55,6 +55,7 @@ resources.set('/upload-proof-worker.mjs', ['upload-proof-worker.mjs', 'text/java
 resources.set('/circle-funding.mjs', ['circle-funding.mjs', 'text/javascript']);
 resources.set('/clock.mjs', ['clock.mjs', 'text/javascript']);
 resources.set('/theme.css', ['theme.css', 'text/css']);
+resources.set('/search.mjs',['search.mjs','text/javascript']);
 resources.set('/shell.mjs', ['shell.mjs', 'text/javascript']);
 resources.set('/theme-boot.js', ['theme-boot.js', 'text/javascript']);
 resources.set('/explore-view.mjs', ['explore-view.mjs', 'text/javascript']);
