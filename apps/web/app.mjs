@@ -9,6 +9,7 @@ import { renderAnalytics } from './analytics-view.mjs';
 // rewards-view.mjs and receive the shared `ctx` object below.
 import { TestnetWallet, evmWallets, chosenEvmWallet } from './wallet.mjs';
 import { SolanaWallet, solanaWallets, chosenSolanaWallet } from './solana-wallet.mjs';
+import { browserWalletCatalog, walletIcon } from './wallet-discovery.mjs';
 import { $, $$, h, icon, short, number, compact, avatar, bar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, usdRate, toast, errorText, closeOnBackdrop, callout } from './ui.mjs';
 import { renderLaunch } from './launch-flow.mjs';
 import { renderToken } from './token-page.mjs';
@@ -348,6 +349,8 @@ function portfolioView() {
 /** Wallet picker for the current network: one row per wallet this browser announces. */
 function openWalletDialog(net = wallet.net) {
   const dialog = $('#wallet-dialog'), body = $('#wallet-body'), error = h('p.error-text', { role: 'alert' });
+  if (dialog.open) return;
+  let connecting = false, refreshTimer;
   $('#wallet-intro').textContent = `Choose your wallet to connect on ${net.name}.`;
   const draw = () => {
     const solana = net.kind === 'solana';
@@ -357,18 +360,38 @@ function openWalletDialog(net = wallet.net) {
     const again = h('button.round-button', { type: 'button', 'aria-label': 'Look for wallets again', on: { click: () => { window.dispatchEvent(new Event('eip6963:requestProvider')); setTimeout(draw, 250); } } }, icon('refresh-cw', 'icon-sm'));
     const row = w => h('button.wallet-row', { type: 'button', 'data-busy-disable': '', on: { click: async event => {
       const button = event.currentTarget, note = button.querySelector('small');
-      button.disabled = true; note.textContent = `Waiting for ${w.name}…`; error.textContent = '';
+      if (connecting) return;
+      connecting = true;
+      body.querySelectorAll('button').forEach(b => { b.disabled = true; });
+      note.textContent = `Waiting for ${w.name}…`; error.textContent = '';
       try { await connect(net.key, w.id); dialog.close(); toast(`Connected to ${net.name} with ${w.name}.`, { kind: 'success' }); }
       catch (e) { error.textContent = errorText(e); note.textContent = w.id === chosen ? 'Last used' : 'Detected'; }
-      finally { button.disabled = false; }
+      finally { connecting = false; body.querySelectorAll('button').forEach(b => { b.disabled = false; }); }
     } } },
       h('span.wallet-logo', w.icon && (/^data:image\//.test(w.icon) || /^\/assets\/wallets\//.test(w.icon)) ? h('img', { src: w.icon, alt: '', width: 28, height: 28 }) : icon('wallet')),
       h('span', h('strong', w.name), h('small', w.id === chosen ? 'Last used' : 'Detected')), icon('chevron-right'));
     body.replaceChildren(h('div.wallet-list-head', h('span', 'Available in this browser'), again),
-      sorted.length ? sorted.map(row) : h('p.wallet-empty', solana ? 'No Solana wallet found in this browser. Install Phantom, Solflare or Backpack, then look again.' : 'No Ethereum wallet found in this browser. Install MetaMask, Rabby or another browser wallet, then look again.'),
-      error);
+      ...(sorted.length ? sorted.map(row) : [h('p.wallet-empty', solana ? 'No Solana wallet found. Open Elpida in your wallet’s browser, or install a compatible browser extension, then look again.' : 'No Ethereum wallet found. Open Elpida in your wallet’s browser, or install a compatible browser extension, then look again.')]),
+      error,
+      h('details.wallet-more', { open: !sorted.length }, h('summary', 'Get a compatible wallet'),
+        h('div.wallet-catalog', browserWalletCatalog.filter(w => w.chains.includes(solana ? 'solana' : 'evm')).map(w =>
+          h('a.wallet-install', { href: w.url, target: '_blank', rel: 'noopener noreferrer' },
+            h('img', { src: walletIcon(w.name), alt: '', width: 24, height: 24 }), h('span', w.name), icon('external-link', 'icon-sm')))),
+        h('p.hint', 'Already installed? Unlock your wallet, enable it for this site, then look again.')));
   };
   draw();
+  const discovered = () => {
+    clearTimeout(refreshTimer);
+    refreshTimer = setTimeout(() => { if (dialog.open && !connecting) draw(); }, 100);
+  };
+  window.addEventListener('eip6963:announceProvider', discovered);
+  window.addEventListener('wallet-standard:register-wallet', discovered);
+  dialog.addEventListener('close', () => {
+    clearTimeout(refreshTimer);
+    window.removeEventListener('eip6963:announceProvider', discovered);
+    window.removeEventListener('wallet-standard:register-wallet', discovered);
+  }, { once: true });
+  window.dispatchEvent(new Event('eip6963:requestProvider'));
   if (!dialog.open) dialog.showModal();
 }
 async function connectCurrent() { openWalletDialog(wallet.net); }

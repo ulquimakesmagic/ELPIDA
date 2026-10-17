@@ -5,26 +5,20 @@ import {prepareUploadProof} from './upload-proof.mjs';
 import { PAIR_LIMITS, usdReferenceFor } from '/pairs.mjs';
 import { withWalletTimeout, walletErrorText } from './wallet.mjs';
 
-import { standardSolanaWallets, standardSolanaProvider } from './wallet-discovery.mjs';
+import { injectedSolanaWallets, standardSolanaWallets, standardSolanaProvider } from './wallet-discovery.mjs';
 const SOL_CHOICE = 'elpida:solana-wallet';
-const SOLANA_WALLETS = [
-  { id: 'phantom', name: 'Phantom', get: () => window.phantom?.solana ?? (window.solana?.isPhantom ? window.solana : null) },
-  { id: 'solflare', name: 'Solflare', get: () => window.solflare ?? null },
-  { id: 'backpack', name: 'Backpack', get: () => window.backpack ?? null },
-];
-/** Installed Solana wallets: [{ id, name }]. */
+/** Installed Solana signing wallets; standard adapters take precedence. */
 export function solanaWallets(chain='solana:devnet') {
-  const list = SOLANA_WALLETS.filter(w => { try { return !!w.get(); } catch { return false; } }).map(({ id, name }) => ({ id, name, icon: ['phantom','solflare'].includes(id)?`/assets/wallets/${id}.svg`:'' }));
-  if (!list.length && typeof window !== 'undefined' && window.solana) list.push({ id: 'injected', name: 'Solana wallet' });
-  const standard=standardSolanaWallets(chain);
-  return [...standard,...list.filter(w=>!standard.some(a=>a.name.toLowerCase()===w.name.toLowerCase()))];
+ const list=injectedSolanaWallets(typeof window==='undefined'?{}:window);
+ const standard=standardSolanaWallets(chain);
+ return [...standard,...list.filter(w=>!standard.some(a=>a.name.toLowerCase()===w.name.toLowerCase()))];
 }
 export function chosenSolanaWallet() { try { return localStorage.getItem(SOL_CHOICE); } catch { return null; } }
 function solanaProvider(id = chosenSolanaWallet(),chain='solana:devnet') {
   if(id?.startsWith('standard:'))return standardSolanaProvider(id,globalThis.solanaWeb3,chain);
-  const pick = SOLANA_WALLETS.find(w => w.id === id)?.get();
-  if(id)return pick ?? (id==='injected'?window.solana:null);
-  return SOLANA_WALLETS.map(w => w.get()).find(Boolean) ?? window.solana ?? null;
+  const list=injectedSolanaWallets(typeof window==='undefined'?{}:window);
+  if(id)return list.find(w=>w.id===id)?.provider??null;
+  return list.length===1?list[0].provider:null;
 }
 import {readMetadataCache,writeMetadataCache} from './metadata-cache.mjs';
 const metadataKey=(program,mint)=>`elpida:solana-metadata:${program}:${mint}`;

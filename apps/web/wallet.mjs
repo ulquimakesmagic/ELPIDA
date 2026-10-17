@@ -109,7 +109,7 @@ export class TestnetWallet {
   /** Factory that created `item`: its legacy team factory, or the current launchpad. */
   factoryOf(item) { return item?.factory && item.factory.toLowerCase() !== this.deployment?.factory.toLowerCase() ? new Contract(item.factory, this.artifacts.factory.abi, this.provider) : this.factoryContract(); }
   get eth() { return this._eth ?? evmProvider(); }
-  get walletName() { const eth = this.eth; const entry = [...announced.values()].find(d => d.provider === eth); return entry?.info.name ?? (eth?.isMetaMask ? 'MetaMask' : 'your wallet'); }
+  get walletName() { return evmWallets().find(w => w.provider === this.eth)?.name ?? 'your wallet'; }
   /** Connects with the chosen EVM wallet (`walletId`, an EIP-6963 rdns), remembered for next time. */
   async connect(walletId, {silent=false}={}) {
     if (walletId) { try { localStorage.setItem(EVM_CHOICE, walletId); } catch {} }
