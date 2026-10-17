@@ -402,7 +402,7 @@ main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; 
   .dock { display: none; }
   .topbar { margin: 8px 8px 0; min-height: 60px; padding: 8px 8px 8px 10px; gap: 8px; }
   .topbar-brand { display: flex; padding-left: 4px; }
-  .top-search { display: none; }
+  .topbar > .top-search { display: none; }
   .mobile-only { display: grid; }
   .mobile-chain { display: block; }
   .mobile-chain .env-button { width: auto; min-height: 42px; padding: 0 10px; gap: 6px; }

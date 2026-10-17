@@ -51,7 +51,7 @@
     <header class="topbar" id="topbar">
       <a class="topbar-brand" href="#/" aria-label="Elpida home"><img class="topbar-wordmark brand-dark" src="/assets/brand/elpida-wordmark-dark.svg?v=green-20261011" alt="Elpida" width="105" height="28"><img class="topbar-wordmark brand-light" src="/assets/brand/elpida-wordmark.svg?v=green-20261011" alt="Elpida" width="105" height="28"></a>
       <form class="top-search" role="search" id="top-search">
-        <svg class="icon icon-sm" aria-hidden="true"><use href="/assets/icons.svg#i-search"/></svg>
+        <button type="submit" class="top-icon" aria-label="Search tokens"><svg class="icon icon-sm" aria-hidden="true"><use href="/assets/icons.svg#i-search"/></svg></button>
         <input type="search" id="top-search-input" placeholder="Search tokens…" aria-label="Search tokens by name, symbol or address" autocomplete="off" spellcheck="false">
         <kbd aria-hidden="true">Ctrl K</kbd>
       </form>
@@ -112,7 +112,7 @@
   </dialog>
 
   <dialog id="search-dialog" class="search-dialog" aria-label="Search tokens">
-    <form class="top-search sheet-search" id="sheet-search"><svg class="icon icon-sm" aria-hidden="true"><use href="/assets/icons.svg#i-search"/></svg><input type="search" id="sheet-search-input" placeholder="Search tokens…" aria-label="Search tokens by name, symbol or address" autocomplete="off"><button type="button" class="round-button" data-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-x"/></svg></button></form>
+    <form class="top-search sheet-search" id="sheet-search"><button type="submit" class="top-icon" aria-label="Show search results"><svg class="icon icon-sm" aria-hidden="true"><use href="/assets/icons.svg#i-search"/></svg></button><input type="search" id="sheet-search-input" placeholder="Search tokens…" aria-label="Search tokens by name, symbol or address" autocomplete="off"><button type="button" class="round-button" data-close aria-label="Close"><svg class="icon" aria-hidden="true"><use href="/assets/icons.svg#i-x"/></svg></button></form>
   </dialog>
 
   <dialog id="tools-dialog" aria-labelledby="tools-title">

@@ -1,3 +1,4 @@
+import {bindSearch} from './search.mjs';
 // App shell behaviour: the dock (collapsed, widened on hover or focus, or pinned), the colour theme,
 // keyboard search (Ctrl/⌘ K), the phone search sheet and the "Last sale" strip in the top bar.
 // Views and data stay in app.mjs; this module only drives the frame around them.
@@ -44,19 +45,7 @@ function initDock() {
 }
 
 /* ---------- Search ---------- */
-function initSearch(onSearch) {
-  const input = $('#top-search-input'), sheet = $('#search-dialog'), sheetInput = $('#sheet-search-input');
-  const send = value => { for (const field of [input, sheetInput]) if (field && field.value !== value) field.value = value; onSearch(value); };
-  input?.addEventListener('input', () => send(input.value));
-  sheetInput?.addEventListener('input', () => send(sheetInput.value));
-  for (const form of [$('#top-search'), $('#sheet-search')]) form?.addEventListener('submit', event => { event.preventDefault(); if (form.id === 'sheet-search') sheet?.close(); });
-  $('#mobile-search-button')?.addEventListener('click', () => { sheet?.showModal(); sheetInput?.focus(); });
-  document.addEventListener('keydown', event => {
-    if (event.key.toLowerCase() !== 'k' || !(event.ctrlKey || event.metaKey) || event.altKey) return;
-    event.preventDefault();
-    if (input && input.offsetParent) { input.focus(); input.select(); } else { sheet?.showModal(); sheetInput?.focus(); }
-  });
-}
+function initSearch(onSearch){bindSearch({input:$('#top-search-input'),sheet:$('#search-dialog'),sheetInput:$('#sheet-search-input'),topForm:$('#top-search'),sheetForm:$('#sheet-search'),mobileButton:$('#mobile-search-button'),document,onSearch});}
 /** Keeps the top bar search in step with a query typed elsewhere (the Explore filter). */
 export function syncSearch(value) { for (const field of [$('#top-search-input'), $('#sheet-search-input')]) if (field && field.value !== value) field.value = value; }
 
