@@ -231,7 +231,6 @@ function rerender(reason) {
   if (!state) { closeExplore(); view.replaceChildren(loadingView()); return; }
   if (r.name === 'token') {
     // Keep the editor and wallet-signing state intact while a holder is writing.
-    if(reason==='background'&&(document.activeElement?.id==='holder-thesis'||view.querySelector('.thesis-editor[data-pending="true"]')))return;
     const previous = reason === 'background' ? {
       side: view.querySelector('[data-side][role=tab][aria-selected=true]')?.dataset.side,
       amount: view.querySelector('#trade-amount')?.value,

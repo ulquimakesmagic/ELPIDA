@@ -665,16 +665,8 @@ button.link-button,.copy { min-height:44px; }
 .position-stat strong{font-size:15px;overflow-wrap:anywhere;}
 .position-pnl{display:flex;justify-content:space-between;flex-wrap:wrap;gap:8px;padding:14px;margin-top:18px;background:var(--surface-2);border-radius:10px;}
 .position-pnl[data-dir=up] strong{color:var(--positive);}.position-pnl[data-dir=down] strong{color:var(--negative);}
-.thesis-editor{padding-top:16px;border-top:1px solid var(--line);margin-top:16px;}
-.thesis-editor textarea{width:100%;resize:vertical;min-height:120px;margin-top:10px;}
-.holder-thesis{padding:20px 0;border-top:1px solid var(--line);}
-.thesis-byline{display:flex;align-items:center;flex-wrap:wrap;gap:10px;}
-.thesis-byline>strong{color:var(--primary);}.thesis-byline>.meta{margin-left:auto;}
-.thesis-text{white-space:pre-wrap;overflow-wrap:anywhere;line-height:1.65;}
-.thesis-version{border-left:2px solid var(--line);padding-left:14px;margin-top:14px;}
-.holder-thesis summary{cursor:pointer;min-height:44px;display:flex;align-items:center;color:var(--ink-2);}
 @media(max-width:1100px) {.token-page>.stat-row{grid-template-columns:repeat(4,minmax(0,1fr));}.terminal-chart{height:400px;}}
-@media(max-width:780px) {.token-page .token-layout{grid-template-columns:1fr;}.token-page .trade-aside{grid-column:1;grid-row:auto;order:0;}.terminal-detail{grid-column:1;}.terminal-chart{height:340px;}.token-page>.stat-row{grid-template-columns:repeat(3,minmax(0,1fr));padding:16px;}.token-page .token-hero{padding:16px;}.thesis-byline>.meta{margin-left:0;}}
+@media(max-width:780px) {.token-page .token-layout{grid-template-columns:1fr;}.token-page .trade-aside{grid-column:1;grid-row:auto;order:0;}.terminal-detail{grid-column:1;}.terminal-chart{height:340px;}.token-page>.stat-row{grid-template-columns:repeat(3,minmax(0,1fr));padding:16px;}.token-page .token-hero{padding:16px;}}
 @media(max-width:420px) {.token-page>.stat-row{grid-template-columns:repeat(2,minmax(0,1fr));}.terminal-chart{height:300px;}.chart-readout{font-size:11px;}}
 
 /* Compact terminal ribbon, matching the dense two-line token headers used by trading terminals. */
