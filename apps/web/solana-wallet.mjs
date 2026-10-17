@@ -1,6 +1,7 @@
 import { nowSeconds } from './clock.mjs';
 import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut } from '/elpida-solana.mjs';
 import {normalizeMetadata} from './metadata.mjs';
+import {prepareUploadProof} from './upload-proof.mjs';
 import { PAIR_LIMITS } from '/pairs.mjs';
 import { withWalletTimeout, walletErrorText } from './wallet.mjs';
 
@@ -307,16 +308,47 @@ export class SolanaWallet {
     return { ...extra, out: formatAmount(q.net, d), fee: formatAmount(q.fee, d), antiSnipeFee: formatAmount(q.antiSnipeFee, d) };
   }
   // Wallet signs first, then any extra signer (the new mint keypair), as Phantom recommends.
-  async sendInstructions(instructions, extraSigners = [], message = 'Confirm the transaction in your wallet…') {
+  /**
+   * Whether the deployed program writes Metaplex metadata at launch (the D7/D11 upgrade). Detected once by
+   * simulating `reopen_curve` on an empty pool address: an upgraded program fails on the missing account,
+   * an older one with InstructionFallbackNotFound (101).
+   */
+  async supportsMetadata() {
+    this._metadataSupport ??= await this.client.supportsMetadata(this.connection, this.publicKey);
+    return this._metadataSupport;
+  }
+  /** A reserved vanity mint (the server co-signs the launch after the wallet), or a fresh random keypair. */
+  async mintFor() {
+    const random = { mint: web3.Keypair.generate(), remote: null, vanityNote: '' };
+    if (!this.config.vanity?.enabled) return random;
+    const post = async (path, body) => {
+      const response = await fetch('/api/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': this.config.csrf }, body: JSON.stringify(body) });
+      const data = await response.json(); if (!response.ok) throw new Error(data.error ?? 'Vanity mint request failed.'); return data;
+    };
+    let reserved;
+    try { reserved = await post('solana/vanity-mint', { wallet: this.publicKey.toBase58() }); } catch { return { ...random, vanityNote: ' Its mint address is random (the address service is unavailable).' }; }
+    if (!reserved.mint) return { ...random, vanityNote: reserved.reason ? ` ${reserved.reason}` : '' };
+    const pubkey = new web3.PublicKey(reserved.mint), wallet = this.publicKey.toBase58();
+    const toBase64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)));
+    const fromBase64 = text => Uint8Array.from(atob(text), c => c.charCodeAt(0));
+    return { mint: { publicKey: pubkey }, vanityNote: ` Its address ends in "${this.config.vanity.suffix}".`,
+      remote: { pubkey, sign: async message => fromBase64((await post('solana/vanity-sign', { id: reserved.id, wallet, message: toBase64(message) })).signature) } };
+  }
+  /** `remoteSigners`: [{ pubkey, sign(messageBytes) → signature bytes }], applied after the wallet (vanity mint). */
+  async sendInstructions(instructions, extraSigners = [], message = 'Confirm the transaction in your wallet…', remoteSigners = []) {
     this.checkWallet();
     const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
     const tx = new web3.Transaction({ feePayer: this.publicKey, blockhash, lastValidBlockHeight }).add(...instructions);
+    // Solana caps a transaction at 1,232 bytes: say so before asking the wallet to sign.
+    const size = tx.serializeMessage().length + 1 + 64 * tx.compileMessage().header.numRequiredSignatures;
+    if (size > 1232) throw new Error(`This transaction is too large for Solana (${size} of 1,232 bytes). Shorten the token name, or pay the launch fee in SOL instead of USDC, and try again. Nothing was submitted.`);
     try {
       const simulated = await this.connection.simulateTransaction(tx);
       if (simulated.value.err) throw Object.assign(new Error(`Simulation failed: ${JSON.stringify(simulated.value.err)}`), { logs: simulated.value.logs ?? [] });
       this.onProgress(message);
       const signed = await withWalletTimeout(this.provider.signTransaction(tx), this.walletName);
       for (const signer of extraSigners) signed.partialSign(signer);
+      for (const remote of remoteSigners) signed.addSignature(remote.pubkey, await remote.sign(signed.serializeMessage()));
       const signature = await this.connection.sendRawTransaction(signed.serialize(), { preflightCommitment: 'confirmed' });
       this.onProgress('Transaction submitted. Waiting for confirmation…');
       for (;;) {
@@ -387,20 +419,41 @@ export class SolanaWallet {
         if (BigInt(await this.connection.getBalance(this.publicKey)) < solNeeded) throw new Error(`You need about ${formatAmount(solNeeded, 9)} SOL for the creation fee and account rent.${getSol}`);
         if (await this.quoteBalance(this.publicKey, config) < q.gross) throw new Error(`You need ${formatAmount(q.gross, d)} ${config.symbol} for the first buy.${config.test ? ' Use its test faucet in Network and funds.' : ''}`);
       }
-      const mint = web3.Keypair.generate();
+      // Token details are published first: the program writes this IPFS URI into immutable Metaplex
+      // metadata in the launch transaction (D11), so wallets and explorers show the name and image.
+      // A program not yet upgraded to metadata support keeps the earlier launch (details in this browser).
+      const withMetadata = await this.supportsMetadata();
+      let published = { metadata, storage: null };
+      if (withMetadata) {
+        this.onProgress?.('Publishing token details for the launch…');
+        const payload = JSON.stringify({ network: this.net.key, name, symbol, ...metadata }), proof = await prepareUploadProof(payload);
+        const staged = await fetch('/api/metadata/stage', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': this.config.csrf, ...proof }, body: payload });
+        published = await staged.json();
+        if (!staged.ok) throw new Error(published.error ?? 'Publishing token details failed. No launch was submitted.');
+        if (!/^ipfs:\/\//.test(published.uri ?? '') || !['public-ipfs', 'elpida-hosted'].includes(published.storage)) throw new Error('Token details were not staged safely. No launch was submitted.');
+      }
+      // D9: a pre-ground mint address ending in "hope" when the server has one ready, else a random mint.
+      const { mint, remote, vanityNote } = await this.mintFor();
       const signature = await this.sendInstructions([
         this.client.computeBudget(),
         ...await this.wrapFor(config, q.gross),
-        this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, priceUpdate: terms.priceFeed, maxFee, usdc }),
+        this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, legacy: !withMetadata, priceUpdate: terms.priceFeed, maxFee, usdc }),
         ...(config.wsol ? [this.client.unwrapSol(this.publicKey)] : []),
-      ], [mint], `Confirm your token launch in your wallet ($10 fee: ${inUsdc ? `${formatAmount(terms.usdcFee, 6)} USDC` : `${formatAmount(terms.fee, 9)} SOL, at most ${formatAmount(maxFee, 9)} SOL`})…`);
-      const saved=await writeMetadataCache(metadataKey(this.deployment.programId,mint.publicKey.toBase58()),metadata);
-      return { hash: signature, token: mint.publicKey.toBase58(), message: `Your token is live on ${this.net.name}.${saved?' Metadata saved in this browser.':' Metadata could not be saved in this browser.'}` };
+      ], remote ? [] : [mint], `Confirm your token launch in your wallet ($10 fee: ${inUsdc ? `${formatAmount(terms.usdcFee, 6)} USDC` : `${formatAmount(terms.fee, 9)} SOL, at most ${formatAmount(maxFee, 9)} SOL`})…`, remote ? [remote] : []);
+      await writeMetadataCache(metadataKey(this.deployment.programId,mint.publicKey.toBase58()),published.metadata??metadata);
+      return { hash: signature, token: mint.publicKey.toBase58(), metadataPublished: withMetadata, metadataStorage: published.storage,
+        message: `Your token is live on ${this.net.name}.${vanityNote} ${!withMetadata ? 'Its details are saved in this browser (this network\'s program does not write token metadata yet).' : published.storage === 'public-ipfs' ? 'Its details are pinned to public IPFS and written into immutable token metadata.' : 'Its details are hosted by Elpida and written into immutable token metadata; public IPFS pinning is not configured.'}` };
     }
     const { mint, pool } = await this.freshPool(body.token);
     config = this.configOf(pool);
     if (!config) throw new Error('This token uses an unknown configuration.');
     d = config.quoteDecimals; refs = this.refsOf(config);
+    if (action === 'reopen') {
+      // D7 escape hatch: permissionless once a completed curve has waited 24 h without migrating.
+      if (pool.status !== STATUS_GRADUATED) throw new Error('Only a completed curve that has not migrated can be reopened.');
+      const signature = await this.sendInstructions([this.client.reopenCurve({ mint })], [], 'Confirm reopening the curve for trading in your wallet…');
+      return { hash: signature, message: 'The curve is trading again. Holders can sell, and it graduates again once complete.' };
+    }
     if (action === 'graduate') {
       if (pool.status === STATUS_MIGRATED) throw new Error('This token already trades on PumpSwap.');
       if (pool.status !== STATUS_GRADUATED) throw new Error('The curve is not complete yet.');

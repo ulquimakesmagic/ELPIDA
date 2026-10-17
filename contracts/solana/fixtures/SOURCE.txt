@@ -1,2 +1,9 @@
 PumpSwap fixtures fetched from https://api.devnet.solana.com at 2026-10-11T08:26:33.179Z
 program pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA (programdata 6naEzKeUuFh1Jeeu51NXQgr5qkXgXtc9WKNct4xynVJc, slot 508659436)
+
+mpl_token_metadata.so (test fixture only; devnet and mainnet use the deployed Metaplex program)
+built 2026-10-17 from https://github.com/metaplex-foundation/mpl-token-metadata
+tag proposal(v1.14.1@mainnet-beta), commit 7c1c905f324462af7bb3850c75aa6724f8689a74,
+programs/token-metadata/program, cargo-build-sbf 2.3.13 (platform-tools v1.48), with ahash bumped to
+0.7.8 / 0.8.11 in its Cargo.lock so it compiles on the current toolchain.
+sha256 985a7c4997c8bf8fd4e0de6aa0ff83720fac7cadd2450ef90443d99ae8b457ec

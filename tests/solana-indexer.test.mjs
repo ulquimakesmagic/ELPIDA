@@ -4,11 +4,12 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as web3 from '@solana/web3.js';
-import { SolanaIndexer, programEventLogs } from '../packages/indexer/solana-indexer.mjs';
+import { SolanaIndexer, programEventLogs, pumpSwapTrade, metadataUri } from '../packages/indexer/solana-indexer.mjs';
 import { EVENTS } from '../packages/solana/client.mjs';
 import { SOLANA_GENESIS, validateSolanaRpc } from '../packages/solana/rpc-config.mjs';
 
 const programId = web3.Keypair.generate().publicKey.toBase58();
+const bs58 = bytes => { let n = 0n; for (const b of bytes) n = (n << 8n) | BigInt(b); let out = ''; const A = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz'; while (n > 0n) { out = A[Number(n % 58n)] + out; n /= 58n; } for (const b of bytes) { if (b) break; out = '1' + out; } return out; };
 const pool = web3.Keypair.generate().publicKey.toBase58();
 const mint = web3.Keypair.generate().publicKey.toBase58();
 const buyer = web3.Keypair.generate().publicKey.toBase58();
@@ -117,4 +118,41 @@ test('Solana RPC cluster mismatch prevents all pool reads and checkpoint changes
     f.setTransaction(success()); await f.index.sync();
     assert.equal(reads, 2); assert.equal(f.index.status().error, null);
   } finally { f.index.close(); }
+});
+
+test('PumpSwap swaps: one swap instruction on the pool, consistent price and reserves, trader from the instruction', () => {
+  const PUMP = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
+  const [pumpPool, poolBase, poolQuote, trader, payer, other] = Array.from({ length: 6 }, () => web3.Keypair.generate().publicKey.toBase58());
+  const keys = [payer, poolBase, poolQuote, trader, other, pumpPool, PUMP].map(k => new web3.PublicKey(k));
+  const BUY = [102, 6, 61, 18, 1, 218, 235, 234], SELL = [51, 230, 133, 164, 1, 127, 131, 173];
+  // Swap instruction accounts: pool, user, ... ; indexes into `keys`.
+  const swap = (disc, user = 3) => ({ programIdIndex: 6, accountKeyIndexes: [5, user, 1, 2], data: Uint8Array.from([...disc, ...new Array(16).fill(0)]) });
+  const bal = (accountIndex, amount) => ({ accountIndex, mint: mint, owner: 'x', uiTokenAmount: { amount: String(amount) } });
+  const tx = (ixs, pre, post, inner = []) => ({ transaction: { message: { staticAccountKeys: keys, compiledInstructions: ixs } }, meta: { err: null, preTokenBalances: pre, postTokenBalances: post, innerInstructions: inner } });
+  const ids = { pool: pumpPool, poolBase, poolQuote };
+  // Pool 1,000,000 base : 2,500,000 quote (price 2.5). A buy of 1,000 base for 2,506 quote (fees included).
+  const pre = [bal(1, 1_000_000), bal(2, 2_500_000)], postBuy = [bal(1, 999_000), bal(2, 2_502_506)];
+  assert.deepEqual(pumpSwapTrade(tx([swap(BUY)], pre, postBuy), ids), { side: 'buy', tokenRaw: 1_000n, quoteRaw: 2_506n, account: trader });
+  // A sell routed through an aggregator (inner instruction); the trader is the swap's user.
+  const inner = [{ index: 0, instructions: [{ programIdIndex: 6, accounts: [5, 4, 1, 2], data: bs58([...SELL, ...new Array(16).fill(0)]) }] }];
+  assert.deepEqual(pumpSwapTrade(tx([], pre, [bal(1, 1_000_400), bal(2, 2_499_002)], inner), ids), { side: 'sell', tokenRaw: 400n, quoteRaw: 998n, account: other });
+  // Two swaps on the pool in one transaction (buy X, sell X-1) are refused: the netted price would be fake.
+  assert.equal(pumpSwapTrade(tx([swap(BUY), swap(SELL)], pre, [bal(1, 999_999), bal(2, 2_500_015)]), ids), null);
+  // A swap plus a donation to a vault: the price falls outside the pool's range, or reserves grow too much.
+  assert.equal(pumpSwapTrade(tx([swap(BUY)], pre, [bal(1, 999_000), bal(2, 2_700_000)]), ids), null);
+  // No swap instruction (a plain transfer that moved vault balances), and liquidity moves, are not trades.
+  assert.equal(pumpSwapTrade(tx([], pre, postBuy), ids), null);
+  assert.equal(pumpSwapTrade(tx([swap(BUY)], pre, [bal(1, 1_100_000), bal(2, 2_750_000)]), ids), null);
+  // A swap on another pool does not count for this one.
+  assert.equal(pumpSwapTrade(tx([{ ...swap(BUY), accountKeyIndexes: [4, 3, 1, 2] }], pre, postBuy), ids), null);
+});
+
+test('Metaplex metadata URI is read from a MetadataV1 account and ignored otherwise', () => {
+  const data = Buffer.alloc(679); data[0] = 4;
+  const uri = 'ipfs://bafkreih6ilp3u4ue7fmqjnxdnq4ejxn6s5edsxqy7y5c3x2tsnkacsm4zu';
+  data.writeUInt32LE(200, 115); data.write(uri, 119, 'utf8');
+  assert.equal(metadataUri(data), uri, 'padding removed');
+  assert.equal(metadataUri(Buffer.alloc(679)), '', 'wrong account key');
+  assert.equal(metadataUri(Buffer.alloc(100)), '', 'too short');
+  assert.equal(metadataUri(null), '');
 });

@@ -44,6 +44,18 @@ export const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
 /** Fees PumpSwap charges on pools it did not create itself: 0.25% to LP holders, 0.05% to pump. */
 export const PUMPSWAP_FEES = { lpFeeBps: 25, protocolFeeBps: 5, creatorFeeBps: 0 };
 export const LAUNCH_COMPUTE_UNITS = 400_000;
+/** Metaplex Token Metadata; `launch` writes immutable metadata (name, symbol, IPFS URI) through it. */
+export const MPL_TOKEN_METADATA = 'metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s';
+export const SYSVAR_RENT = 'SysvarRent111111111111111111111111111111111';
+/** D7: a completed curve that has not migrated this long after completion can be reopened for trading. */
+export const GRADUATION_GRACE_SECS = 86_400;
+/** Same rule as the program: an ipfs:// URI of printable ASCII, at most 200 bytes. */
+/** Longest URI the client sends. The metadata store returns bare `ipfs://<CIDv1>` links, which are
+ *  66 characters; with that cap the largest supported launch (SOL pair, SPL-Token USDC fee, 32-byte
+ *  name) is 1,227 of Solana's 1,232 bytes. A Token-2022 USDC fee on a SOL pair does not fit (1,259)
+ *  and is refused by the wallet's size check before signing. */
+export const MAX_LAUNCH_URI = 66;
+export const validMetadataUri = uri => typeof uri === 'string' && uri.length > 7 && uri.length <= 200 && uri.startsWith('ipfs://') && /^[\x21-\x7e]+$/.test(uri);
 
 /** Default curve shape (FDVs are in whole units of the pair asset, SOL for native pairs; real
  *  deployments take their values from config/native-pricing.json), 1.25% base fee,
@@ -75,6 +87,7 @@ export const DISCRIMINATORS = {
   setPricing: [52, 200, 157, 192, 18, 134, 57, 123],
   PricingConfig: [126, 131, 53, 131, 89, 154, 123, 85],
   PriceUpdateV2: [34, 241, 35, 99, 157, 126, 244, 205],
+  reopenCurve: [133, 7, 138, 0, 67, 115, 150, 12],
 };
 
 // sha256("event:<Name>")[0..8] and field layouts (32-byte keys or little-endian u64s after the
@@ -92,6 +105,8 @@ export const EVENTS = {
   PricingConfigSet: { discriminator: [119, 27, 79, 254, 28, 84, 0, 183], fields: [['config', 'key'], ['priceFeed', 'key'], ['feeUsdE6', 'u64'], ['startFdvUsdE6', 'u64'], ['usdcMint', 'key'], ['oraclePrice', 'u64']] },
   LaunchFeePaid: { discriminator: [64, 129, 156, 243, 251, 34, 72, 120], fields: [['mint', 'key'], ['payer', 'key'], ['asset', 'key'], ['amount', 'u64'], ['oraclePrice', 'u64']] },
   CurveConfigUpdated: { discriminator: [15, 223, 121, 188, 171, 123, 126, 224], fields: [['config', 'key'], ['quoteMint', 'key'], ['virtualQuote', 'u64'], ['virtualToken', 'u64'], ['curveSupply', 'u64'], ['launchFee', 'u64']] },
+  // D7 escape hatch. graduatedAt / reopenedAt are positive i64 timestamps, decoded as u64.
+  CurveReopened: { discriminator: [134, 18, 70, 177, 37, 255, 73, 7], fields: [['pool', 'key'], ['mint', 'key'], ['graduatedAt', 'u64'], ['reopenedAt', 'u64'], ['realQuote', 'u64'], ['liquidityBonus', 'u64']] },
   LpFeesHarvested: { discriminator: [230, 156, 123, 178, 68, 124, 167, 67], fields: [['pool', 'key'], ['pumpPool', 'key'], ['lpBurned', 'u64'], ['baseOut', 'u64'], ['quoteOut', 'u64'], ['protocolBase', 'u64'], ['protocolQuote', 'u64'], ['lpLocked', 'u64']] },
 };
 
@@ -170,6 +185,8 @@ export const PROGRAM_ERRORS = [
   'The SOL/USD price is too uncertain right now (market moving fast). Try again shortly.',
   'The $10 fee in SOL rose above the amount you approved because the price moved. Refresh the quote and confirm again.',
   'Paying the fee in USDC is not available for this pair.',
+  'Token details must be published to IPFS first (an ipfs:// link of at most 200 characters). No launch was submitted.',
+  'This curve can be reopened only 24 hours after it completed without migrating.',
 ];
 
 /** Turns a Solana/Anchor error into a readable message. */
@@ -365,7 +382,7 @@ const sameBytes = (data, expected) => expected.every((byte, i) => data[i] === by
 export const encodeCurveParams = p => concat(u64(p.virtualQuote), u64(p.virtualToken), u64(p.curveSupply), u16(p.baseFeeBps), u16(p.snipeStartBps), u32(p.snipeWindowSecs), u16(p.maxCreatorBuyBps), u64(p.launchFee ?? 0n));
 
 export function createElpidaSolana(web3, programIdInput) {
-  const { PublicKey, TransactionInstruction, SystemProgram, ComputeBudgetProgram } = web3;
+  const { PublicKey, TransactionInstruction, SystemProgram, ComputeBudgetProgram, Transaction, Keypair } = web3;
   const programId = new PublicKey(programIdInput);
   const tokenProgram = new PublicKey(TOKEN_PROGRAM);
   const ataProgram = new PublicKey(ATA_PROGRAM);
@@ -395,6 +412,8 @@ export function createElpidaSolana(web3, programIdInput) {
   const token2022 = new PublicKey(TOKEN_2022_PROGRAM);
   const lpAuthorityPda = mint => PublicKey.findProgramAddressSync([enc('pump-lp'), key(mint).toBytes()], programId)[0];
   const betaGatePda = PublicKey.findProgramAddressSync([enc('beta-gate')], programId)[0];
+  const mplProgram = new PublicKey(MPL_TOKEN_METADATA);
+  const metadataPda = mint => PublicKey.findProgramAddressSync([enc('metadata'), mplProgram.toBytes(), key(mint).toBytes()], mplProgram)[0];
   const betaCreatorPda = creator => PublicKey.findProgramAddressSync([enc('beta-creator'), key(creator).toBytes()], programId)[0];
   const pricingPda = config => PublicKey.findProgramAddressSync([enc('pricing'), key(config).toBytes()], programId)[0];
   const migrationPda = mint => PublicKey.findProgramAddressSync([enc('pump-migration'), key(mint).toBytes()], programId)[0];
@@ -416,7 +435,7 @@ export function createElpidaSolana(web3, programIdInput) {
   };
 
   return {
-    programId, configPda, configFor, betaGatePda, betaCreatorPda, pricingPda, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, wsol,
+    programId, configPda, configFor, betaGatePda, metadataPda, betaCreatorPda, pricingPda, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, wsol,
     computeBudget: (units = LAUNCH_COMPUTE_UNITS) => ComputeBudgetProgram.setComputeUnitLimit({ units }),
     createAtaIdempotent(payer, owner, mint, program = tokenProgram) {
       return new TransactionInstruction({ programId: ataProgram, data: data([1]), keys: [meta(payer, true, true), meta(ata(owner, mint, program), true), meta(owner), meta(mint), meta(SystemProgram.programId), meta(program)] });
@@ -452,16 +471,40 @@ export function createElpidaSolana(web3, programIdInput) {
      * `maxFee`: lamport cap for the SOL fee (quote plus a margin). `usdc`: { mint, tokenProgram } to pay the
      * USD fee in USDC from the creator's associated account to the treasury's.
      */
-    launch({ creator, config, mint, name, symbol, firstBuy, minTokensOut, reward, priceUpdate = null, maxFee = (1n << 64n) - 1n, usdc = null }) {
+    /**
+     * `uri`: the IPFS metadata document, written into immutable Metaplex metadata by the current program.
+     * `legacy: true` builds the pre-metadata layout (no uri, no Metaplex accounts) for programs that have
+     * not been upgraded yet; see `supportsMetadata` in the browser wallet.
+     */
+    launch({ creator, config, mint, name, symbol, firstBuy, minTokensOut, reward, uri, legacy = false, priceUpdate = null, maxFee = (1n << 64n) - 1n, usdc = null }) {
+      if (!legacy && (!validMetadataUri(uri) || uri.length > MAX_LAUNCH_URI)) throw new Error(PROGRAM_ERRORS[30]);
       const pool = poolPda(mint), cfg = config.address ?? configPda;
       const usdcMetas = usdc ? [meta(usdc.mint), meta(ata(creator, usdc.mint, usdc.tokenProgram ?? tokenProgram), true), meta(ata(config.treasury, usdc.mint, usdc.tokenProgram ?? tokenProgram), true), meta(usdc.tokenProgram ?? tokenProgram)] : [];
       return ix([
         meta(creator, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(config.treasury, true),
         meta(mint, true, true), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true),
         meta(qata(creator, config), true), meta(ata(creator, mint), true), meta(tokenProgram), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId),
-        meta(betaGatePda), meta(betaCreatorPda(creator)), meta(pricingPda(cfg)), meta(priceUpdate ?? SystemProgram.programId), ...usdcMetas,
-      ], concat(DISCRIMINATORS.launch, str(name), str(symbol), u64(firstBuy), u64(minTokensOut), key(reward).toBytes(), u64(maxFee), [usdc ? 1 : 0]));
+        meta(betaGatePda), meta(betaCreatorPda(creator)), meta(pricingPda(cfg)), meta(priceUpdate ?? SystemProgram.programId),
+        ...(legacy ? [] : [meta(metadataPda(mint), true), meta(mplProgram), meta(SYSVAR_RENT)]), ...usdcMetas,
+      ], concat(DISCRIMINATORS.launch, str(name), str(symbol), u64(firstBuy), u64(minTokensOut), key(reward).toBytes(), u64(maxFee), [usdc ? 1 : 0], ...(legacy ? [] : [str(uri)])));
     },
+    /**
+     * Whether the deployed program has the D7/D11 upgrade (reopen_curve, Metaplex metadata at launch).
+     * Simulates reopen_curve on an empty pool address: an upgraded program fails on the missing account,
+     * an older one with InstructionFallbackNotFound (Anchor error 101).
+     */
+    async supportsMetadata(connection, feePayer) {
+      const { blockhash } = await connection.getLatestBlockhash('confirmed');
+      const probe = new Transaction({ feePayer: key(feePayer), recentBlockhash: blockhash }).add(this.reopenCurve({ mint: Keypair.generate().publicKey }));
+      const { value } = await connection.simulateTransaction(probe);
+      const logs = (value.logs ?? []).join(' ');
+      // Positive evidence either way; anything else (for example an unfunded fee payer) is not an answer.
+      if (/Instruction: ReopenCurve/.test(logs)) return true;
+      if (value.err?.InstructionError?.[1]?.Custom === 101 || /InstructionFallbackNotFound|Fallback functions are not supported/i.test(logs)) return false;
+      throw new Error('Could not check this network\'s Elpida program version (your wallet may need SOL for network fees). Nothing was submitted.');
+    },
+    /** Permissionless D7 escape hatch: reopens a curve that completed GRADUATION_GRACE_SECS ago without migrating. */
+    reopenCurve: ({ mint }) => ix([meta(poolPda(mint), true)], DISCRIMINATORS.reopenCurve),
     /** Upgrade authority: reprices a config for future launches. The fee schedule must stay the same. */
     /** Upgrade authority: oracle pricing for a config, bound to `priceUpdate` (a Pyth PriceUpdateV2 account). */
     setPricing({ authority, config, priceUpdate, feedId = SOL_USD_FEED_ID, maxAgeSecs = USD_PRICING.maxAgeSecs, maxConfBps = USD_PRICING.maxConfBps, feeUsdE6 = USD_PRICING.feeUsdE6, startFdvUsdE6 = USD_PRICING.startFdvUsdE6, usdcMint = null }) {

@@ -1,0 +1,25 @@
+# Host-side tests for the Elpida Solana program (not deployed): property tests of the curve math and
+# LiteSVM tests that move the clock (the 24 h reopen escape hatch). Its own workspace and lockfile, so
+# the on-chain build (Rust 1.84 platform tools) never sees these dependencies.
+[package]
+name = "elpida-host-tests"
+version = "0.1.0"
+edition = "2021"
+publish = false
+
+[lib]
+path = "src/lib.rs"
+
+[workspace]
+
+[dev-dependencies]
+elpida_launchpad = { path = "../programs/elpida_launchpad", features = ["no-entrypoint"] }
+anchor-lang = "0.31.1"
+proptest = "1"
+litesvm = "0.6"
+solana-keypair = "2"
+solana-signer = "2"
+solana-transaction = "2"
+solana-message = "2"
+solana-account = "2"
+solana-clock = "2"

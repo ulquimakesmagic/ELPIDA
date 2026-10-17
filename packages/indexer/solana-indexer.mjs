@@ -2,13 +2,18 @@
 //
 // Every tick: pool accounts are read with getProgramAccounts (current curve state), and new program
 // transactions are read through getSignaturesForAddress with a durable cursor. Launch, buy and sell
-// events become trades and candles. Holders come from getTokenLargestAccounts, cached briefly.
+// events become trades and candles. After migration, each token's PumpSwap pool gets its own cursor:
+// swaps are read from the pool vaults' token-balance changes (independent of PumpSwap's event layout),
+// and the price comes from the pool reserves. The creator's launch buy and live holding feed the dev
+// badge. Immutable Metaplex metadata (name, symbol, IPFS URI) is read once per token. Holders come from
+// getProgramAccounts on the mint (all holders, cached; getTokenLargestAccounts as a fallback).
 // SQLite in WAL mode keeps everything on the data volume, so history survives restarts.
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { SOLANA_GENESIS } from '../solana/rpc-config.mjs';
-import { createElpidaSolana, decodeEvents, poolStats, quoteBuy, formatAmount, TOKEN_DECIMALS, TOKEN_SUPPLY, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, WSOL_MINT } from '../solana/client.mjs';
+import { createElpidaSolana, decodeEvents, poolStats, quoteBuy, formatAmount, TOKEN_DECIMALS, TOKEN_SUPPLY, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, WSOL_MINT, TOKEN_PROGRAM, GRADUATION_GRACE_SECS } from '../solana/client.mjs';
+import { supplyPercent } from '../core/curve-model.mjs';
 
 const MAX_U64 = (1n << 64n) - 1n;
 const json = value => JSON.stringify(value, (_, v) => typeof v === 'bigint' ? v.toString() : v);
@@ -28,24 +33,87 @@ export function programEventLogs(logs, programId) {
   return result;
 }
 
+/** URI from a Metaplex MetadataV1 account (key 4; name 32, symbol 10, uri 200, length-prefixed and padded). */
+export function metadataUri(data) {
+  if (!data || data.length < 319 || data[0] !== 4) return '';
+  const len = Math.min(data.readUInt32LE?.(115) ?? new DataView(data.buffer, data.byteOffset).getUint32(115, true), 200);
+  return Buffer.from(data.subarray(119, 119 + len)).toString('utf8').replace(/\0+$/, '');
+}
+
+const B58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
+function base58Bytes(text) {
+  if (typeof text !== 'string') return Uint8Array.from(text ?? []);
+  let n = 0n; for (const c of text) { const i = B58.indexOf(c); if (i < 0) return new Uint8Array(); n = n * 58n + BigInt(i); }
+  const bytes = []; while (n > 0n) { bytes.unshift(Number(n & 0xffn)); n >>= 8n; }
+  for (const c of text) { if (c !== '1') break; bytes.unshift(0); }
+  return Uint8Array.from(bytes);
+}
+// PumpSwap instructions that swap through a pool (public IDL, pump-fun/pump-public-docs): the trader is
+// the account at the given index. multi_hop_swap lists the pool among its accounts.
+const PUMP_SWAPS = [
+  [[102, 6, 61, 18, 1, 218, 235, 234], 1], [[198, 46, 21, 82, 180, 217, 232, 112], 1], [[194, 171, 28, 70, 104, 77, 91, 47], 1],
+  [[184, 23, 238, 97, 103, 197, 211, 61], 1], [[51, 230, 133, 164, 1, 127, 131, 173], 1], [[93, 246, 130, 60, 231, 233, 64, 178], 1],
+  [[43, 100, 73, 19, 233, 246, 111, 148], 0], [[105, 68, 6, 175, 0, 7, 35, 162], 1],
+];
+const PUMP_AMM = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
+
+/**
+ * A PumpSwap swap on one Elpida pool from a confirmed transaction, or null. Amounts come from the pool
+ * vaults' token-balance changes, accepted only when:
+ * - the transaction holds exactly one PumpSwap swap instruction (top level or inner) that uses this pool,
+ *   so several swaps netted in one transaction (buy X, sell X-1) cannot fake a price;
+ * - base and quote moved in opposite directions (liquidity moves are not trades);
+ * - the execution price lies within the pool's price before and after (±3% for fees), and the reserve
+ *   product grew by at most 3% (more means a donation to a vault was mixed in).
+ * The trader is the swap instruction's user account.
+ */
+export function pumpSwapTrade(tx, { pool, poolBase, poolQuote }) {
+  const message = tx?.transaction?.message ?? {};
+  const keys = (message.staticAccountKeys ?? message.accountKeys ?? []).map(k => (k.pubkey ?? k).toBase58?.() ?? String(k.pubkey ?? k));
+  const loaded = [...(tx?.meta?.loadedAddresses?.writable ?? []), ...(tx?.meta?.loadedAddresses?.readonly ?? [])].map(k => k.toBase58?.() ?? String(k));
+  const all = [...keys, ...loaded];
+  const top = (message.compiledInstructions ?? message.instructions ?? []).map(ix => ({ program: all[ix.programIdIndex], accounts: (ix.accountKeyIndexes ?? ix.accounts ?? []).map(i => all[i]), data: base58Bytes(ix.data) }));
+  const inner = (tx?.meta?.innerInstructions ?? []).flatMap(group => group.instructions.map(ix => ({ program: all[ix.programIdIndex], accounts: (ix.accounts ?? []).map(i => all[i]), data: base58Bytes(ix.data) })));
+  const swaps = [...top, ...inner].filter(ix => ix.program === PUMP_AMM && ix.accounts.includes(pool)).flatMap(ix => {
+    const kind = PUMP_SWAPS.find(([disc]) => disc.every((b, i) => ix.data[i] === b));
+    return kind ? [{ trader: ix.accounts[kind[1]] }] : [];
+  });
+  if (swaps.length !== 1) return null;
+  const amount = (list, index) => BigInt(list?.find(b => b.accountIndex === index)?.uiTokenAmount?.amount ?? 0);
+  const balances = address => { const i = all.indexOf(address); return i < 0 ? null : [amount(tx.meta.preTokenBalances, i), amount(tx.meta.postTokenBalances, i)]; };
+  const base = balances(poolBase), quote = balances(poolQuote);
+  if (!base || !quote || base[0] <= 0n || quote[0] <= 0n || base[1] <= 0n || quote[1] <= 0n) return null;
+  const dBase = base[1] - base[0], dQuote = quote[1] - quote[0];
+  const buy = dBase < 0n && dQuote > 0n, sell = dBase > 0n && dQuote < 0n;
+  if (!buy && !sell) return null;
+  const tokenRaw = buy ? -dBase : dBase, quoteRaw = buy ? dQuote : -dQuote;
+  const price = Number(quoteRaw) / Number(tokenRaw), before = Number(quote[0]) / Number(base[0]), after = Number(quote[1]) / Number(base[1]);
+  if (!(price >= Math.min(before, after) * 0.97 && price <= Math.max(before, after) * 1.03)) return null;
+  const k0 = base[0] * quote[0], k1 = base[1] * quote[1];
+  if (k1 * 100n > k0 * 103n || k1 * 100n < k0 * 99n) return null;
+  return { side: buy ? 'buy' : 'sell', tokenRaw, quoteRaw, account: swaps[0].trader ?? all[0] };
+}
+
 export class SolanaIndexer {
   /**
    * `web3`: @solana/web3.js; `connection`: a Connection; `deployment`: { programId, pairs }; `network`: net registry entry.
    * `backfill`: how many past program transactions to read on first start; `spacingMs`: delay between transaction reads.
    */
-  constructor({ web3, connection, deployment, network, path = ':memory:', backfill = 1500, spacingMs = 120 }) {
+  constructor({ web3, connection, deployment, network, path = ':memory:', backfill = 1500, spacingMs = 120, metadataStore = null, pumpPerTick = 200 }) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.web3 = web3; this.connection = connection; this.network = network; this.deployment = deployment;
     this.client = createElpidaSolana(web3, new web3.PublicKey(deployment.programId));
     this.pairs = new Map((deployment.pairs ?? []).map(p => [p.config, p]));
-    this.backfill = backfill; this.spacingMs = spacingMs; this.holderCache = new Map(); this.lastError = null; this.lastSuccess = null;
+    this.backfill = backfill; this.spacingMs = spacingMs; this.holderCache = new Map(); this.lastError = null; this.lastSuccess = null; this.metadataStore = metadataStore; this.pumpPerTick = pumpPerTick; this.holderLookups = new Map();
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS cursor (id INTEGER PRIMARY KEY CHECK(id=1), signature TEXT NOT NULL, slot INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS tokens (mint TEXT PRIMARY KEY, created INTEGER NOT NULL, data TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS trades (signature TEXT NOT NULL, idx INTEGER NOT NULL, mint TEXT NOT NULL, slot INTEGER NOT NULL, timestamp INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(signature, idx));
-      CREATE INDEX IF NOT EXISTS trades_mint ON trades(mint, slot);`);
+      CREATE INDEX IF NOT EXISTS trades_mint ON trades(mint, slot);
+      CREATE TABLE IF NOT EXISTS pump_cursor (pool TEXT PRIMARY KEY, signature TEXT NOT NULL, slot INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS token_meta (mint TEXT PRIMARY KEY, uri TEXT NOT NULL, data TEXT);`);
     const identity = json({ cluster: network.cluster, programId: deployment.programId });
     const prior = this.db.prepare('SELECT value FROM identity WHERE id=1').get();
     if (prior && prior.value !== identity) { this.db.close(); throw new Error('Solana index belongs to a different deployment.'); }
@@ -64,6 +132,7 @@ export class SolanaIndexer {
     const configKeys = [...new Set(pools.map(p => p.config.toBase58()))];
     const infos = configKeys.length ? await this.connection.getMultipleAccountsInfo(configKeys.map(k => new this.web3.PublicKey(k))) : [];
     const configs = new Map(configKeys.flatMap((k, i) => { try { return infos[i] ? [[k, this.client.decodeConfig(infos[i].data)]] : []; } catch { return []; } }));
+    const extra = await this.poolExtras(pools, configs);
     const upsert = this.db.prepare('INSERT INTO tokens(mint, created, data) VALUES(?,?,?) ON CONFLICT(mint) DO UPDATE SET data=excluded.data');
     this.db.exec('BEGIN');
     try {
@@ -74,21 +143,143 @@ export class SolanaIndexer {
         const complete = pool.status === STATUS_GRADUATED || pool.status === STATUS_MIGRATED;
         const mint = pool.mint.toBase58();
         const remaining = complete ? 0n : quoteBuy(pool, MAX_U64, cfg.baseFeeBps, cfg.baseFeeBps).gross;
+        const x = extra.get(mint) ?? {}, migrated = pool.status === STATUS_MIGRATED;
+        // After migration the curve is empty: price, market cap and liquidity come from the PumpSwap pool.
+        const pumpPrice = migrated && x.pumpBase > 0n ? Number(x.pumpQuote) / 10 ** d / (Number(x.pumpBase) / 10 ** TOKEN_DECIMALS) : null;
+        const price = pumpPrice ?? stats.price;
         upsert.run(mint, Number(pool.createdAt), json({
           address: mint, pool: pool.pubkey.toBase58(), config: key, name: pool.name, symbol: pool.symbol, creator: pool.creator.toBase58(), reward: pool.reward.toBase58(),
           created: Number(pool.createdAt) * 1000, pair: quote.kind, quoteSymbol: quote.symbol, quoteDecimals: d, decimals: TOKEN_DECIMALS, dex: 'PumpSwap',
           reserve: formatAmount(pool.realQuote, d), liquidityBonus: formatAmount(pool.liquidityBonus, d), sold: formatAmount(pool.sold, TOKEN_DECIMALS),
           circulatingSupply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS), saleCap: formatAmount(pool.curveSupply, TOKEN_DECIMALS), supply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS),
-          spotPrice: stats.price, marketCap: stats.marketCap, progress: stats.progress, remainingBuy: formatAmount(remaining, d),
-          complete, graduated: pool.status === STATUS_MIGRATED, completedAt: Number(pool.graduatedAt), liquidityLocked: true,
+          spotPrice: price, marketCap: pumpPrice !== null ? pumpPrice * Number(TOKEN_SUPPLY) / 10 ** TOKEN_DECIMALS : stats.marketCap, progress: stats.progress, remainingBuy: formatAmount(remaining, d),
+          complete, graduated: migrated, completedAt: Number(pool.graduatedAt), liquidityLocked: true,
+          // D7: a completed curve that has not migrated can be reopened by anyone after the grace period.
+          reopenableAt: pool.status === STATUS_GRADUATED && pool.graduatedAt > 0n ? Number(pool.graduatedAt) + GRADUATION_GRACE_SECS : null,
+          ...(migrated ? { pumpPool: x.pumpPool, liquidity: x.pumpQuote !== undefined ? formatAmount(x.pumpQuote, d) : undefined } : {}),
           protocolFees: formatAmount(pool.protocolFees, d), creatorFees: formatAmount(pool.creatorFees, d),
           virtualQuote: pool.virtualQuote.toString(), virtualToken: pool.virtualToken.toString(),
+          // Creator transparency (D6): the launch buy and the creator wallet's live holding, % of supply.
+          ...(x.devBoughtRaw !== undefined ? { devBoughtRaw: x.devBoughtRaw.toString(), devBoughtPct: supplyPercent(x.devBoughtRaw, TOKEN_SUPPLY) } : {}),
+          ...(x.devHoldingRaw !== undefined ? { devHoldingRaw: x.devHoldingRaw.toString(), devHoldingPct: supplyPercent(x.devHoldingRaw, TOKEN_SUPPLY) } : {}),
+          metadataURI: x.metadataURI ?? '',
         }));
       }
       this.db.exec('COMMIT');
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
     this.poolMints = new Map(pools.map(p => [p.pubkey.toBase58(), p.mint.toBase58()]));
     this.configs = configs;
+  }
+
+  /** Per-pool reads that are not in the pool account: dev badge, PumpSwap reserves, Metaplex URI. */
+  async poolExtras(pools, configs) {
+    const { PublicKey } = this.web3, out = new Map(pools.map(p => [p.mint.toBase58(), {}]));
+    const batch = async keys => { const result = []; for (let i = 0; i < keys.length; i += 100) result.push(...await this.connection.getMultipleAccountsInfo(keys.slice(i, i + 100), 'confirmed')); return result; };
+    const launchBuy = this.db.prepare("SELECT data FROM trades WHERE mint=? AND json_extract(data,'$.launch')=1 ORDER BY slot LIMIT 1");
+    // Creator holdings (the creator's associated token account for the mint).
+    const holdings = await batch(pools.map(p => this.client.ata(p.creator, p.mint)));
+    pools.forEach((p, i) => {
+      const row = launchBuy.get(p.mint.toBase58()), x = out.get(p.mint.toBase58());
+      if (row) x.devBoughtRaw = BigInt(JSON.parse(row.data).tokenRaw);
+      x.devHoldingRaw = this.client.tokenAmount(holdings[i]?.data);
+    });
+    // Metaplex URIs, read once per token (metadata is immutable).
+    const known = new Map(this.db.prepare('SELECT mint, uri FROM token_meta').all().map(r => [r.mint, r.uri]));
+    const missing = pools.filter(p => !known.has(p.mint.toBase58()));
+    if (missing.length) {
+      const infos = await batch(missing.map(p => this.client.metadataPda(p.mint)));
+      const save = this.db.prepare('INSERT OR IGNORE INTO token_meta(mint, uri) VALUES(?,?)');
+      // Only record definite answers: an existing account, or none at all for tokens launched before metadata.
+      // A missing account is recorded as "no metadata" only for pools older than 10 minutes, so a lagging RPC
+      // node cannot permanently hide a new token's metadata.
+      const settled = p => Date.now() / 1000 - Number(p.createdAt) > 600;
+      missing.forEach((p, i) => { const uri = metadataUri(infos[i]?.data); if (uri || (!infos[i] && settled(p))) { save.run(p.mint.toBase58(), uri); known.set(p.mint.toBase58(), uri); } });
+    }
+    for (const p of pools) out.get(p.mint.toBase58()).metadataURI = known.get(p.mint.toBase58()) ?? '';
+    // PumpSwap reserves for migrated tokens.
+    const migrated = pools.filter(p => p.status === STATUS_MIGRATED && configs.get(p.config.toBase58()));
+    // Quote token program per quote mint (SPL Token or Token-2022), read from the mint's owner once.
+    this.quotePrograms ??= new Map();
+    const unknownMints = [...new Set(migrated.map(p => configs.get(p.config.toBase58()).quoteMint.toBase58()))].filter(m => !this.quotePrograms.has(m));
+    if (unknownMints.length) (await batch(unknownMints.map(m => new PublicKey(m)))).forEach((info, i) => { if (info) this.quotePrograms.set(unknownMints[i], info.owner); });
+    if (migrated.length) {
+      const accounts = migrated.map(p => { const cfg = configs.get(p.config.toBase58()); return this.client.pumpAccounts(p.mint, cfg.quoteMint, this.quoteProgramOf(cfg)); });
+      const infos = await batch(accounts.flatMap(a => [a.pool, a.poolBase, a.poolQuote]));
+      migrated.forEach((p, i) => {
+        const [poolInfo, baseInfo, quoteInfo] = infos.slice(i * 3, i * 3 + 3), x = out.get(p.mint.toBase58());
+        if (!poolInfo || !baseInfo || !quoteInfo) return;
+        const state = this.client.pumpState(poolInfo.data, baseInfo.data, quoteInfo.data);
+        Object.assign(x, { pumpPool: accounts[i].pool.toBase58(), pumpBase: state.base, pumpQuote: state.quote });
+      });
+    }
+    return out;
+  }
+
+  /** The quote mint's token program for a config: the mint's on-chain owner, else the deployment record. */
+  quoteProgramOf(cfg) {
+    const mint = cfg.quoteMint.toBase58(), owner = this.quotePrograms?.get(mint);
+    if (owner) return owner;
+    const pair = [...this.pairs.values()].find(p => (p.mint ?? p.quoteMint) === mint);
+    return new this.web3.PublicKey(pair?.tokenProgram ?? pair?.quoteTokenProgram ?? TOKEN_PROGRAM);
+  }
+
+  /** PumpSwap swaps on migrated Elpida pools, one durable cursor per pool (oldest first). */
+  async syncPumpTrades() {
+    const tokens = this.tokens().filter(t => t.graduated && t.pumpPool);
+    if (!tokens.length) return 0;
+    const cursorOf = this.db.prepare('SELECT signature FROM pump_cursor WHERE pool=?');
+    const setCursor = this.db.prepare('INSERT INTO pump_cursor(pool, signature, slot) VALUES(?,?,?) ON CONFLICT(pool) DO UPDATE SET signature=excluded.signature, slot=excluded.slot');
+    const insert = this.db.prepare('INSERT OR IGNORE INTO trades(signature, idx, mint, slot, timestamp, data) VALUES(?,?,?,?,?,?)');
+    let added = 0;
+    for (const token of tokens) {
+      const cfg = this.configs?.get(token.config);
+      if (!cfg) continue;
+      const a = this.client.pumpAccounts(new this.web3.PublicKey(token.address), cfg.quoteMint, this.quoteProgramOf(cfg));
+      const cursor = cursorOf.get(token.pumpPool)?.signature;
+      const fresh = [];
+      let before;
+      for (;;) {
+        const page = await this.connection.getSignaturesForAddress(a.pool, { until: cursor, before, limit: 1000 }, 'confirmed');
+        fresh.push(...page);
+        if (page.length < 1000 || (!cursor && fresh.length >= this.backfill)) break;
+        before = page.at(-1).signature;
+      }
+      // Oldest first, at most `pumpPerTick` per pool per tick; the cursor resumes from the last one handled.
+      for (const sig of fresh.reverse().slice(0, this.pumpPerTick)) {
+        let trade = null, tx;
+        if (!sig.err) {
+          tx = await this.connection.getTransaction(sig.signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
+          if (!tx?.meta) { const error = new Error('Transaction details not available yet.'); error.code = 'TRANSACTION_PENDING'; throw error; }
+          if (!tx.meta.err) trade = pumpSwapTrade(tx, { pool: a.pool.toBase58(), poolBase: a.poolBase.toBase58(), poolQuote: a.poolQuote.toBase58() });
+        }
+        this.db.exec('BEGIN');
+        try {
+          if (trade) {
+            const d = token.quoteDecimals, timestamp = tx?.blockTime ?? sig.blockTime ?? 0;
+            added += Number(insert.run(sig.signature, 0, token.address, sig.slot, timestamp, json({
+              hash: sig.signature, token: token.address, side: trade.side, account: trade.account, venue: 'PumpSwap',
+              quoteRaw: trade.quoteRaw, tokenRaw: trade.tokenRaw, quoteAmount: formatAmount(trade.quoteRaw, d), tokenAmount: formatAmount(trade.tokenRaw, TOKEN_DECIMALS),
+              priceQuote: Number(trade.quoteRaw) / 10 ** d / (Number(trade.tokenRaw) / 10 ** TOKEN_DECIMALS), launch: false, timestamp, slot: sig.slot,
+            })).changes);
+          }
+          setCursor.run(token.pumpPool, sig.signature, sig.slot);
+          this.db.exec('COMMIT');
+        } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+        if (!sig.err && this.spacingMs) await sleep(this.spacingMs);
+      }
+    }
+    return added;
+  }
+
+  /** Retains and resolves each token's published metadata document (best effort; IPFS outages are retried). */
+  async syncMetadata() {
+    if (!this.metadataStore) return;
+    const save = this.db.prepare('UPDATE token_meta SET data=? WHERE mint=?');
+    for (const row of this.db.prepare("SELECT mint, uri, data FROM token_meta WHERE uri<>''").all()) {
+      try { this.metadataStore.retainPublished(row.uri); } catch { /* unknown to this server: resolved below if reachable */ }
+      if (row.data) continue;
+      try { save.run(JSON.stringify(await this.metadataStore.resolve(row.uri)), row.mint); } catch { /* retry next tick */ }
+    }
   }
 
   /** New program transactions since the cursor (oldest first); backfills `backfill` signatures on first start. */
@@ -164,6 +355,11 @@ export class SolanaIndexer {
         phase = 'pool_snapshot';
         await this.syncPools(); phase = 'transaction_history';
         await this.syncTrades(); phase = 'pool_refresh'; await this.syncPools();
+        // Optional phases are isolated: a PumpSwap backlog or an IPFS outage never blocks the others.
+        this.phaseErrors = {};
+        for (const [name, run] of [['metadata', () => this.syncMetadata()], ['pumpswap_history', () => this.syncPumpTrades()]]) {
+          try { await run(); } catch (error) { this.phaseErrors[name] = String(error.code ?? error.name ?? 'INDEX_ERROR').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 64); }
+        }
         this.lastError = null; this.lastErrorPhase = null; this.lastSuccess = new Date().toISOString();
       }
       catch (error) { this.lastErrorPhase = phase; this.lastError = String(error.code ?? error.name ?? 'INDEX_ERROR').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 64); throw error; }
@@ -173,7 +369,11 @@ export class SolanaIndexer {
   }
 
   tokens() { return this.db.prepare('SELECT data FROM tokens ORDER BY created DESC').all().map(r => JSON.parse(r.data)); }
-  listings() { return this.tokens().map(t => ({ ...t, balance: '0', network: this.network.key, url: `${this.network.explorer}/address/${t.address}${this.network.cluster === 'mainnet' ? '' : `?cluster=${this.network.cluster}`}` })); }
+  listings() {
+    const meta = new Map(this.db.prepare('SELECT mint, data FROM token_meta WHERE data IS NOT NULL').all().map(r => [r.mint, r.data]));
+    return this.tokens().map(t => ({ ...t, ...(meta.has(t.address) ? { metadata: JSON.parse(meta.get(t.address)), metadataStatus: 'published' } : t.metadataURI ? { metadataStatus: 'unavailable' } : {}),
+      balance: '0', network: this.network.key, url: `${this.network.explorer}/address/${t.address}${this.network.cluster === 'mainnet' ? '' : `?cluster=${this.network.cluster}`}` }));
+  }
   token(mint) { return this.listings().find(t => t.address === mint) ?? null; }
   trades(mint, limit = 100) { return this.db.prepare('SELECT data FROM trades WHERE mint=? ORDER BY slot DESC, idx DESC LIMIT ?').all(mint, Math.max(1, Math.min(500, limit))).map(r => JSON.parse(r.data)); }
   candles(mint, interval = 60, limit = 100) {
@@ -188,12 +388,43 @@ export class SolanaIndexer {
     }
     return [...buckets.values()].slice(-Math.max(1, Math.min(500, limit))).map(c => ({ ...c, open: String(c.open), high: String(c.high), low: String(c.low), close: String(c.close) }));
   }
-  /** Largest wallet holders (curve vault and PumpSwap pool excluded), cached for a minute. */
-  async holders(mint) {
+  /**
+   * Every wallet holder, largest first (curve vault and PumpSwap pool excluded), cached for a minute.
+   * Reads all token accounts of the mint with getProgramAccounts (owner + amount slices only); falls back
+   * to getTokenLargestAccounts (top 20) on RPCs that refuse it. `offset` / `limit` page the cached list.
+   */
+  async holders(mint, { offset = 0, limit = 100 } = {}) {
+    const all = await this.allHolders(mint);
+    return all.slice(Math.max(0, offset), Math.max(0, offset) + Math.max(1, Math.min(1000, limit)));
+  }
+  async holderCount(mint) { return (await this.allHolders(mint)).length; }
+  async allHolders(mint) {
     const hit = this.holderCache.get(mint);
     if (hit && Date.now() - hit.at < 60_000) return hit.rows;
+    // One RPC lookup per mint at a time: concurrent requests share it.
+    if (this.holderLookups.has(mint)) return this.holderLookups.get(mint);
+    const lookup = this.lookupHolders(mint).finally(() => this.holderLookups.delete(mint));
+    this.holderLookups.set(mint, lookup);
+    return lookup;
+  }
+  async lookupHolders(mint) {
     const token = this.token(mint);
     if (!token) return [];
+    const { PublicKey } = this.web3;
+    try {
+      const accounts = await this.connection.getProgramAccounts(new PublicKey(TOKEN_PROGRAM), { commitment: 'confirmed', dataSlice: { offset: 32, length: 40 }, filters: [{ dataSize: 165 }, { memcmp: { offset: 0, bytes: mint } }] });
+      const totals = new Map();
+      for (const { account } of accounts) {
+        const data = account.data; if (data.length < 40) continue;
+        const ownerBytes = data.subarray(0, 32), amount = this.client.tokenAmount(Buffer.concat([Buffer.alloc(64), data.subarray(32, 40)]));
+        if (amount <= 0n || !PublicKey.isOnCurve(ownerBytes)) continue; // program-owned vaults (curve, PumpSwap) are off-curve PDAs
+        const owner = new PublicKey(ownerBytes).toBase58();
+        totals.set(owner, (totals.get(owner) ?? 0n) + amount);
+      }
+      const rows = [...totals].sort((a, b) => (b[1] > a[1] ? 1 : b[1] < a[1] ? -1 : 0)).map(([address, amount]) => ({ address, balance: formatAmount(amount, TOKEN_DECIMALS), supplyShare: String(Number(amount) / Number(TOKEN_SUPPLY)) }));
+      this.holderCache.set(mint, { at: Date.now(), rows });
+      return rows;
+    } catch { /* RPC refuses getProgramAccounts on the token program: top 20 only */ }
     const largest = (await this.connection.getTokenLargestAccounts(new this.web3.PublicKey(mint), 'confirmed')).value;
     const infos = largest.length ? await this.connection.getMultipleAccountsInfo(largest.map(a => a.address)) : [];
     const excluded = new Set([token.pool]);
@@ -209,7 +440,7 @@ export class SolanaIndexer {
   }
   status() {
     const cursor = this.db.prepare('SELECT signature, slot FROM cursor WHERE id=1').get();
-    return { network: this.network.key, programId: this.deployment.programId, tokens: this.db.prepare('SELECT COUNT(*) n FROM tokens').get().n, trades: this.db.prepare('SELECT COUNT(*) n FROM trades').get().n, cursorSlot: cursor?.slot ?? null, lastSuccess: this.lastSuccess, error: this.lastError, errorPhase: this.lastErrorPhase ?? null, backend: 'SQLite WAL' };
+    return { network: this.network.key, programId: this.deployment.programId, tokens: this.db.prepare('SELECT COUNT(*) n FROM tokens').get().n, trades: this.db.prepare('SELECT COUNT(*) n FROM trades').get().n, cursorSlot: cursor?.slot ?? null, lastSuccess: this.lastSuccess, error: this.lastError, errorPhase: this.lastErrorPhase ?? null, phaseErrors: this.phaseErrors ?? {}, backend: 'SQLite WAL' };
   }
   close() { this.db.close(); }
 }

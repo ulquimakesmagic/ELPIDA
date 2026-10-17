@@ -17,8 +17,9 @@ This page supersedes the curve numbers in older guides (VIRTUAL_CURVE_AND_PAIRS,
 | Creator first buy | Atomic with the launch, base fee only, **no cap** | Same (`max_creator_buy_bps = 0`) |
 | Final buy | Partially filled: takes exactly the remaining supply, charges only what it needs, refunds the rest | Same |
 | Graduation | Uniswap v3 full-range position, locked forever; LP fees split 50/50 | PumpSwap, LP locked in a program PDA |
-| Escape hatch | If a completed curve has not graduated 24 h after completion, anyone can `reopen()` it for trading | Phase 2 (pending) |
-| Metadata | Set once in the launch transaction; no setter | Phase 2: Metaplex, `is_mutable = false` |
+| Escape hatch | If a completed curve has not graduated 24 h after completion, anyone can `reopen()` it for trading | Same: `reopen_curve` (Phase 2) |
+| Metadata | Set once in the launch transaction; no setter | Set once in `launch`: Metaplex metadata with `is_mutable = false` (Phase 2) |
+| Mint address | Contract address | Ends in `hope` when the server's vanity pool has a key ready (D9), else random |
 
 All shared numbers live in `packages/core/curve-model.mjs` (served to the browser as `/curve-model.mjs`). Nothing else should hard-code them.
 
@@ -49,7 +50,7 @@ A griefer who creates the Uniswap pool early with a sliver of liquidity at a wro
 ## Interface and indexer
 
 - Trade panel: a live "Launch fee window: 47.1% → 1.25% in 31 s" line on both chains, the fee rate in quotes, and a "Reopen curve trading" button once a stuck curve passes its grace time.
-- Creator transparency: the indexer records the creator's first buy and live holding. The token page shows "Dev 4.73% → 4.73%" (bought at launch → holds now), and discovery cards show the same chip. Solana data arrives in Phase 2.
+- Creator transparency: the indexer records the creator's first buy and live holding. The token page shows "Dev 4.73% → 4.73%" (bought at launch → holds now), and discovery cards show the same chip. The Solana indexer provides the same fields (Phase 2).
 - `remainingBuy` is an amount that completes the curve at the current fee; any excess is refunded by the partial fill, so "Complete curve" works even during the first minute. `remainingBase` (model 10) is the cost at the 1.25% base fee, used for progress and hints so the first minute's fee does not inflate the display.
 - Legacy model 9 records keep their old behaviour: no fee window, no partial fill, no escape hatch.
 

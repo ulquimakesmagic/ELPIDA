@@ -4,12 +4,13 @@ import {launchProfile,publishForLaunch} from '../apps/web/launch-capabilities.mj
 test('every chain uses the same four trading-pair kinds without requiring public metadata',()=>{
  for(const chain of ['local','base-sepolia','ethereum-sepolia','bnb-testnet','robinhood-testnet']){
    assert.deepEqual(launchProfile(chain).pairs,['native','usdc','xstock','token']);assert.equal(launchProfile(chain).decimals,18);
-   assert.equal(publishForLaunch({chain,publicEnabled:false,metadataSupported:true}),chain==='base-sepolia');
+   assert.equal(publishForLaunch({chain,publicEnabled:false,metadataSupported:true}),chain==='base-sepolia'||chain.startsWith('solana-'));
  }
 });
 test('Solana uses the same pair kinds with its own token decimals',()=>{
  assert.deepEqual(launchProfile('solana-devnet'),{solana:true,pairs:['native','usdc','xstock','token'],decimals:6,maxNameBytes:32});
- assert.equal(publishForLaunch({chain:'solana-devnet',publicEnabled:true,metadataSupported:true}),false);
+ assert.equal(publishForLaunch({chain:'solana-devnet',publicEnabled:true,metadataSupported:true}),true,'Solana launches always write immutable Metaplex metadata');
+ assert.equal(publishForLaunch({chain:'solana-mainnet',publicEnabled:false,metadataSupported:false}),true);
 });
 test('a compatible Base launch always stages metadata in its launch transaction',()=>{
  assert.equal(publishForLaunch({chain:'base-sepolia',publicEnabled:true,metadataSupported:true}),true);

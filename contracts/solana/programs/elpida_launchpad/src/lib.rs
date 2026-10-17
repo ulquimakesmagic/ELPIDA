@@ -25,6 +25,11 @@
 //!   a program PDA. `harvest_lp_fees` withdraws only the LP growth earned from trading fees (the
 //!   pool's liquidity never falls below the migrated amount) and splits it 50/50 protocol / creator.
 //!   Only accrued fees can be paid out, to fixed destinations.
+//! - Escape hatch (D7): if a completed curve has not migrated `GRADUATION_GRACE_SECS` (24 h) after it
+//!   completed (for example because PumpSwap changed or refused the pool), anyone can `reopen_curve`, and
+//!   trading resumes with unchanged reserves. The locked anti-snipe bonus stays for the eventual migration.
+//! - Token metadata (D11): `launch` creates Metaplex metadata (name, symbol, IPFS URI) in the same
+//!   transaction with `is_mutable = false` and the curve PDA as update authority, so nobody can change it.
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::solana_program::program::invoke_signed;
@@ -60,6 +65,14 @@ pub const PYTH_RECEIVER: Pubkey = pubkey!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJ
 /// sha256("account:PriceUpdateV2")[0..8]
 const PRICE_UPDATE_V2: [u8; 8] = [34, 241, 35, 99, 157, 126, 244, 205];
 pub const WSOL_MINT: Pubkey = pubkey!("So11111111111111111111111111111111111111112");
+/// Metaplex Token Metadata (same ID on mainnet and devnet).
+pub const MPL_TOKEN_METADATA: Pubkey = pubkey!("metaqbxxUerdq28cj1RbAWkYQm3ybzjb6a8bt518x1s");
+/// Metaplex `CreateMetadataAccountV3` instruction index.
+const MPL_CREATE_METADATA_V3: u8 = 33;
+/// Metaplex limit for the metadata URI.
+pub const MAX_URI: usize = 200;
+/// D7: a completed curve that has not migrated this long after completion can be reopened for trading.
+pub const GRADUATION_GRACE_SECS: i64 = 86_400;
 pub const USD_DECIMALS: u32 = 6;
 /// Largest single test-faucet mint, in whole units of the test asset (10,000,000).
 pub const TEST_FAUCET_MAX_WHOLE: u64 = 10_000_000;
@@ -215,7 +228,9 @@ pub mod elpida_launchpad {
 
     /// `max_fee`: the most lamports the creator accepts for the SOL creation fee (price movement guard).
     /// `fee_in_usdc`: pay the USD fee in USDC instead; the four USDC accounts follow in remaining accounts.
-    pub fn launch<'info>(ctx: Context<'_, '_, 'info, 'info, Launch<'info>>, name: String, symbol: String, first_buy: u64, min_tokens_out: u64, reward: Pubkey, max_fee: u64, fee_in_usdc: bool) -> Result<()> {
+    /// `uri`: the token's IPFS metadata document (`ipfs://…`), written once into immutable Metaplex metadata.
+    #[allow(clippy::too_many_arguments)]
+    pub fn launch<'info>(ctx: Context<'_, '_, 'info, 'info, Launch<'info>>, name: String, symbol: String, first_buy: u64, min_tokens_out: u64, reward: Pubkey, max_fee: u64, fee_in_usdc: bool, uri: String) -> Result<()> {
         check_beta(&ctx.accounts.beta_gate.to_account_info(), &ctx.accounts.beta_creator.to_account_info())?;
         let name = name.trim().to_string();
         require!(!name.is_empty() && name.len() <= MAX_NAME, ElpidaError::InvalidName);
@@ -225,6 +240,7 @@ pub mod elpida_launchpad {
         );
         require!(first_buy > 0, ElpidaError::FirstBuyRequired);
         require!(reward != Pubkey::default(), ElpidaError::RewardRequired);
+        require!(valid_metadata_uri(&uri), ElpidaError::InvalidUri);
 
         let now = Clock::get()?.unix_timestamp;
         let a = &ctx.accounts;
@@ -267,6 +283,8 @@ pub mod elpida_launchpad {
             CpiContext::new(tp.clone(), MintTo { mint: a.mint.to_account_info(), to: a.token_vault.to_account_info(), authority: a.creator.to_account_info() }),
             TOKEN_SUPPLY,
         )?;
+        // Immutable Metaplex metadata, created while the creator is still the mint authority.
+        create_metadata(&a.token_metadata_program, &a.metadata, &a.mint.to_account_info(), &a.creator.to_account_info(), &a.pool.to_account_info(), &a.system_program.to_account_info(), &a.rent, &name, &symbol, &uri)?;
         token::set_authority(
             CpiContext::new(tp.clone(), SetAuthority { current_authority: a.creator.to_account_info(), account_or_mint: a.mint.to_account_info() }),
             AuthorityType::MintTokens,
@@ -405,6 +423,22 @@ pub mod elpida_launchpad {
         }
         Ok(())
     }
+
+    /// Permissionless escape hatch (D7): a curve that completed but has not migrated within
+    /// `GRADUATION_GRACE_SECS` returns to trading with its reserves unchanged, so holders can sell (or buy
+    /// back what others sold). Completing it again restarts the grace period. The locked anti-snipe bonus
+    /// stays in the vault for the eventual migration.
+    pub fn reopen_curve(ctx: Context<ReopenCurve>) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let pool = &mut ctx.accounts.pool;
+        require!(pool.status == STATUS_GRADUATED, ElpidaError::NotComplete);
+        let open_at = pool.graduated_at.checked_add(GRADUATION_GRACE_SECS).ok_or(ElpidaError::MathOverflow)?;
+        require!(now >= open_at, ElpidaError::GraceNotOver);
+        pool.status = STATUS_TRADING;
+        emit!(CurveReopened { pool: pool.key(), mint: pool.mint, graduated_at: pool.graduated_at, reopened_at: now, real_quote: pool.real_quote, liquidity_bonus: pool.liquidity_bonus });
+        Ok(())
+    }
+
     /// Permissionless once the curve is complete: seeds a PumpSwap pool with the remaining supply and
     /// all raised quote (curve reserve + locked anti-snipe bonus). The LP tokens stay in a program PDA
     /// forever. The caller pays PumpSwap's account rent (refunded surplus) and the transaction fee.
@@ -652,6 +686,43 @@ fn test_networks_only() -> Result<()> {
     Ok(())
 }
 
+/// A token metadata URI: `ipfs://` followed by printable ASCII, at most Metaplex's 200 bytes.
+pub fn valid_metadata_uri(uri: &str) -> bool {
+    uri.len() > "ipfs://".len() && uri.len() <= MAX_URI && uri.starts_with("ipfs://") && uri.bytes().all(|b| b.is_ascii_graphic())
+}
+
+/// Metaplex `CreateMetadataAccountV3` with `is_mutable = false`: name, symbol and URI can never change.
+/// No creators, collection or uses; zero royalties. The curve PDA is recorded as update authority but has
+/// no instruction that signs for it, and immutable metadata cannot be updated anyway.
+#[inline(never)]
+#[allow(clippy::too_many_arguments)]
+fn create_metadata<'info>(program: &AccountInfo<'info>, metadata: &AccountInfo<'info>, mint: &AccountInfo<'info>, creator: &AccountInfo<'info>, update_authority: &AccountInfo<'info>, system: &AccountInfo<'info>, rent: &AccountInfo<'info>, name: &str, symbol: &str, uri: &str) -> Result<()> {
+    let mut data = Vec::with_capacity(1 + 12 + name.len() + symbol.len() + uri.len() + 7);
+    data.push(MPL_CREATE_METADATA_V3);
+    for field in [name, symbol, uri] {
+        data.extend_from_slice(&(field.len() as u32).to_le_bytes());
+        data.extend_from_slice(field.as_bytes());
+    }
+    data.extend_from_slice(&0u16.to_le_bytes()); // seller_fee_basis_points
+    data.extend_from_slice(&[0, 0, 0]); // creators, collection, uses: None
+    data.push(0); // is_mutable: false
+    data.push(0); // collection_details: None
+    let accounts = vec![
+        AccountMeta::new(metadata.key(), false),
+        AccountMeta::new_readonly(mint.key(), false),
+        AccountMeta::new_readonly(creator.key(), true), // mint authority
+        AccountMeta::new(creator.key(), true),          // payer
+        AccountMeta::new_readonly(update_authority.key(), false),
+        AccountMeta::new_readonly(system.key(), false),
+        AccountMeta::new_readonly(rent.key(), false),
+    ];
+    anchor_lang::solana_program::program::invoke(
+        &Instruction { program_id: MPL_TOKEN_METADATA, accounts, data },
+        &[metadata.clone(), mint.clone(), creator.clone(), update_authority.clone(), system.clone(), rent.clone(), program.clone()],
+    )?;
+    Ok(())
+}
+
 /// Launches are open unless the beta gate exists and is enabled; then the creator must be allowlisted.
 /// Both accounts are seed-checked PDAs, so a caller cannot substitute others.
 #[inline(never)]
@@ -780,7 +851,7 @@ pub fn current_fee_bps(cfg: &CurveConfig, created_at: i64, now: i64) -> u64 {
 
 pub struct TradeQuote { pub gross: u64, pub net: u64, pub tokens: u64, pub fee: u64, pub base_fee: u64, pub surplus: u64, pub graduates: bool }
 
-fn fees(gross: u64, fee_bps: u64, base_fee_bps: u64) -> (u64, u64, u64) {
+pub fn fees(gross: u64, fee_bps: u64, base_fee_bps: u64) -> (u64, u64, u64) {
     let fee = (gross as u128 * fee_bps as u128 / BPS) as u64;
     let base = ((gross as u128 * base_fee_bps as u128 / BPS) as u64).min(fee);
     (fee, base, fee - base)
@@ -1018,6 +1089,21 @@ pub struct Launch<'info> {
     pub pricing: UncheckedAccount<'info>,
     /// CHECK: the Pyth price account bound in `pricing` (any account when pricing is off).
     pub price_update: UncheckedAccount<'info>,
+    /// CHECK: Metaplex metadata PDA ["metadata", program, mint]; created and seed-checked by Metaplex.
+    #[account(mut)]
+    pub metadata: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = MPL_TOKEN_METADATA)]
+    pub token_metadata_program: UncheckedAccount<'info>,
+    /// CHECK: the rent sysvar, for Metaplex.
+    #[account(address = anchor_lang::solana_program::sysvar::rent::ID)]
+    pub rent: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct ReopenCurve<'info> {
+    #[account(mut, seeds = [b"curve", pool.mint.as_ref()], bump = pool.bump)]
+    pub pool: Box<Account<'info, CurvePool>>,
 }
 
 #[derive(Accounts)]
@@ -1349,6 +1435,8 @@ pub struct FeesWithdrawn { pub pool: Pubkey, pub recipient: Pubkey, pub amount: 
 #[event]
 pub struct CurveMigrated { pub pool: Pubkey, pub mint: Pubkey, pub pump_pool: Pubkey, pub lp_mint: Pubkey, pub base_amount: u64, pub quote_amount: u64, pub lp_locked: u64 }
 #[event]
+pub struct CurveReopened { pub pool: Pubkey, pub mint: Pubkey, pub graduated_at: i64, pub reopened_at: i64, pub real_quote: u64, pub liquidity_bonus: u64 }
+#[event]
 pub struct LpFeesHarvested { pub pool: Pubkey, pub pump_pool: Pubkey, pub lp_burned: u64, pub base_out: u64, pub quote_out: u64, pub protocol_base: u64, pub protocol_quote: u64, pub lp_locked: u64 }
 
 #[error_code]
@@ -1383,4 +1471,6 @@ pub enum ElpidaError {
     #[msg("The USD price is too uncertain right now")] PriceUncertain,
     #[msg("The creation fee rose above your limit; refresh the quote")] FeeAboveMax,
     #[msg("USDC fee payment is not available for this pair")] UsdcFeeUnavailable,
+    #[msg("Token metadata must be an ipfs:// URI of at most 200 printable characters")] InvalidUri,
+    #[msg("The curve can be reopened only 24 hours after it completed without migrating")] GraceNotOver,
 }

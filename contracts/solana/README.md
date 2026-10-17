@@ -23,7 +23,8 @@ The SOL pair's fee and curve come from `config/native-pricing.json`. On test net
    - The quote moved includes the curve reserve and the anti-snipe bonus.
    - The pool opens at the final curve price, raised slightly by the bonus.
    - The pool is created by the data-less PDA `["pump-lp", mint]`, which keeps the LP tokens forever. Only PumpSwap's 100-unit minimum stays in the pool unowned.
-4. **LP fees.** PumpSwap charges pools it did not create itself 0.25% to LPs and 0.05% to pump. It pays no coin-creator fee on these pools.
+4. **Escape hatch (D7).** If a completed curve has not migrated 24 hours after it completed (for example because PumpSwap changed or refused the pool), anyone can call `reopen_curve`. Trading resumes with the reserves unchanged, so holders can sell; completing the curve again restarts the grace period. The locked anti-snipe bonus stays in the vault for the eventual migration.
+5. **LP fees.** PumpSwap charges pools it did not create itself 0.25% to LPs and 0.05% to pump. It pays no coin-creator fee on these pools.
    - Anyone can call `harvest_lp_fees`. It withdraws only the LP tokens that represent fee growth, and splits the base and quote 50/50 between the treasury and the creator reward wallet.
    - Fee growth is measured in liquidity units (`lp / lp_supply × √(base × quote)`). The position never drops below its migrated units, and the program checks this after every harvest.
    - A harvest must be at least 0.01% of the locked LP.
@@ -33,7 +34,8 @@ The SOL pair's fee and curve come from `config/native-pricing.json`. On test net
 | Instruction | Who | What it does |
 | --- | --- | --- |
 | `initialize_curve(params)` | Program upgrade authority, once | Legacy default config at `["curve-config"]`; deployments now use `add_curve_config` for every pair |
-| `launch(name, symbol, first_buy, min_tokens_out, reward)` | Creator | Atomically does four things: transfers the creation fee in SOL (lamports) to the treasury wallet, mints a fixed 1B supply (6 decimals) to the curve, revokes mint authority (no freeze authority) and makes the mandatory first buy |
+| `launch(name, symbol, first_buy, min_tokens_out, reward, max_fee, fee_in_usdc, uri)` | Creator | Atomically: charges the creation fee to the treasury, mints a fixed 1B supply (6 decimals) to the curve, writes **immutable Metaplex metadata** (name, symbol, `ipfs://` URI, `is_mutable = false`, curve PDA as update authority), revokes mint authority (no freeze authority) and makes the mandatory first buy. An invalid URI reverts everything (6030) |
+| `reopen_curve` | Anyone, 24 h after completion without migration | D7 escape hatch: sets a completed, unmigrated curve back to trading; reserves, bonus and owed fees unchanged; emits `CurveReopened`. Earlier: 6031 `GraceNotOver` |
 | `buy(gross_in, min_tokens_out)` / `sell(tokens_in, min_quote_out)` | Anyone | Curve trades at the current fee (anti-snipe schedule, then 1.25%) |
 | `withdraw_fees` | Anyone | Pays accrued curve fees 50/50 to the treasury and the creator reward wallet; works before and after migration |
 | `migrate_to_pumpswap` | Anyone, once the curve is complete | Creates the PumpSwap pool. The caller advances 0.05 SOL; about 0.017 SOL is used for rent and the rest is refunded in the same transaction |
@@ -44,6 +46,8 @@ The SOL pair's fee and curve come from `config/native-pricing.json`. On test net
 | `allow_beta_creator(creator)` / `revoke_beta_creator` | Beta admin | Adds or removes a creator (PDA `["beta-creator", creator]`) |
 | `test_build_check` | Anyone | Succeeds only on the test build; lets scripts confirm a cluster runs the mainnet build |
 | `harvest_lp_fees` | Anyone, after migration | Withdraws LP fee growth and splits it 50/50; destination token accounts must exist (the client adds idempotent creation) |
+
+**Transaction size.** A launch is one legacy transaction, capped by Solana at 1,232 bytes. The client sends only bare `ipfs://<CIDv1>` links (66 characters, `MAX_LAUNCH_URI`); the largest supported launch, a SOL pair paying the fee in SPL-Token USDC with a 32-byte name, is 1,227 bytes. A Token-2022 USDC fee on a SOL pair would be 1,259 bytes, so the wallet refuses it before signing and suggests paying in SOL; it needs a v0 transaction with a lookup table if such a USDC mint is ever configured. Mainnet and devnet USDC are SPL-Token mints.
 
 **Accounts:**
 - One `CurveConfig` PDA `["curve-config", quote_mint]` per pair (the SOL pair uses the wrapped-SOL mint).
@@ -73,12 +77,24 @@ cp /tmp/sbf-main/elpida_launchpad.so build/elpida_launchpad-mainnet.so
 
 `Cargo.lock` pins dependencies compatible with the Solana toolchain's Rust 1.84 (for example `blake3` 1.5.5). The program ID is fixed by `declare_id!` and `keys/elpida_launchpad-keypair.json` (private, git-ignored).
 
+Release builds (16 October 2026, Agave / Solana CLI **2.3.13**, platform-tools v1.48), each reproduced byte for byte from a clean `target`:
+
+| File | Build | sha256 |
+|---|---|---|
+| `build/elpida_launchpad.so` | `--features testnet` (devnet, localnet) | `4e96db5726f91b9c5e0d7b8b9dafd779c6848307ea3350edbc10eda049199623` |
+| `build/elpida_launchpad-mainnet.so` | mainnet (test instructions refused) | `974ee70ca17d8722e855af89b3fed089c8f306baa0d69f280378d2b6fb11975e` |
+
+The previous devnet build (`319e2ffe…`, before metadata and reopen) is kept as `fixtures/elpida_launchpad-pre-metadata.so` for the compatibility test. Browsers detect which build a cluster runs (`client.supportsMetadata`, a simulated `reopen_curve`) and use the earlier launch layout until the program is upgraded.
+
 ## Deploy and test
 
 - `npm run solana:deploy` deploys to Solana Devnet and creates or reprices the SOL pair from `config/native-pricing.json`, plus the TEST-MEME pair (skip it with `--no-test-pairs`).
 - `node scripts/native-pricing.mjs --chain solana-devnet --yes` reprices the pairs after editing the pricing file (`--export` prints the instructions for a multisig).
 - `npm run solana:deploy -- --upgrade` (or double-click `solana-upgrade.cmd` in the ELPIDA folder) upgrades the deployed program to `build/elpida_launchpad.so`. Uploads resume if interrupted, and stale buffers from older builds are closed first.
-- `npm run test:solana` runs the program against a throwaway `solana-test-validator`. The migration tests load the real PumpSwap program and its GlobalConfig from `fixtures/`. Refresh those with `solana-pumpswap-fixtures.cmd` or `node scripts/solana-pumpswap-fixtures.mjs`.
+- `npm run test:solana` runs the program against a throwaway `solana-test-validator`. Without the private program keypair the validator preloads the build at the program ID as an upgradeable program, so the suite runs anywhere the Solana CLI is installed. It also loads, from `fixtures/`:
+  - the real PumpSwap program and its GlobalConfig (refresh with `solana-pumpswap-fixtures.cmd` or `node scripts/solana-pumpswap-fixtures.mjs`);
+  - Metaplex Token Metadata, built from its mainnet source tag (see `fixtures/SOURCE.txt`).
+- `npm run test:solana-host` runs `host-tests/`, a separate Cargo workspace: the 24 h reopen in LiteSVM (the clock moves) and property tests of the curve math (`PROPTEST_CASES=200000` for a deeper run): solvency through any trade sequence, k never decreasing, price direction, rounding in the pool's favour, round trips never profitable, the exact final fill (overcharge at most `floor(10000/(10000-fee))+1` base units, kept by the pool), fee split, the anti-snipe schedule, LP harvests never touching the principal, oracle rounding and `isqrt`.
 
 ## Events
 
@@ -92,10 +108,11 @@ cp /tmp/sbf-main/elpida_launchpad.so build/elpida_launchpad-mainnet.so
 - `CurveGraduated` marks completion.
 - `CurveMigrated` records the PumpSwap pool and the locked LP.
 - `LpFeesHarvested` records each harvest.
+- `CurveReopened` records a D7 reopen (graduated and reopened times, reserve and bonus).
 
 `decodeEvents` in `packages/solana/client.mjs` reads all of them. It also reads events from the first deployed version, which decode with `legacy: true`.
 
-Not yet implemented:
-- Metaplex token metadata.
-- The branded vanity mint suffix. Base58 excludes 0, O, I and l; never log or persist mint secret keys.
+## Vanity mint addresses (D9)
+
+The mint is a fresh signer keypair, so the program needs nothing for vanity addresses. The server (`apps/api/vanity-mints.mjs`) keeps a small pool of keypairs whose address ends in `hope`, ground in a worker thread (about 9 minutes per key per core) and sealed with AES-256-GCM under `ELPIDA_VANITY_KEY`. A launch reserves one key for one wallet; the key leaves the pool at once, the server co-signs only an Elpida `launch` by that wallet with that mint, and the secret is destroyed after that one signature or on expiry. Without the key, with an empty pool or over the rate limit, launches use a random mint and say so. Secret keys are never logged or stored in plaintext.
 - In-app PumpSwap trading after migration. Migrated tokens trade on PumpSwap or through aggregators.

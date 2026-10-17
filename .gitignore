@@ -10,3 +10,4 @@ local-data/
 contracts/solana/target/
 # Program deploy keypair: private key material, keep local.
 contracts/solana/keys/
+contracts/solana/host-tests/target/
