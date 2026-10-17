@@ -5,6 +5,7 @@ import { compileContracts } from '../../scripts/compile.mjs';
 import { testnets, evmTestnets } from '../../packages/core/networks.mjs';
 import { amount } from './runtime.mjs';
 import { EvmIndexer } from '../../packages/indexer/evm-indexer.mjs';
+import { indexedActivity, activityOf } from '../web/discovery.mjs';
 import {deployLocalV3,v3Artifacts,baseSepoliaDex} from '../../packages/core/uniswap.mjs';
 import { normalizeMetadata } from '../web/metadata.mjs';
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync, appendFileSync } from 'node:fs';
@@ -66,7 +67,7 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   }
   const tokens = [], activity = [];
   const metadata = new Map(metadataPath && existsSync(metadataPath) ? Object.entries(JSON.parse(readFileSync(metadataPath,'utf8'))) : []);
-  const listings = () => indexer.listings().map(r => ({...r,metadata:metadata.get(r.hash) ?? {}}));
+  const listings = () => { const activity = indexedActivity(indexer.db); return indexer.listings().map(r => ({...r,metadata:metadata.get(r.hash) ?? {},...activityOf(activity,r.address)})); };
   function saveMetadata(hash, value) {
     metadata.set(hash,value);
     if(metadataPath){mkdirSync(dirname(metadataPath),{recursive:true});writeFileSync(metadataPath+'.tmp',JSON.stringify(Object.fromEntries(metadata)));renameSync(metadataPath+'.tmp',metadataPath);}

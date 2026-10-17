@@ -1,8 +1,8 @@
 # Elpida design system (v2)
 
-Status: Phase 1 of the UI rebuild (`claude/ELPIDA-brew-style-rebuild-prompt.md`) — tokens, recipes and the app shell. Explore, the token page, launch, portfolio, analytics and docs are rebuilt in later phases; until then they render inside the new shell with the new palette applied to their existing components.
+Status: Phases 1–2 of the UI rebuild (`claude/ELPIDA-brew-style-rebuild-prompt.md`) — tokens, recipes, the app shell, and Home / Explore. The token page, launch, portfolio, analytics and docs are rebuilt in later phases; until then they render inside the new shell with the new palette applied to their existing components.
 
-Files: `apps/web/theme.css` (tokens, recipes, shell; loaded after `styles.css`), `apps/web/shell.mjs` (dock, theme, search, Last sale strip), `apps/web/theme-boot.js` (applies the saved theme before first paint; same-origin script, so the CSP still forbids inline scripts).
+Files: `apps/web/theme.css` (tokens, recipes, shell; loaded after `styles.css`), `apps/web/explore.css` + `apps/web/explore-view.mjs` (Home / Explore), `apps/web/odometer.mjs` (rolling numbers), `apps/web/shell.mjs` (dock, theme, search, Last sale strip), `apps/web/theme-boot.js` (applies the saved theme before first paint; same-origin script, so the CSP still forbids inline scripts).
 
 ## Look
 - Near-black canvas. Every surface is a floating rounded panel: a hairline border (0.67px, about one device pixel), a soft diagonal gradient and a faint inset top highlight.
@@ -53,9 +53,29 @@ Changing the accent family retints the whole app. The legacy names (`--paper`, `
 - **404.** Unknown routes show "Page not found." with a link to Explore.
 - **Themes.** Dark by default, light on request; saved in `localStorage` (`elpida:theme`) and applied before first paint.
 
+## Home / Explore (phase 2)
+Data: every listing (`/api/public/tokens`, the simulation's `/api/state`) carries 24-hour activity from the indexers: `volume24h` (pair asset, including trader fees), `trades24h`, `buys24h`, `sells24h`, `lastTradeAt`, `lastBuyAt` (`indexedActivity` in `discovery.mjs`). Dollar figures use the existing references (native oracle; USDC at $1); pairs without one stay in their own asset. Ordering, filters, pages and URL state are pure functions in `discovery.mjs` (`exploreModel`, `trendingTokens`, `topCreators`, `feedRows`, `pageOf`, `exploreHash`), tested in `tests/explore-model.test.mjs`.
+
+| Module | Behaviour |
+|---|---|
+| **Trending** | Tokens that traded in the last 24 hours, by dollar volume (unpriced pairs follow by trade count). Snap carousel: 4 / 3 / 2.2 / 1.4 cards per view by width (container query), prev/next buttons, edge fades only while there is more to scroll. Card: image area (or accent initials), rank chip, 24h change pill when known, name, ticker with pair + chain icons, curve bar or "Graduated", MARKET CAP / 24H VOLUME, address and age. Hidden when nothing traded. No "Pinned / Official" chip until a protocol pin list exists. |
+| **Top creators** | Creators ranked by the 24h dollar volume of the tokens they launched (`+` marks a partial total). Clicking a pill filters Explore to their launches. Hidden when empty. *Deviation from the prompt:* it asked for creator fees earned over 7 days; the indexers hold only current unclaimed fees, not an earnings history, so volume is the honest available measure. |
+| **Explore** | Sort tabs Trending · Market cap · New pairs · Last sale · Graduating (closest to completion, waiting migrations first). Filter field (name, ticker, address prefix of 4+ characters, or a full creator address), kept in step with the top bar search. "Paired with" chips with counts (All, Native, USDC, xStocks, Tokens; unavailable kinds disabled with the reason). Chain chips on public networks only. 8 list cards per page, 2 columns (1 below ~620px of list width). |
+| **List card** | Image 82px (64px on small phones), NEW chip under 24h, name with ↗, `$TICKER · pair+chain icons · age · Dev x%` (amber above 10%), market cap (odometer, 19px) and 24h volume (odometer), curve bar, "Bought 4m ago" and copyable short address. The whole card is a link (stretched name link); the copy button sits above it. |
+| **Live feed** | Sticky 340px column (drops below the list when the Explore column is under ~980px). Latest buys from `/api/public/recent-trades` (public networks) or `/api/recent-trades` (simulation); rows: avatar, name, `$TICKER · QUOTE`, "Bought 33s ago", market cap. New rows slide in. "Live" shows only while there are buys. Toggle remembered per browser (`elpida:feed`). A Notes tab (holder theses) is deferred: theses are per token and need holder checks, so there is no cross-token feed yet. |
+| **Pagination** | "Showing 1–8 of N tokens · 8 per page", square page buttons with gaps, prev/next. |
+| **URL** | `#/?tab=new&pair=usdc&chain=solana-devnet&q=…&page=2` (defaults omitted) via `history.replaceState`; pasted links restore the view. |
+| **Dollar note** | One line under the list: the native references in use, with sources in a disclosure. |
+
+Live updates: one Explore controller per visit; refreshes update cards in place (keyed by network and address), so values roll and flash only on real changes. Relative times tick every 15 seconds.
+
+### Odometer (`odometer.mjs`)
+`odometer(text, class)` renders one span per character plus a visually hidden copy for screen readers. `setOdometer(el, text, direction)`: when the value keeps its shape, changed digits roll up (rose) or down (fell) in 280ms; the value tints `--up` / `--down` for 1.2s and eases back. Unit changes (dollars ↔ pair asset) swap without rolling. Reduced motion keeps the tint, drops the roll.
+
 ## Motion
-Dock width 220ms; label fades 120ms; marquee about 40px per second. `prefers-reduced-motion` turns off the dock transition and the marquee (plus every existing animation, as before).
+Dock width 220ms; label fades 120ms; marquee about 40px per second. Cards enter with a 260ms fade-up, staggered 30ms (first 12); hover lifts cards 2px and scales images to 1.03; feed rows arrive in 300ms. `prefers-reduced-motion` turns off the dock transition, the marquee, rolls, lifts and slides, keeping opacity fades and colour flashes.
 
 ## Checks
 - `tests/web-shell.test.mjs`: every element the scripts look up exists in `index.html`; every local file the page references is served; no inline scripts; every sprite icon used exists; the recent-trades endpoint answers.
-- No horizontal overflow at 320, 390, 768, 1280 and 1440px on Explore, Create, Portfolio, Rewards, Analytics, a token page and the 404 page, in both themes.
+- `tests/explore-model.test.mjs`: 24h activity (EVM and Solana tables), trending, tabs, filters, chip counts, search, pages, creators, live feed join, URL round-trip. `tests/api.test.mjs` checks listing activity and the simulation's recent trades.
+- No horizontal overflow at 320, 390, 768, 1280 and 1440px on Explore (including a paged view), Create, Portfolio, Analytics and the 404 page, in both themes.

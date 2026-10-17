@@ -1,7 +1,8 @@
 import { nowSeconds, syncClock } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
 import { usdReferenceFor } from '/pairs.mjs';
-import { discoveryTokens } from './discovery.mjs';
+import { exploreHash } from './discovery.mjs';
+import { createExplore, exploreSkeleton } from './explore-view.mjs';
 import { assetIcon, chainIcon, chainSelector } from './chain-ui.mjs';
 import { renderAnalytics } from './analytics-view.mjs';
 // Elpida web app shell: environment (local simulation or public testnet), wallets, routing, discovery,
@@ -19,8 +20,7 @@ import { initShell, renderLastSale, syncSearch } from './shell.mjs';
 
 let config, evmWallet, solWallet, wallet;
 let mode = 'local', account = '0', state = null, busy = false, refreshRevision = 0, progressHook = null;
-let allTokens = [], discoveryErrors = [], chainControls = [], connecting=false;
-const ui = { filter: 'all', query: '', sort: 'marketcap',stage:'all' };
+let allTokens = [], discoveryErrors = [], chainControls = [], connecting=false, recentBuys = [];
 
 async function api(path, body, renewed = false) {
   const response = await fetch(`/api/${path}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': config.csrf }, body: JSON.stringify({ ...body, account }) } : {signal:AbortSignal.timeout(15000)});
@@ -100,7 +100,7 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
     allTokens=[...merged.values()];
     if(currentRoute.name==='explore')rerender('background');
     refreshLastSale();
-  }else allTokens=next.tokens;
+  }else{allTokens=next.tokens;refreshLastSale();}
   return state;
 }
 async function chooseChain(key){
@@ -131,7 +131,7 @@ async function connect(key, walletId, {silent=false}={}) {
   } finally { connecting=false;updateChrome(); }
 }
 async function useLocal() {
-  mode = 'local'; state = null; refreshLastSale();
+  mode = 'local'; state = null; recentBuys = []; refreshLastSale();
   try { localStorage.setItem('elpida:network', 'local'); } catch {}
   await refresh(); return true;
 }
@@ -171,19 +171,6 @@ function updateChrome() {
   $('#account-button').setAttribute('aria-label', mode === 'testnet' && !wallet.address ? 'Connect wallet' : `${$('#account-label').textContent}. Open account and network settings.`);
   $$('[data-busy-disable]').forEach(button => { button.disabled = busy; });
 }
-function envBanner() {
-  const local = mode === 'local';
-  const text = local
-    ? `${config?.hostedSimulation ? 'Shared simulation. Visitors share demo accounts and launches.' : 'Local simulation.'} Contracts run on a private test chain with simulated balances. Everything resets when the server restarts.`
-    : wallet.net.mainnet
-      ? `${wallet.net.name} mainnet beta. Real funds: your wallet signs every transaction and pays network fees in SOL. The contracts are new; launch and trade only what you can afford to lose.${wallet.beta?.enabled ? ' Launching is invite-only during the beta.' : ''}`
-      : wallet.net.kind === 'solana'
-      ? `${wallet.net.name} public testnet. Your wallet signs every transaction and pays network fees in devnet SOL. Launches pay their creation fee in SOL.`
-      : `${wallet.net.name} public testnet. Your wallet signs every transaction and pays gas in test ${wallet.net.nativeCurrency.symbol}.`;
-  return h('div.env-banner', { 'data-env': mode }, icon(local ? 'flask-conical' : 'globe'), h('span', text),
-    h('button.btn.btn-sm.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: openTools } }, local ? 'Test funds' : 'Network and funds'));
-}
-
 /* ---------- Routing ---------- */
 let currentRoute = { name: 'explore' };
 function parseRoute() {
@@ -203,7 +190,24 @@ function route() {
   if(changed&&wallet?.address&&!['explore','analytics'].includes(next.name))refresh({preserveInput:true,walletRead:true}).catch(e=>toast(errorText(e),{kind:'error'}));
   if (changed) { window.scrollTo({ top: 0 }); if (next.name !== 'launch') $('#main').focus({ preventScroll: true }); }
 }
-let launchView = null, analyticsView = null;
+let launchView = null, analyticsView = null, exploreView = null;
+const freshPrice = p => !!p && p.status === 'fresh' && Number.isFinite(p.usd) && nowSeconds() - p.updatedAt <= (p.maxAge ?? 180);
+/** What the Explore view reads from the app; it never touches wallets or routing directly. */
+const exploreSource = {
+  tokens: () => (mode === 'local' ? state?.tokens ?? [] : allTokens),
+  networks: () => (mode === 'local' ? [] : networks()),
+  mode: () => mode,
+  errors: () => (mode === 'local' ? [] : discoveryErrors),
+  tokenHref: t => `#/token/${t.address}${t.network && mode === 'testnet' ? '?network=' + encodeURIComponent(t.network) : ''}`,
+  nativeSymbol: t => { const net = networkByKey(t.network); return net?.nativeCurrency?.symbol ?? (net?.kind === 'solana' ? 'SOL' : state?.nativeSymbol ?? 'ETH'); },
+  networkName: t => networkByKey(t.network)?.name ?? 'the simulation',
+  prices: () => {
+    if (mode === 'local') { const p = config.prices?.local; return p ? [{ symbol: p.symbol ?? 'ETH', usd: freshPrice(p) ? p.usd : null, source: p.source ?? 'Simulated price', updatedAt: p.updatedAt }] : []; }
+    return ['ETH', 'BNB', 'SOL'].map(symbol => { const p = Object.values(config.prices ?? {}).find(p => p.symbol === symbol && !p.simulation && freshPrice(p)); return { symbol, usd: p?.usd ?? null, source: p?.source, updatedAt: p?.updatedAt }; });
+  },
+  onQuery: query => syncSearch(query),
+};
+function closeExplore() { exploreView?.dispose(); exploreView = null; }
 function rerender(reason) {
   const view = $('#view'); view.setAttribute('aria-busy', state ? 'false' : 'true');
   if (!config) return;
@@ -214,6 +218,7 @@ function rerender(reason) {
     return;
   }
   analyticsView?.dispose();analyticsView=null;
+  if (r.name !== 'explore') closeExplore();
   if(r.name==='notfound'){view.setAttribute('aria-busy','false');view.replaceChildren(notFoundView());return;}
   if (r.name === 'launch') {
     // The launch flow owns its own state; a data refresh only updates balances and connection status.
@@ -223,7 +228,7 @@ function rerender(reason) {
   }
   launchView = null;
   if(['portfolio','rewards'].includes(r.name)&&(mode!=='testnet'||!wallet.address)){view.replaceChildren(h('div.empty',h('h1',r.name==='rewards'?'Rewards':'Portfolio'),h('p','Connect your wallet to see your '+r.name+'.'),h('p.small.muted','Connecting lets you interact—it does not give us access to your funds.'),h('button.btn.btn-primary',{type:'button',on:{click:connectCurrent}},'Connect wallet')));return;}
-  if (!state) { view.replaceChildren(loadingView()); return; }
+  if (!state) { closeExplore(); view.replaceChildren(loadingView()); return; }
   if (r.name === 'token') {
     // Keep the editor and wallet-signing state intact while a holder is writing.
     if(reason==='background'&&(document.activeElement?.id==='holder-thesis'||view.querySelector('.thesis-editor[data-pending="true"]')))return;
@@ -244,26 +249,17 @@ function rerender(reason) {
   }
   else if (r.name === 'portfolio') view.replaceChildren(portfolioView());
   else if (r.name === 'rewards') view.replaceChildren(renderRewards(ctx));
-  else view.replaceChildren(exploreView());
+  else if (!exploreView || !view.contains(exploreView.root)) {
+    // One Explore controller per visit: later refreshes update its cards in place.
+    closeExplore(); exploreView = createExplore(exploreSource); view.replaceChildren(exploreView.root); exploreView.setTrades(recentBuys);
+  }
+  else if (reason === 'route') exploreView.readUrl();
+  else exploreView.update();
 }
 function notFoundView() { return h('section.not-found', h('h1', 'Page not found.'), h('p', 'That page doesn’t exist. Every token, launch and chart starts from Explore.'), h('a.btn-accent', { href: '#/' }, icon('compass', 'icon-sm'), 'Explore tokens')); }
-function loadingView() { return h('div', h('div.page-head', h('div', h('h1', 'Explore tokens'), h('p', 'Loading the launchpad…'))), h('div.token-grid', [1, 2, 3].map(() => h('div.skeleton', { 'aria-hidden': 'true' })))); }
+function loadingView() { return currentRoute.name === 'explore' ? exploreSkeleton() : h('div', h('div.page-head', h('div', h('h1', 'Loading…'), h('p', 'Loading the launchpad…'))), h('div.token-grid', [1, 2, 3].map(() => h('div.skeleton', { 'aria-hidden': 'true' })))); }
 
-/* ---------- Explore ---------- */
-function stats() {
-  const totals = {};
-  const listings=mode==='local'?state.tokens:allTokens;
-  for (const t of listings) { const q = t.quoteSymbol ?? state.nativeSymbol ?? 'ETH'; totals[q] = (totals[q] ?? 0) + Number(t.reserve); }
-  const solana = mode === 'testnet' && wallet === solWallet;
-  const dex = mode === 'local' ? config.dex : wallet.dex;
-  // Balances are in the network's native coin (pricing is native only).
-  const balance = `${number(state.nativeBalance ?? state.balance, 4)} ${state.nativeSymbol ?? state.balanceSymbol ?? 'ETH'}`;
-  return h('section.stats', { 'aria-label': 'Launchpad overview' },
-    h('div', h('span', 'Tokens launched'), h('strong', String(listings.length))),
-    h('div', h('span', 'Trading reserves'), h('strong', Object.entries(totals).map(([q, v]) => `${number(v, v < 1 ? 4 : 2)} ${q}`).join(' + ') || '0'), h('small', mode === 'local' ? 'Simulated assets held by curves and pools' : 'Test assets held by curves and pools')),
-    h('div', h('span', mode === 'local' ? 'Your simulated balance' : 'Your balance'), h('strong', state.disconnected ? '—' : balance)),
-    h('div', h('span', 'Trading fee'), h('strong', solana ? '1.25% → 0.30%' : dex ? '1.25% → 1%' : '1.25%'), h('small', solana ? 'Curve, then PumpSwap pool' : dex ? 'Curve, then Uniswap v3 pool' : 'Bonding curve')));
-}
+/* ---------- Token cards (portfolio) ---------- */
 function age(created){const seconds=Math.max(0,(nowSeconds()*1000-created)/1000);return seconds<60?`${Math.floor(seconds)}s`:seconds<3600?`${Math.floor(seconds/60)}m`:seconds<86400?`${Math.floor(seconds/3600)}h`:`${Math.floor(seconds/86400)}d`;}
 function tokenCard(token) {
   const life = lifecycle(token), pct = progressOf(token), p = pricing(token);
@@ -279,51 +275,6 @@ function tokenCard(token) {
     h('p.card-change',{'data-direction':!token.priceChange24h?'unknown':token.priceChange24h.percent>=0?'up':'down',title:token.priceChange24h?.basis??'Requires confirmed prices near both comparison times'},token.priceChange24h?icon(token.priceChange24h.percent>=0?'trending-up':'trending-down','icon-sm'):null,token.priceChange24h?`${token.priceChange24h.percent>=0?'+':''}${number(token.priceChange24h.percent,2)}% — 24h`:'24h change unavailable'),
     token.complete&&!token.graduated?h('p.small.muted','Migration pending. Open token for status and next action.'):null,
     h('div.progress', h('div.progress-label', h('span', token.graduated ? 'Graduated' : 'Bonding curve'), h('strong', `${number(pct, 1)}%`)), bar(pct, token.complete || token.graduated)));
-}
-function filtered(list) {return discoveryTokens(list,{query:ui.query,category:ui.stage});}
-function exploreView() {
-  const grid = h('div.token-grid');
-  const empty = h('div');
-  const draw = () => {
-    const items = filtered([...(mode==='local'?state.tokens:allTokens)]);
-    grid.replaceChildren(...items.map(tokenCard));
-    empty.replaceChildren(items.length ? '' : emptyState());
-    count.textContent = `${items.length} ${items.length === 1 ? 'token' : 'tokens'}`;
-  };
-  const count = h('span.muted.small');
-  const search = h('input.input', { type: 'search', placeholder: 'Search by name or symbol', 'aria-label': 'Search tokens', value: ui.query, on: { input: e => { ui.query = e.target.value; syncSearch(ui.query); draw(); } } });
-  const stages=h('div.stage-filters',{role:'group','aria-label':'Launch stage'},[['all','All'],['migrating','Migrating'],['graduated','Graduated'],['new','New']].map(([key,label])=>h('button.btn.btn-ghost.btn-sm',{type:'button','aria-pressed':String(ui.stage===key),on:{click:e=>{ui.stage=key;stages.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b===e.currentTarget)));draw();}}},label)));
-  const view = h('div',
-    h('section.intro', h('div', h('h1', 'Create a token. Build your community.'), h('p', 'Launch a token, choose its trading pair and decide where creator fees go.')),
-      h('div.intro-actions', h('a.btn.btn-primary.btn-lg', { href: '#/launch' }, icon('plus'), 'Create token'), h('button.btn.btn-secondary.btn-lg', { type: 'button', on: { click: () => $('#how-dialog').showModal() } }, 'How it works'))),
-    discoveryErrors.length?h('p.small.error-text',`Some networks could not load: ${discoveryErrors.join(', ')}. Refresh to retry.`):null,
-    h('div.price-ticker',{'aria-label':'Native asset USD reference prices'}, ['ETH','BNB','SOL'].map(symbol=>{const p=Object.values(config.prices??{}).find(p=>p.symbol===symbol&&!p.simulation&&p.status==='fresh'&&nowSeconds()-p.updatedAt<=(p.maxAge??180));return h('span',{title:p?.updatedAt?`${p.source} — Updated ${new Date(p.updatedAt*1000).toLocaleString()}`:'Price unavailable'},assetIcon(symbol),h('strong',symbol),p?.status==='fresh'?'$'+number(p.usd):'Price unavailable');})),
-    h('details.price-sources',h('summary','Price sources & freshness'),['ETH','BNB','SOL'].map(symbol=>{const p=Object.values(config.prices??{}).find(p=>p.symbol===symbol&&!p.simulation&&p.status==='fresh'&&nowSeconds()-p.updatedAt<=(p.maxAge??180));return h('p.small.muted',`${symbol}: ${p?.source??'Unavailable'}${p?.updatedAt?' · '+new Date(p.updatedAt*1000).toLocaleString():''}. Display reference; launch fees are verified separately by the contract.`);})),
-    h('section', { 'aria-labelledby': 'tokens-title' },
-      h('div.page-head', h('div', h('h2#tokens-title', 'Tokens'), count), h('button.btn.btn-ghost.btn-sm', { type: 'button', on: { click: () => refresh().then(() => toast('Updated.')).catch(e => toast(errorText(e), { kind: 'error' })) } }, icon('refresh-cw', 'icon-sm'), 'Refresh')),
-      h('div.toolbar', h('label.search', icon('search'), search)),stages, grid, empty),
-    );
-  draw();
-  return view;
-}
-function emptyState() {
-  const text = ui.query ? 'No tokens match your search. Try another name or symbol.' : ui.filter !=='all'&&state.disconnected?'Connect your wallet to see your tokens.':ui.filter === 'held' ? 'You do not hold any tokens yet.' : ui.filter === 'created' ? 'You have not created a token yet.' : 'No indexed launches yet. Tokens across Elpida networks appear here.';
-  const needsWallet=state.disconnected&&ui.filter!=='all';
-  return h('div.empty', h('img', { src: '/assets/brand/elpida-mark.svg', alt: '' }), h('h3', needsWallet ? 'Wallet not connected' : 'Nothing here yet'), h('p', text),
-    needsWallet ? h('button.btn.btn-primary', { type: 'button', on: { click: () => connectCurrent() } }, icon('wallet'), 'Connect wallet') : null);
-}
-function activitySection() {
-  const items = mode === 'local' ? state.activity ?? [] : state.tokens.map(t => ({ type: 'Launch', symbol: t.symbol, account: t.creator, hash: t.hash, url: t.hash ? wallet.txUrl(t.hash) : t.url, time: t.created }));
-  const rows = items.slice(0, 6).map(a => {
-    const when = a.time ? new Date(a.time).toLocaleString([], { hour: '2-digit', minute: '2-digit', month: 'short', day: 'numeric' }) : '';
-    const link = a.url ?? (mode === 'testnet' && a.hash ? wallet.txUrl(a.hash) : null);
-    return h('div.activity-row', h('span.glyph', { 'data-kind': a.type }, icon(a.type === 'Sell' ? 'trending-up' : a.type === 'Launch' ? 'plus' : a.type === 'Buy' ? 'arrow-down-up' : 'coins', 'icon-sm')),
-      h('div', h('strong', `${a.type === 'Fees paid' ? 'Creator fees distributed' : a.type} · ${a.symbol}`), h('span.meta', a.amount ? `${number(a.amount, 4)} ${a.type === 'Sell' ? a.symbol : a.quoteSymbol ?? state.nativeSymbol ?? 'ETH'}` : 'On-chain transaction')),
-      h('span.meta.who', short(a.account)),
-      link ? h('a.small', { href: link, target: '_blank', rel: 'noopener noreferrer' }, 'View', icon('external-link', 'icon-sm')) : h('span.meta', when));
-  });
-  return h('section.section', { 'aria-labelledby': 'activity-title' }, h('div.page-head', h('h2#activity-title', 'Recent activity'), h('span.muted.small', mode === 'local' ? 'This local session' : `Launches on ${wallet.net.name}`)),
-    rows.length ? h('div.activity', rows) : h('p.muted', 'Launches and trades will appear here.'));
 }
 
 /* ---------- Portfolio ---------- */
@@ -397,9 +348,17 @@ function openWalletDialog(net = wallet.net) {
 async function connectCurrent() { openWalletDialog(wallet.net); }
 
 /* ---------- Last sale strip ---------- */
+// Recent buys feed the top bar strip (public networks only) and the Explore Live feed (the simulation's
+// own buys in the simulation).
 async function refreshLastSale() {
-  if (mode !== 'testnet') { renderLastSale([], { href: () => '#/' }); return; }
-  try { renderLastSale(await api('public/recent-trades?limit=16'), { href: t => `#/token/${t.address}?network=${encodeURIComponent(t.network)}` }); } catch {}
+  const local = mode !== 'testnet', asked = mode;
+  if (local) renderLastSale([], { href: () => '#/' });
+  let trades = [];
+  try { trades = await api(local ? 'recent-trades?limit=20' : 'public/recent-trades?limit=20'); } catch { return; }
+  if (mode !== asked) return;
+  recentBuys = Array.isArray(trades) ? trades : [];
+  if (!local) renderLastSale(recentBuys, { href: t => `#/token/${t.address}?network=${encodeURIComponent(t.network)}` });
+  exploreView?.setTrades(recentBuys);
 }
 function openTools() {
   const body = $('#tools-body'); const error = h('p.error-text', { role: 'alert' });
@@ -468,7 +427,7 @@ async function init() {
   const selectChain=key=>chooseChain(key).catch(e=>{toast(errorText(e),{kind:'error'});updateChrome();});
   chainControls=[['#env-button','chain-options'],['#env-button-mobile','chain-options-mobile']].filter(([id])=>$(id)).map(([id,listId])=>chainSelector({button:$(id),listId,networks,current:()=>mode==='local'?'local':currentChain(),onSelect:selectChain}));
   $('#account-button').addEventListener('click', () => (mode === 'testnet' && !wallet.address ? connectCurrent() : openTools()));
-  initShell({ onHow: () => $('#how-dialog').showModal(), onSearch: query => { ui.query = query; if (currentRoute.name !== 'explore') { if (query) location.hash = '#/'; } else rerender('background'); } });
+  initShell({ onHow: () => $('#how-dialog').showModal(), onSearch: query => { if (currentRoute.name === 'explore' && exploreView) exploreView.setQuery(query); else if (query || currentRoute.name === 'explore') location.hash = exploreHash({ query }); } });
   window.addEventListener('hashchange', route);
   updateChrome(); route();
   // Return to the testnet used last time, but only silently: wallets that already trust Elpida reconnect

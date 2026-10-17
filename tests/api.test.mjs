@@ -126,6 +126,13 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal((await request('sell', { token: address, amount: held, account: '1', slippage: '0.5' })).status, 200);
     assert.equal((await state('1')).tokens[0].balance, '0.0');
     assert.equal((await request('buy', { token: address, amount: '0.01', slippage: '50' })).status, 400);
+    // Explore's 24h activity (launch buy, buy, sell) and the simulation's recent trades, public fields only.
+    const listed = (await state('0')).tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
+    assert.deepEqual([listed.trades24h, listed.buys24h, listed.sells24h], [3, 2, 1]);
+    assert.ok(listed.volume24h > 0.02 && listed.lastBuyAt > 0 && listed.lastTradeAt >= listed.lastBuyAt);
+    const recent = await (await fetch(`${base}/api/recent-trades?limit=2`)).json();
+    assert.deepEqual(recent.map(r => [r.address.toLowerCase(), r.side, r.network]), [[address.toLowerCase(), 'sell', 'local'], [address.toLowerCase(), 'buy', 'local']]);
+    assert.deepEqual(Object.keys(recent[0]).sort(), ['address', 'image', 'name', 'network', 'side', 'symbol', 'timestamp']);
   });
   await t.test('pays accrued fees and survives rejected requests', async () => {
     const before = await state();
