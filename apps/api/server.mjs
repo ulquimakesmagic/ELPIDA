@@ -21,6 +21,7 @@ import {OperationsMonitor,evaluateOperations} from './operations-health.mjs';
 import {tmpdir} from 'node:os';
 import {Contract,keccak256,formatUnits,parseUnits} from 'ethers';
 import {HolderTheses,thesisIdentity} from './holder-theses.mjs';
+import {HolderChat} from './holder-chat.mjs';
 import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
 import { MAX_METADATA_REQUEST_BYTES, normalizeMetadata } from '../web/metadata.mjs';
@@ -35,6 +36,8 @@ const resources = new Map([['/', ['index.html', 'text/html']], ['/launch', ['ind
 const assetRoot = fileURLToPath(new URL('../web/assets/', import.meta.url));
 resources.set('/terminal-chart.mjs',['terminal-chart.mjs','text/javascript']);
 resources.set('/holder-terminal.mjs',['holder-terminal.mjs','text/javascript']);
+resources.set('/holder-chat.mjs',['holder-chat.mjs','text/javascript']);
+resources.set('/trade-filter.mjs',['trade-filter.mjs','text/javascript']);
 resources.set('/wallet-discovery.mjs', ['wallet-discovery.mjs','text/javascript']);
 resources.set('/wallet-token.mjs', ['wallet-token.mjs','text/javascript']);
 resources.set('/discovery.mjs', ['discovery.mjs','text/javascript']);
@@ -156,6 +159,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     const accounts=await index.connection.getTokenAccountsByOwner(new solanaWeb3.PublicKey(i.author),{mint:new solanaWeb3.PublicKey(i.token)},'confirmed');return formatUnits(accounts.value.reduce((n,a)=>n+(a.account.data.length>=72?a.account.data.readBigUInt64LE(64):0n),0n),6);
   }
   const theses=new HolderTheses({path:port===0?':memory:':dataFile('public-theses.sqlite'),origin:publicUrl??`http://${host}:${port}`,holding:async i=>Number(await heldBalance(i,true))>0});
+  const chat=new HolderChat({path:port===0?':memory:':dataFile('public-holder-chat.sqlite'),origin:()=>publicUrl??`http://${host}:${server.address().port}`,holding:async i=>Number(await heldBalance(i,true))>0});
+  let chatWindow=Date.now(),chatReads=0,chatWrites=0;
+  const chatLimit=write=>{if(Date.now()-chatWindow>=60000){chatWindow=Date.now();chatReads=0;chatWrites=0;}return write?++chatWrites>120:++chatReads>600;};
   let terminalWindow=Date.now(),terminalCount=0,thesisCount=0;
   const uploadAdmission=new UploadAdmission({path:port===0?':memory:':dataFile('metadata-admission.sqlite')});
   let diagnosticWindow=Date.now(),diagnosticCount=0;
@@ -185,6 +191,14 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
       if (req.method === 'GET') {
+        if(url.pathname==='/api/chat'){
+          if(chatLimit(false))return send(429,{error:'Chat is busy. Retry shortly.'});
+          const network=url.searchParams.get('network'),token=url.searchParams.get('token'),author=url.searchParams.get('author');
+          const i=thesisIdentity(network,token,author??token);indexedMarket(i.network,i.token);
+          const data=chat.list(i.network,i.token,{before:url.searchParams.has('before')?Number(url.searchParams.get('before')):null});
+          const canPost=author?Number(await heldBalance(i,true))>0:false;
+          return send(200,{...data,canPost});
+        }
         const logoMatch=url.pathname.match(/^\/api\/wallet-logo\/([a-z0-9-]+)\/(0x[0-9a-fA-F]{40})$/);
         if(logoMatch){
           const [_,key,address]=logoMatch;
@@ -294,6 +308,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       try { body = JSON.parse(rawBody.toString()); } catch { return send(400, { error: 'Invalid request.' }); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) return send(400, { error: 'Invalid request.' });
       const action = url.pathname.slice('/api/'.length);
+      if(['chat/prepare','chat/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat publishing is busy. Retry shortly.'});return send(200,action==='chat/prepare'?await chat.prepare(body):await chat.save(body));}
       if(['theses/prepare','theses/save'].includes(action)){if(Date.now()-terminalWindow>=60000){terminalWindow=Date.now();terminalCount=0;thesisCount=0;}if(++thesisCount>30)return send(429,{error:'Thesis publishing is busy. Retry in a minute.'});return send(200,action==='theses/prepare'?await theses.prepare(body):await theses.save(body));}
       if(action==='public/metadata/prepare')return send(200,{message:publicIndex.metadataMessage(body).message});
       if(action==='public/metadata/save')return send(200,publicIndex.saveMetadata(body));
@@ -334,7 +349,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   });
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, vanity, async close() {vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close(); await publicIndex.close();uploadAdmission.close();theses.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, vanity, async close() {vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

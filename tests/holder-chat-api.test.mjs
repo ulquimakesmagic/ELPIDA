@@ -1,0 +1,25 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {Contract} from 'ethers';
+import {startServer} from '../apps/api/server.mjs';
+
+test('chat HTTP routes check live token holdings, wallet signatures, origin and CSRF',async t=>{
+ const app=await startServer({port:0,seed:false});t.after(()=>app.close());
+ const config=await (await fetch(app.url+'/api/config')).json();
+ const launch=await app.runtime.transact('launch',{name:'Chat test',symbol:'CHAT',pair:'native',firstBuy:'0.025'});
+ const signer=await app.runtime.provider.getSigner(0),other=await app.runtime.provider.getSigner(1),author=await signer.getAddress();
+ const body={network:'local',token:launch.token,author,text:'Hello <b>holders</b>'};
+ const post=async(action,data,headers={})=>{const r=await fetch(app.url+'/api/'+action,{method:'POST',headers:{Origin:app.url,'Content-Type':'application/json','X-Elpida-Token':config.csrf,...headers},body:JSON.stringify(data)});return {status:r.status,body:await r.json()};};
+ assert.equal((await post('chat/prepare',body,{Origin:'https://evil.example'})).status,403);
+ assert.equal((await post('chat/prepare',body,{'X-Elpida-Token':'bad'})).status,403);
+ const rejected=await post('chat/prepare',{...body,author:await other.getAddress()});assert.equal(rejected.status,400);
+ const prepared=await post('chat/prepare',body);assert.equal(prepared.status,200);
+ const signed={...body,nonce:prepared.body.nonce,signature:await signer.signMessage(prepared.body.message)};
+ assert.equal((await post('chat/save',signed)).status,200);assert.equal((await post('chat/save',signed)).status,400);
+ const page=await (await fetch(app.url+'/api/chat?network=local&token='+launch.token)).json();assert.equal(page.canPost,false);assert.equal(page.messages.length,1);assert.equal(page.messages[0].text,body.text);
+ await app.runtime.transact('buy',{token:launch.token,amount:'0.01',account:'1'});
+ const second={...body,author:await other.getAddress(),text:'I hold too',replyTo:page.messages[0].id},p2=await post('chat/prepare',second);assert.equal(p2.status,200);
+ const token=new Contract(launch.token,app.runtime.config.contracts.token.abi,other);await(await token.transfer(author,await token.balanceOf(await other.getAddress()))).wait();
+ assert.equal((await post('chat/save',{...second,nonce:p2.body.nonce,signature:await other.signMessage(p2.body.message)})).status,400);
+ for(const path of ['/holder-chat.mjs','/trade-filter.mjs'])assert.equal((await fetch(app.url+path)).status,200);
+});

@@ -84,5 +84,12 @@ export function standardSolanaProvider(id,web3,chain='solana:devnet') {
       if(!result?.signedTransaction)throw new Error('The wallet did not return a signed transaction.');
       return web3.Transaction.from(result.signedTransaction);
     }
-  };adapters.set(key,provider);return provider;
+  };
+  if(typeof wallet.features['solana:signMessage']?.signMessage==='function')provider.signMessage=async message=>{
+    if(!account||!wallet.accounts.some(a=>a.address===account.address&&valid(a)&&a.features?.includes('solana:signMessage')))throw new Error('Your wallet account changed or cannot sign messages. Connect again.');
+    const [result]=await wallet.features['solana:signMessage'].signMessage({account,message});
+    if(result?.signature?.length!==64||result?.signedMessage?.length!==message.length||!message.every((byte,i)=>byte===result.signedMessage[i]))throw new Error('Wallet did not sign the exact requested message.');
+    return {signature:result.signature};
+  };
+  adapters.set(key,provider);return provider;
 }
