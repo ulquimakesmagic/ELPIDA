@@ -4,6 +4,28 @@ import {resolveTxt} from 'node:dns/promises';
 import {normalizeRewardPolicy,holderDistribution} from '../web/reward-policy.mjs';
 import {XVerification} from './x-verification.mjs';
 const dead='0x000000000000000000000000000000000000dead';
+
+// Resume incomplete local holder epochs without recomputing the snapshot or
+// redistributing funds. On-chain epochPaid is the final authority when a
+// transaction was mined but its response was lost. Production must persist
+// pending epoch plans, not rely on this in-memory record.
+export async function runRewardBatches(vault,epoch){
+ const {asset,snapshot,duration,allocations}=epoch;
+ while(epoch.nextBatch<allocations.length){
+  const batch=allocations.slice(epoch.nextBatch,epoch.nextBatch+64);
+  const payments=await Promise.all(batch.map(row=>vault.epochPaid(asset,snapshot,row.address)));
+  if(payments.some(Boolean)&&!payments.every(Boolean))throw new Error('Partial epoch batch on-chain: manual reconciliation required.');
+  if(!payments.every(Boolean)){
+   try {
+    await (await vault.distribute(asset,batch.map(row=>row.address),batch.map(row=>BigInt(row.amount)),duration,snapshot)).wait();
+   } catch(error){
+    const confirmed=await Promise.all(batch.map(row=>vault.epochPaid(asset,snapshot,row.address)));
+    if(!confirmed.every(Boolean))throw error;
+   }
+  }
+  epoch.nextBatch+=batch.length;
+ }
+}
 export class RewardEngine {
  constructor({compiled,provider,executor,verifier,tokens,curveAbi,tokenAbi,dex}){
   Object.assign(this,{provider,executor,verifier,tokens,curveAbi,tokenAbi,dex});this.artifact=compiled['contracts/evm/src/ElpidaRewardVault.sol'].ElpidaRewardVault;
@@ -32,6 +54,7 @@ export class RewardEngine {
  }
  async process(record){
   const r=this.records.get(record.address);if(!r)return;
+  if(r.pendingEpoch)return this.completePending(record,r);
   const source=record.pair==='native'?ZeroAddress:(record.quoteAddress||ZeroAddress),d=record.quoteDecimals,v=r.vault;
   const ownCurve=new Contract(record.curve,this.curveAbi,this.executor);
   if(await ownCurve.creatorFees()>0n||await ownCurve.protocolFees()>0n)await(await ownCurve.withdrawFees()).wait();
@@ -55,9 +78,21 @@ export class RewardEngine {
    await(await (route==='dex'?v.convertDex(source,asset,amount,out*9950n/10000n||1n):v.convert(source,asset,route,amount,out*9950n/10000n||1n))).wait();budget=await v.strategyBalance(asset);
   }
   const allocations=holderDistribution(budget,balances,parseUnits(r.policy.minimumHolding,18),excluded);
-  for(let i=0;i<allocations.length;i+=64){const batch=allocations.slice(i,i+64);await(await v.distribute(asset,batch.map(h=>h.address),batch.map(h=>h.amount),r.policy.mode==='buyback'?r.policy.vestingDays*86400:0,snapshot)).wait();}
-  r.epochs++;r.status=r.policy.mode==='buyback'?'Buyback distributed into linear vesting':'Holder distribution completed';
-  r.events.unshift({snapshot,asset,budget:budget.toString(),holders:allocations.length,mode:r.policy.mode,at:Date.now()});r.events.splice(50);
+  if(!allocations.length){r.status='Waiting for eligible holders';return;}
+  r.pendingEpoch={asset,snapshot,duration:r.policy.mode==='buyback'?r.policy.vestingDays*86400:0,
+    budget:budget.toString(),mode:r.policy.mode,nextBatch:0,
+    allocations:allocations.map(h=>({address:h.address,amount:h.amount.toString()}))};
+  return this.completePending(record,r);
+ }
+ async completePending(record,r){
+  const epoch=r.pendingEpoch;
+  await runRewardBatches(r.vault,epoch);
+  r.epochs++;
+  r.status=epoch.mode==='buyback'?'Buyback distributed into linear vesting':'Holder distribution completed';
+  r.events.unshift({snapshot:epoch.snapshot,asset:epoch.asset,budget:epoch.budget,
+    holders:epoch.allocations.length,mode:epoch.mode,at:Date.now()});
+  r.events.splice(50);
+  r.pendingEpoch=null;
  }
  async dexQuote(input,output,amount){const wrapped=this.dex.v3.weth.target;const result=await this.dex.v3.quoter.quoteExactInputSingle.staticCall({tokenIn:input===ZeroAddress?wrapped:input,tokenOut:output===ZeroAddress?wrapped:output,amountIn:amount,fee:10000,sqrtPriceLimitX96:0});return result[0];}
  async tick(){for(const record of this.tokens){if(!this.records.has(record.address))continue;try{await this.process(record);}catch(error){this.records.get(record.address).status='Waiting · '+(error.shortMessage??error.message);}}}

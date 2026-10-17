@@ -23,6 +23,8 @@ contract ElpidaRewardVault is ReentrancyGuard {
     mapping(address=>uint256) public strategyBalance;
     mapping(bytes32=>mapping(address=>uint256)) public identityBalance;
     mapping(address=>mapping(address=>uint256)) public claimable;
+    // A holder may be paid only once per asset and snapshot, including across batches.
+    mapping(address=>mapping(uint256=>mapping(address=>bool))) public epochPaid;
     mapping(bytes32=>address) public verifiedWallet;
     event Synced(address indexed asset,uint256 amount);
     event IdentityBound(bytes32 indexed identity,address indexed wallet);
@@ -80,6 +82,8 @@ contract ElpidaRewardVault is ReentrancyGuard {
         for(uint256 i;i<holders.length;i++){require(holders[i]!=address(0)&&amounts[i]>0,"holder");total+=amounts[i];}
         require(total<=strategyBalance[asset],"budget");strategyBalance[asset]-=total;
         for(uint256 i;i<holders.length;i++){
+            require(!epochPaid[asset][snapshotBlock][holders[i]],"duplicate epoch holder");
+            epochPaid[asset][snapshotBlock][holders[i]]=true;
             if(duration>0)grants.push(Grant(asset,holders[i],amounts[i],0,uint64(block.timestamp),duration));
             else if(asset==address(0)){accounted[asset]-=amounts[i];(bool ok,)=holders[i].call{value:amounts[i]}("");if(!ok){accounted[asset]+=amounts[i];claimable[holders[i]][asset]+=amounts[i];}}
             else {accounted[asset]-=amounts[i];IERC20(asset).safeTransfer(holders[i],amounts[i]);}

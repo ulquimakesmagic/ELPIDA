@@ -1,5 +1,7 @@
 # Elpida wallets and funding
 
+> **Decision superseding the historical research below (17 October 2026):** Elpida will **not** implement a unified USDC balance, Circle Gateway deposit vault, or automatic cross-chain settlement. Users connect and fund each chain's wallet separately. Sections discussing Gateway and unified balances are retained only as historical exploration; they are **not** active product requirements. See [current implementation scope](IMPLEMENTATION_SCOPE_2026-10-17.md).
+
 **11 October update:** funding is 10 USDC plus the first buy in the native/USDC pair, without a liquidity deposit. Virtual trading precedes locked-pool graduation. The deposit examples below are historical. See [current specification](VIRTUAL_CURVE_AND_PAIRS.md).
 
 Design review: 10 October 2026. Recommendations below are not implemented wallet or bridge integrations.

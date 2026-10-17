@@ -4,6 +4,9 @@
 
 For an online test preview, see [Railway setup](docs/RAILWAY_TESTING.md). The included Dockerfile serves the UI and API together; demo-chain state resets on restart.
 
+
+**Product scope update (17 October 2026):** Elpida uses **separately connected, chain-specific wallets and balances** for Solana, Ethereum, Base, BNB Chain and Robinhood Chain. **Do not build a unified USDC cash balance, shared custody vault, or automatic cross-chain funding layer.** The existing Model 10 / Solana market-cap and reserve graduation configuration remains unchanged. See [scope decision](docs/IMPLEMENTATION_SCOPE_2026-10-17.md).
+
 Independent multichain memecoin launchpad targeting Solana, Ethereum, Base, BNB Chain and Robinhood Chain. New EVM factories enforce a $10 creation fee using an execution-time on-chain USD oracle, with optional 10 USDC payment independent of the trading pair. Native curves start at approximately $5,000 FDV before the first purchase. See [USD pricing, chain readiness and verification](docs/USD_PRICING_AND_UX.md); older native-pricing guides and configuration describe legacy deployments.
 
 The localhost preview uses model 10 ([spec](docs/MODEL_10.md)): an oracle-priced virtual curve from $5,000 to $50,000 FDV (10×, the same shape as the Solana program), a 90% → 1.25% anti-snipe fee over the first minute, no cap on the creator's first buy (shown as a "Dev bought" badge), then actual Uniswap v3 graduation with a permanently locked full-range position. A griefed graduation pool is rebalanced within a 2% budget, and a curve that cannot graduate within 24 hours can be reopened for trading. Base Sepolia's pinned team launchpad is still model 9 until the model 10 factory is deployed. The SQLite indexer reads both curve and DEX trades. Base Sepolia wallet deployment is prepared; it requires your signatures and test funds. Model 8 (basic, no external DEX) serves other configured EVM previews. Solana and Robinhood USD-priced launches remain blocked pending verified pricing integrations. See [DEX testing guide](docs/BASE_SEPOLIA_DEX_TESTING.md).
@@ -11,6 +14,7 @@ The localhost preview uses model 10 ([spec](docs/MODEL_10.md)): an oracle-priced
 See [current curve/pair guide](docs/VIRTUAL_CURVE_AND_PAIRS.md), [launchpad research](docs/LAUNCHPAD_RESEARCH.md) and [wallet/funding architecture](docs/WALLET_AND_CROSS_CHAIN_ARCHITECTURE.md). The direct-pool guide is historical.
 
 ## Agreed product requirements
+- Wallet connection and funds are **per chain**. A connected wallet signs each chain's launch and trade; no platform-wide USDC cash account or bridge is planned.
 - $10 token creation fee to protocol, calculated from a verified native USD feed at execution; optional 10 USDC payment on configured EVM networks.
 - Mandatory developer first buy of any **valid positive** amount, atomic with launch, at the 1.25% base fee and with no cap. The creator's launch buy and live holding are shown publicly.
 - Virtual curve first, then locked liquidity funded by accumulated trades; no separate liquidity deposit.
