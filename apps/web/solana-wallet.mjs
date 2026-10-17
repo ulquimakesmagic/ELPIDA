@@ -182,7 +182,7 @@ export class SolanaWallet {
     const group = kind => {
       const assets = all.filter(cfg => cfg.kind === kind).sort((a, b) => Number(b.test) - Number(a.test)).map(asset);
       if (assets.length) return { assets };
-      return { assets: [], unavailable: PAIR_LIMITS.solana[kind] ?? (!this.deployment ? 'The Solana program is not deployed yet.' : this.net.mainnet ? `No ${kind === 'token' ? 'paired token' : 'asset of this kind'} is approved on mainnet yet.` : `Not set up on ${this.net.name} yet. Run solana-upgrade.cmd to add the SOL and test-token pairs.`) };
+      return { assets: [], unavailable: PAIR_LIMITS.solana[kind] ?? (!this.deployment ? 'The Solana program is not deployed yet.' : this.net.mainnet ? `No ${kind === 'token' ? 'paired token' : 'asset of this kind'} is approved on mainnet yet.` : `Not set up on ${this.net.name} yet. Run solana-upgrade.cmd to add the SOL, USDC and test-token pairs.`) };
     };
     return { native: group('native'), usdc: group('usdc'), xstock: group('xstock'), token: group('token') };
   }

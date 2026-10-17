@@ -1,7 +1,8 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { request as httpRequest } from 'node:http';
-import { startServer } from '../apps/api/server.mjs';
+import { readFileSync } from 'node:fs';
+import { startServer, solanaConfig } from '../apps/api/server.mjs';
 import {MAX_IMAGE_BYTES} from '../apps/web/metadata.mjs';
 import {keccak256,toUtf8Bytes} from 'ethers';
 
@@ -153,4 +154,14 @@ test('localhost API exercises launch, trading, fee payout and request protection
     for(let i=0;i<21;i++)assert.equal((await fetch(`${base}/api/metadata/publish`,{method:'POST',headers:{'Content-Type':'application/json','X-Elpida-Token':config.csrf},body:'not json'})).status,410);
     assert.equal((await request('metadata/stage',{network:'unsupported'})).status,400);
   });
+});
+
+test('the Solana devnet deployment record keeps every pair kind, including USDC', () => {
+  const record = JSON.parse(readFileSync(new URL('../deployments/solana-devnet.json', import.meta.url), 'utf8'));
+  const pairs = solanaConfig().deployment?.pairs ?? [];
+  assert.deepEqual(pairs.map(p => p.kind).sort(), record.pairs.map(p => p.kind).sort(), 'no recorded pair is dropped');
+  const usdc = pairs.find(p => p.kind === 'usdc');
+  assert.ok(usdc, 'USDC pair served to the browser');
+  assert.equal(usdc.mint, '4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU');
+  assert.equal(usdc.decimals, 6);
 });
