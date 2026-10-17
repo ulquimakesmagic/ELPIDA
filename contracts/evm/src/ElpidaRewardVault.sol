@@ -3,6 +3,10 @@ pragma solidity ^0.8.24;
 import "@openzeppelin/contracts/token/ERC20/utils/SafeERC20.sol";
 import "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
 interface IRewardCurve { function buy(uint256,uint256) external payable returns(uint256); function token() external view returns(address); function quote() external view returns(address); }
+interface IHolderEpochFunding {
+    function publisher() external view returns(address);
+    function publishEpoch(uint256,address,address,uint256,uint256,bytes32,bytes32,uint256,uint32) external;
+}
 interface IRewardWrapped {function deposit() external payable;function withdraw(uint256) external;}
 interface IRewardRouter {struct Swap {address tokenIn;address tokenOut;uint24 fee;address recipient;uint256 amountIn;uint256 amountOutMinimum;uint160 sqrtPriceLimitX96;}function exactInputSingle(Swap calldata) external payable returns(uint256);}
 /// @notice Local-test reward treasury. Executor/verifier are trusted; do not deploy as permissionless production automation.
@@ -11,6 +15,7 @@ contract ElpidaRewardVault is ReentrancyGuard {
     address public immutable executor;
     address public immutable verifier;
     address public mainToken;
+    address public holderDistributor;
     address public mainCurve;
     address public sourceAsset;
     address public dexRouter;
@@ -25,6 +30,8 @@ contract ElpidaRewardVault is ReentrancyGuard {
     mapping(address=>mapping(address=>uint256)) public claimable;
     // A holder may be paid only once per asset and snapshot, including across batches.
     mapping(address=>mapping(uint256=>mapping(address=>bool))) public epochPaid;
+    mapping(address=>mapping(uint256=>bool)) public holderSnapshotFunded;
+    mapping(address=>mapping(uint256=>bool)) public legacySnapshotUsed;
     mapping(bytes32=>address) public verifiedWallet;
     event Synced(address indexed asset,uint256 amount);
     event IdentityBound(bytes32 indexed identity,address indexed wallet);
@@ -78,6 +85,8 @@ contract ElpidaRewardVault is ReentrancyGuard {
     // Trusted local snapshot publisher. Production requires independently verifiable roots and a funded keeper.
     function distribute(address asset,address[] calldata holders,uint256[] calldata amounts,uint64 duration,uint256 snapshotBlock) external nonReentrant {
         require(msg.sender==executor&&holders.length==amounts.length&&holders.length>0&&holders.length<=64&&snapshotBlock<block.number,"epoch");
+        require(!holderSnapshotFunded[asset][snapshotBlock],"snapshot already funded");
+        legacySnapshotUsed[asset][snapshotBlock]=true;
         uint256 total;
         for(uint256 i;i<holders.length;i++){require(holders[i]!=address(0)&&amounts[i]>0,"holder");total+=amounts[i];}
         require(total<=strategyBalance[asset],"budget");strategyBalance[asset]-=total;
@@ -89,6 +98,31 @@ contract ElpidaRewardVault is ReentrancyGuard {
             else {accounted[asset]-=amounts[i];IERC20(asset).safeTransfer(holders[i],amounts[i]);}
         }
         emit Epoch(snapshotBlock,asset,total,holders.length);
+    }
+    event HolderDistributorConfigured(address indexed distributor);
+    event HolderEpochFunded(uint256 indexed epochId,address indexed asset,uint256 amount);
+    function configureHolderDistributor(address distributor) external {
+        require(msg.sender==executor&&holderDistributor==address(0)&&distributor.code.length>0,"distributor config");
+        require(IHolderEpochFunding(distributor).publisher()==address(this),"distributor publisher");
+        holderDistributor=distributor;
+        emit HolderDistributorConfigured(distributor);
+    }
+    /// @notice Atomic publication uses only strategy funds, never claims or grants.
+    function fundHolderEpoch(uint256 epochId,address asset,uint256 snapshotBlock,uint256 minimumHolding,bytes32 root,bytes32 manifestHash,uint256 budget,uint32 recipientCount) external nonReentrant {
+        require(msg.sender==executor&&holderDistributor!=address(0)&&mainToken!=address(0),"holder funding authority");
+        require(asset!=address(0)&&asset.code.length>0&&budget>0&&strategyBalance[asset]>=budget,"holder budget");
+        require(!holderSnapshotFunded[asset][snapshotBlock]&&!legacySnapshotUsed[asset][snapshotBlock],"snapshot already funded");
+        holderSnapshotFunded[asset][snapshotBlock]=true;
+        IERC20 token=IERC20(asset);
+        uint256 beforeVault=token.balanceOf(address(this));
+        uint256 beforeDistributor=token.balanceOf(holderDistributor);
+        strategyBalance[asset]-=budget;
+        accounted[asset]-=budget;
+        token.safeTransfer(holderDistributor,budget);
+        require(beforeVault-token.balanceOf(address(this))==budget&&token.balanceOf(holderDistributor)-beforeDistributor==budget,"nonstandard funding");
+        require(token.balanceOf(address(this))>=accounted[asset],"vault insolvency");
+        IHolderEpochFunding(holderDistributor).publishEpoch(epochId,mainToken,asset,snapshotBlock,minimumHolding,root,manifestHash,budget,recipientCount);
+        emit HolderEpochFunded(epochId,asset,budget);
     }
     function grantCount() external view returns(uint256){return grants.length;}
     function claimVested(uint256 id) external nonReentrant {Grant storage g=grants[id];uint256 elapsed=block.timestamp-g.start;uint256 vested=elapsed>=g.duration?g.total:g.total*elapsed/g.duration;uint256 amount=vested-g.claimed;g.claimed=vested;_pay(g.asset,g.recipient,amount);}
