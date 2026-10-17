@@ -260,6 +260,30 @@ test('Solana launch writes immutable Metaplex metadata that nobody can change', 
   assert.equal((await f.connection.getAccountInfo(mint)).data.readUInt32LE(0), 0, 'no mint authority');
 });
 
+test('Solana launch with a vanity mint: the server pool co-signs only after the creator, then forgets the key', { skip }, async () => {
+  const { VanityMintPool, grind } = await import('../apps/api/vanity-mints.mjs');
+  const { randomBytes } = await import('node:crypto');
+  const dir = mkdtempSync(join(tmpdir(), 'elpida-vanity-')), vanity = new VanityMintPool({ path: join(dir, 'v.json'), key: randomBytes(32), programId: f.programId.toBase58(), suffix: 'h', autoStart: false });
+  try {
+    const g = grind('h', 200_000); vanity.add(g.seed, g.pubkey);
+    const r = vanity.reserve({ wallet: f.creator.publicKey.toBase58(), address: '127.0.0.1' });
+    const mint = new PublicKey(r.mint);
+    assert.ok(mint.toBase58().endsWith('h'));
+    const { blockhash } = await f.connection.getLatestBlockhash('confirmed');
+    const tx = new web3.Transaction({ feePayer: f.creator.publicKey, recentBlockhash: blockhash }).add(f.client.computeBudget(),
+      f.client.launch({ uri: TEST_URI, creator: f.creator.publicKey, config: f.config, mint, name: 'Vanity', symbol: 'VAN', firstBuy: 10n * USDC, minTokensOut: 0n, reward: f.rewardWallet.publicKey }));
+    tx.partialSign(f.creator);
+    const { signature } = vanity.sign({ id: r.id, wallet: f.creator.publicKey.toBase58(), message: tx.serializeMessage().toString('base64') });
+    tx.addSignature(mint, Buffer.from(signature, 'base64'));
+    const sent = await f.connection.sendRawTransaction(tx.serialize());
+    await f.connection.confirmTransaction(sent, 'confirmed');
+    const p = await pool(mint);
+    assert.equal(p.mint.toBase58(), mint.toBase58(), 'launched at the vanity address');
+    assert.equal(vanity.status().available, 0);
+    assert.throws(() => vanity.sign({ id: r.id, wallet: f.creator.publicKey.toBase58(), message: tx.serializeMessage().toString('base64') }), /expired/, 'key destroyed after signing');
+  } finally { vanity.stop(); rmSync(dir, { recursive: true, force: true }); }
+});
+
 test('Solana launch rejects bad input and leaves no partial state', { skip }, async () => {
   const before = await balance(f.client.ata(f.creator.publicKey, f.quoteMint));
   const treasuryBefore = await f.connection.getBalance(f.treasury);

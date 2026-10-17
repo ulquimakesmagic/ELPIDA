@@ -308,7 +308,25 @@ export class SolanaWallet {
     return { ...extra, out: formatAmount(q.net, d), fee: formatAmount(q.fee, d), antiSnipeFee: formatAmount(q.antiSnipeFee, d) };
   }
   // Wallet signs first, then any extra signer (the new mint keypair), as Phantom recommends.
-  async sendInstructions(instructions, extraSigners = [], message = 'Confirm the transaction in your wallet…') {
+  /** A reserved vanity mint (the server co-signs the launch after the wallet), or a fresh random keypair. */
+  async mintFor() {
+    const random = { mint: web3.Keypair.generate(), remote: null, vanityNote: '' };
+    if (!this.config.vanity?.enabled) return random;
+    const post = async (path, body) => {
+      const response = await fetch('/api/' + path, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': this.config.csrf }, body: JSON.stringify(body) });
+      const data = await response.json(); if (!response.ok) throw new Error(data.error ?? 'Vanity mint request failed.'); return data;
+    };
+    let reserved;
+    try { reserved = await post('solana/vanity-mint', { wallet: this.publicKey.toBase58() }); } catch { return { ...random, vanityNote: ' Its mint address is random (the address service is unavailable).' }; }
+    if (!reserved.mint) return { ...random, vanityNote: reserved.reason ? ` ${reserved.reason}` : '' };
+    const pubkey = new web3.PublicKey(reserved.mint), wallet = this.publicKey.toBase58();
+    const toBase64 = bytes => btoa(String.fromCharCode(...new Uint8Array(bytes)));
+    const fromBase64 = text => Uint8Array.from(atob(text), c => c.charCodeAt(0));
+    return { mint: { publicKey: pubkey }, vanityNote: ` Its address ends in "${this.config.vanity.suffix}".`,
+      remote: { pubkey, sign: async message => fromBase64((await post('solana/vanity-sign', { id: reserved.id, wallet, message: toBase64(message) })).signature) } };
+  }
+  /** `remoteSigners`: [{ pubkey, sign(messageBytes) → signature bytes }], applied after the wallet (vanity mint). */
+  async sendInstructions(instructions, extraSigners = [], message = 'Confirm the transaction in your wallet…', remoteSigners = []) {
     this.checkWallet();
     const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
     const tx = new web3.Transaction({ feePayer: this.publicKey, blockhash, lastValidBlockHeight }).add(...instructions);
@@ -318,6 +336,7 @@ export class SolanaWallet {
       this.onProgress(message);
       const signed = await withWalletTimeout(this.provider.signTransaction(tx), this.walletName);
       for (const signer of extraSigners) signed.partialSign(signer);
+      for (const remote of remoteSigners) signed.addSignature(remote.pubkey, await remote.sign(signed.serializeMessage()));
       const signature = await this.connection.sendRawTransaction(signed.serialize(), { preflightCommitment: 'confirmed' });
       this.onProgress('Transaction submitted. Waiting for confirmation…');
       for (;;) {
@@ -396,16 +415,17 @@ export class SolanaWallet {
       const published = await staged.json();
       if (!staged.ok) throw new Error(published.error ?? 'Publishing token details failed. No launch was submitted.');
       if (!/^ipfs:\/\//.test(published.uri ?? '') || !['public-ipfs', 'elpida-hosted'].includes(published.storage)) throw new Error('Token details were not staged safely. No launch was submitted.');
-      const mint = web3.Keypair.generate();
+      // D9: a pre-ground mint address ending in "hope" when the server has one ready, else a random mint.
+      const { mint, remote, vanityNote } = await this.mintFor();
       const signature = await this.sendInstructions([
         this.client.computeBudget(),
         ...await this.wrapFor(config, q.gross),
         this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, priceUpdate: terms.priceFeed, maxFee, usdc }),
         ...(config.wsol ? [this.client.unwrapSol(this.publicKey)] : []),
-      ], [mint], `Confirm your token launch in your wallet ($10 fee: ${inUsdc ? `${formatAmount(terms.usdcFee, 6)} USDC` : `${formatAmount(terms.fee, 9)} SOL, at most ${formatAmount(maxFee, 9)} SOL`})…`);
+      ], remote ? [] : [mint], `Confirm your token launch in your wallet ($10 fee: ${inUsdc ? `${formatAmount(terms.usdcFee, 6)} USDC` : `${formatAmount(terms.fee, 9)} SOL, at most ${formatAmount(maxFee, 9)} SOL`})…`, remote ? [remote] : []);
       await writeMetadataCache(metadataKey(this.deployment.programId,mint.publicKey.toBase58()),published.metadata??metadata);
       return { hash: signature, token: mint.publicKey.toBase58(), metadataPublished: true, metadataStorage: published.storage,
-        message: `Your token is live on ${this.net.name}. ${published.storage === 'public-ipfs' ? 'Its details are pinned to public IPFS and written into immutable token metadata.' : 'Its details are hosted by Elpida and written into immutable token metadata; public IPFS pinning is not configured.'}` };
+        message: `Your token is live on ${this.net.name}.${vanityNote} ${published.storage === 'public-ipfs' ? 'Its details are pinned to public IPFS and written into immutable token metadata.' : 'Its details are hosted by Elpida and written into immutable token metadata; public IPFS pinning is not configured.'}` };
     }
     const { mint, pool } = await this.freshPool(body.token);
     config = this.configOf(pool);
