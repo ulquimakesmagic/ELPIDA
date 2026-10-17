@@ -743,3 +743,22 @@ dialog{max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contai
  .analytics-metrics{grid-template-columns:repeat(2,minmax(0,1fr));}.analytics-metric{padding:14px;}.analytics-metric strong{font-size:20px;overflow-wrap:anywhere;}
 }
 @media(max-width:360px) {.chain-options{width:calc(100vw - 32px);}.chart-controls{width:100%;}}
+
+/* Holder chat and trade-side controls */
+.activity-head { gap: 12px; flex-wrap: wrap; }
+.activity-controls { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding-block: 6px; }
+.trade-side-filter { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.trade-side-filter .select { width: auto; min-width: 92px; padding-block: 7px; }
+.trade-side-filter[hidden] { display: none; }
+.holder-chat { display: grid; gap: 14px; padding-top: 12px; }
+.chat-toolbar, .chat-compose-actions, .chat-reply { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.chat-messages { max-height: 520px; overflow-y: auto; overflow-wrap: anywhere; }
+.chat-message { padding: 16px 0; border-bottom: 1px solid var(--line); }
+.chat-byline { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
+.chat-byline strong { font-size: 13px; }
+.chat-byline time { color: var(--muted); font-size: 11px; }
+.chat-text { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.6; margin-block: 10px; }
+.chat-message blockquote { margin: 10px 0; padding: 8px 12px; border-left: 2px solid var(--accent); background: var(--hover); color: var(--muted); font-size: 12px; white-space: pre-wrap; }
+.chat-composer { display: grid; gap: 10px; }
+.chat-composer textarea { width: 100%; resize: vertical; }
+.chat-reply { font-size: 12px; color: var(--muted); }

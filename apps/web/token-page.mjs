@@ -10,6 +10,8 @@ import { exceedsRemaining } from './amounts.mjs';
 import {terminalChart} from './terminal-chart.mjs';
 import {holderTerminal} from './holder-terminal.mjs';
 import {tokenWalletImage,watchEvmToken} from './wallet-token.mjs';
+import {holderChat} from './holder-chat.mjs';
+import {filterTrades} from './trade-filter.mjs';
 export { exceedsRemaining };
 
 const metadataRequests = new Map();
@@ -163,24 +165,30 @@ export function renderToken(ctx, address) {
 }
 
 function marketActivity(ctx,token,q,{addressUrl,isCreator,onCounts}){
-  const content=h('div',h('p.muted.small','Loading trades…')),total=h('span.meta'),tabs=h('div.tabs-underline',{role:'tablist','aria-label':'Trades and holders'});
-  const panel=h('section.activity-panel',h('div.activity-head',tabs,total),content);let selected='trades',revision=0;
+  const content=h('div',h('p.muted.small','Loading trades…')),total=h('span.meta'),tabs=h('div.tabs-underline',{role:'tablist','aria-label':'Token activity'});
+  let selected='trades',revision=0,side='all',chatView=null;
+  const sideFilter=h('label.trade-side-filter',h('span','Show'),h('select.select',{'aria-label':'Filter trades by side',on:{change:event=>{side=event.target.value;load();}}},...['all','buy','sell'].map(value=>h('option',{value},value==='all'?'All':value==='buy'?'Buys':'Sells'))));
+  const panel=h('section.activity-panel',h('div.activity-head',tabs,h('div.activity-controls',sideFilter,total)),content);
   const base=ctx.mode==='local'?`tokens/${token.address}`:`public/tokens/${token.address}`,net=ctx.mode==='local'?'':`?network=${encodeURIComponent(ctx.currentChain())}`;
   const fetchKind=kind=>ctx.api(`${base}/${kind}${net}`);
   const usd=usdRate(token);
   const priceCell=row=>{const price=Number(row.quoteAmount)/Number(row.tokenAmount);return Number.isFinite(price)&&price>0?(usd!==null?formatPrice(price*usd):`${formatPrice(price,'')} ${q}`):'—';};
   const trader=a=>h('span.trader',h('a',{href:addressUrl(a)??'#',target:'_blank',rel:'noopener noreferrer'},short(a)),isCreator(a)?h('span.badge-dev',{title:'The creator of this token'},'Dev'):null);
   async function load(){const current=++revision;
-    tabs.replaceChildren(...['trades','holders'].map(kind=>h('button',{type:'button',role:'tab','aria-selected':String(selected===kind),on:{click:()=>{selected=kind;load();}}},kind==='trades'?'Trades':'Holders')));
-    try{const rows=await fetchKind(selected);if(current!==revision||!panel.isConnected)return;
-      total.textContent=`${rows.length}${rows.length>=100?'+':''} ${selected==='trades'?'total':'holders'}`;
+    chatView?.dispose();chatView=null;
+    tabs.replaceChildren(...['trades','holders','chat'].map(kind=>h('button',{type:'button',role:'tab','aria-selected':String(selected===kind),on:{click:()=>{selected=kind;load();}}},kind==='trades'?'Trades':kind==='holders'?'Holders':'Chat')));
+    sideFilter.hidden=selected!=='trades';total.textContent='';
+    if(selected==='chat'){chatView=holderChat(ctx,token);content.replaceChildren(chatView.element);return;}
+    try{const fetched=await fetchKind(selected);if(current!==revision||!panel.isConnected)return;
+      const rows=selected==='trades'?filterTrades(fetched,side):fetched;
+      total.textContent=selected==='trades'?`${rows.length} of ${fetched.length}${fetched.length>=100?'+':''} recent trades`:`${rows.length}${rows.length>=50?'+':''} holders`;
       const table=selected==='trades'
         ?h('table.market-table',h('thead',h('tr',...['Side','Trader',q,token.symbol,'Price','Age'].map((label,i)=>h('th',{scope:'col',class:i>1?'num':''},label)))),h('tbody',rows.map(row=>h('tr',
             h('td',{class:row.side==='buy'?'trade-buy':'trade-sell'},h('span.side',icon(row.side==='buy'?'trending-up':'trending-down','icon-sm'),row.side==='buy'?'Buy':'Sell')),
             h('td',trader(row.account)),h('td.num',number(row.quoteAmount,Number(row.quoteAmount)<0.001?6:3)),h('td.num',compact(row.tokenAmount)),h('td.num',priceCell(row)),
             h('td.num',row.hash&&addressUrl(row.account)?h('a',{href:addressUrl(row.account).replace(/\/address\/[^?]+/,'/tx/'+row.hash),target:'_blank',rel:'noopener noreferrer',title:new Date(row.timestamp*1000).toLocaleString()},ago(row.timestamp)):ago(row.timestamp))))))
         :h('table.market-table',h('thead',h('tr',...['#','Holder','Balance','Share'].map((label,i)=>h('th',{scope:'col',class:i>1?'num':''},label)))),h('tbody',rows.map((row,i)=>h('tr',h('td',String(i+1)),h('td',trader(row.address)),h('td.num',compact(row.balance)),h('td.num',number(Number(row.supplyShare)*100,2)+'%')))));
-      content.replaceChildren(rows.length?h('div.table-scroll',table):h('p.muted.small',selected==='trades'?'No trades yet.':'No holders yet.'),...(selected==='holders'?[h('p.meta','Wallets only: the curve, the DEX pool and the burn address are not counted. Shares use the full 1B supply.')]:[]));
+      content.replaceChildren(rows.length?h('div.table-scroll',table):h('p.muted.small',selected==='trades'?(side==='all'?'No trades yet.':`No ${side==='buy'?'buys':'sells'} in the recent indexed trades.`):'No holders yet.'),...(selected==='holders'?[h('p.meta','Wallets only: the curve, the DEX pool and the burn address are not counted. Shares use the full 1B supply.')]:[]));
     }catch{if(current===revision)content.replaceChildren(h('p.muted.small','Trades are still indexing or temporarily unavailable.'),h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:load}},'Retry'));}
   }
   Promise.allSettled([fetchKind('trades'),fetchKind('holders')]).then(([t,hd])=>onCounts({trades:t.status==='fulfilled'?`${t.value.length}${t.value.length>=100?'+':''}`:null,holders:hd.status==='fulfilled'?`${hd.value.length}${hd.value.length>=50?'+':''}`:null}));

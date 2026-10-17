@@ -54,3 +54,14 @@ test('all catalog wallets have bundled SVG icons and official HTTPS install link
  assert.equal(walletIcon('Trust Wallet','javascript:alert(1)'),'/assets/wallets/trust.svg');
  assert.equal(walletIcon('Unknown','data:text/html,<script>'), '');
 });
+
+test('Solana standard message signing binds the selected account and exact message bytes',async()=>{
+ const account={address:'chat-account',publicKey:[1],chains:['solana:devnet'],features:['solana:signTransaction','solana:signMessage']};let input,modified=false;
+ const wallet={name:'Chat signing wallet',chains:['solana:devnet'],accounts:[account],features:{'standard:connect':{connect:async()=>({accounts:[account]})},'solana:signTransaction':{supportedTransactionVersions:['legacy'],signTransaction(){}},'solana:signMessage':{signMessage:async i=>{input=i;return [{signature:new Uint8Array(64),signedMessage:modified?new Uint8Array([9]):i.message}];}}}};
+ const remove=registerStandard(wallet);try{
+  const p=standardSolanaProvider('standard:'+wallet.name,{PublicKey:class{} });await p.connect();
+  const message=new Uint8Array([1,2,3]);assert.equal((await p.signMessage(message)).signature.length,64);assert.equal(input.account,account);assert.equal(input.message,message);
+  modified=true;await assert.rejects(p.signMessage(message),/exact requested message/);
+  wallet.accounts=[];await assert.rejects(p.signMessage(message),/account changed/);
+ }finally{remove();}
+});
