@@ -5,7 +5,7 @@ Nothing here authorizes mainnet deployment.
 
 | Chain | Standard-token destination | Tax-token destination | ELPIDA status |
 | --- | --- | --- | --- |
-| Base | Uniswap v3 | Uniswap-style v2 | Public V3 on Base Sepolia; new atomic factory needs deployment. V2 tax lifecycle tested locally; public deployment not pinned. |
+| Base | Uniswap v3 | Uniswap-style v2 | Atomic V3 factory deployed and registered on Base Sepolia; SONGOKU graduation rehearsal pending. V2 tax lifecycle tested locally; public deployment not pinned. See `BASE_SEPOLIA_TAX_REHEARSAL.md`. |
 | Ethereum | Uniswap v3 target | Uniswap v2 target | Public migration integrations not configured in ELPIDA yet. |
 | BNB Chain | PancakeSwap target | PancakeSwap V2 target | Adapter addresses and fork fees must be verified; current V2 implementation tests Uniswap's 0.30% profile, not PancakeSwap's profile. |
 | Robinhood Chain | Uniswap candidate | V2 candidate | DEXs exist; ELPIDA's addresses, migration adapters and router fee profile remain unverified/unconfigured. |

@@ -1,5 +1,14 @@
 # Actions that need Malik
 
+## Next test funds: finish SONGOKU, then tax rehearsal
+
+SONGOKU's zero-buy launch, buys, sell and shared-wallet fee claim are verified.
+Automatic graduation and post-migration trading remain outstanding. See
+`BASE_SEPOLIA_TAX_REHEARSAL.md` for the snapshot, acceptance checks and separate
+V2 deployment order; `config/base-sepolia-tax-plan.json` is an inert plan, not
+an active registry entry. No official Base Sepolia V2 factory was found in the
+Uniswap registry; the planned test deployment must be labelled accordingly.
+
 ## Atomic Base Sepolia deployment — verified 18 October 2026
 
 Factory `0x98a0E75dbBe9EdA5D228319C72D496b814bA7145`, creation block
