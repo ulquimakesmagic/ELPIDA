@@ -1,0 +1,45 @@
+{
+  "purpose": "Preparation only; not consumed by the live network registry",
+  "network": "base-sepolia",
+  "chainId": 84532,
+  "mainnet": false,
+  "publicTaxLaunchesEnabled": false,
+  "rpcUrl": "https://sepolia.base.org",
+  "treasury": "0xf5B0cE04241f9518dfA3CBfbaafC7E40638E639D",
+  "wrappedNative": "0x4200000000000000000000000000000000000006",
+  "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
+  "usdFeed": "0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1",
+  "maxPriceAgeSeconds": 1500,
+  "startFdvUsd": 50,
+  "graduationGraceSeconds": 86400,
+  "usdcVirtualQuoteRaw": "55555556",
+  "poolFeeBps": 30,
+  "curveBaseFeeBps": 125,
+  "baseProtocolShareBps": 5000,
+  "taxProtocolShareBps": 3000,
+  "maxBuyTaxBps": 1000,
+  "maxSellTaxBps": 1000,
+  "dex": {
+    "venue": "ELPIDA V2 test deployment (Uniswap V2 core)",
+    "officialBaseSepoliaV2Listed": false,
+    "officialRegistry": "https://developers.uniswap.org/deployments.json",
+    "registrySourceCommit": "a677c0d4b5fb6e3357cf6d0f0315bcb135a1e1ee",
+    "factoryArtifact": "node_modules/@uniswap/v2-core/build/UniswapV2Factory.json",
+    "factory": null
+  },
+  "deployment": {
+    "factory": null,
+    "adapter": null,
+    "router": null,
+    "block": null,
+    "model": "curve-tax-v10"
+  },
+  "rehearsal": {
+    "creatorPurchase": "0",
+    "buyTaxBps": 400,
+    "sellTaxBps": 600,
+    "creatorAllocationSharesBps": [6000, 4000],
+    "creatorAllocationWallets": null,
+    "requiredPairs": ["native", "usdc"]
+  }
+}
