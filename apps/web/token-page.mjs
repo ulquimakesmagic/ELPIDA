@@ -379,6 +379,6 @@ function tradePanel(ctx, token, { dex, solana }) {
   setSide('buy');
   tickFeeWindow();
   return h('section.panel.trade-panel.tk-trade', { 'aria-labelledby': 'trade-title' }, h('h2#trade-title.visually-hidden', 'Trade'),
-    h('p.small.muted', token.graduated ? `Trading on ${dex === 'test' ? 'the locked test pool' : dex}. Liquidity is locked permanently.` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'),
+    h('p.small.muted', token.tax ? `Buy tax ${token.tax.buyBps/100}% / sell tax ${token.tax.sellBps/100}%, fixed at launch. Tax revenue: 30% Elpida / 70% creator allocations. ${token.graduated?'The V2 pool fee is additional; the curve fee has stopped. LP fees compound in locked liquidity. Creator tax claims are paid in this token.':'The 1.25% curve fee remains additional, split 50/50. First-minute protection adds locked liquidity.'}` : token.graduated ? `Trading on ${dex === 'test' ? 'the locked test pool' : dex}. Liquidity is locked permanently. The curve fee has stopped; the DEX pool fee applies.` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'),
     form);
 }

@@ -202,12 +202,12 @@ export function explainError(error) {
 }
 
 /** Parses a decimal string into base units, truncating digits beyond `decimals`. */
-export function parseAmount(value, decimals) {
+export function parseAmount(value, decimals, allowZero = false) {
   const text = String(value ?? '').trim();
   if (!/^\d{1,18}(\.\d*)?$/.test(text)) throw new Error('Enter a valid positive amount.');
   const [whole, fraction = ''] = text.split('.');
   const units = BigInt(whole) * 10n ** BigInt(decimals) + BigInt((fraction.slice(0, decimals) || '0').padEnd(decimals, '0'));
-  if (units <= 0n) throw new Error('Amount must be greater than zero.');
+  if (units < 0n || (!allowZero && units === 0n)) throw new Error('Amount must be greater than zero.');
   return units;
 }
 
@@ -502,6 +502,14 @@ export function createElpidaSolana(web3, programIdInput) {
       if (/Instruction: ReopenCurve/.test(logs)) return true;
       if (value.err?.InstructionError?.[1]?.Custom === 101 || /InstructionFallbackNotFound|Fallback functions are not supported/i.test(logs)) return false;
       throw new Error('Could not check this network\'s Elpida program version (your wallet may need SOL for network fees). Nothing was submitted.');
+    },
+    async supportsOptionalBuy(connection, feePayer) {
+      const {blockhash}=await connection.getLatestBlockhash('confirmed');
+      const probe=new Transaction({feePayer:key(feePayer),recentBlockhash:blockhash}).add(ix([],new Uint8Array([63,214,46,20,82,115,180,91])));
+      const {value}=await connection.simulateTransaction(probe);
+      if(value.err===null)return true;
+      if(value.err?.InstructionError?.[1]?.Custom===101)return false;
+      throw new Error('Could not check optional creator buy support. Nothing was submitted.');
     },
     /** Permissionless D7 escape hatch: reopens a curve that completed GRADUATION_GRACE_SECS ago without migrating. */
     reopenCurve: ({ mint }) => ix([meta(poolPda(mint), true)], DISCRIMINATORS.reopenCurve),

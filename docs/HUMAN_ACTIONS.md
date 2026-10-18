@@ -1,5 +1,20 @@
 # Actions that need Malik
 
+## Launch changes in source — 18 October 2026
+
+See `IMPLEMENTATION_SCOPE_2026-10-18.md` and `DEX_DESTINATIONS_AND_FEES.md`.
+Optional creator buys and atomic final-buy migration require a new standard EVM
+factory; old deployed contracts retain their behavior. The wallet tools expose
+the automatic-graduation factory upgrade when the old capability probe fails.
+Only testnet funds are authorized. Keep old factories indexed.
+
+The tax factory, V2 adapter/router and creator allocation flow are implemented
+and rehearsed with local native/USDC pairs. A public tax deployment must be
+verified and added as `network.taxDeployment` before its inputs are enabled.
+Do not label a local V2 factory as an official Uniswap deployment. Solana
+optional buys require a fresh program build and devnet upgrade; its binary has
+not been rebuilt on this Windows host.
+
 Updated 16 October 2026, after the model 10 Base Sepolia deployment. Items are in the order they unblock work.
 
 ## 1. Phase 1 merged; model 10 deployed on Base Sepolia (done, 16 October 2026)

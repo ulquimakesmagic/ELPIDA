@@ -41,6 +41,9 @@ resources.set('/holder-terminal.mjs',['holder-terminal.mjs','text/javascript']);
 resources.set('/chat-signature.mjs',['chat-signature.mjs','text/javascript']);
 resources.set('/holder-chat.mjs',['holder-chat.mjs','text/javascript']);
 resources.set('/trade-filter.mjs',['trade-filter.mjs','text/javascript']);
+resources.set('/tax-policy.mjs',['tax-policy.mjs','text/javascript']);
+resources.set('/tax-wallet.mjs',['tax-wallet.mjs','text/javascript']);
+resources.set('/tax-allocation.mjs',['tax-allocation.mjs','text/javascript']);
 resources.set('/wallet-discovery.mjs', ['wallet-discovery.mjs','text/javascript']);
 resources.set('/wallet-token.mjs', ['wallet-token.mjs','text/javascript']);
 resources.set('/discovery.mjs', ['discovery.mjs','text/javascript']);
@@ -159,7 +162,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const creatorFeeTotals=new CreatorFeeTotals();
   const csrf = randomBytes(24).toString('hex');
   function indexedMarket(network,address){
-    if(network==='local'){const token=runtime.indexer.listings().find(t=>t.address===address.toLowerCase());if(!token)throw new Error('Token not indexed.');return {token,index:runtime.indexer,sol:false};}
+    if(network==='local'){const token=runtime.indexer.listings().find(t=>t.address===address.toLowerCase());if(!token)throw new Error('Token not indexed.');return {token,index:runtime.indexer.indexFor?.(address)??runtime.indexer,sol:false};}
     if(network.startsWith('solana-')){if(!solanaIndex||solanaIndex.network.key!==network||solanaIndex.status().error||!solanaIndex.status().lastSuccess||Date.now()-Date.parse(solanaIndex.status().lastSuccess)>180000)throw new Error('Network not indexed.');const token=solanaIndex.token(address);if(!token)throw new Error('Token not indexed.');return {token,index:solanaIndex,sol:true};}
     const current=publicIndex.entries.get(network),e=publicIndex.entryFor(network,address)??current;if(!e?.validated||e.error||Date.now()-Date.parse(e.lastSuccess)>180000)throw new Error('Indexing is behind. Retry shortly.');const token=e.index.listings().find(t=>t.address===address.toLowerCase());if(!token)throw new Error('Token not indexed.');return {token,index:e.index,sol:false};
   }

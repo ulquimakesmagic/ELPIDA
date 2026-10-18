@@ -55,6 +55,8 @@ contract ElpidaDexFactory is ElpidaUsdPricing {
         deployer = new ElpidaDexCurveDeployer();
     }
     function pricingOwner() internal view override returns(address){return treasury;}
+    function automaticGraduation() public pure virtual returns(bool){return false;}
+    function OPTIONAL_CREATOR_BUY_VERSION() external pure returns(uint256){return 1;}
     /// Deprecated compatibility endpoint. Manual repricing is disabled.
     function setPricing(uint256,uint256) external view {
         require(msg.sender == treasury, "owner only"); revert PricingFixed();
@@ -94,7 +96,7 @@ contract ElpidaDexFactory is ElpidaUsdPricing {
     /// Metadata is written once, inside the launch transaction, for a token this factory just created.
     function _publish(address token,string calldata uri) private {tokenMetadataURI[token]=uri;emit MetadataPublished(token,uri);}
     function _launchPaired(string calldata name_,string calldata symbol_,address asset,uint256 firstBuy,uint256 minOut,address reward,bool inUsdc) private returns(address token,address curve){
-        require(!entered,"reentrancy");entered=true;QuoteTemplate memory template=approvedQuotes[asset];require(template.adapter!=address(0)&&firstBuy>0&&reward!=address(0),"pair/buy/reward");
+        require(!entered,"reentrancy");entered=true;QuoteTemplate memory template=approvedQuotes[asset];require(template.adapter!=address(0)&&reward!=address(0),"pair/reward");
         _chargeLaunchFee(0,inUsdc);
         IERC20Minimal q=IERC20Minimal(asset);uint256 beforeBalance=q.balanceOf(address(this));require(q.transferFrom(msg.sender,address(this),firstBuy),"pair funding");require(q.balanceOf(address(this))-beforeBalance==firstBuy,"unsupported quote");
         (token,curve)=deployer.create(name_,symbol_,asset,treasury,reward,template.virtualQuote,VIRTUAL_TOKEN,template.adapter,graduationGrace);
@@ -105,7 +107,7 @@ contract ElpidaDexFactory is ElpidaUsdPricing {
     }
     function _launch(string calldata name_,string calldata symbol_,uint256 firstBuy,uint256 minOut,address reward,bool inUsdc) private returns (address token,address curve) {
         require(!entered, "reentrancy"); entered = true;
-        require(firstBuy > 0 && reward != address(0), "buy/reward required");
+        require(reward != address(0), "reward required");
         _chargeLaunchFee(firstBuy,inUsdc);
         (token,curve)=deployer.create(name_,symbol_,address(0),treasury,reward,nativeVirtualQuote(),VIRTUAL_TOKEN,migrationAdapter,graduationGrace);
         require(IERC20Minimal(token).transfer(curve,TOKEN_SUPPLY), "token seed");

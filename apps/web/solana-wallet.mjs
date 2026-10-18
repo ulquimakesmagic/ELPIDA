@@ -382,8 +382,9 @@ export class SolanaWallet {
       const metadata=normalizeMetadata(body);
       const name = String(body.name ?? '').trim(), symbol = String(body.symbol ?? '').trim().toUpperCase();
       if (!name || new TextEncoder().encode(name).length > 32 || !/^[A-Z0-9]{1,10}$/.test(symbol)) throw new Error('Use a name up to 32 characters and a symbol of 1–10 letters or numbers.');
-      const firstBuy = parseAmount(body.firstBuy, d);
-      if(firstBuy<=0n)throw new Error('Enter a positive first buy.');
+      const firstBuy = parseAmount(body.firstBuy || '0', d, true);
+      if(firstBuy===0n&&!await this.client.supportsOptionalBuy(this.connection,this.publicKey))throw new Error('The Solana program needs the optional-buy upgrade before a zero-buy launch. Nothing was submitted.');
+      if(firstBuy<0n)throw new Error('Enter zero or a positive creator buy.');
       let reward;
       try { reward = new web3.PublicKey(String(body.reward || this.address).trim()); } catch { throw new Error('Enter a valid Solana creator reward wallet.'); }
       // Price-aware terms read from chain just before signing: the program recomputes them at execution.
@@ -396,7 +397,7 @@ export class SolanaWallet {
       const maxFee = inUsdc ? 0n : terms.fee * 101n / 100n + 1n;
       const fresh = { virtualQuote: terms.virtualQuote, virtualToken: config.virtualToken, curveSupply: config.curveSupply, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 };
       // The creator's first buy pays only the base fee (no anti-snipe tax); a buy beyond the curve is capped.
-      const q = quoteBuy(fresh, firstBuy, config.baseFeeBps, config.baseFeeBps);
+      const q = firstBuy===0n ? {tokens:0n,gross:0n,fee:0n} : quoteBuy(fresh, firstBuy, config.baseFeeBps, config.baseFeeBps);
       // The SOL creation fee is paid from plain SOL; for SOL pairs the first buy is wrapped from it too.
       const solNeeded = maxFee + (config.wsol ? q.gross : 0n) + SolanaWallet.SOL_HEADROOM;
       let usdc = null;

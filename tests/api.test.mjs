@@ -83,8 +83,8 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal(large.status,400); // Valid body size reaches launch validation rather than HTTP 413.
   });
   let address;
-  await t.test('launches with a mandatory first buy and rejects invalid input', async () => {
-    assert.equal((await request('launch', { name: 'No buy', symbol: 'ZERO', firstBuy: '0' })).status, 400);
+  await t.test('launches with an optional creator buy and rejects invalid input', async () => {
+    assert.equal((await request('launch', { name: 'Invalid buy', symbol: 'ZERO', firstBuy: '-1' })).status, 400);
     assert.equal((await request('launch', { name: 'Invalid', symbol: '<script>', firstBuy: '0.025' })).status, 400);
     assert.equal((await request('launch', { name: 'Dollar', symbol: 'USD', firstBuy: '25', pair: 'usdc' })).status, 400, 'no USDC pair');
     const before = await state();
@@ -160,6 +160,11 @@ test('localhost API exercises launch, trading, fee payout and request protection
     const held = (await state('1')).tokens.find(t => t.address === token.address).balance;
     assert.equal((await request('sell', {token:token.address, amount:held,account:'1'})).status, 200);
     assert.equal((await request('launch', {name:'Bad',symbol:'BAD',pair:'unknown',firstBuy:'1'})).status, 400);
+  });
+  await t.test('zero creator buy charges the launch fee without minting a creator allocation or recording a trade',async()=>{
+    const launched=await request('launch',{name:'No purchase',symbol:'NONE',firstBuy:'0'});assert.equal(launched.status,200);
+    const token=(await state()).tokens.find(t=>t.address===launched.body.token);
+    assert.equal(token.balance,'0.0');assert.equal(token.sold,'0.0');assert.equal(token.reserve,'0.0');
   });
   await t.test('disabled publishing refuses bodies without consuming protected upload admission',async()=>{
     for(let i=0;i<21;i++)assert.equal((await fetch(`${base}/api/metadata/publish`,{method:'POST',headers:{'Content-Type':'application/json','X-Elpida-Token':config.csrf},body:'not json'})).status,410);

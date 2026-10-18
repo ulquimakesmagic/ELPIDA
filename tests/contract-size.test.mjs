@@ -4,7 +4,7 @@ import {compileContracts} from '../scripts/compile.mjs';
 
 // EIP-170 caps deployed runtime code at 24,576 bytes and EIP-3860 caps initcode at 49,152 bytes.
 // Release contracts keep a safety margin under 24,000 bytes so small fixes do not push them over.
-const RELEASE=['ElpidaDexFactory','ElpidaDexCurveDeployer','ElpidaDexCurve','ElpidaToken','ElpidaV3MigrationAdapter','ElpidaV3FeeLocker','ElpidaFeeSplitter'];
+const RELEASE=['ElpidaDexFactory','ElpidaDexCurveDeployer','ElpidaDexCurve','ElpidaToken','ElpidaV3MigrationAdapter','ElpidaV3FeeLocker','ElpidaFeeSplitter','ElpidaAtomicDexFactory','ElpidaTaxFactory','ElpidaTaxDeployer','ElpidaTaxTokenDeployer','ElpidaTaxCurveDeployer','ElpidaTaxCurve','ElpidaTaxToken','ElpidaV2TaxMigrationAdapter','ElpidaV2TaxRouter','ElpidaCreatorAllocation'];
 test('every deployable contract fits the EVM size limits; release contracts keep a margin',()=>{
  const compiled=compileContracts({includeMocks:false});
  const sizes={};

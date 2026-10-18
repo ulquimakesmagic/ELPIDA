@@ -1,4 +1,5 @@
 import { nowSeconds } from './clock.mjs';
+import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, parseUnits, formatUnits, isAddress, ZeroAddress } from '/vendor/ethers.js';
 
 import { normalizeMetadata } from './metadata.mjs';
@@ -63,7 +64,7 @@ export class TestnetWallet {
     return net;
   }
   get dex(){return this.net.key==='base-sepolia'?this.config.publicDex:null;}
-  get artifacts(){return {...this.config.contracts,factory:this.dex?this.config.contracts.dexFactory:this.config.contracts.legacyFactory,curve:this.dex?this.config.contracts.dexCurve:this.config.contracts.legacyCurve};}
+  get artifacts(){return {...this.config.contracts,factory:this.dex?(this.config.contracts.atomicFactory??this.config.contracts.dexFactory):this.config.contracts.legacyFactory,curve:this.dex?this.config.contracts.dexCurve:this.config.contracts.legacyCurve};}
   router(runner=this.provider){return new Contract(this.dex.router,['function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns(uint256)','function multicall(uint256 deadline,bytes[] data) payable returns(bytes[])','function unwrapWETH9(uint256 amountMinimum,address recipient) payable'],runner);}
   txUrl(hash) { return `${this.net.explorer}/tx/${hash}`; }
   /**
@@ -96,6 +97,7 @@ export class TestnetWallet {
     // Team deployment is authoritative across visitors; saved private deployments remain intact.
     // A model 10 record saved by this browser takes precedence over a pinned legacy model 9 team deployment.
     const shared=this.net.shared, model=modelOf(this.net.chainId), saved=read(deploymentKey(this.net.chainId));
+    if(saved?.launchFeaturesVersion===1&&saved.model===DEX_MODEL&&(shared?.launchFeaturesVersion??0)<1)return saved;
     if(this.net.key==='base-sepolia'&&saved?.model===DEX_MODEL&&saved.feeAccountingVersion===1&&(shared?.feeAccountingVersion??0)<1)return saved;
     if (shared?.factory && shared.model === model) return { ...shared, shared: true };
     if (saved) return saved;
@@ -106,6 +108,16 @@ export class TestnetWallet {
   get modelUpgradeAvailable() { return !!this.dex && this.deployment?.model === LEGACY_DEX_MODEL;
   }
   get feeFixUpgradeAvailable(){return this.net.key==='base-sepolia'&&this.model===DEX_MODEL&&!!this.deployment&&this.feeAccountingVersion===0;}
+  get launchUpgradeAvailable(){return this.net.key==='base-sepolia'&&this.model===DEX_MODEL&&!!this.deployment&&this.launchFeaturesChecked&&!this.automaticGraduationSupported;}
+  async checkLaunchFeatures(factory=this.factoryContract()){
+    if(this.launchFeaturesChecked&&this._launchFeaturesFactory===factory.target)return;
+    this.launchFeaturesChecked=false;this.automaticGraduationSupported=false;
+    if(this.model===DEX_MODEL){
+      try{this.automaticGraduationSupported=await new Contract(factory.target,['function automaticGraduation() view returns(bool)'],this.provider).automaticGraduation();}
+      catch(error){if(error.code!=='CALL_EXCEPTION'||(error.data&&error.data!=='0x'))throw error;}
+    }
+    this.launchFeaturesChecked=true;this._launchFeaturesFactory=factory.target;
+  }
   /** A token's own curve model: tokens from a legacy team factory keep that factory's model. */
   modelOf(item) { return item?.deploymentModel ?? this.model; }
   /** Factory that created `item`: its legacy team factory, or the current launchpad. */
@@ -311,7 +323,7 @@ export class TestnetWallet {
   }
   async deploy() {
     await this.checkNetwork();
-    if (this.deployment && !this.needsMetadataUpgrade && !this.modelUpgradeAvailable && !this.feeFixUpgradeAvailable) throw new Error(`This ${this.net.name} launchpad is already set up. Use it for your launches.`);
+    if (this.deployment && !this.needsMetadataUpgrade && !this.modelUpgradeAvailable && !this.feeFixUpgradeAvailable && !this.launchUpgradeAvailable) throw new Error(`This ${this.net.name} launchpad is already set up. Use it for your launches.`);
     const previousDeployment=this.deployment;
     await this.oraclePrice();
     if (await this.provider.getBalance(this.address) === 0n) throw new Error(`Get ${this.net.nativeCurrency.symbol} on ${this.net.name} from a faucet to pay deployment gas.`);
@@ -334,7 +346,7 @@ export class TestnetWallet {
     this.onProgress('Deployment submitted. Waiting for confirmation…');
     await contract.waitForDeployment();
     const receipt = await contract.deploymentTransaction().wait();
-    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, migrationAdapter, model: modelOf(this.net.chainId), metadataVersion:this.dex?1:undefined,feeAccountingVersion:this.dex?Number(await contract.FEE_ACCOUNTING_VERSION()):undefined };
+    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, migrationAdapter, model: modelOf(this.net.chainId), metadataVersion:this.dex?1:undefined,feeAccountingVersion:this.dex?Number(await contract.FEE_ACCOUNTING_VERSION()):undefined,launchFeaturesVersion:this.dex&&this.config.contracts.atomicFactory?1:undefined };
     if(previousDeployment && !write('elpida:previous-factory:'+this.net.chainId+':'+previousDeployment.factory,previousDeployment))throw new Error('Factory deployed, but previous deployment could not be archived. Save the new factory '+record.factory+' manually.');
     this.launches.clear(); this.scannedBlock = undefined; this.factoryStartFdvUsd = undefined;this.pairsScanned=undefined;this.approvedQuotes=[];this.nativeVirtualQuote=undefined;this.launchFee=undefined;
     if (!write(deploymentKey(this.net.chainId), record)) throw new Error(`Deployed, but this browser blocks storage. Save factory ${record.factory} (block ${record.block}) in packages/core/networks.mjs.`);
@@ -351,6 +363,7 @@ export class TestnetWallet {
   async verifyFactory({launch=false}={}) {
     const factory=this.factoryContract(),version=Number(await factory.MODEL_VERSION());
     await this.checkFeeAccounting(factory);
+    await this.checkLaunchFeatures(factory);
     if(version!==MODEL_VERSIONS[this.model]||(this.dex?!isDexModel(this.model):this.model!==BETA_MODEL))throw new Error('This launchpad needs the verified USD version. Set up a new launchpad from Network and funds.');
     if(this.model===DEX_MODEL&&!this.factoryStartFdvUsd)this.factoryStartFdvUsd=Number(await factory.startFdvUsd());
     if(!this.oracle?.available||(await factory.usdFeed()).toLowerCase()!==this.oracle.feed.toLowerCase()||await factory.maxPriceAge()!==BigInt(this.oracle.maxAge)||(await factory.feeUsdc()).toLowerCase()!==(this.oracle.usdc??ZeroAddress).toLowerCase())throw new Error('Activate verified USD pricing from Network and funds before launching.');
@@ -404,6 +417,7 @@ export class TestnetWallet {
     const tokens = await Promise.all([...this.launches.values()].reverse().map(async item => {
       item = {...item,metadata:await readMetadataCache(metadataKey(this.net.chainId,item.factory??this.deployment.factory,item.address)) ?? item.metadata ?? {}};
       if(item.metadataURI){try{const response=await fetch('/api/metadata/resolve?uri='+encodeURIComponent(item.metadataURI));if(!response.ok)throw new Error('unavailable');item.metadata=normalizeMetadata(await response.json());item.metadataStatus='published';}catch{item.metadataStatus='unavailable';}}
+      if(item.tax)return readTaxMarket(this,item);
       const d = this.qd(item);
       const token = new Contract(item.address, this.config.contracts.token.abi, this.provider);
       const curve = new Contract(item.curve, this.artifacts.curve.abi, this.provider);
@@ -460,6 +474,7 @@ export class TestnetWallet {
     await this.checkNetwork();
     const item = this.launches.get(token.toLowerCase());
     if (!item) throw new Error('Token not found. Refresh the launchpad.');
+    if(item.tax)return quoteTaxMarket(this,item,side,amount);
     const curve = await this.market(item);
     const d = this.qd(item);
     if(this.dex&&await new Contract(item.curve,this.artifacts.curve.abi,this.provider).pool()!==ZeroAddress){const input=parseUnits(amount,side==='buy'?d:18),out=await this.dexQuote(item,side,input);return {out:formatUnits(out,side==='buy'?18:d),fee:formatUnits(input/100n,side==='buy'?d:18),feeSymbol:side==='buy'?this.qsym(item):await new Contract(item.address,this.config.contracts.token.abi,this.provider).symbol()};}
@@ -480,6 +495,7 @@ export class TestnetWallet {
   }
   async transact(action, body) {
     await this.checkNetwork();
+    if(action==='launch'&&body.tax)return launchPublicTax(this,body);
     const factory = (await this.verifyFactory()).connect(this.signer);
     let result;
     if (action === 'setup-pairs') return this.setupTestPairs();
@@ -511,9 +527,15 @@ export class TestnetWallet {
       const nativePair = kind === 'native', paired = !nativePair;
       const asset = paired ? (this.approvedQuotes ?? []).find(a => a.kind === kind && a.address.toLowerCase() === String(body.quoteAsset ?? '').toLowerCase()) : null;
       if (paired && !asset) throw new Error(this.pairOptions()[kind].unavailable ?? 'Choose an approved asset for this pair.');
-      const firstBuy = parseUnits(body.firstBuy, nativePair ? 18 : asset.decimals);
+      if(body.tax)throw new Error('Public tax launches need a registered V2 tax factory. Use the local DEX rehearsal until that deployment is verified. Nothing was submitted.');
+      const firstBuy = parseUnits(body.firstBuy || '0', nativePair ? 18 : asset.decimals);
       const name = body.name.trim(), symbol = body.symbol.trim().toUpperCase();
-      if (firstBuy <= 0n || !name || name.length > 40 || !/^[A-Z0-9]{1,10}$/.test(symbol)) throw new Error('Check the token name, symbol and first buy.');
+      if (firstBuy < 0n || !name || name.length > 40 || !/^[A-Z0-9]{1,10}$/.test(symbol)) throw new Error('Check the token name, symbol and creator buy.');
+      if(firstBuy===0n){
+        let supported=false;
+        try{supported=await new Contract(this.deployment.factory,['function OPTIONAL_CREATOR_BUY_VERSION() view returns(uint256)'],this.provider).OPTIONAL_CREATOR_BUY_VERSION()>=1n;}catch(error){if(error.code!=='CALL_EXCEPTION')throw error;}
+        if(!supported)throw new Error('This deployed factory requires an upgrade before zero-buy launches are available. Nothing was submitted.');
+      }
       const reward = body.reward || this.address;
       if (!isAddress(reward) || reward === ZeroAddress) throw new Error('Enter a valid creator reward wallet.');
       const net = firstBuy - firstBuy * 125n / 10000n;
@@ -580,6 +602,7 @@ export class TestnetWallet {
     } else {
       const item = this.launches.get(body.token.toLowerCase());
       if (!item) throw new Error('Token not found.');
+      if(item.tax){const result=await transactTaxMarket(this,item,action,body);return {hash:result.tx.hash,message:'Tax market transaction confirmed.'};}
       const curve = await this.market(item, this.signer);
       const original = new Contract(item.curve, this.artifacts.curve.abi, this.signer);
       if (action === 'reopen') { if (this.modelOf(item) !== DEX_MODEL) throw new Error('Only model 10 curves can be reopened.'); result = await this.wait(original.reopen(), 'Confirm reopening the curve for trading…'); }

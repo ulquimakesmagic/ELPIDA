@@ -5,11 +5,11 @@ import { testnets, evmTestnets } from '../../packages/core/networks.mjs';
 
 const USDC = 1_000_000n;
 
-export function amount(value, decimals = 6) {
+export function amount(value, decimals = 6, allowZero = false) {
   if (typeof value !== 'string' || !/^\d{1,18}(\.\d+)?$/.test(value)) throw new Error('Enter a valid positive amount.');
   let result;
   try { result = parseUnits(value, decimals); } catch { throw new Error(`Use at most ${decimals} decimal places.`); }
-  if (result <= 0n) throw new Error('Amount must be greater than zero.');
+  if (result < 0n || (!allowZero && result === 0n)) throw new Error('Amount must be greater than zero.');
   return result;
 }
 
