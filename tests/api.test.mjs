@@ -11,6 +11,10 @@ test('localhost API exercises launch, trading, fee payout and request protection
   t.after(() => app.close());
   const base = app.url;
   const config = await (await fetch(`${base}/api/config`)).json();
+  const graduation=await (await fetch(`${base}/api/graduation/status`)).json();
+  assert.equal(graduation.enabled,false);
+  assert.equal(graduation.state,'not_configured');
+  assert.equal('privateKey' in graduation,false);
   const state = async account => (await fetch(`${base}/api/state?account=${account ?? '0'}`)).json();
   const request = async (action, body, headers = {}) => {
     const payload=JSON.stringify({account:'0',...body}),proof={};
