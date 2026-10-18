@@ -1,9 +1,13 @@
-export function evaluateOperations({now=Date.now(),startedAt=now,storage={},networks={},prices={},backup={},durable=false}={}){
+export function evaluateOperations({now=Date.now(),startedAt=now,storage={},networks={},prices={},backup={},graduation,durable=false}={}){
  const incidents=[],add=(code,severity,message)=>incidents.push({code,severity,message});
  if(!durable)add('storage_ephemeral','warning','Persistent storage is not configured.');
  for(const [field,cap,code] of [['bytes','maxBytes','storage_capacity'],['pendingBytes','maxPendingBytes','pending_capacity']])if(storage[cap]>0&&storage[field]/storage[cap]>=0.8)add(code,storage[field]>=storage[cap]?'critical':'warning','Metadata storage is approaching its limit.');
  if(storage.expiredPendingBytes>0)add('pending_review','warning','Old provisional uploads need review; they have not been deleted.');
  const warm=now-startedAt<180000;
+ if(graduation){
+  if(!graduation.enabled)add('graduation_disabled','warning','Automatic Base Sepolia graduation needs an operator gas wallet.');
+  else if(graduation.state==='retrying'||graduation.reason)add('graduation_delayed','critical','Automatic graduation needs operator attention: '+(graduation.reason??'transaction reverted')+'.');
+ }
  for(const [name,n] of Object.entries(networks))if(n.enabled){
   if(!warm&&(n.error||!Number.isFinite(Date.parse(n.lastSuccess))||now-Date.parse(n.lastSuccess)>180000||Number(n.lag)>100))add('indexer_'+name,'critical','Public indexing is behind or unavailable on '+name+'.');
   const p=prices[name];if(!warm&&(!p||p.status!=='fresh'||!Number.isFinite(p.usd)||p.usd<=0||now/1000-p.updatedAt>(p.maxAge??180)))add('price_'+name,'warning','A fresh display price is unavailable on '+name+'. On-chain launch pricing is checked separately.');
