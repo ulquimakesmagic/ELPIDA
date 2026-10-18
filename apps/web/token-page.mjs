@@ -75,13 +75,16 @@ export function renderToken(ctx, address) {
   const stat = (label, value, cls = '') => h(`div.tk-stat${cls}`, h('span', label), value);
   const holdersValue = h('strong', '—'), tradesValue = h('strong', token.trades24h != null ? number(token.trades24h, 0) : '—'),volumeValue=h('strong',token.volume24h!=null?fmtValue(token.volume24h,token):'—');
   const creatorFeesTotal=h('strong','Loading…');
-  const creatorFeesStat=h('div.tk-tile',{title:'Lifetime creator fees, including claimed amounts. LP fees include collected and currently collectible fees. Assets are shown separately.'},h('span','Creator fees'),creatorFeesTotal,h('a.terminal-claim',{href:'#/rewards',title:'Claim available creator fees','aria-label':'Claim available creator fees'},icon('arrow-right','icon-sm')));
+  const creatorFeesStat=h('section.tk-card.tk-fees',{'aria-label':'Creator fees',title:'Lifetime creator fees, including claimed amounts. LP fees include collected and currently collectible fees. Assets are shown separately.'},h('h2.tk-h','Creator fees'),creatorFeesTotal,h('p.hint','Lifetime total, including amounts already claimed.'),h('a.btn.btn-secondary.btn-sm',{href:'#/rewards'},'Claim fees',icon('arrow-right','icon-sm')));
   const tile=(label,value,title)=>h('div.tk-tile',{title:title??null},h('span',label),h('strong',value));
   const details = h('section.tk-card.tk-details', { 'aria-label': 'Token details' }, h('h2.tk-h', 'Token details'), h('div.tk-tiles',
     tile('Liquidity',fmtValue(Number(token.reserve??0),token),'Actual quote assets in the curve or pool; virtual reserves are excluded.'),
     tile('Supply', compact(token.supply || 1e9)),
-    token.devBoughtPct != null ? tile('Dev bought → holds', `${number(token.devBoughtPct, 2)}% → ${token.devHoldingPct != null ? number(token.devHoldingPct, 2) + '%' : '—'}`, devLabel(token.devBoughtPct, token.devHoldingPct)) : null,
-    creatorFeesStat));
+    tile('Trading pair', q),
+    tile('Venue', token.graduated ? (dex === 'test' ? 'Locked test pool' : dex) : 'Bonding curve')));
+  const miniBar = (label, value) => h('div.tk-dev-row', h('span', label), h('strong', value == null ? '—' : `${number(value, 2)}%`), h('span.tk-minibar', { 'aria-hidden': 'true' }, h('i')));
+  const devCard = token.devBoughtPct != null ? h('section.tk-card.tk-dev', { 'aria-label': 'Dev transparency', title: devLabel(token.devBoughtPct, token.devHoldingPct) }, h('h2.tk-h', 'Dev transparency'), miniBar('Dev bought', token.devBoughtPct), miniBar('Dev holds now', token.devHoldingPct)) : null;
+  if (devCard) devCard.querySelectorAll('.tk-minibar i').forEach((fill, i) => { const v = Number([token.devBoughtPct, token.devHoldingPct][i]); fill.style.width = `${Math.min(100, Math.max(0, Number.isFinite(v) ? v : 0))}%`; });
 
   const change = token.priceChange24h, hasChange = change && Number.isFinite(change.percent), up = hasChange && change.percent >= 0;
   const usdOn = usdRate(token) !== null;
@@ -188,8 +191,8 @@ export function renderToken(ctx, address) {
   const page=h('div.tk-page', head,
     h('div.tk-layout',
       h('div.tk-top', priceCard),
-      h('aside.tk-rail.stack', desk.position, tradePanel(ctx, token, { dex, solana })),
-      h('div.tk-rest.stack', activity, curve, details, addresses, about, tech)));
+      h('aside.tk-rail.stack', tradePanel(ctx, token, { dex, solana }), desk.position, curve, creatorFeesStat, devCard),
+      h('div.tk-rest.stack', activity, details, addresses, about, tech)));
   async function loadCreatorFees(){if(!page.isConnected)return;try{const result=await ctx.api(`creator-fees?network=${encodeURIComponent(token.network??ctx.currentChain())}&token=${encodeURIComponent(token.address)}`);if(!page.isConnected)return;if(result.status==='ready'){creatorFeesTotal.textContent=result.assets.filter(a=>Number(a.amount)>0).map(a=>`${number(a.amount,6)} ${a.symbol}`).join(' + ')||`0 ${q}`;creatorFeesStat.title=`Lifetime creator fees through indexed block ${result.indexedBlock}, including claimed amounts. Token and quote assets are shown separately.`;}else{creatorFeesTotal.textContent=result.status==='loading'?'Loading…':'Unavailable';}}catch{creatorFeesTotal.textContent='Unavailable';}if(page.isConnected)setTimeout(loadCreatorFees,15000);}
   queueMicrotask(loadCreatorFees);
   return page;
@@ -254,7 +257,7 @@ function tradePanel(ctx, token, { dex, solana }) {
   const unit = h('span.affix');
   const balance = h('p.hint#trade-balance');
   const shortcuts = h('div.shortcuts', { role: 'group', 'aria-label': 'Amount shortcuts' });
-  const out = h('strong', 'Enter an amount'), fee = h('strong', '—'), feeNote = h('p.hint');
+  const out = h('strong', 'Enter an amount'), fee = h('strong', '—'), minOut = h('strong', '—'), feeNote = h('p.hint');
   // Live anti-snipe countdown ("Launch fee window: 47% → 1.25% in 31 s") while the first minute lasts.
   const feeWindow = h('p.hint.fee-window', { role: 'status', 'aria-live': 'off' });
   let feeTicks = 0;
@@ -270,7 +273,7 @@ function tradePanel(ctx, token, { dex, solana }) {
   };
 
   const error = h('p.error-text', { role: 'alert' });
-  const slippage = h('select.select#trade-slippage', [['0.5', '0.5%'], ['1', '1%'], ['3', '3%'], ['5', '5%']].map(([v, l]) => h('option', { value: v, selected: v === '1' }, l)));
+  const slippage = h('select.select#trade-slippage', [['0.1', '0.1%'], ['0.5', '0.5%'], ['1', '1%'], ['3', '3%'], ['5', '5%']].map(([v, l]) => h('option', { value: v, selected: v === '1' }, l)));
   const submit = h('button.btn.btn-block.btn-lg', { type: 'submit', disabled:true });
   const updateSubmit = () => { submit.disabled = !quoteReady || submitting; };
   const remainingDisplay = token.remainingBase ?? token.remainingBuy;
@@ -294,7 +297,7 @@ function tradePanel(ctx, token, { dex, solana }) {
     unit.textContent = side === 'buy' ? q : token.symbol;
     submit.textContent = `${side === 'buy' ? 'Buy' : 'Sell'} ${token.symbol}`;
     submit.className = `btn btn-block btn-lg ${side === 'buy' ? 'btn-buy' : 'btn-sell'}`;
-    amount.value = ''; out.textContent = 'Enter an amount'; fee.textContent = '—'; feeNote.textContent = ''; error.textContent = '';
+    amount.value = ''; out.textContent = 'Enter an amount'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = ''; error.textContent = '';
     const qb = quoteBalance();
     balance.textContent = side === 'buy' ? (qb ? `Available: ${qb}` : '') : `Available: ${number(token.balance, 4)} ${token.symbol}`;
     // 25/50/75/Max of the spendable balance. Buys keep a small native reserve for network fees.
@@ -318,13 +321,13 @@ function tradePanel(ctx, token, { dex, solana }) {
   function quote() {
     const value = amount.value, rev = ++revision; clearTimeout(timer); error.textContent = '';
     quoteReady = false; updateSubmit(); useRemaining.hidden = true;
-    if (!(Number(value) > 0)) { out.textContent = 'Enter an amount'; fee.textContent = '—'; feeNote.textContent = ''; return; }
+    if (!(Number(value) > 0)) { out.textContent = 'Enter an amount'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = ''; return; }
     if (side === 'buy' && remaining && exceedsRemaining(value,token.remainingBuy) && !solana && !token.partialFill) {
-      out.textContent = 'Amount exceeds the curve limit'; fee.textContent = '—'; feeNote.textContent = '';
+      out.textContent = 'Amount exceeds the curve limit'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = '';
       error.textContent = `About ${number(token.remainingBuy,8)} ${q} remains on the bonding curve. Use the remaining-amount button to fill the exact limit, then graduate to the locked pool.`;
       useRemaining.hidden = false; return;
     }
-    fee.textContent = '—'; feeNote.textContent = '';
+    fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = '';
     out.textContent = 'Getting quote…';
     timer = setTimeout(async () => {
       try {
@@ -333,11 +336,13 @@ function tradePanel(ctx, token, { dex, solana }) {
         quoteReady = true; updateSubmit();
         out.textContent = `${number(result.out, side === 'buy' ? 2 : 6)} ${side === 'buy' ? token.symbol : q}`;
         fee.textContent = `${number(result.fee, 6)} ${result.feeSymbol ?? q}`;
+        minOut.textContent = `${number(Number(result.out) * (1 - Number(slippage.value) / 100), side === 'buy' ? 2 : 6)} ${side === 'buy' ? token.symbol : q}`;
         feeNote.textContent = result.antiSnipeActive ? `Launch protection is active: the fee is ${number(result.feeBps / 100, 2)}% right now and falls to 1.25% by the end of the first minute. The amount above 1.25% is added to the token's locked liquidity.` : result.completesCurve ? `This purchase completes the curve. Only ${number(result.spend, 4)} ${q} will be charged.` : '';
-      } catch (e) { if (rev !== revision) return; out.textContent = 'Quote unavailable'; fee.textContent = '—'; error.textContent = errorText(e); }
+      } catch (e) { if (rev !== revision) return; out.textContent = 'Quote unavailable'; fee.textContent = '—'; minOut.textContent = '—'; error.textContent = errorText(e); }
     }, 300);
   }
   amount.addEventListener('input', quote);
+  slippage.addEventListener('change', () => { if (Number(amount.value) > 0) quote(); });
   const form = h('form', { class: 'stack', on: { submit: async event => {
     event.preventDefault(); error.textContent = '';
     if (!(Number(amount.value) > 0)) { error.textContent = 'Enter an amount greater than zero.'; amount.focus(); return; }
@@ -354,7 +359,8 @@ function tradePanel(ctx, token, { dex, solana }) {
     funding,
     h('div.receive', h('span', 'You receive'), out),
     h('div.trade-meta', h('span', 'Trading fee'), fee),
-    h('div.trade-meta', h('label', { for: 'trade-slippage' }, 'Slippage'), slippage),
+    h('div.trade-meta', h('span', 'Minimum received'), minOut),
+    h('details.trade-settings', h('summary', icon('sliders-horizontal', 'icon-sm'), 'Slippage settings'), h('div.trade-meta', h('label', { for: 'trade-slippage' }, 'Slippage tolerance'), slippage)),
     feeWindow, feeNote, error, submit);
   form.querySelector('label[for=trade-amount]').dataset.dynamic = 'true';
   tabs.addEventListener('click', () => { form.querySelector('label[for=trade-amount]').textContent = side === 'buy' ? 'Pay' : 'Sell'; });
@@ -366,7 +372,7 @@ function tradePanel(ctx, token, { dex, solana }) {
   });
   setSide('buy');
   tickFeeWindow();
-  return h('section.panel.trade-panel', { 'aria-labelledby': 'trade-title' }, h('h2#trade-title.visually-hidden', 'Trade'),
-    h('p.small.muted', token.graduated ? `Trades on the locked ${dex} pool since graduation.` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'),
+  return h('section.panel.trade-panel.tk-trade', { 'aria-labelledby': 'trade-title' }, h('h2#trade-title.visually-hidden', 'Trade'),
+    h('p.small.muted', token.graduated ? `Trading on ${dex === 'test' ? 'the locked test pool' : dex}. Liquidity is locked permanently.` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'),
     form);
 }
