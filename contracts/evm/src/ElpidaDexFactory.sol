@@ -28,6 +28,7 @@ contract ElpidaDexFactory is ElpidaUsdPricing {
     uint256 public constant VIRTUAL_TOKEN = 1_111_111_111_111_111 * 1e12;
     uint256 public constant TOKEN_SUPPLY = 1_000_000_000 ether;
     uint256 public constant MODEL_VERSION = 10;
+    uint256 public constant FEE_ACCOUNTING_VERSION = 1;
     uint256 public constant METADATA_VERSION = 1;
     /// Starting FDV in whole US dollars: 5000 on mainnet, 50 on test-sized testnet deployments.
     uint256 public immutable startFdvUsd;
