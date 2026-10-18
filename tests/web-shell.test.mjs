@@ -20,7 +20,7 @@ test('the shell ships its own fonts, theme and scripts, served same-origin under
   const app = await startServer({ port: 0, seed: false });
   t.after(() => app.close());
   const local = [...html.matchAll(/(?:href|src)="(\/[^"?#]*)/g)].map(m => m[1]).filter(path => !path.startsWith('/#'));
-  const required = ['/theme.css', '/explore.css', '/theme-boot.js', '/app.mjs', '/assets/fonts/geist-variable.woff2', '/assets/fonts/geist-mono-variable.woff2', '/assets/icons.svg'];
+  const required = ['/theme.css', '/explore.css', '/token.css', '/theme-boot.js', '/app.mjs', '/assets/fonts/geist-variable.woff2', '/assets/fonts/geist-mono-variable.woff2', '/assets/icons.svg'];
   for (const path of required) assert.ok(local.includes(path), `${path} is referenced by index.html`);
   for (const path of new Set([...local, '/shell.mjs', '/explore-view.mjs', '/odometer.mjs'])) {
     const response = await fetch(`${app.url}${path}`);

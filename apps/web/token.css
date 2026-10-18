@@ -1,0 +1,113 @@
+/* Token page (UI Phase 3a): header, price card with chart, records card. Uses the shared tokens in theme.css. */
+.tk-page { display: grid; gap: 16px; min-width: 0; }
+.tk-head { display: grid; gap: 14px; min-width: 0; }
+.tk-crumb { display: flex; align-items: center; gap: 8px; font: 500 13px/1 var(--font-sans); color: var(--muted); min-width: 0; }
+.tk-crumb a { display: inline-flex; align-items: center; gap: 6px; color: var(--muted); text-decoration: none; }
+.tk-crumb a:hover { color: var(--ink); }
+.tk-crumb-now { color: var(--ink); font-weight: 600; }
+.tk-chain { margin-left: auto; display: inline-flex; align-items: center; gap: 8px; min-width: 0; font-size: 12px; }
+.tk-chain span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tk-id { display: flex; gap: 16px; align-items: center; min-width: 0; }
+.tk-id .avatar-lg { width: 56px; height: 56px; min-width: 56px; flex: none; }
+.tk-id-copy { display: grid; gap: 10px; min-width: 0; }
+.tk-id h1 { margin: 0; font: 650 24px/1.15 var(--font-sans); letter-spacing: -.01em; overflow-wrap: anywhere; }
+.tk-tags, .tk-links { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.tk-tag { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: var(--r-pill); border: .67px solid var(--line-soft);
+  background: var(--panel-2); font: 500 12px/1 var(--font-sans); color: var(--ink-2); white-space: nowrap; }
+.tk-tag-strong { color: var(--accent-text); border-color: var(--accent-line); background: var(--accent-tint); font-weight: 600; }
+.tk-tag-live { color: var(--up); }
+.tk-addr .copy-btn, .tk-addr button { margin-left: 2px; }
+.tk-pill { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: var(--r-pill); border: .67px solid var(--line); color: var(--ink-2);
+  font: 500 12px/1 var(--font-sans); text-decoration: none; background: transparent; }
+.tk-pill:hover { background: var(--hover); color: var(--ink); }
+.tk-pill-end { margin-left: auto; }
+.tk-about { display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; max-width: 70ch; }
+.tk-desc { margin: 0; color: var(--ink-2); font-size: 14px; line-height: 1.55; overflow-wrap: anywhere; }
+.tk-desc[data-clamped="true"] { display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; }
+.tk-lock { margin: 0; display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+
+.tk-layout { display: grid; grid-template-columns: minmax(0, 1fr) 350px; grid-template-areas: "top rail" "rest rail"; gap: 16px; align-items: start; }
+.tk-top { grid-area: top; min-width: 0; }
+.tk-rest { grid-area: rest; min-width: 0; }
+.tk-rail { grid-area: rail; position: sticky; top: 80px; min-width: 0; }
+
+.tk-card { background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo)); border: .67px solid var(--line-soft); border-radius: var(--r-card); box-shadow: var(--shadow-card); padding: 20px; min-width: 0; }
+.tk-h { margin: 0 0 12px; font: 600 15px/1.2 var(--font-sans); }
+.tk-pricetop { display: flex; flex-wrap: wrap; gap: 16px 28px; justify-content: space-between; align-items: flex-end; margin-bottom: 16px; }
+.tk-price { display: grid; gap: 8px; min-width: 0; }
+.tk-label { font: 600 11px/1 var(--font-sans); letter-spacing: .08em; color: var(--muted); }
+.tk-price-value { font: 600 29px/1.1 var(--font-sans); font-variant-numeric: tabular-nums; max-width: 100%; }
+.tk-price-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 10px; }
+.tk-price-meta .hint { margin: 0; font-size: 12px; }
+.pct-flat { background: var(--panel-2); border-color: var(--line-soft); color: var(--muted); }
+.tk-stats { display: grid; grid-template-columns: repeat(4, minmax(0, auto)); gap: 8px 24px; }
+.tk-stat { display: grid; gap: 6px; min-width: 0; }
+.tk-stat > span { font: 500 11px/1 var(--font-sans); color: var(--muted); }
+.tk-stat strong { font: 600 15px/1.2 var(--font-sans); font-variant-numeric: tabular-nums; }
+.tk-accent { color: var(--accent-text); }
+.tk-foot { margin: 12px 0 0; font-size: 11px; color: var(--muted); }
+
+/* Chart */
+.price-history { display: grid; gap: 8px; min-width: 0; }
+.price-history .chart-top { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: center; gap: 10px; margin: 0; }
+.price-history .chart-controls { display: flex; flex-wrap: wrap; gap: 8px; margin: 0; }
+.price-history .chart-options { display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--r-pill); background: var(--panel-2); border: .67px solid var(--line-soft); }
+.price-history .chart-options .btn { border: 0; border-radius: var(--r-pill); min-height: 30px; padding: 0 12px; background: transparent; font-size: 12px; color: var(--muted); }
+.price-history .chart-options .btn[aria-pressed=true] { background: var(--panel-3); color: var(--ink); }
+.tk-live { display: inline-flex; align-items: center; gap: 6px; padding: 5px 10px; border-radius: var(--r-pill); border: .67px solid var(--line-soft); font: 500 11px/1 var(--font-sans); color: var(--muted); }
+.tk-live i { width: 6px; height: 6px; border-radius: 50%; background: var(--up); box-shadow: 0 0 0 3px var(--up-soft); }
+.price-history .terminal-chart { height: 380px; }
+
+/* Records */
+.tk-records { padding: 8px 0 0; overflow: hidden; }
+.tk-records-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px 16px; padding: 0 20px; border-bottom: .67px solid var(--line-soft); }
+.tk-tabs { display: flex; gap: 20px; }
+.tk-tabs button { position: relative; padding: 14px 0; border: 0; background: none; color: var(--muted); font: 600 14px/1 var(--font-sans); cursor: pointer; display: inline-flex; gap: 8px; align-items: center; min-height: 44px; }
+.tk-tabs button[aria-selected=true] { color: var(--ink); }
+.tk-tabs button[aria-selected=true]::after { content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px; background: var(--accent); border-radius: 2px; }
+.tk-count { padding: 3px 7px; border-radius: var(--r-pill); background: var(--panel-3); font-size: 11px; font-weight: 600; color: var(--ink-2); }
+.tk-records .activity-controls { display: flex; align-items: center; gap: 12px; }
+.tk-records > div:last-child { padding: 0 0 16px; }
+.tk-records .table-scroll { overflow-x: auto; }
+.tk-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.tk-table th { padding: 12px 20px; text-align: left; font: 500 11px/1 var(--font-sans); color: var(--muted); white-space: nowrap; }
+.tk-table th.num, .tk-table td.num { text-align: right; }
+.tk-table td { padding: 0 20px; height: 52px; border-top: .67px solid var(--line-faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.tk-row:hover td { background: var(--hover); }
+.tk-time a { color: var(--age); text-decoration: none; }
+.tk-badge { display: inline-block; padding: 5px 10px; border-radius: var(--r-chip); font: 600 11px/1 var(--font-sans); }
+.tk-buy { background: var(--up-soft); color: var(--up); }
+.tk-sell { background: var(--down-bg); color: var(--down); }
+.tk-trader { display: inline-flex; align-items: center; gap: 4px; color: var(--accent-text); text-decoration: none; }
+.tk-trader:hover { text-decoration: underline; }
+.tk-role { margin-left: 8px; padding: 3px 8px; border-radius: var(--r-pill); background: var(--panel-3); color: var(--ink-2); font-size: 11px; }
+.tk-share { display: flex; align-items: center; justify-content: flex-end; gap: 10px; height: 51px; }
+.tk-minibar { width: 56px; height: 4px; border-radius: 2px; background: var(--panel-3); overflow: hidden; }
+.tk-minibar i { display: block; height: 100%; background: var(--accent); border-radius: 2px; }
+.tk-more { margin: 12px 20px 0; }
+.tk-records .holder-chat { padding: 16px 20px 0; }
+.tk-records > div > p.meta { padding: 0 20px; }
+
+.tk-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.tk-tile { position: relative; display: grid; gap: 6px; padding: 12px 14px; border: .67px solid var(--line-soft); border-radius: var(--r-tile); background: var(--panel-2); min-width: 0; }
+.tk-tile span { font: 500 11px/1 var(--font-sans); color: var(--muted); }
+.tk-tile strong { font: 600 14px/1.25 var(--font-sans); overflow-wrap: anywhere; }
+.tk-tile .terminal-claim { position: absolute; right: 10px; top: 10px; }
+
+@media (max-width: 1000px) {
+  .tk-layout { grid-template-columns: minmax(0, 1fr); grid-template-areas: "top" "rail" "rest"; }
+  .tk-rail { position: static; }
+}
+@media (max-width: 640px) {
+  .tk-card { padding: 14px; border-radius: 18px; }
+  .tk-records { padding-top: 0; }
+  .tk-records-head { padding: 0 14px; }
+  .tk-table th, .tk-table td { padding-left: 12px; padding-right: 12px; }
+  .tk-stats { grid-template-columns: repeat(2, minmax(0, 1fr)); width: 100%; }
+  .tk-pill-end { margin-left: 0; }
+  .price-history .terminal-chart { height: 300px; }
+  .tk-id h1 { font-size: 20px; }
+  .tk-id .avatar-lg { width: 48px; height: 48px; min-width: 48px; }
+  .tk-price-value { font-size: 26px; }
+}
+@media (prefers-reduced-motion: reduce) { .tk-live i { box-shadow: none; } }
