@@ -79,3 +79,7 @@ Dock width 220ms; label fades 120ms; marquee about 40px per second. Cards enter 
 - `tests/web-shell.test.mjs`: every element the scripts look up exists in `index.html`; every local file the page references is served; no inline scripts; every sprite icon used exists; the recent-trades endpoint answers.
 - `tests/explore-model.test.mjs`: 24h activity (EVM and Solana tables), trending, tabs, filters, chip counts, search, pages, creators, live feed join, URL round-trip. `tests/api.test.mjs` checks listing activity and the simulation's recent trades.
 - No horizontal overflow at 320, 390, 768, 1280 and 1440px on Explore (including a paged view), Create, Portfolio, Analytics and the 404 page, in both themes.
+
+## Token page (Phase 3a)
+
+`apps/web/token.css` styles the token page: header (breadcrumb, 56px logo, tag row, link pills, three-line description with "more", lock note only when the token has an on-chain metadata reference), a price card (odometer price, 24h change pill or "No 24h change", buys/sells, Market cap / 24h volume / Holders / 24h trades) containing the chart, and a records card with Activity, Holders and Chat tabs. The chart reads `--up`, `--down`, `--muted` and `--line-*` at draw time, so it follows the theme. Holder chat replaces the old theses panel (PR #13/#14). Hidden when data is missing: no "Official" chip, no pinned note. The trade panel, curve card, creator fees and dev cards are unchanged until Phase 3b. The vendored chart library still logs one CSP inline-style warning.
