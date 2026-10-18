@@ -83,3 +83,7 @@ Dock width 220ms; label fades 120ms; marquee about 40px per second. Cards enter 
 ## Token page (Phase 3a)
 
 `apps/web/token.css` styles the token page: header (breadcrumb, 56px logo, tag row, link pills, three-line description with "more", lock note only when the token has an on-chain metadata reference), a price card (odometer price, 24h change pill or "No 24h change", buys/sells, Market cap / 24h volume / Holders / 24h trades) containing the chart, and a records card with Activity, Holders and Chat tabs. The chart reads `--up`, `--down`, `--muted` and `--line-*` at draw time, so it follows the theme. Holder chat replaces the old theses panel (PR #13/#14). Hidden when data is missing: no "Official" chip, no pinned note. The trade panel, curve card, creator fees and dev cards are unchanged until Phase 3b. The vendored chart library still logs one CSP inline-style warning.
+
+### Token page right rail (Phase 3b)
+
+Order: trade panel (accent-tinted border; Minimum received row; slippage in a collapsible settings drawer with 0.1/0.5/1/3/5%), your position, curve progress, creator fees (lifetime total and a Claim link to Rewards), dev transparency (bars, shown only when dev data exists). Trade, quote, anti-snipe, graduate and reopen logic are unchanged. No "launch transaction" link: the indexer does not store the launch hash.
