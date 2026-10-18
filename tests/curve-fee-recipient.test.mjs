@@ -7,6 +7,7 @@ test('curve claims clear both ledgers for a shared beneficiary and preserve sepa
  const runtime=await createRuntime({seed:false,dex:true});t.after(()=>runtime.close());
  const creator=runtime.config.accounts[0].address,other=runtime.config.accounts[1].address;
  const payer=await runtime.provider.getSigner(2);
+ assert.equal(await new Contract(runtime.indexer.factory,runtime.config.contracts.dexFactory.abi,payer).FEE_ACCOUNTING_VERSION(),1n);
  for(const reward of [creator,other]){
   const launch=await runtime.transact('launch',{name:'Fee recipients',symbol:'FEES',pair:'native',firstBuy:'0.025',reward});
   const listing=runtime.indexer.listings().find(row=>row.address.toLowerCase()===launch.token.toLowerCase());

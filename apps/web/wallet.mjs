@@ -59,7 +59,7 @@ export class TestnetWallet {
   select(key) {
     const net = this.config.testnets.find(item => item.key === key);
     if (!net) throw new Error('That test network is not available.');
-    if (this.net?.key !== key) { this.net = net; this.atomicLaunch=undefined; this.launches = new Map(); this.scannedBlock = undefined; this.launchFee = undefined; this.pairsScanned=undefined;this.approvedQuotes=[]; this.nativeVirtualQuote = undefined; this.factoryStartFdvUsd = undefined; this.needsMetadataUpgrade = false; }
+    if (this.net?.key !== key) { this.net = net; this.atomicLaunch=undefined; this.launches = new Map(); this.scannedBlock = undefined; this.launchFee = undefined; this.pairsScanned=undefined;this.approvedQuotes=[]; this.nativeVirtualQuote = undefined; this.factoryStartFdvUsd = undefined; this.needsMetadataUpgrade = false;this.feeAccountingVersion=undefined; }
     return net;
   }
   get dex(){return this.net.key==='base-sepolia'?this.config.publicDex:null;}
@@ -96,6 +96,7 @@ export class TestnetWallet {
     // Team deployment is authoritative across visitors; saved private deployments remain intact.
     // A model 10 record saved by this browser takes precedence over a pinned legacy model 9 team deployment.
     const shared=this.net.shared, model=modelOf(this.net.chainId), saved=read(deploymentKey(this.net.chainId));
+    if(this.net.key==='base-sepolia'&&saved?.model===DEX_MODEL&&saved.feeAccountingVersion===1&&(shared?.feeAccountingVersion??0)<1)return saved;
     if (shared?.factory && shared.model === model) return { ...shared, shared: true };
     if (saved) return saved;
     if (shared?.factory && isDexModel(model) && isDexModel(shared.model)) return { ...shared, shared: true };
@@ -104,6 +105,7 @@ export class TestnetWallet {
   /** True when this network still uses a legacy model 9 launchpad and model 10 can be deployed. */
   get modelUpgradeAvailable() { return !!this.dex && this.deployment?.model === LEGACY_DEX_MODEL;
   }
+  get feeFixUpgradeAvailable(){return this.net.key==='base-sepolia'&&this.model===DEX_MODEL&&!!this.deployment&&this.feeAccountingVersion===0;}
   /** A token's own curve model: tokens from a legacy team factory keep that factory's model. */
   modelOf(item) { return item?.deploymentModel ?? this.model; }
   /** Factory that created `item`: its legacy team factory, or the current launchpad. */
@@ -309,7 +311,7 @@ export class TestnetWallet {
   }
   async deploy() {
     await this.checkNetwork();
-    if (this.deployment && !this.needsMetadataUpgrade && !this.modelUpgradeAvailable) throw new Error(`This ${this.net.name} launchpad is already set up. Use it for your launches.`);
+    if (this.deployment && !this.needsMetadataUpgrade && !this.modelUpgradeAvailable && !this.feeFixUpgradeAvailable) throw new Error(`This ${this.net.name} launchpad is already set up. Use it for your launches.`);
     const previousDeployment=this.deployment;
     await this.oraclePrice();
     if (await this.provider.getBalance(this.address) === 0n) throw new Error(`Get ${this.net.nativeCurrency.symbol} on ${this.net.name} from a faucet to pay deployment gas.`);
@@ -332,17 +334,23 @@ export class TestnetWallet {
     this.onProgress('Deployment submitted. Waiting for confirmation…');
     await contract.waitForDeployment();
     const receipt = await contract.deploymentTransaction().wait();
-    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, migrationAdapter, model: modelOf(this.net.chainId), metadataVersion:this.dex?1:undefined };
+    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, migrationAdapter, model: modelOf(this.net.chainId), metadataVersion:this.dex?1:undefined,feeAccountingVersion:this.dex?Number(await contract.FEE_ACCOUNTING_VERSION()):undefined };
     if(previousDeployment && !write('elpida:previous-factory:'+this.net.chainId+':'+previousDeployment.factory,previousDeployment))throw new Error('Factory deployed, but previous deployment could not be archived. Save the new factory '+record.factory+' manually.');
-    this.launches.clear(); this.scannedBlock = undefined; this.factoryStartFdvUsd = undefined;
+    this.launches.clear(); this.scannedBlock = undefined; this.factoryStartFdvUsd = undefined;this.pairsScanned=undefined;this.approvedQuotes=[];this.nativeVirtualQuote=undefined;this.launchFee=undefined;
     if (!write(deploymentKey(this.net.chainId), record)) throw new Error(`Deployed, but this browser blocks storage. Save factory ${record.factory} (block ${record.block}) in packages/core/networks.mjs.`);
     await this.wait(contract.configureUsdPricing(this.oracle.feed,this.oracle.maxAge,this.oracle.usdc??ZeroAddress),'Activate verified USD pricing. This fixes the oracle and enables launches…');
     if(this.dex&&this.oracle.usdc&&this.oracle.usdc!==ZeroAddress)await this.setupUsdcPair(contract);
-    this.needsMetadataUpgrade=false;
+    this.needsMetadataUpgrade=false;this.feeAccountingVersion=record.feeAccountingVersion;
     return { hash: receipt.hash, message: `Your ${this.net.name} launchpad is deployed, using the on-chain USD oracle for the $10 launch fee.${this.dex&&this.oracle.usdc?' USDC trading is configured for all creators.':''}` };
+  }
+  async checkFeeAccounting(factory=this.factoryContract()){
+    this.feeAccountingVersion=undefined;
+    if(this.net.key==='base-sepolia'&&this.model===DEX_MODEL){try{this.feeAccountingVersion=Number(await new Contract(factory.target,['function FEE_ACCOUNTING_VERSION() view returns(uint256)'],this.provider).FEE_ACCOUNTING_VERSION());}catch(error){if(error.code==='CALL_EXCEPTION'&&(!error.data||error.data==='0x'))this.feeAccountingVersion=0;else throw error;}}
+    return this.feeAccountingVersion;
   }
   async verifyFactory({launch=false}={}) {
     const factory=this.factoryContract(),version=Number(await factory.MODEL_VERSION());
+    await this.checkFeeAccounting(factory);
     if(version!==MODEL_VERSIONS[this.model]||(this.dex?!isDexModel(this.model):this.model!==BETA_MODEL))throw new Error('This launchpad needs the verified USD version. Set up a new launchpad from Network and funds.');
     if(this.model===DEX_MODEL&&!this.factoryStartFdvUsd)this.factoryStartFdvUsd=Number(await factory.startFdvUsd());
     if(!this.oracle?.available||(await factory.usdFeed()).toLowerCase()!==this.oracle.feed.toLowerCase()||await factory.maxPriceAge()!==BigInt(this.oracle.maxAge)||(await factory.feeUsdc()).toLowerCase()!==(this.oracle.usdc??ZeroAddress).toLowerCase())throw new Error('Activate verified USD pricing from Network and funds before launching.');
