@@ -64,6 +64,7 @@ resources.set('/explore-view.mjs', ['explore-view.mjs', 'text/javascript']);
 resources.set('/odometer.mjs', ['odometer.mjs', 'text/javascript']);
 resources.set('/explore.css', ['explore.css', 'text/css']);
 resources.set('/token.css', ['token.css', 'text/css']);
+resources.set('/launch.css', ['launch.css', 'text/css']);
 const assetTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8' };
 const vendorFiles = new Map([
   ['/vendor/lightweight-charts.js', fileURLToPath(new URL('../../node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js', import.meta.url))],

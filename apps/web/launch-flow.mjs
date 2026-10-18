@@ -19,6 +19,7 @@ const STEPS = [
   { key: 'purchase', title: 'First purchase', lead: 'Your token launches with your first purchase on its bonding curve, in the same transaction.' },
   { key: 'review', title: 'Review and create', lead: 'Check everything before you create your token. Items marked as fixed cannot be changed later.' },
 ];
+const STEP_ICONS = { details: 'file-pen', network: 'layers', rewards: 'coins', purchase: 'zap', review: 'shield-check' };
 const STRATEGY_TEXT = {
   creator: 'Creator fees accumulate for one or more wallets you choose. Each wallet can claim its share.',
   holders: 'When the distribution threshold is reached, fees are paid to eligible holders in the trading asset, weighted by their holdings at a snapshot.',
@@ -41,7 +42,11 @@ export function renderLaunch(ctx) {
   const stepper = h('ol.stepper', { 'aria-label': 'Create token steps' });
   const panel = h('section.step-panel', { 'aria-live': 'polite' });
   const preview = h('aside.preview', { 'aria-label': 'Live preview' });
-  const root = h('div', h('a.back-link', { href: '#/' }, icon('arrow-left', 'icon-sm'), 'Back to tokens'), h('div.launch', stepper, panel, preview));
+  const root = h('div.lk',
+    h('header.lk-head', h('h1', 'Launch your token, ', h('em', 'built on hope'), ' across any chain.'),
+      h('button.tk-pill', { type: 'button', on: { click: () => document.querySelector('#how-dialog')?.showModal() } }, icon('circle-help', 'icon-sm'), 'How it works')),
+    h('nav.lk-stepper', { 'aria-label': 'Create token progress' }, stepper),
+    h('div.launch', panel, preview));
 
   const profile = () => launchProfile(draft.chain === 'local' ? 'local' : draft.chain || 'local');
   const net = () => draft.chain && draft.chain !== 'local' ? ctx.networkByKey(draft.chain) : null;
@@ -104,8 +109,10 @@ export function renderLaunch(ctx) {
     const strategy = STRATEGIES[draft.rewardMode]?.name ?? 'Creator wallets';
     const est = estimate();
     preview.replaceChildren(
-      h('div.preview-card', h('span.small.muted', 'Preview'),
-        h('div.token-card-head', avatar({ symbol: draft.symbol || 'NEW', metadata: { image: draft.image } }), h('div', h('h3', draft.name || 'Your token name'), h('span.sym.muted.small', `$${(draft.symbol || 'SYMBOL').toUpperCase()}`))),
+      h('div.preview-card', h('span.lk-label', h('i'), 'Token preview'),
+        h('div.lk-well', draft.image ? avatar({ symbol: draft.symbol || 'NEW', metadata: { image: draft.image } }, 'avatar-xl') : h('span.lk-spark', icon('sparkles'))),
+        h('div.lk-name', h('h3', draft.name || 'Your token name'), h('span.sym.muted.small', `$${(draft.symbol || 'SYMBOL').toUpperCase()}`), h('span.lk-paired', 'Paired with ', h('strong', pairSymbol()))),
+        h('dl.lk-facts', h('dt', 'Network'), h('dd', draft.chain ? (draft.chain === 'local' ? 'Local simulation' : net()?.name ?? draft.chain) : 'Not chosen'), h('dt', 'Status'), h('dd', 'Pre-launch'), ...(startCap() ? [h('dt', 'Starts at'), h('dd', startCap())] : [])),
         h('p.desc', draft.description || 'Your description appears here.'), links,
         h('div.chips', { class: 'links' }, h('span.chip',chainIcon(draft.chain), draft.chain ? (draft.chain === 'local' ? 'Local simulation' : net()?.name ?? draft.chain) : 'Network not chosen'), h('span.chip',assetIcon(pairSymbol()), `Pair: ${pairSymbol()}`))),
       h('div.summary-card', h('h4', 'Launch summary'), h('dl.kv',
@@ -115,6 +122,14 @@ export function renderLaunch(ctx) {
         h('dt', 'Creator rewards'), h('dd', strategy),
         h('dt.total', connected()?'You pay':'Estimated total'), h('dd.total', youPay())),
         h('p.hint', { text: `Launch fee conversion is verified before signing. Plus the network fee. Fixed supply of 1,000,000,000 ${draft.symbol ? draft.symbol.toUpperCase() : 'tokens'}.` })));
+  }
+  /** Market cap the token starts at, from the selected pair's curve. USD only when the conversion is known. */
+  function startCap() {
+    const asset = selectedAsset(), curve = asset?.curve;
+    if (!curve || !(curve.vt > 0)) return '';
+    const quote = curve.vq * 1e9 / curve.vt, usd = asset.symbol === 'USDC' ? 1 : asset.id === 'native' && freshPrice(launchPrice()) ? launchPrice().usd : null;
+    const testNote = draft.chain === 'local' ? ' · simulation' : draft.chain && !net()?.mainnet ? ' · test size' : '';
+    return usd !== null ? `$${number(quote * usd, 0)} market cap${testNote}` : `${number(quote, 4)} ${asset.symbol} market cap${testNote}`;
   }
   function youPay() {
     if(feeAmount()===null)return 'Quote unavailable';
@@ -407,12 +422,13 @@ export function renderLaunch(ctx) {
     pricingRefresh=()=>drawPreview();
     current = builders[step]();
     const nav = h('div.step-nav',
+      h('span.lk-saved', icon('check', 'icon-xs'), 'Draft saved in this browser'),
       step > 0 ? h('button.btn.btn-secondary', { type: 'button', disabled: phase === 'submitting', on: { click: () => go(step - 1) } }, icon('chevron-left', 'icon-sm'), 'Back') : h('a.btn.btn-ghost', { href: '#/' }, 'Cancel'),
       step < STEPS.length - 1 ? h('button.btn.btn-primary', { type: 'button', on: { click: () => go(step + 1) } }, 'Continue', icon('chevron-right', 'icon-sm'))
         : h('button.btn.btn-primary.btn-lg', { type: 'button', 'data-busy-disable': '', disabled: phase === 'submitting', on: { click: () => { if (current.validate()) create(); } } }, phase === 'failed' ? 'Try again' : 'Create token'));
     const status = statusState ? h('div.panel', { class: 'stack' }, h('h3', phase === 'failed' ? 'Your token was not created' : 'Creating your token'), statusView(),statusState.message?h('p.small',statusState.message):null,
       statusState.error ? callout('error', 'circle-alert', statusState.error, ' Your draft is saved, so you can adjust it and try again.') : null) : null;
-    panel.replaceChildren(...[h('header', h('span.step-kicker', `Step ${step + 1} of ${STEPS.length}`), h('h2', { tabindex: '-1' }, s.title), h('p', s.lead)), h('div.step-body', current.body), status, nav].filter(Boolean));
+    panel.replaceChildren(...[h('header.lk-sec-head', h('span.lk-ico', icon(STEP_ICONS[s.key] ?? 'sparkles')), h('div', h('span.step-kicker', `Step ${step + 1} of ${STEPS.length}`), h('h2', { tabindex: '-1' }, s.title), h('p', s.lead))), h('div.step-body', current.body), status, nav].filter(Boolean));
   }
   draw();
   loadRewards();
