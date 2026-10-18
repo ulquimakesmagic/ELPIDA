@@ -41,6 +41,7 @@ contract ElpidaDexCurve {
     uint256 public quoteDust;
     bool private entered;
     bool private firstBuyDone;
+    bool public immutable automaticGraduation;
     event Bought(address indexed payer, address indexed recipient, uint256 quoteIn, uint256 tokensOut);
     event Sold(address indexed seller, uint256 tokensIn, uint256 quoteOut);
     event FeesWithdrawn(address indexed recipient, uint256 amount);
@@ -59,6 +60,8 @@ contract ElpidaDexCurve {
         quote = IERC20Minimal(quote_); token = IERC20Minimal(token_); factory = factory_;
         protocolTreasury = treasury_; creatorRewardVault = reward_; virtualQuote = virtualQuote_; virtualToken = virtualToken_;
         graduationGrace = grace_; launchedAt = block.timestamp;
+        (bool ok, bytes memory data) = factory_.staticcall(abi.encodeWithSignature("automaticGraduation()"));
+        automaticGraduation = ok && data.length == 32 && abi.decode(data, (bool));
     }
     /// Mirrors the Solana program's `current_fee_bps`: linear decay from 90% to the base fee over 60 s.
     function currentFeeBps() public view returns (uint256) {
@@ -104,6 +107,7 @@ contract ElpidaDexCurve {
     /// The creator's atomic first buy pays only the base fee and is not capped.
     function initialBuy(address recipient, uint256 gross, uint256 minOut) external payable nonReentrant returns (uint256) {
         require(msg.sender == factory && !firstBuyDone, "factory/first buy"); firstBuyDone = true;
+        if (gross == 0) { require(minOut == 0 && msg.value == 0, "empty first buy"); return 0; }
         return _buy(factory, recipient, gross, minOut, FEE_BPS);
     }
     function _buy(address payer, address recipient, uint256 gross, uint256 minOut, uint256 feeBps) private returns (uint256 out) {
@@ -119,6 +123,7 @@ contract ElpidaDexCurve {
         if (sold == SALE_CAP) { complete = true; completedAt = block.timestamp; emit CurveCompleted(realReserve); }
         // Unused native value from a partially filled final buy goes back to the buyer.
         if (address(quote) == address(0) && gross > spent) _pay(recipient, gross - spent);
+        if (complete && automaticGraduation) _graduate();
     }
     function _accrue(uint256 fee, uint256 base, address trader, uint256 feeBps) private {
         protocolFees += base / 2; creatorFees += base - base / 2;
@@ -176,6 +181,9 @@ contract ElpidaDexCurve {
         complete = false; emit CurveReopened(completedAt, block.timestamp); completedAt = 0;
     }
     function graduate() external nonReentrant returns (address) {
+        return _graduate();
+    }
+    function _graduate() private returns (address) {
         require(complete && pool == address(0), "not complete/already migrated");
         uint256 q = realReserve; uint256 bonus = liquidityBonus; uint256 total = q + bonus;
         // Tokens priced at the curve's terminal marginal price using REAL funds, not its virtual quote offset.

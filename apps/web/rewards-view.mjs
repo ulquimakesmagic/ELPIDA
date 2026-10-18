@@ -15,13 +15,13 @@ const fromUnits = (raw, decimals) => { try { const v = BigInt(raw), s = 10n ** B
 
 export function renderRewards(ctx) {
   const root = h('div');
-  const mine = ctx.state.tokens.filter(t => ctx.isCreatorOf(t));
+  const mine = ctx.state.tokens.filter(t => ctx.isCreatorOf(t)||t.creatorRecipients?.some(r=>r.address.toLowerCase()===String(ctx.state.wallet).toLowerCase()));
   root.append(h('div.page-head', h('div', h('h1', 'Rewards'), h('p', 'Claim creator fees, follow holder distributions and claim rewards allocated to you.'))));
   root.append(feesSection(ctx, mine));
   const treasuries = h('section.section', { 'aria-labelledby': 'treasury-title' });
   root.append(treasuries);
   if (ctx.mode !== 'local') {
-    treasuries.append(h('h2#treasury-title', 'Reward treasuries'), callout('', 'info', 'Holder distributions, reward-token purchases, buybacks with vesting and X or website allocations run in the local simulation. On public testnets, creator fees go to one creator wallet until the reward contracts and verification services are deployed.'));
+    treasuries.append(h('h2#treasury-title', 'Reward treasuries'), callout('', 'info', 'Holder distributions, reward-token purchases, buybacks with vesting and X or website allocations run in the local simulation. Standard public launches use one creator wallet. Tax launches support fixed wallet allocations when a verified tax deployment is configured.'));
     return root;
   }
   treasuries.append(h('div.page-head', h('div', h('h2#treasury-title', 'Reward treasuries'), h('p', 'Each treasury holds the creator share of fees and follows the strategy fixed at launch.')),
@@ -44,11 +44,11 @@ function feesSection(ctx, mine) {
   for (const token of mine) {
     const q = token.quoteSymbol ?? ctx.state?.nativeSymbol ?? 'ETH';
     const harvest = Number(token.harvestableQuote) > 0;
-    const nothing = !token.rewardVault && !token.feeSplitter && Number(token.protocolFees) + Number(token.creatorFees) === 0 && !harvest;
+    const nothing = token.tax ? Number(token.protocolFees)+Number(token.creatorAllocationFees)+Number(token.creatorTokenFees)===0 : !token.rewardVault && !token.feeSplitter && Number(token.protocolFees) + Number(token.creatorFees) === 0 && !harvest;
     const error = h('p.error-text', { role: 'alert' });
     table.append(h('div.fee-row',
-      h('a.token-card-head', { href: `#/token/${token.address}` }, avatar(token), h('div', h('h3', token.name), h('span.sym.muted.small', token.rewardVault ? 'Reward treasury' : `Creator wallet ${short(token.reward)}`))),
-      h('div.figure', h('span', 'Creator share'), h('strong', amount(token.creatorFees, q))),
+      h('a.token-card-head', { href: `#/token/${token.address}` }, avatar(token), h('div', h('h3', token.name), h('span.sym.muted.small', token.tax?'Fixed creator allocations':token.rewardVault ? 'Reward treasury' : `Creator wallet ${short(token.reward)}`))),
+      h('div.figure', h('span', token.tax?'Your creator allocation':'Creator share'), h('strong', token.tax?`${amount(token.creatorAllocationFees,q)} + ${amount(token.creatorTokenFees,token.symbol)}`:amount(token.creatorFees, q))),
       h('div.figure', h('span', harvest ? 'PumpSwap LP fees ready' : 'Elpida share'), h('strong', harvest ? `${number(token.harvestableQuote, 4)} ${q} + ${number(token.harvestableTokens, 0)} ${token.symbol}` : amount(token.protocolFees, q))),
       h('div', h('button.btn.btn-secondary.btn-sm', { type: 'button', 'data-busy-disable': '', disabled: nothing, on: { click: async () => { error.textContent = ''; try { await ctx.run('withdraw', { token: token.address }); } catch (e) { error.textContent = errorText(e); } } } }, 'Claim fees'), error)));
   }

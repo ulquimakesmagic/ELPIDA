@@ -115,6 +115,7 @@ pub struct PricingParams {
 #[program]
 pub mod elpida_launchpad {
     use super::*;
+    pub fn optional_buy_version(_ctx: Context<OptionalBuyVersion>) -> Result<()> { Ok(()) }
 
     /// One-time setup by the program's upgrade authority: quote mint, treasury and curve parameters.
     pub fn initialize_curve(ctx: Context<InitializeCurve>, params: CurveParams) -> Result<()> {
@@ -238,7 +239,6 @@ pub mod elpida_launchpad {
             !symbol.is_empty() && symbol.len() <= MAX_SYMBOL && symbol.bytes().all(|b| b.is_ascii_uppercase() || b.is_ascii_digit()),
             ElpidaError::InvalidSymbol
         );
-        require!(first_buy > 0, ElpidaError::FirstBuyRequired);
         require!(reward != Pubkey::default(), ElpidaError::RewardRequired);
         require!(valid_metadata_uri(&uri), ElpidaError::InvalidUri);
 
@@ -327,8 +327,10 @@ pub mod elpida_launchpad {
         pool.status = STATUS_TRADING;
         pool.bump = ctx.bumps.pool;
 
-        // Mandatory creator first buy at the base fee (exempt from the anti-snipe schedule).
-        let trade = quote_buy(pool, first_buy, cfg.base_fee_bps as u64, cfg.base_fee_bps as u64)?;
+        // Optional creator buy; zero creates an empty trading curve without a synthetic purchase.
+        let trade = if first_buy == 0 {
+            TradeQuote { gross: 0, net: 0, tokens: 0, fee: 0, base_fee: 0, surplus: 0, graduates: false }
+        } else { quote_buy(pool, first_buy, cfg.base_fee_bps as u64, cfg.base_fee_bps as u64)? };
         require!(trade.tokens >= min_tokens_out, ElpidaError::Slippage);
         if cfg.max_creator_buy_bps > 0 {
             require!(trade.tokens as u128 * BPS <= TOKEN_SUPPLY as u128 * cfg.max_creator_buy_bps as u128, ElpidaError::CreatorBuyCap);
@@ -848,6 +850,9 @@ pub fn current_fee_bps(cfg: &CurveConfig, created_at: i64, now: i64) -> u64 {
     if window == 0 || elapsed >= window { return base; }
     base + (cfg.snipe_start_bps as u64 - base) * (window - elapsed) / window
 }
+
+#[derive(Accounts)]
+pub struct OptionalBuyVersion {}
 
 pub struct TradeQuote { pub gross: u64, pub net: u64, pub tokens: u64, pub fee: u64, pub base_fee: u64, pub surplus: u64, pub graduates: bool }
 

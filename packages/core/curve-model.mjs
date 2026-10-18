@@ -8,7 +8,8 @@
 export const DEX_MODEL = 'curve-dex-v10';
 export const LEGACY_DEX_MODEL = 'curve-dex-v9';
 export const BETA_MODEL = 'curve-beta-v8';
-export const MODEL_VERSIONS = Object.freeze({ [DEX_MODEL]: 10, [LEGACY_DEX_MODEL]: 9, [BETA_MODEL]: 8 });
+export const TAX_MODEL = 'curve-tax-v10';
+export const MODEL_VERSIONS = Object.freeze({ [DEX_MODEL]: 10, [LEGACY_DEX_MODEL]: 9, [BETA_MODEL]: 8, [TAX_MODEL]:10 });
 /** Models backed by ElpidaDexFactory / ElpidaDexCurve ABIs (Uniswap v3 graduation). */
 export const isDexModel = model => model === DEX_MODEL || model === LEGACY_DEX_MODEL;
 

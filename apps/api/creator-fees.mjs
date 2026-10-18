@@ -8,11 +8,13 @@ export function curveCreatorEarnings(token,events){
   if(e.name==='AntiSnipeFee')bonus+=BigInt(e.args[2]);
   if(e.name==='Bought'){
    const gross=BigInt(e.args[2]),base=gross*bps/10000n;
-   earned+=base-base/2n;reserve+=gross-base-bonus;sold+=BigInt(e.args[3]);bonus=0n;
+   const tax=gross*BigInt(token.tax?.buyBps??0)/10000n;
+   earned+=base-base/2n+tax-tax*3000n/10000n;reserve+=gross-base-tax-bonus;sold+=BigInt(e.args[3]);bonus=0n;
   }
   if(e.name==='Sold'){
    const input=BigInt(e.args[1]),gross=(vq+reserve)*input/(vt-sold+input),base=gross*bps/10000n;
-   earned+=base-base/2n;reserve-=gross;sold-=input;bonus=0n;
+   const tax=gross*BigInt(token.tax?.sellBps??0)/10000n;
+   earned+=base-base/2n+tax-tax*3000n/10000n;reserve-=gross;sold-=input;bonus=0n;
   }
  }
  if(reserve<0n||sold<0n||bonus!==0n||(token.expectedSold!==undefined&&sold!==BigInt(token.expectedSold)))throw Error('Incomplete curve fee history.');
@@ -41,11 +43,15 @@ export class CreatorFeeTotals {
   if(!row)throw Error('Token snapshot unavailable.');
   const snapshot=JSON.parse(row.data);
   const events=index.db.prepare('SELECT data FROM events WHERE height<=? AND lower(json_extract(data,\'$.address\'))=? ORDER BY height,idx').all(height,token.curve.toLowerCase()).map(row=>JSON.parse(row.data));
-  const curve=curveCreatorEarnings({...token,expectedSold:parseUnits(snapshot.sold,18)},events),assets=new Map();
+  const curve=curveCreatorEarnings({...token,tax:snapshot.tax,expectedSold:parseUnits(snapshot.sold,18)},events),assets=new Map();
   const quote=token.quoteAddress.toLowerCase(),add=(asset,value)=>{let key=asset.toLowerCase();if(quote===ZeroAddress&&key===snapshot.quoteAsset?.toLowerCase())key=quote;assets.set(key,(assets.get(key)??0n)+value);};
   add(quote,curve);
   if(snapshot.graduated&&!snapshot.feeSplitter)throw Error('Lifetime pool fees are not indexed for this adapter.');
-  if(snapshot.feeSplitter){
+  if(snapshot.tax){
+   const taxes=index.db.prepare("SELECT data FROM events WHERE height<=? AND lower(json_extract(data,'$.address'))=? AND json_extract(data,'$.name')='TaxPaid'").all(height,token.address.toLowerCase()).map(row=>JSON.parse(row.data));
+   add(token.address,taxes.reduce((sum,e)=>sum+BigInt(e.args[2])-BigInt(e.args[3]),0n));
+  }
+  if(snapshot.feeSplitter&&!snapshot.tax){
    index.db.exec('CREATE TABLE IF NOT EXISTS creator_fee_totals_cache(token TEXT PRIMARY KEY,height INTEGER,hash TEXT,data TEXT)');
    const saved=index.db.prepare('SELECT * FROM creator_fee_totals_cache WHERE token=?').get(token.address);
    const locker=new Contract(snapshot.locker,['function token0() view returns(address)','function token1() view returns(address)','function collectFees() returns(uint256,uint256)'],provider);

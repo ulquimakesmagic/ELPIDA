@@ -1,4 +1,5 @@
 import { network } from 'hardhat';
+import {createTaxRuntime} from './tax-runtime.mjs';
 import {RewardEngine} from './reward-engine.mjs';
 import { BrowserProvider, Contract, ContractFactory, formatUnits, parseUnits, isAddress, ZeroAddress } from 'ethers';
 import { compileContracts } from '../../scripts/compile.mjs';
@@ -67,7 +68,9 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   }
   const tokens = [], activity = [];
   const metadata = new Map(metadataPath && existsSync(metadataPath) ? Object.entries(JSON.parse(readFileSync(metadataPath,'utf8'))) : []);
-  const listings = () => { const activity = indexedActivity(indexer.db); return indexer.listings().map(r => ({...r,metadata:metadata.get(r.hash) ?? {},...activityOf(activity,r.address)})); };
+  let taxRuntime,taxPending;
+  const ensureTax=async()=>{taxPending??=createTaxRuntime({provider,signers,compiled,feed:usdFeed,coin:feeCoin,wrapped:v3.weth}).then(r=>{taxRuntime=r;config.taxLaunch.deployment=r.config;return r;});return taxPending;};
+  const listings = () => { const activity = indexedActivity(indexer.db); return [...indexer.listings().map(r => ({...r,metadata:metadata.get(r.hash) ?? {},...activityOf(activity,r.address)})),...(taxRuntime?.listings()??[])]; };
   function saveMetadata(hash, value) {
     metadata.set(hash,value);
     if(metadataPath){mkdirSync(dirname(metadataPath),{recursive:true});writeFileSync(metadataPath+'.tmp',JSON.stringify(Object.fromEntries(metadata)));renameSync(metadataPath+'.tmp',metadataPath);}
@@ -83,6 +86,15 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
     contracts:{...(dex?{dexPool:{abi:v3Artifacts.pool.abi},router:{abi:v3Artifacts.router.abi},quoter:{abi:v3Artifacts.quoter.abi},locker:{abi:artifact('ElpidaV3FeeLocker').abi},splitter:{abi:artifact('ElpidaFeeSplitter').abi}}:{}),dexFactory:{abi:artifact('ElpidaDexFactory').abi,bytecode:'0x'+artifact('ElpidaDexFactory').evm.bytecode.object},dexCurve:{abi:artifact('ElpidaDexCurve').abi},adapter:{abi:artifact('ElpidaV3MigrationAdapter').abi,bytecode:'0x'+artifact('ElpidaV3MigrationAdapter').evm.bytecode.object},legacyFactory:{abi:artifact('ElpidaBetaFactory').abi,bytecode:'0x'+artifact('ElpidaBetaFactory').evm.bytecode.object},legacyCurve:{abi:artifact('ElpidaBetaCurve').abi},factory:{abi:fa.abi,bytecode:`0x${fa.evm.bytecode.object}`},token:{abi:artifact('ElpidaToken').abi},curve:{abi:artifact(dex?'ElpidaDexCurve':'ElpidaBetaCurve').abi},pool:{abi:artifact('ElpidaLockedPool').abi},quote:{abi:mock.abi},testAsset:{abi:compiled['contracts/evm/testnet/ElpidaTestAsset.sol'].ElpidaTestAsset.abi,bytecode:'0x'+compiled['contracts/evm/testnet/ElpidaTestAsset.sol'].ElpidaTestAsset.evm.bytecode.object}},
   };
   const indexer = new EvmIndexer({provider,factory:await factory.getAddress(),contracts:config.contracts,path:indexerPath,fromBlock:(await factory.deploymentTransaction().wait()).blockNumber});
+  config.taxLaunch={available:dex,experimental:true,venue:'Uniswap v2 (local rehearsal)',creatorAllocation:'wallets',taxProtocolBps:3000};
+  config.contracts.atomicFactory={abi:artifact('ElpidaAtomicDexFactory').abi,bytecode:'0x'+artifact('ElpidaAtomicDexFactory').evm.bytecode.object};
+  for(const [key,name] of [['taxFactory','ElpidaTaxFactory'],['taxCurve','ElpidaTaxCurve'],['taxToken','ElpidaTaxToken'],['taxRouter','ElpidaV2TaxRouter'],['creatorAllocation','ElpidaCreatorAllocation']])config.contracts[key]={abi:artifact(name).abi};
+  const combinedIndex=new Proxy(indexer,{get(target,key){
+    if(key==='indexFor')return address=>taxRuntime?.record(address)?taxRuntime.index:indexer;
+    if(key==='listings')return listings;
+    if(['snapshot','trades','candles','holders'].includes(key))return (address,...args)=>taxRuntime?.record(address)?taxRuntime.index[key](address,...args):target[key](address,...args);
+    const value=target[key];return typeof value==='function'?value.bind(target):value;
+  }});
   const signerFor = account => { if (account !== '0' && account !== '1') throw new Error('Choose a local demo account.'); return signers[Number(account)]; };
   const recordFor = address => { const r = tokens.find(t => t.address.toLowerCase() === String(address).toLowerCase()); if (!r) throw new Error('Token not found.'); return r; };
   const original = (r, runner = provider) => new Contract(r.curve,config.contracts.curve.abi,runner);
@@ -103,6 +115,8 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   }
   async function getConversionQuote(body) {const q=await conversionQuote(body);return {nativeAmount:formatUnits(q.amountOut,18),usdcAmount:formatUnits(q.amountIn,6),maxUsdc:formatUnits(q.maxUsdc,6),quotedAt:q.quotedAt,fee:q.fee};}
   async function execute(action,body) {
+    if(action==='launch'&&body.tax){if(!dex)throw new Error('Tax launches require the DEX rehearsal environment.');return (await ensureTax()).launch(body,signerFor(body.account??'0'));}
+    if(taxRuntime?.record(body.token))return taxRuntime.execute(action,body,signerFor(body.account??'0'));
     const s = signerFor(body.account ?? '0'), owner = await s.getAddress();
     if(action==='convert-usdc') {
       const q=await conversionQuote(body),ceiling=amount(body.maxUsdc,6);
@@ -141,7 +155,7 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
           pairVirtual=parseUnits(quoteWhole.toFixed(12),18);await mined(factory.connect(signers[2]).approveQuote(pairAsset,pairVirtual,customAdapter.target));
         }else pairVirtual=existing.virtualQuote;
       }
-      const buy = amount(body.firstBuy,pair === 'native' ? 18 : pairDecimals);
+      const buy = amount(body.firstBuy??'0',pair === 'native' ? 18 : pairDecimals,true);
       const fee = await factory.launchFee(),inUsdc=body.feeCurrency==='usdc';
       if(inUsdc)await mined(feeCoin.connect(s).approve(factory.target,10_000_000n+(pair==='usdc'?buy:0n)));
       if(await provider.getBalance(owner)<(inUsdc?0n:fee)+(pair==='native'?buy:0n))throw new Error('Not enough ETH for the creation fee and first buy.');
@@ -197,10 +211,12 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   async function state(account = '0') {
     const owner = await signerFor(account).getAddress();
     await indexer.sync();
-    const items = await Promise.all(listings().map(async r => ({...r,rewardPolicy:tokens.find(t=>t.address===r.address)?.rewardPolicy,rewardVault:tokens.find(t=>t.address===r.address)?.rewardVault,spotPrice:Number(r.spotPrice),balance:formatUnits(await new Contract(r.address,config.contracts.token.abi,provider).balanceOf(owner),18)})));
+    await taxRuntime?.index.sync();
+    const items = await Promise.all(listings().map(async r => ({...r,...(r.tax?await taxRuntime.walletRewards(r,owner):{}),rewardPolicy:tokens.find(t=>t.address===r.address)?.rewardPolicy,rewardVault:tokens.find(t=>t.address===r.address)?.rewardVault,spotPrice:Number(r.spotPrice),balance:formatUnits(await new Contract(r.address,config.contracts.token.abi,provider).balanceOf(owner),18)})));
     return {wallet:owner,balance:formatUnits(await provider.getBalance(owner),18),nativeBalance:formatUnits(await provider.getBalance(owner),18),nativeSymbol:'ETH',feeUsdcBalance:formatUnits(await feeCoin.balanceOf(owner),6),pairBalances:{[feeCoin.target]:formatUnits(await feeCoin.balanceOf(owner),6)},wrappedNativeBalance:dex?formatUnits(await v3.weth.balanceOf(owner),18):undefined,tokens:items,indexer:indexer.status(),activity,treasuryBalance:formatUnits(await provider.getBalance(addresses[2]),18)};
   }
   async function getQuote(body) {
+    if(taxRuntime?.record(body.token))return taxRuntime.quote(body);
     const r = recordFor(body.token), m = await market(r);
     if (!['buy','sell'].includes(body.side)) throw new Error('Choose buy or sell.');
     const input = amount(body.amount,body.side === 'buy'?decimals(r):18);
@@ -239,5 +255,5 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   if(!journal.length&&seed)for (const [name,symbol,firstBuy,pair,account] of [['Orbit Club','ORBIT','0.1','native','0'],['Pixel Party','PIXEL','0.05','native','1'],['Lucky Sprout','LUCK','0.03','native','0']]){const at=((await provider.getBlock('latest')).timestamp+1)*1000,body={name,symbol,firstBuy,pair,account};await apply('launch',body);record('launch',body,at);}
   config.simulation={durable:Boolean(journalPath),replayed,skipped};
   await indexer.sync();
-  return {updatePrice,config,state,getQuote,getConversionQuote,indexer,listings,provider,rewards,transact(action,body) { const result = queue.then(async () => { const started=((await provider.getBlock('latest')).timestamp+1)*1000; const result=action==='reward-x-finish'?await rewards.finishX(body):action==='reward-x-start'?await rewards.startX(body):action==='reward-verify'?await rewards.verify(body):action==='reward-challenge'?await rewards.challenge(body):action==='reward-process'?(await rewards.tick(),{message:'Reward treasuries processed.'}):await apply(action,body); record(action,body,started); try {await indexer.sync();} catch {result.message += " Indexing pending; refresh to retry.";} return result;}); queue = result.catch(() => {}); return result; },async close() {await queue; await indexer.close(); provider.destroy(); await connection.close();}};
+  return {updatePrice,config,state,getQuote,getConversionQuote,indexer:combinedIndex,listings,provider,rewards,transact(action,body) { const result = queue.then(async () => { const started=((await provider.getBlock('latest')).timestamp+1)*1000; const result=action==='reward-x-finish'?await rewards.finishX(body):action==='reward-x-start'?await rewards.startX(body):action==='reward-verify'?await rewards.verify(body):action==='reward-challenge'?await rewards.challenge(body):action==='reward-process'?(await rewards.tick(),{message:'Reward treasuries processed.'}):await apply(action,body); record(action,body,started); try {await indexer.sync();} catch {result.message += " Indexing pending; refresh to retry.";} return result;}); queue = result.catch(() => {}); return result; },async close() {await queue; await taxRuntime?.close(); await indexer.close(); provider.destroy(); await connection.close();}};
 }

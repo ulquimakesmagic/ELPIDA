@@ -303,7 +303,7 @@ test('Solana launch with a vanity mint: the server pool co-signs only after the 
 test('Solana launch rejects bad input and leaves no partial state', { skip }, async () => {
   const before = await balance(f.client.ata(f.creator.publicKey, f.quoteMint));
   const treasuryBefore = await f.connection.getBalance(f.treasury);
-  await failsWith(launch({ firstBuy: 0n }), /0x1775/);
+  await failsWith(launch({ firstBuy: 0n, minOut: 1n }), /0x1777/);
   await failsWith(launch({ symbol: 'bad!' }), /0x1773/);
   await failsWith(launch({ minOut: TOKEN_SUPPLY }), /0x1777/);
   // Metadata must be an ipfs:// URI. The client refuses first; the program refuses a patched instruction too.

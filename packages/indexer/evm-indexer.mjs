@@ -3,6 +3,7 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { Contract, Interface, ZeroAddress, formatUnits, parseUnits } from 'ethers';
 import { supplyPercent } from '../core/curve-model.mjs';
+import {creatorRecipients} from '../../apps/web/tax-allocation.mjs';
 
 const dead = '0x000000000000000000000000000000000000dead';
 const json = value => JSON.stringify(value, (_, v) => typeof v === 'bigint' ? v.toString() : v);
@@ -101,6 +102,7 @@ export class EvmIndexer {
       if(!native){try{if((await new Contract(this.factory,['function feeUsdc() view returns(address)'],this.provider).feeUsdc(call)).toLowerCase()===quote.toLowerCase())kind='usdc';}catch{/* Older deployments lack independent USDC payment. */}}
       fresh.push({address:e.args.token.toLowerCase(),metadataURI:metadataURIs.get(e.args.token.toLowerCase())??'',curve:e.args.curve.toLowerCase(),creator:e.args.creator,reward,name,symbol,pair:kind,quoteAddress:quote,quoteDecimals:d,quoteSymbol:native?this.nativeSymbol:await new Contract(quote,['function symbol() view returns(string)'],this.provider).symbol(call),virtualQuote:virtualQuote.toString(),virtualToken:virtualToken.toString(),saleCapRaw:saleCap.toString(),created:block.timestamp*1000,creationBlock:height,hash:log.transactionHash,curveModel:schedule?10:null,partialFill:!!schedule,...(schedule??{})});
     }
+    if(this.contracts.tax)for(const r of fresh)r.creatorRecipients=await creatorRecipients(Contract,this.provider,r.reward,{blockTag:height});
     const records=[...known,...fresh], addressMap=new Map();
     for(const r of records) {
       addressMap.set(r.curve,{r,kind:'curve'});addressMap.set(r.address,{r,kind:'token'});
@@ -135,10 +137,10 @@ export class EvmIndexer {
         this.db.prepare('INSERT OR IGNORE INTO events VALUES(?,?,?,?)').run(l.transactionHash,l.index,height,json({address:l.address,kind,name:e.name,args:e.args.toArray(),blockHash:block.hash}));
         if(info && (['Bought','Sold'].includes(e.name)||e.name==='Swap')) {
           const dex=e.name==='Swap',first=this.snapshot(info.r.address)?.tokenFirst??snapshots.find(([r])=>r.address===info.r.address)?.[1].tokenFirst;
-          const tokenDelta=dex?(first?e.args.amount0:e.args.amount1):0n,quoteDelta=dex?(first?e.args.amount1:e.args.amount0):0n;
+          const tokenDelta=dex?(this.contracts.tax?(first?e.args.amount0In-e.args.amount0Out:e.args.amount1In-e.args.amount1Out):(first?e.args.amount0:e.args.amount1)):0n,quoteDelta=dex?(this.contracts.tax?(first?e.args.amount1In-e.args.amount1Out:e.args.amount0In-e.args.amount0Out):(first?e.args.amount1:e.args.amount0)):0n;
           const buy=dex?quoteDelta>0n:e.name==='Bought',q=dex?(quoteDelta<0n?-quoteDelta:quoteDelta):buy?e.args.quoteIn:e.args.quoteOut,t=dex?(tokenDelta<0n?-tokenDelta:tokenDelta):buy?e.args.tokensOut:e.args.tokensIn,d=info.r.quoteDecimals;
           if(q===0n||t===0n)continue;
-          const trade={hash:l.transactionHash,index:l.index,token:info.r.address,market:l.address,venue:kind,side:buy?'buy':'sell',account:dex?e.args.recipient:buy?e.args.recipient:e.args.seller,sender:dex?e.args.sender:null,accountBasis:dex?'pool recipient; payer may be a router':null,quoteRaw:q.toString(),tokenRaw:t.toString(),quoteAmount:formatUnits(q,d),tokenAmount:formatUnits(t,18),quoteSymbol:info.r.quoteSymbol,priceQuote:ratio(q*10n**18n,t*10n**BigInt(d)),priceBasis:'execution, including trader fees',timestamp:block.timestamp,blockNumber:height};
+          const trade={hash:l.transactionHash,index:l.index,token:info.r.address,market:l.address,venue:kind,side:buy?'buy':'sell',account:dex?(e.args.recipient??e.args.to):buy?e.args.recipient:e.args.seller,sender:dex?e.args.sender:null,accountBasis:dex?'pool recipient; payer may be a router':null,quoteRaw:q.toString(),tokenRaw:t.toString(),quoteAmount:formatUnits(q,d),tokenAmount:formatUnits(t,18),quoteSymbol:info.r.quoteSymbol,priceQuote:ratio(q*10n**18n,t*10n**BigInt(d)),priceBasis:'execution, including trader fees',timestamp:block.timestamp,blockNumber:height};
           this.db.prepare('INSERT OR IGNORE INTO trades VALUES(?,?,?,?,?,?)').run(l.transactionHash,l.index,info.r.address,height,block.timestamp,json(trade));
         }
       }
@@ -152,8 +154,10 @@ export class EvmIndexer {
     const [pool,sold,complete,supply,deadBalance,devHolding] = await Promise.all([c.pool(call),c.sold(call),c.complete(call),t.totalSupply(call),t.balanceOf(dead,call),t.balanceOf(r.creator,call)]);
     // Live creator holding and, for model 10, the locked anti-snipe bonus and graduation escape-hatch timing.
     const dev={devHoldingRaw:devHolding.toString(),devHoldingPct:supplyPercent(devHolding,supply)};
+    if(this.contracts.tax){const [buy,sell]=await Promise.all([t.buyTaxBps(call),t.sellTaxBps(call)]);dev.tax={buyBps:Number(buy),sellBps:Number(sell),protocolBps:3000,creatorBps:7000};dev.factory=this.factory;}
     if(r.curveModel===10){const [bonus,completedAt]=await Promise.all([c.liquidityBonus(call),c.completedAt(call)]);Object.assign(dev,{liquidityBonus:formatUnits(bonus,r.quoteDecimals),completedAt:Number(completedAt),reopenableAt:complete&&pool===ZeroAddress&&completedAt>0n?Number(completedAt)+r.graduationGrace:null});}
     const graduated=pool!==ZeroAddress,m=graduated?new Contract(pool,this.contracts.pool.abi,this.provider):c;
+    if(graduated && this.contracts.tax)return {...await this.readV2Snapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance}),...dev};
     if(graduated && this.contracts.dexPool)return {...await this.readDexSnapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance}),...dev};
     const [reserve,cp,cc] = await Promise.all([m.realReserve(call),c.protocolFees(call),c.creatorFees(call)]);
     const poolTokens=graduated?await m.tokenReserve(call):0n;
@@ -176,6 +180,13 @@ export class EvmIndexer {
     const splitter=new Contract(splitterAddress,this.contracts.splitter.abi,this.provider),rewards=[];
     for(const asset of [asset0,asset1]){const tokenAsset=asset.toLowerCase()===r.address;rewards.push({asset,symbol:tokenAsset?r.symbol:r.pair==='native'?'WETH':r.quoteSymbol,decimals:tokenAsset?18:d,creator:formatUnits(await splitter.claimable(asset,r.reward,call),tokenAsset?18:d)});}
     return {pool,graduated:true,complete,liquidityLocked:locked,locker:lockerAddress,feeSplitter:splitterAddress,positionId:positionId.toString(),venue:'Uniswap v3',feeBps:Number(fee)/100,tokenFirst,quoteAsset,liquidity:liquidity.toString(),reserve:formatUnits(reserve,d),reserveBasis:'actual DEX quote balance, including uncollected fees',sold:formatUnits(sold,18),supply:formatUnits(supply,18),circulatingSupply:formatUnits(circulating,18),deadSupply:formatUnits(deadBalance,18),saleCap:formatUnits(BigInt(r.saleCapRaw),18),spotPrice:price,fdvQuote:ratio(n*supply,den*10n**BigInt(d)),circulatingMarketCapQuote:ratio(n*circulating,den*10n**BigInt(d)),supplyPolicy:'exclude curve/pool inventory and known dead address v1',priceUsd:null,usdBasis:null,protocolFees:formatUnits(cp,d),creatorFees:formatUnits(cc,d),dexRewards:rewards,rewardsBasis:'collected fees available to claim; collect the position to settle more',remainingBuy:'0',indexedBlock:height,indexedBlockHash:block.hash,priceTimestamp:block.timestamp};
+  }
+  async readV2Snapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance}){
+    const call={blockTag:height},m=new Contract(pool,this.contracts.dexPool.abi,this.provider);
+    const [asset0,asset1,reserves,lp,locked,cp,cc,allocation]=await Promise.all([m.token0(call),m.token1(call),m.getReserves(call),m.totalSupply(call),m.balanceOf(dead,call),c.protocolFees(call),c.creatorFees(call),c.creatorRewardVault(call)]);
+    const first=asset0.toLowerCase()===r.address,rt=first?reserves[0]:reserves[1],rq=first?reserves[1]:reserves[0],d=r.quoteDecimals;
+    const circulating=supply-deadBalance-await t.balanceOf(r.curve,call)-await t.balanceOf(pool,call);
+    return {pool,graduated:true,complete,liquidityLocked:locked>0n,locker:dead,feeSplitter:allocation,positionId:'0',venue:'Uniswap v2',feeBps:30,tokenFirst:first,quoteAsset:first?asset1:asset0,liquidity:String(lp),reserve:formatUnits(rq,d),reserveBasis:'V2 reserves',sold:formatUnits(sold,18),supply:formatUnits(supply,18),circulatingSupply:formatUnits(circulating,18),deadSupply:formatUnits(deadBalance,18),saleCap:formatUnits(BigInt(r.saleCapRaw),18),spotPrice:ratio(rq*10n**18n,rt*10n**BigInt(d)),fdvQuote:ratio(rq*supply,rt*10n**BigInt(d)),circulatingMarketCapQuote:ratio(rq*circulating,rt*10n**BigInt(d)),priceUsd:null,usdBasis:null,protocolFees:formatUnits(cp,d),creatorFees:formatUnits(cc,d),dexRewards:[{asset:r.address,symbol:r.symbol,decimals:18,creator:formatUnits(await t.balanceOf(allocation,call),18)}],rewardsBasis:'creator token-tax allocation; V2 LP fees compound in permanently locked liquidity',remainingBuy:'0',indexedBlock:height,indexedBlockHash:block.hash,priceTimestamp:block.timestamp};
   }
   /** Latest trades across every token of this index, newest first (the "Last sale" strip). */
   recentTrades(limit=20){return this.db.prepare('SELECT timestamp,data FROM trades ORDER BY timestamp DESC,height DESC,idx DESC LIMIT ?').all(Math.max(1,Math.min(100,limit))).map(r=>({...decode(r.data),timestamp:r.timestamp}));}

@@ -1,3 +1,4 @@
+import {taxPolicy} from './tax-policy.mjs';
 import { nowSeconds } from './clock.mjs';
 import { assetIcon, chainIcon } from './chain-ui.mjs';
 // Guided token creation: details → network and trading pair → creator rewards → first purchase →
@@ -16,7 +17,7 @@ const STEPS = [
   { key: 'details', title: 'Token details', lead: 'How your token appears everywhere on Elpida. Name and symbol cannot be changed after launch.' },
   { key: 'network', title: 'Trading pair', lead: 'Choose the asset buyers pay with. Change the chain using the selector at the top.' },
   { key: 'rewards', title: 'Creator rewards', lead: 'Decide where the creator share of trading fees goes. Your choice is fixed at launch.' },
-  { key: 'purchase', title: 'First purchase', lead: 'Your token launches with your first purchase on its bonding curve, in the same transaction.' },
+  { key: 'purchase', title: 'Creator purchase (optional)', lead: 'Launch without buying, or make a creator purchase in the launch transaction.' },
   { key: 'review', title: 'Review and create', lead: 'Check everything before you create your token. Items marked as fixed cannot be changed later.' },
 ];
 const STRATEGY_TEXT = {
@@ -26,7 +27,7 @@ const STRATEGY_TEXT = {
   buyback: 'At the threshold, creator fees buy back your token and vest it to eligible holders over a period you set.',
   exclusive: 'Fees are allocated by percentage to wallets, X accounts or websites. X and website shares stay in the treasury until ownership is verified.',
 };
-const blankDraft = () => ({ name: '', symbol: '', description: '', image: '', imageUrl: '', website: '', twitter: '', telegram: '', discord: '', chain: '', pair: 'native', quoteAsset: '', rewardMode: 'creator', recipients: [{ kind: 'wallet', target: '', percent: '100' }], threshold: '0.01', minimumHolding: '1000', vestingDays: '30', rewardToken: '', feeCurrency:'native', firstBuy: '0.01' });
+const blankDraft = () => ({ name: '', symbol: '', description: '', image: '', imageUrl: '', website: '', twitter: '', telegram: '', discord: '', chain: '', pair: 'native', quoteAsset: '', rewardMode: 'creator', recipients: [{ kind: 'wallet', target: '', percent: '100' }], threshold: '0.01', minimumHolding: '1000', vestingDays: '30', rewardToken: '', feeCurrency:'native', firstBuy: '0', taxBuy:'0', taxSell:'0' });
 
 export function renderLaunch(ctx) {
   const draft = { ...blankDraft(), ...(storage.get(DRAFT_KEY) ?? {}) };
@@ -126,14 +127,13 @@ export function renderLaunch(ctx) {
     if (!(buy > 0) || !curve) return null;
     // Same virtual-reserve curve the contracts use: tokens = Vt × net / (Vq + net), net of the base fee.
     // The creator's first buy always pays the 1.25% base fee; the anti-snipe fee applies to other traders only.
-    const net = buy * (1 - (curve.feeBps ?? 125) / 10000), tokens = curve.vt * net / (curve.vq + net);
+    const tax=solana()?0:Number(draft.taxBuy??0);
+    if(!Number.isFinite(tax)||tax<0||tax>10)return null;
+    const net = buy * (1 - ((curve.feeBps ?? 125)+tax*100) / 10000), tokens = curve.vt * net / (curve.vq + net);
     return { tokens: Math.min(tokens, curve.cap),exceeds:tokens>curve.cap, completes: tokens >= curve.cap, share: Math.min(tokens, curve.cap) / 1e9 * 100 };
   }
   /** A first purchase of about 0.5% of the starting FDV, rounded to two significant figures. */
-  function defaultBuy(kind, asset) {
-    if (asset?.curve) { const v = asset.curve.vq * 1e9 / asset.curve.vt * 0.005; const p = 10 ** (Math.floor(Math.log10(v)) - 1); return String(Number((Math.round(v / p) * p).toPrecision(2))); }
-    return { native: '0.01', usdc:'10', xstock: '1', token: '100' }[kind];
-  }
+  function defaultBuy() { return '0'; }
 
   /* ---------- Steps ---------- */
   function input(key, { multiline, onInput, ...attrs } = {}) {
@@ -254,18 +254,24 @@ export function renderLaunch(ctx) {
       if (draft.rewardMode === 'buyback') settings.append(field({ label: 'Vesting duration', control: h('div.input-affix', input('vestingDays', { type: 'number', min: '1', max: '3650', step: '1' }), h('span.affix', 'days')), hint: 'Bought-back tokens unlock linearly over this period for the eligible holders at each snapshot.' }));
       settings.append(callout('', 'info', 'Holder payouts are weighted by each wallet’s eligible token balance at the recorded snapshot, not by total supply.'));
     } else settings.append(allocationEditor());
+    const canTax = local ? !!ctx.config.taxLaunch?.available : !!ctx.wallet?.net?.taxDeployment;
+    const taxControls = !solana() ? h('section.stack',h('h3','Optional token tax'),
+      field({label:'Buy tax (%)',control:input('taxBuy',{type:'number',min:'0',max:'10',step:'0.01',disabled:!canTax})}),
+      field({label:'Sell tax (%)',control:input('taxSell',{type:'number',min:'0',max:'10',step:'0.01',disabled:!canTax})}),
+      h('p.hint',canTax?'0–10% per side, fixed at launch. Additional tax splits 30% to Elpida and 70% to your wallet allocations. The 1.25% curve fee remains 50/50. After migration, the token tax and V2 pool fee apply. Creator tax rewards after migration are paid in your launched token.':'Tax launches require the verified V2 tax factory deployment. Available in the local DEX rehearsal; existing public V3 factories cannot create transfer-tax tokens.')) : null;
     settings.append(h('div.summary-card', h('h4', 'Fixed at launch'), h('ul.fixed-list', h('li', 'The reward strategy and its settings'), h('li', 'Recipients and their percentages'), h('li', 'The 50/50 split of trading fees between Elpida and the creator share'))));
     return { body: [
       local ? null : callout('', 'info', 'On public testnets, creator fees go to one creator wallet. Holder distributions, buybacks and X or website allocations are available in the local simulation until their contracts are deployed publicly.'),
-      grid, settings, error,
+      taxControls, grid, settings, error,
     ], validate: () => {
       error.textContent = '';
-      try { buildPolicy(); return true; } catch (e) { error.textContent = errorText(e); return false; }
+      try { buildPolicy(); const tax=taxPolicy({buy:draft.taxBuy,sell:draft.taxSell,recipients:draft.recipients,owner:ctx.state?.wallet});
+        if(tax&&(!canTax||draft.rewardMode!=='creator'))throw new Error('Tax launches require a verified V2 deployment and creator wallet allocations.');return true; } catch (e) { error.textContent = errorText(e); return false; }
     } };
   }
   function allocationEditor() {
     const exclusive = draft.rewardMode === 'exclusive';
-    const local = draft.chain === 'local';
+    const local = draft.chain === 'local' || !!ctx.wallet?.net?.taxDeployment;
     const list = h('div.alloc');
     const total = h('div.alloc-total', { role: 'status' });
     const updateTotal = () => { const sum = draft.recipients.reduce((n, r) => n + Number(r.percent || 0), 0); total.dataset.ok = String(Math.abs(sum - 100) < 1e-9); total.replaceChildren(h('span', 'Total'), h('span', `${number(sum, 2)}% of 100%`)); };
@@ -287,13 +293,14 @@ export function renderLaunch(ctx) {
   }
   function buildPolicy() {
     const policy = normalizeRewardPolicy({ mode: draft.rewardMode, threshold: draft.threshold, minimumHolding: draft.minimumHolding, vestingDays: draft.vestingDays, rewardToken: draft.rewardToken, recipients: draft.recipients }, draft.chain || 'local');
-    if (draft.chain !== 'local' && (policy.mode !== 'creator' || policy.recipients.length !== 1 || policy.recipients[0].kind !== 'wallet')) throw new Error('Public testnets support one creator wallet. Remove extra recipients or use the local simulation.');
+    const taxed=!solana()&&(Number(draft.taxBuy)>0||Number(draft.taxSell)>0)&&!!ctx.wallet?.net?.taxDeployment;
+    if (draft.chain !== 'local' && (policy.mode !== 'creator' || (!taxed&&policy.recipients.length!==1) || policy.recipients.some(r=>r.kind!=='wallet'))) throw new Error('Public standard launches support one creator wallet. Verified tax deployments support fixed wallet allocations.');
     return policy;
   }
 
   function purchaseStep() {
     const est = estimate();
-    const amount = input('firstBuy', { type: 'number', min: '0.000001', step: 'any', inputmode: 'decimal', onInput: e => { draft.firstBuy = e.target.value; drawEstimate(); } });
+    const amount = input('firstBuy', { type: 'number', min: '0', step: 'any', inputmode: 'decimal', onInput: e => { draft.firstBuy = e.target.value; drawEstimate(); } });
     const estBox = h('div'),priceStatus=h('p.price-status',priceNote());
     const balance = () => { if (!connected()) return null; const a = selectedAsset(); const v = a ? ctx.state?.pairBalances?.[a.id] ?? (draft.pair === 'native' ? ctx.state?.nativeBalance : null) : null; return v == null ? null : `${number(v, 6)} ${pairSymbol()}`; };
     const drawEstimate = () => {
@@ -313,7 +320,7 @@ export function renderLaunch(ctx) {
     return { body: [
       field({label:'Pay launch fee with',control:payment,hint:'Independent of the trading pair. USDC payment does not change your token’s pool.'}),
       priceStatus,
-      field({ label: 'Purchase amount', control: h('div.input-affix', amount, h('span.affix', pairSymbol())), hint: 'Required by the launch contract: any amount above zero. Smaller purchases leave more of the curve for your community.' }),
+      field({ label: 'Purchase amount', control: h('div.input-affix', amount, h('span.affix', pairSymbol())), hint: 'Optional. Enter 0 to launch without buying. Launch fees and network gas still apply.' }),
       estBox,
       draft.pair==='native'?usdcFunding(ctx,{amount:()=>String(draft.firstBuy),symbol:nativeSymbol()}):null,
       callout('', 'info', 'Native payment uses the on-chain price at execution, rounded up by at most one smallest unit. A 1% fee cap protects your total; unused native funds are refunded. The oracle price can differ from the live market. USDC payment is exactly 10 USDC, whose dollar value can move.'),
@@ -321,7 +328,7 @@ export function renderLaunch(ctx) {
     ], validate: () => {
       const control = amount;
       if(estimate()?.exceeds){setError(control,'This amount exceeds the curve. Reduce your first purchase.');control.focus();return false;}
-      if (!(Number(draft.firstBuy) > 0)) { setError(control, 'Enter an amount greater than zero.'); control.focus(); return false; }
+      if (!(Number(draft.firstBuy) >= 0)) { setError(control, 'Enter zero or a positive amount.'); control.focus(); return false; }
       const places = assetDecimals();
       if (!new RegExp(`^\\d+(\\.\\d{0,${places}})?$`).test(draft.firstBuy)) { setError(control, `Use at most ${places} decimal places.`); return false; }
       return true;
@@ -339,7 +346,7 @@ export function renderLaunch(ctx) {
         block('Token', 0, row('Name', draft.name), row('Symbol', `$${draft.symbol.toUpperCase()}`), row('Description', draft.description), row('Logo', draft.image ? (draft.image.startsWith('data:') ? 'Uploaded image' : draft.image) : '—'), row('Links', ['website', 'twitter', 'telegram', 'discord'].filter(k => draft[k]).map(k => ({ website: 'Website', twitter: 'X', telegram: 'Telegram', discord: 'Discord' })[k]).join(', ') || 'None')),
         block('Network and trading pair', 1, row('Network', draft.chain === 'local' ? 'Local simulation' : net()?.name ?? '—'), row('Wallet', draft.chain === 'local' ? `Demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()}` : short(ctx.wallet.address)), row('Trading pair', `${PAIR_INFO[draft.pair]?.title ?? ''} · ${pairSymbol()}`), row('Graduates into', `A locked ${dexName()} pool`)),
         block('Creator rewards', 2, row('Strategy', STRATEGIES[draft.rewardMode].name), ...(['holders', 'paired', 'buyback'].includes(draft.rewardMode) ? [row('Distribution threshold', `${draft.threshold} ${pairSymbol()}`), row('Minimum token holding', `${number(draft.minimumHolding, 0)} ${draft.symbol.toUpperCase()}`)] : [row('Recipients', recipients)]), draft.rewardMode === 'paired' ? row('Reward asset', rewardData?.assets.find(a => a.address === draft.rewardToken)?.symbol ?? '—') : null, draft.rewardMode === 'buyback' ? row('Vesting', `${draft.vestingDays} days`) : null),
-        block('First purchase and costs', 3, row('Launch fee · $10', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), row('First purchase', `${number(draft.firstBuy, 6)} ${pairSymbol()}`), row('Estimated tokens', estimate() ? compact(estimate().tokens) : 'Shown after launch'), row('Conversion',priceNote()),row('Network gas', 'Estimated before signing; paid separately'))),
+        block('Creator purchase and costs', 3, row('Launch fee · $10', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), row('First purchase', `${number(draft.firstBuy, 6)} ${pairSymbol()}`), row('Buy / sell token tax', `${draft.taxBuy||0}% / ${draft.taxSell||0}% · additional to trading fees`), row('Estimated tokens', estimate() ? compact(estimate().tokens) : 'Shown after launch'), row('Conversion',priceNote()),row('Network gas', 'Estimated before signing; paid separately'))),
       h('section.summary-card', h('h4', 'Fixed after launch'), h('ul.fixed-list', h('li', 'Name, symbol and the 1,000,000,000 fixed supply'), h('li', `Trading pair (${pairSymbol()})`), h('li', 'Creator reward strategy, recipients and percentages'), h('li', `Graduation into a ${dexName()} pool with permanently locked liquidity`))),
       ctx.mode!=='local'&&!solana() ? h('p.hint',draft.pair==='native'&&draft.feeCurrency!=='usdc' ? 'One launch confirmation pays the native fee, records supported metadata, creates your token and makes the first purchase. No token spending approval is needed.' : ctx.wallet.atomicLaunch ? 'Your wallet supports one atomic confirmation for payment approval, creation, supported metadata and the first purchase.' : 'Metadata uses the launch confirmation. This wallet may require a separate token payment approval; one-confirmation approval and launch requires an atomic-capable wallet.') : null,
       draft.chain==='base-sepolia'&&!ctx.wallet.needsMetadataUpgrade ? h('p.hint',ctx.config.metadataPublishing?.publicEnabled ? 'Token details are pinned to public IPFS and their reference is included in your launch transaction.' : 'Token details are stored on Elpida’s persistent server and their content reference is included in your launch transaction. Public IPFS pinning is not configured.') : null,
@@ -362,6 +369,7 @@ export function renderLaunch(ctx) {
   async function create() {
     const policy = buildPolicy();
     const body = { ...normalizeMetadata(draft), name: draft.name.trim(), symbol: draft.symbol.trim().toUpperCase(), pair: draft.pair, quoteAsset: selectedAsset()?.id ?? draft.quoteAsset, firstBuy: String(draft.firstBuy), feeCurrency:draft.feeCurrency, reward: ctx.state?.wallet ?? '' };
+    if(!solana())body.tax=taxPolicy({buy:draft.taxBuy,sell:draft.taxSell,recipients:draft.recipients,owner:ctx.state?.wallet});
     if (draft.chain === 'local' && (draft.pair === 'token' || draft.pair === 'xstock')) body.quoteToken = body.quoteAsset;
     if (draft.chain === 'local') body.rewardPolicy = policy;
     else body.reward = policy.recipients[0].target || ctx.wallet.address;

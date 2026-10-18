@@ -13,13 +13,13 @@ export const ETH_USD=2500n;
 /** $10 at $2,500 per ETH. */
 export const FEE=parseEther('0.004');
 
-export async function dexFixture(t,{startFdvUsd=5000,grace=GRADUATION_GRACE_SECONDS}={}){
+export async function dexFixture(t,{startFdvUsd=5000,grace=GRADUATION_GRACE_SECONDS,factoryName='ElpidaDexFactory'}={}){
  const connection=await network.create('localTest'),provider=new BrowserProvider(connection.provider,undefined,{cacheTimeout:-1});provider.pollingInterval=10;t.after(async()=>{provider.destroy();await connection.close();});
  const signers=await Promise.all([0,1,2,3].map(i=>provider.getSigner(i))),addresses=await Promise.all(signers.map(s=>s.getAddress()));
  const deploy=async(a,...args)=>{const c=await new ContractFactory(a.abi,a.evm.bytecode.object,signers[0]).deploy(...args);await c.waitForDeployment();return c;};
  const usdc=await deploy(fixtureArt('MockUSDC')),dex=await deployLocalV3(signers[0],fixtureArt('LocalWrappedETH'));
  const nativeAdapter=await deploy(art('ElpidaV3MigrationAdapter'),dex.manager.target,dex.weth.target,10000);
- const factory=await deploy(art('ElpidaDexFactory'),addresses[2],nativeAdapter.target,startFdvUsd,grace);
+ const factory=await deploy(art(factoryName),addresses[2],nativeAdapter.target,startFdvUsd,grace);
  const feed=await deploy(fixtureArt('MockUsdFeed'),ETH_USD*10n**8n);
  await mined(factory.connect(signers[2]).configureUsdPricing(feed.target,86400,ZeroAddress));
  const adapter=await deploy(art('ElpidaV3MigrationAdapter'),dex.manager.target,usdc.target,10000);

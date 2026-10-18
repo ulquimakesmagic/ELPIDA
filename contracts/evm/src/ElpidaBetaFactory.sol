@@ -21,6 +21,7 @@ contract ElpidaBetaFactory is ElpidaUsdPricing {
         treasury = treasury_; _setPricing(launchFee_,nativeVirtualQuote_);
     }
     function pricingOwner() internal view override returns(address){return treasury;}
+    function OPTIONAL_CREATOR_BUY_VERSION() external pure returns(uint256){return 1;}
     /// Deprecated compatibility endpoint. Manual repricing is disabled.
     function setPricing(uint256,uint256) external view {
         require(msg.sender == treasury, "owner only"); revert PricingFixed();
@@ -39,12 +40,13 @@ contract ElpidaBetaFactory is ElpidaUsdPricing {
     }
     function _launch(string calldata name_,string calldata symbol_,uint256 firstBuy,uint256 minOut,address reward,bool inUsdc) private returns(address,address){
         require(!entered, "reentrancy"); entered = true;
-        require(firstBuy > 0 && reward != address(0), "buy/reward required");
+        require(reward != address(0), "reward required");
         _chargeLaunchFee(firstBuy,inUsdc);
         ElpidaToken t = new ElpidaToken(name_,symbol_,TOKEN_SUPPLY,address(this));
         ElpidaBetaCurve c = new ElpidaBetaCurve(address(0),address(t),address(this),treasury,reward,nativeVirtualQuote(),VIRTUAL_TOKEN);
         require(t.transfer(address(c),TOKEN_SUPPLY), "token seed");
-        c.initialBuy{value:firstBuy}(msg.sender,firstBuy,minOut);
+        if(firstBuy>0)c.initialBuy{value:firstBuy}(msg.sender,firstBuy,minOut);
+        else require(minOut==0,"empty first buy");
         isElpidaToken[address(t)] = true; emit Launched(msg.sender,address(t),address(c),firstBuy,true);
         entered = false; return (address(t),address(c));
     }
