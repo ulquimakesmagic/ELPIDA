@@ -1,5 +1,23 @@
 # Actions that need Malik
 
+## Atomic Base Sepolia deployment — verified 18 October 2026
+
+Factory `0x98a0E75dbBe9EdA5D228319C72D496b814bA7145`, creation block
+48289973, transaction `0x553fbbddcab2b001b27a7e5bc2ba6cff5240a7af9d7e12721f474de3ac1c48bb`.
+Creation input exactly matches the compiled `ElpidaAtomicDexFactory` and its
+constructor arguments. Model 10, optional-buy version 1, fee-accounting version
+1 and automatic graduation are confirmed on chain. Treasury remains the
+connected Zerion `0xf5B0…639D`; starting FDV $50, grace 86400 seconds, expected
+Chainlink feed and Circle USDC. Native and USDC adapters use the registered
+Uniswap V3 manager and 1% pool tier. User transaction
+`0x6714859d6eded425199bf51d1fb5580487bbee6c9ce870066e9055f98110bebe`
+successfully enabled USDC at block 48289999.
+
+The registry selects this factory for new launches and keeps all earlier
+factories indexed. Next: a fresh zero-creator-buy test token, curve trades,
+final-buy atomic graduation and claims. This standard factory does not enable
+configurable taxes; a verified V2 tax deployment remains a separate gate.
+
 ## Launch changes in source — 18 October 2026
 
 See `IMPLEMENTATION_SCOPE_2026-10-18.md` and `DEX_DESTINATIONS_AND_FEES.md`.
