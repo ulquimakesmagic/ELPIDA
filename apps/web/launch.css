@@ -1,0 +1,56 @@
+/* Launch page (UI Phase 4): header, progress card, section card, token preview. Logic lives in launch-flow.mjs. */
+.lk { display: grid; gap: 16px; min-width: 0; }
+.lk-head { display: flex; flex-wrap: wrap; justify-content: space-between; align-items: flex-end; gap: 12px 24px; }
+.lk-head h1 { margin: 0; font: 450 33px/1.1 var(--font-sans); letter-spacing: -.83px; max-width: 18ch; }
+.lk-head h1 em { font-style: normal; font-weight: 700; color: var(--accent-text); }
+.lk-stepper { background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo)); border: .67px solid var(--line-soft); border-radius: 18px; padding: 10px 16px; min-width: 0; }
+.lk .stepper { position: static; display: flex; align-items: center; gap: 0; overflow: visible; padding: 0; margin: 0; list-style: none; }
+.lk .stepper li { flex: 1 1 0; display: flex; align-items: center; min-width: 0; }
+.lk .stepper li:not(:last-child)::after { content: ''; flex: 1 1 12px; height: 1px; background: var(--line-soft); margin: 0 10px; min-width: 8px; }
+.lk .stepper li:last-child { flex: 0 0 auto; }
+.lk .stepper button { width: auto; display: inline-flex; align-items: center; gap: 10px; padding: 6px 4px; background: none; box-shadow: none; border: 0; border-radius: var(--r-chip); color: var(--muted); font: 600 13px/1 var(--font-sans); min-height: 44px; }
+.lk .stepper button:not([aria-current]) span:last-child { display: inline; }
+.lk .stepper .n { width: 26px; height: 26px; flex: none; border-radius: 50%; display: grid; place-items: center; border: 1px solid var(--line-strong); background: transparent; font: 650 10px/1 var(--font-sans); color: var(--muted); }
+.lk .stepper [aria-current="step"] { color: var(--ink); }
+.lk .stepper [aria-current="step"] .n { background: var(--accent); border-color: var(--accent); color: var(--accent-ink); }
+.lk .stepper [data-done="true"] .n { background: transparent; border-color: var(--accent-line); color: var(--accent-text); }
+.lk .stepper [data-done="true"] { color: var(--ink-2); }
+
+.lk .launch { display: grid; grid-template-columns: minmax(0, 1fr) 340px; gap: 16px; align-items: start; }
+.lk .step-panel { background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo)); border: .67px solid var(--line-soft); border-radius: var(--r-card); padding: 22px; box-shadow: var(--shadow-card); }
+.lk-sec-head { display: flex; gap: 14px; align-items: flex-start; margin-bottom: 20px; }
+.lk-sec-head h2 { margin: 2px 0 0; font: 600 19px/1.2 var(--font-sans); letter-spacing: -.45px; }
+.lk-sec-head p { margin: 6px 0 0; color: var(--muted); font-size: 13px; max-width: 60ch; }
+.lk-ico { flex: none; width: 38px; height: 38px; border-radius: 12px; display: grid; place-items: center; background: var(--accent-tint); color: var(--accent-text); }
+.lk .step-kicker { font: 600 10px/1 var(--font-sans); letter-spacing: .08em; text-transform: uppercase; color: var(--muted); }
+.lk .step-nav { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; }
+.lk .step-nav .btn-primary { margin-left: auto; }
+.lk-saved { display: inline-flex; align-items: center; gap: 6px; font-size: 12px; color: var(--muted); }
+
+.lk .preview { position: sticky; top: 80px; }
+.lk .preview-card { border-radius: var(--r-card); padding: 16px; gap: 12px; }
+.lk-label { display: inline-flex; align-items: center; gap: 8px; font: 600 11px/1 var(--font-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+.lk-label i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+.lk-well { aspect-ratio: 1; max-height: 220px; width: 100%; border-radius: 18px; display: grid; place-items: center; background: radial-gradient(circle at 50% 30%, var(--accent-glow), transparent 70%), var(--bg); border: .67px solid var(--line-soft); overflow: hidden; }
+.lk-well .avatar { width: 100%; height: 100%; border-radius: 0; }
+.lk-spark { width: 88px; height: 88px; border-radius: 22px; display: grid; place-items: center; border: 1px solid var(--accent-line); background: var(--accent-tint); color: var(--accent-text); }
+.lk-spark .icon { width: 36px; height: 36px; }
+.lk-name { display: grid; gap: 4px; min-width: 0; }
+.lk-name h3 { margin: 0; font: 650 24px/1.15 var(--font-sans); overflow-wrap: anywhere; }
+.lk-paired { font-size: 13px; color: var(--muted); }
+.lk-paired strong { color: var(--accent-text); }
+.lk-facts { display: grid; grid-template-columns: auto 1fr; gap: 8px 16px; margin: 0; padding-top: 12px; border-top: .67px solid var(--line-soft); font-size: 13px; }
+.lk-facts dt { color: var(--muted); }
+.lk-facts dd { margin: 0; text-align: right; overflow-wrap: anywhere; }
+
+@media (max-width: 1000px) {
+  .lk .launch { grid-template-columns: minmax(0, 1fr); }
+  .lk .preview { position: static; order: 2; }
+}
+@media (max-width: 640px) {
+  .lk-head h1 { font-size: 26px; }
+  .lk .step-panel { padding: 16px; border-radius: 18px; }
+  .lk .stepper button span:last-child, .lk .stepper button:not([aria-current]) span:last-child { display: none; }
+  .lk .stepper li:not(:last-child)::after { margin: 0 4px; }
+  .lk-stepper { padding: 6px 10px; }
+}

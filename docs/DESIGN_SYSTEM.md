@@ -87,3 +87,7 @@ Dock width 220ms; label fades 120ms; marquee about 40px per second. Cards enter 
 ### Token page right rail (Phase 3b)
 
 Order: trade panel (accent-tinted border; Minimum received row; slippage in a collapsible settings drawer with 0.1/0.5/1/3/5%), your position, curve progress, creator fees (lifetime total and a Claim link to Rewards), dev transparency (bars, shown only when dev data exists). Trade, quote, anti-snipe, graduate and reopen logic are unchanged. No "launch transaction" link: the indexer does not store the launch hash.
+
+## Launch page (Phase 4)
+
+`apps/web/launch.css` restyles the five-step launch flow without changing its logic: headline with an accent phrase, a progress card (numbered circles, connectors; labels hide below 640px), a section card per step with an icon tile, and a sticky token preview (image well with glow and sparkle placeholder until an image is chosen, name, ticker, "Paired with", network, status, starting market cap from the selected pair's curve, labelled simulation or test size). Drafts already autosave in the browser; the nav shows "Draft saved in this browser". Kept as a step-by-step flow, not one scrolling page, so each step still validates before the next. "How it works" opens the existing dialog until the Docs route exists (Phase 5).
