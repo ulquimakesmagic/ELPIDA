@@ -1,5 +1,9 @@
 # Actions that need Malik
 
+## Solana binaries rebuilt, 19 October 2026
+
+`contracts/solana/build/*.so` were rebuilt from current source (optional creator buy) with Solana CLI 2.3.13. New SHA256: test build `89d96d53856ba206a8a3a96b0b971d503d6fcfb0dd028587cf654fbc5f6d0b88`, mainnet build `1a1db96d0654a10ffc321e01cd055bd4c807d5ff1ad243bdabe04e02a25f865a`. The hash quoted in item 3 below (`4e96…9623`) belongs to the earlier build. The devnet program has not been upgraded from these yet; that is the next Solana step. See `MAINNET_CHECKLIST_2026-10-19.md`.
+
 ## Next test funds: finish SONGOKU, then tax rehearsal
 
 SONGOKU's zero-buy launch, buys, sell and shared-wallet fee claim are verified.
