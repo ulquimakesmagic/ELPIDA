@@ -199,3 +199,14 @@ test('Robinhood semantics are verified raw balance plus multiplier, with a total
   assert.equal(shareExposure({ model: sem.model, balance: raw, multiplierWad: m, balanceOfKind: sem.balanceOfKind }), 3857298915677612283610n, 'matches the onchain balanceOfUI exactly');
   assert.ok(rh.onchainFindings.risks.includes('block any account'));
 });
+
+test('Coinbase on Base: eight decimals, raw balanceOf, and a total-return feed', () => {
+  const sem = config.providers.coinbase.balanceSemantics.base;
+  assert.deepEqual([sem.model, sem.balanceOfKind, sem.feedIncludesMultiplier], ['raw-with-multiplier', 'raw', true]);
+  const cb = config.assets.filter(a => a.provider === 'coinbase');
+  assert.equal(cb.length, 10); for (const a of cb) assert.equal(a.decimals, 8);
+  const m = 1000538000000000000n, raw = 15154950535n;
+  const shares = shareExposure({ model: sem.model, balance: raw, multiplierWad: m, balanceOfKind: sem.balanceOfKind });
+  assert.ok(Math.abs(Number(shares - 15163102982n)) <= 1500, 'close to the onchain balanceOfUI (the multiplier here is rounded)');
+  assert.equal(tokenValueUsd({ model: sem.model, balance: raw, decimals: 8, balanceOfKind: 'raw', price: 200, priceBasis: 'per-raw-token' }), 151.54950535 * 200);
+});

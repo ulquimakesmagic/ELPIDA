@@ -124,3 +124,13 @@ Done through your Chrome and the public RPC (the sandbox cannot reach it). No wa
 ### Coinbase on Base, from the Base docs page (19 Oct 2026)
 
 docs.base.org/build-on-base/integrate-defi/list-tokenized-stocks adds: a public Tokenized Stocks API with no key (addresses, multipliers, NAV), the Onchain Registry at `0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD`, secondary holding and trading described as permissionless with KYC only for Authorized Participants, address blocklists that make a blocked transfer revert, `scaledBalanceOf` as canonical with `balanceOfUI` as raw x multiplier, no built-in timelock, and feeds identical to those in the registry. `balanceOf` is still not stated, so read it from the chain as done for Robinhood before use.
+
+### Coinbase on Base onchain check (19 Oct 2026, read-only)
+
+Done through your Chrome and public Base RPCs (the sandbox cannot reach them).
+
+- All ten registry addresses return the expected symbols (NVDAc, METAc, AAPLc, GOOGLc, AMZNc, MSFTc, MSTRc, SNDKc, SPCXc, TSLAc) on chain id 8453, so the base.org list matches the chain.
+- **Decimals are 8, not 18.** The registry now records 8 for all ten, and valuation must use it.
+- **`balanceOf` returns the raw balance**; `balanceOfUI` and `scaledBalanceOf` return raw x multiplier (NVDAc holder 15154950535 raw vs 15163102982 UI). Multipliers are 1.000538 (NVDAc), 1.000314 (METAc), 1.000377 (GOOGLc), 1.0 for the rest.
+- Every sampled NVDAc holder was a smart contract, so contracts hold these tokens in practice. Not tested: `isAuthorized` for our contracts (policy ID not identified), transfers, and per-function pause state.
+- Compared with Robinhood: both are raw balance plus multiplier with a total-return feed. Coinbase uses 8 decimals and has no upgradeable proxy (a precompile) but the issuer sets policies and pauses; Robinhood uses 18 decimals, a beacon-upgradable contract and a registry that can block accounts and `adminBurn`.

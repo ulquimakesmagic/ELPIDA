@@ -200,8 +200,9 @@
       "balanceSemantics": {
         "base": {
           "model": "raw-with-multiplier",
-          "note": "B20 native precompile on Base. Corporate actions change a WAD-scaled multiplier, not balances. scaledBalanceOf is the canonical balance; balanceOfUI is raw x multiplier. Whether balanceOf equals the raw or UI amount must be read from the contract before use.",
-          "feedIncludesMultiplier": true
+          "note": "Verified onchain 2026-10-19 (read-only calls on Base): balanceOf() returns the RAW balance; balanceOfUI() and scaledBalanceOf() return raw x multiplier (NVDAc holder: 15154950535 raw vs 15163102982 UI at 1.000538). All ten tokens have 8 decimals, not 18. Multipliers: NVDAc 1.000538, METAc 1.000314, GOOGLc 1.000377, the other seven 1.0. The Chainlink feeds are total-return, so a price is per raw token and the multiplier is not applied again.",
+          "feedIncludesMultiplier": true,
+          "balanceOfKind": "raw"
         }
       },
       "eligibility": {
@@ -232,10 +233,19 @@
         "B20 tokens are precompiles, so they have no per-token bytecode to verify on Basescan; the address list on base.org/stocks must be matched against onchain B20Created events.",
         "Eligible-jurisdiction list and whether a Nigerian user or company is eligible to hold.",
         "Whether Elpida's curve, pool and reward contracts must be allowlisted by the issuer's transfer policy; run isAuthorized and policyExists on each before enabling.",
-        "What balanceOf returns relative to the multiplier.",
         "Whether Uniswap v3 style pools handle the multiplier correctly (pool accounting uses raw balances; the multiplier would change share exposure without moving pool balances).",
-        "Chainlink feed addresses are documented; the oracle registry address is not."
-      ]
+        "Chainlink feed addresses are documented; the oracle registry address is not.",
+        "Policy ID and isAuthorized for our curve, pool and reward contracts were not read; the policy ID lookup function was not identified from the docs."
+      ],
+      "onchainFindings": {
+        "checkedOn": "2026-10-19",
+        "chainId": 8453,
+        "symbolsMatchRegistry": true,
+        "decimals": 8,
+        "codeAtAddress": "0xef-prefixed stub (B20 precompile), so there is no bytecode to verify on Basescan",
+        "sampleHolders": "All five sampled holders of NVDAc were smart contracts; none was blocked in the reads made, but the policy ID was not read so isAuthorized was not tested.",
+        "notTested": "isAuthorized/policy for our contracts; transfers; pause flags (paused() reverts with the standard Pausable selector error, so per-function pause state was not read)."
+      }
     }
   },
   "networks": {
@@ -288,9 +298,10 @@
       "symbol": "NVDAc",
       "underlying": "NVIDIA",
       "address": "0xb20000000000000000000078ee7ce2fE4908108C",
-      "decimals": null,
+      "decimals": 8,
       "feed": "0x04689a41629776563E6822F76f2e57D148d28513",
-      "source": "https://www.base.org/stocks"
+      "source": "https://www.base.org/stocks",
+      "onchainChecked": "2026-10-19"
     },
     {
       "network": "base",
@@ -298,9 +309,10 @@
       "symbol": "METAc",
       "underlying": "Meta",
       "address": "0xb2000000000000000000008bC8786B856E61707C",
-      "decimals": null,
+      "decimals": 8,
       "feed": "0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D",
-      "source": "https://www.base.org/stocks"
+      "source": "https://www.base.org/stocks",
+      "onchainChecked": "2026-10-19"
     },
     {
       "network": "base",
@@ -308,9 +320,10 @@
       "symbol": "AAPLc",
       "underlying": "Apple",
       "address": "0xb200000000000000000000C2e324d24d7eEcd1fb",
-      "decimals": null,
+      "decimals": 8,
       "feed": "0x787f13dEa48Db0897CbCDD985de77809D837F988",
-      "source": "https://www.base.org/stocks"
+      "source": "https://www.base.org/stocks",
+      "onchainChecked": "2026-10-19"
     },
     {
       "network": "base",
@@ -318,9 +331,10 @@
       "symbol": "GOOGLc",
       "underlying": "Alphabet",
       "address": "0xb2000000000000000000002D0BA3164cc74f58B7",
-      "decimals": null,
+      "decimals": 8,
       "feed": "0x5bF49E0ffA937CE2FfF033c739aD7C634c4D34F2",
-      "source": "https://www.base.org/stocks"
+      "source": "https://www.base.org/stocks",
+      "onchainChecked": "2026-10-19"
     },
     {
       "network": "base",
@@ -328,9 +342,10 @@
       "symbol": "AMZNc",
       "underlying": "Amazon",
       "address": "0xb200000000000000000000d9192b6B456483C2E8",
-      "decimals": null,
+      "decimals": 8,
       "feed": "0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295",
-      "source": "https://www.base.org/stocks"
+      "source": "https://www.base.org/stocks",
+      "onchainChecked": "2026-10-19"
     },
     {
       "network": "base",
@@ -338,9 +353,10 @@
       "symbol": "MSFTc",
       "underlying": "Microsoft",
       "address": "0xB200000000000000000000Ab99cFa739E253872B",
-      "decimals": null,
+      "decimals": 8,
       "feed": "0xeB10A6c9aa7E537aEd766C08c35Dae35B321b18c",
-      "source": "https://www.base.org/stocks"
+      "source": "https://www.base.org/stocks",
+      "onchainChecked": "2026-10-19"
     },
     {
       "network": "base",
@@ -348,9 +364,10 @@
       "symbol": "MSTRc",
       "underlying": "Strategy",
       "address": "0xb2000000000000000000004884b426556b92883d",
-      "decimals": null,
+      "decimals": 8,
       "feed": "0xB3cE282CD188b35DA0E38D8Bc7d58e33173D202a",
-      "source": "https://www.base.org/stocks"
+      "source": "https://www.base.org/stocks",
+      "onchainChecked": "2026-10-19"
     },
     {
       "network": "base",
@@ -358,9 +375,10 @@
       "symbol": "SNDKc",
       "underlying": "SanDisk",
       "address": "0xb200000000000000000000397293Cb8cda9a10c5",
-      "decimals": null,
+      "decimals": 8,
       "feed": "0x388b0dC46C0Fb05A74BeE0994fa5b02c6Fcca2eA",
-      "source": "https://www.base.org/stocks"
+      "source": "https://www.base.org/stocks",
+      "onchainChecked": "2026-10-19"
     },
     {
       "network": "base",
@@ -368,9 +386,10 @@
       "symbol": "SPCXc",
       "underlying": "SpaceX",
       "address": "0xb2000000000000000000007b9fcbd005511aCBd5",
-      "decimals": null,
+      "decimals": 8,
       "feed": "0x6A634B235903C4ad6376892180d6fF8612e3Fa68",
-      "source": "https://www.base.org/stocks"
+      "source": "https://www.base.org/stocks",
+      "onchainChecked": "2026-10-19"
     },
     {
       "network": "base",
@@ -378,9 +397,10 @@
       "symbol": "TSLAc",
       "underlying": "Tesla",
       "address": "0xb2000000000000000000001e800a7f5189430cD0",
-      "decimals": null,
+      "decimals": 8,
       "feed": "0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4",
-      "source": "https://www.base.org/stocks"
+      "source": "https://www.base.org/stocks",
+      "onchainChecked": "2026-10-19"
     },
     {
       "network": "robinhood",
