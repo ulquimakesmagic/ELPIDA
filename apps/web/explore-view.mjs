@@ -360,7 +360,7 @@ export function createExplore(source) {
     empty.replaceChildren(view.total ? '' : tokens.length && filtered
       ? h('div.empty.empty-compact', h('h3', 'No tokens match'), h('p', state.tab === 'graduating' && !state.query.trim() && state.pair === 'all' && state.chain === 'all' ? 'Every listed token has graduated.' : 'Try another name, ticker or address, or clear the filters.'),
         h('button.btn.btn-secondary', { type: 'button', on: { click: () => set({ query: '', pair: 'all', chain: 'all', tab: state.tab === 'graduating' ? 'trending' : state.tab, page: 1 }) } }, 'Clear filters'))
-      : h('div.empty', h('img', { src: '/assets/brand/elpida-mark.svg', alt: '' }), h('h3', 'No launches yet'), h('p', source.mode() === 'local' ? 'Tokens you launch in the simulation appear here.' : 'Tokens launched on Elpida networks appear here as soon as they are indexed.'),
+      : h('div.empty', h('img.brand-dark', { src: '/assets/brand/elpida-mark-dark.svg?v=mark-20261019', alt: '' }), h('img.brand-light', { src: '/assets/brand/elpida-mark.svg?v=mark-20261019', alt: '' }), h('h3', 'No launches yet'), h('p', source.mode() === 'local' ? 'Tokens you launch in the simulation appear here.' : 'Tokens launched on Elpida networks appear here as soon as they are indexed.'),
         h('a.btn-accent', { href: '#/launch' }, icon('plus', 'icon-sm'), 'Create a token')));
     empty.hidden = !!view.total;
     drawPager(view);

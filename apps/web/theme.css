@@ -478,3 +478,13 @@ main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; 
 [data-theme="light"] .skeleton { background-image: linear-gradient(90deg, var(--panel-2), var(--panel-3), var(--panel-2)); animation: shimmer 1.4s linear infinite; }
 @media (prefers-reduced-motion: reduce) { [data-theme="light"] .skeleton { animation: none; } }
 [data-theme="light"] .label-xs, [data-theme="light"] .muted { color: var(--muted); }
+
+/* ---------- Mobile chain button and menu ---------- */
+.asset-icon[src*="/base."], .asset-icon[src*="/robinhood."] { border-radius: 50%; object-fit: cover; }
+.mobile-chain .env-button .asset-icon { width: 28px; height: 28px; border-radius: 50%; box-sizing: border-box; background: var(--panel-2); flex: none; }
+.mobile-chain .env-button .asset-icon[src*="bnb"] { padding: 5px; object-fit: contain; }
+.mobile-chain .env-button .asset-icon[src*="ethereum"] { background: #eceefb; }
+.mobile-chain .env-button .asset-icon[src*="solana"] { background: #0c0d12; }
+@media (max-width: 900px) {
+  .mobile-chain .chain-options { position: fixed; left: 12px; right: 12px; top: calc(env(safe-area-inset-top, 0px) + 76px); width: auto; max-width: none; max-height: calc(100dvh - 190px); overflow-y: auto; }
+}

@@ -111,3 +111,13 @@ Header "Explore the numbers", period segmented pill, chain select and a round re
 - Light-theme skeletons use `--panel-2`/`--panel-3` shimmer and stop under reduced motion.
 - Audit (Playwright, 7 routes x 5 widths x 2 themes): no page-level horizontal overflow at 320/390/768/1280/1440. Wide sort tabs, filter chips and the analytics table scroll inside their own containers. Every route has one `h1`, no unnamed buttons/links/inputs, no images without `alt`. Plain-text contrast has no failures; gradient buttons were checked visually (lime on near-black ink, white on indigo ~5.6:1).
 - Not covered: the token page route (the local simulation has no indexed tokens to open).
+
+## Brand mark (19 Oct 2026)
+
+- New mark (an open spiral/leaf circle) replaces the sprout-over-dome. Light theme uses indigo `#4434d4` (`elpida-mark.svg`, `elpida-wordmark.svg`); dark theme uses lime `#adff45` (`elpida-mark-dark.svg`, `elpida-wordmark-dark.svg`). `elpida-mark-mono.svg` uses `currentColor`. Same filenames as before, so only the cache-bust string changed (`?v=mark-20261019`).
+- The mark was traced from the supplied raster into a single SVG path (about 2 KB). Favicon, app icon, apple-touch icon and the 192/512 PNGs are regenerated from it on the near-black tile.
+- Mobile chain button: chain icons are 28px circles (Base/Robinhood cropped, ETH/SOL/BNB padded in a tile). The mobile chain menu is `position: fixed` with 12px side insets so it can no longer slide off the left edge.
+
+## Solana test binaries
+
+`contracts/solana/build/*.so` were built on 17 Oct, before the 18 Oct program change that allows a zero first buy. The test "Solana launch rejects bad input" therefore saw the old `FirstBuyRequired` (0x1775) instead of `Slippage` (0x1777). Rebuilt both binaries from current source with Solana CLI 2.3.13 (commands in `contracts/solana/README.md`); the Solana suite passes 26/26. Nothing was deployed. Upgrading devnet from these binaries is a separate step for the owner.
