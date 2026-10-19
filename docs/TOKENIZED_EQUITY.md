@@ -175,3 +175,29 @@ Run: `npm run test:equity-lifecycle -- robinhood AAPL` (any registry symbol; Bas
 It checks, with the stock as the quote asset: factory `approveQuote`; paired launch with the first buy pulled by `transferFrom` (the factory and the curve both assert the balance delta equals the amount sent, which only holds because `balanceOf` is raw); the curve holding exactly its liabilities after every buy and sell; exact raw payouts on sell; protocol and creator fee payouts; curve completion; graduation into Uniswap v3 with price continuity and a permanently locked position; router buys and sells after graduation; fee collection with principal untouched.
 
 Not covered: the issuer blocking or pausing our curve, pool or locker mid-life, `adminBurn` from our contracts, a multiplier change while a position is open, and Uniswap pools on the real Robinhood Uniswap deployment (the local copy is used). The curve sizing in the script is test sizing, not a price. `tests/equity-lifecycle-fork.test.mjs` runs the same logic offline with a mock token.
+
+### Robinhood lifecycle result (19 Oct 2026, run on Malik's PC)
+
+`npm run test:equity-lifecycle -- robinhood AAPL` returned **PASS** on all 11 steps, on a local fork with our real factory, curve and adapter plus a local Uniswap v3: stock approved as a quote asset; paired launch with the stock as the first buy; no approval left behind; buy and sell with exact raw payouts and the curve fully backed after each; protocol and creator fees paid in the stock; curve completion; graduation into Uniswap v3 with continuous price and a locked position; router buy and sell after graduation; fee collection with principal unchanged. Holder used: the Uniswap v4 `PoolManager`. The curve sizing was test sizing (20 tokens virtual quote), not a price.
+
+Still untested for Robinhood: the issuer blocking, pausing or `adminBurn`-ing our curve, pool or locker mid-life; a multiplier change while a position is open; the real Robinhood Uniswap deployment (a local copy was used). Capabilities stay OFF.
+
+## Coinbase on Base: read-only eth_call simulation
+
+Base's tokenized stocks are node precompiles, so neither the fork check nor the lifecycle check can run them. `scripts/equity-ethcall-sim.mjs` asks a real Base node instead, one `eth_call` at a time. Nothing is signed, sent or changed.
+
+Run: `npm run test:equity-sim -- base` (optionally `NVDAc AAPLc`; use `$env:ELPIDA_EQUITY_FORK_RPC_BASE="https://base-rpc.publicnode.com"` if the default rate-limits). Output: PASS/FAIL lines and `backups/equity-fork/base-ethcall-report.json`.
+
+It checks symbol and decimals; that `balanceOfUI` equals `scaledBalanceOf` and is not below the raw balance; two negative controls (a transfer above the balance and a transfer from an empty sender must be rejected, otherwise a pass would mean nothing); and that the live policy accepts a transfer from a holder to a fresh wallet (one base unit and 1%), to an address given contract code by a state override, an approval to a contract spender, and a contract as sender.
+
+Limits: every call is stateless, so receive-then-sweep and approve-then-pull sequences cannot be played, the issuer's blocklist cannot be changed, and `isAuthorized` for our specific contracts stays untested until they are deployed on Base Sepolia or mainnet. A pass shows the policy accepts contract recipients in general, not that our contracts are authorised.
+
+### Base eth_call simulation result (19 Oct 2026, run on Malik's PC)
+
+`npm run test:equity-sim -- base` returned **PASS** for NVDAc, AAPLc and TSLAc: 11 checks each, all read-only `eth_call`s against a live Base node through `base-rpc.publicnode.com`. Holder used: the `TransparentUpgradeableProxy` at `0xa4d5947Eb727A052bae69C593FfC84247EC9864E`.
+
+- Symbols match and decimals are 8. `balanceOfUI` equals `scaledBalanceOf` and is raw x multiplier (NVDAc raw 1408595108727, UI 1409352847783; AAPLc and TSLAc multiplier 1).
+- Both negative controls were rejected (transfer above the balance, transfer from an empty sender), so the simulation does execute the token.
+- The policy accepted: a holder sending to a fresh wallet (one base unit and 1%), to an address given contract code, approving a contract spender, and a contract sending to a wallet.
+
+What this does not show: sequences (receive then sweep, approve then pull), `isAuthorized` for our own contracts, the issuer blocking or pausing mid-life, or our factory and curve running on Base. Those need Base Sepolia or mainnet deployments. Capabilities stay OFF.
