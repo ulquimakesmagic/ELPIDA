@@ -99,3 +99,8 @@ Order: trade panel (accent-tinted border; Minimum received row; slippage in a co
 ### Analytics (Phase 5b)
 
 Header "Explore the numbers", period segmented pill, chain select and a round refresh button that spins while loading. KPI tiles sit in one container card with Trading volume highlighted in the accent; the chart line is the accent with an area fill. Data and endpoints are unchanged (`public/analytics`); no figure was added that the indexer does not provide, so there is no graduations table or fees-by-currency card yet. Docs were also updated for optional creator buys, atomic graduation and the optional token tax (scope 18 Oct).
+
+## Phase 6a: light accent and chain badges
+
+- Light theme now uses an indigo accent (`--accent` #5b5bd6, `--accent-text` #4338ca, white `--accent-ink`) on cool neutral surfaces. Dark theme keeps the lime accent. Only tokens changed, so every component follows.
+- Ethereum (tall PNG) and Solana (wide SVG) glyphs sit centred in a round badge (`padding` + `object-fit: contain`) in the chain menu, the collapsed dock and the mobile chain button. Base, Robinhood and BNB are unchanged.

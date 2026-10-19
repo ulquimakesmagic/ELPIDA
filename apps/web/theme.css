@@ -71,34 +71,35 @@
 }
 [data-theme="light"] {
   color-scheme: light;
-  --bg: #f7f8f3;
+  --bg: #f6f7fa;
   --panel: #ffffff;
-  --panel-2: #f1f3eb;
-  --panel-3: #e5e9dd;
+  --panel-2: #eef0f5;
+  --panel-3: #e2e5ed;
   --panel-hi: #ffffff;
-  --panel-lo: #f7f8f2;
-  --dock-bg: linear-gradient(155deg, #ffffff, #f2f4ec 78%);
-  --topbar-bg: linear-gradient(rgba(255, 255, 255, .92), rgba(250, 251, 246, .92));
-  --ink: #1d271a;
-  --ink-2: #3c4736;
-  --muted: #626d59;
-  --line: rgba(29, 39, 26, .12);
-  --line-soft: rgba(29, 39, 26, .09);
-  --line-faint: rgba(29, 39, 26, .06);
-  --line-strong: rgba(29, 39, 26, .22);
-  --hover: rgba(29, 39, 26, .045);
+  --panel-lo: #f6f7fb;
+  --dock-bg: linear-gradient(155deg, #ffffff, #eff1f6 78%);
+  --topbar-bg: linear-gradient(rgba(255, 255, 255, .92), rgba(248, 249, 252, .92));
+  --ink: #161a24;
+  --ink-2: #373d4d;
+  --muted: #5d6475;
+  --line: rgba(22, 26, 40, .12);
+  --line-soft: rgba(22, 26, 40, .09);
+  --line-faint: rgba(22, 26, 40, .06);
+  --line-strong: rgba(22, 26, 40, .22);
+  --hover: rgba(22, 26, 40, .045);
   --highlight: rgba(255, 255, 255, .8);
   --up: #18884a;   --up-soft: rgba(24, 136, 74, .1);
   --down: #c2413b; --down-bg: rgba(194, 65, 59, .09); --down-line: rgba(194, 65, 59, .22);
-  --age: #5d7a2e;
-  --accent-text: #3d7a08;
-  --accent-tint: rgba(110, 190, 30, .13);
-  --accent-glow: rgba(110, 190, 30, .14);
-  --accent-line: rgba(110, 170, 30, .55);
-  --shadow-card: 0 1px 2px rgba(20, 30, 10, .04), 0 10px 28px rgba(20, 30, 10, .05);
-  --shadow-pop: 0 18px 50px rgba(20, 30, 10, .16);
+  --age: #6b7186;
+  --accent: #5b5bd6; --accent-hi: #7b7bea; --accent-lo: #4545bd; --accent-ink: #ffffff;
+  --accent-text: #4338ca;
+  --accent-tint: rgba(91, 91, 214, .1);
+  --accent-glow: rgba(91, 91, 214, .15);
+  --accent-line: rgba(91, 91, 214, .5);
+  --shadow-card: 0 1px 2px rgba(16, 20, 40, .04), 0 10px 28px rgba(16, 20, 40, .05);
+  --shadow-pop: 0 18px 50px rgba(16, 20, 40, .16);
   --primary: var(--accent-text);
-  --scrim: rgba(20, 26, 16, .32);
+  --scrim: rgba(16, 20, 32, .34);
 }
 
 /* ---------- Base ---------- */
@@ -460,3 +461,12 @@ main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; 
 .footer-watermark { line-height: .95; margin-bottom: -.18em; }
 [data-theme="light"] .footer-watermark { background-image: linear-gradient(180deg, color-mix(in srgb, var(--accent-text) 26%, transparent), color-mix(in srgb, var(--accent-text) 8%, transparent) 85%); }
 [data-theme="light"] .footer-strip { background: rgba(244, 246, 239, .96); }
+
+/* ---------- Phase 6: chain badges (square/wide glyphs sit centred in the round slot) ---------- */
+.chain-option > .asset-icon[src*="ethereum"], .chain-option > .asset-icon[src*="solana"] { padding: 6px; object-fit: contain; border: 0; }
+.chain-option > .asset-icon[src*="ethereum"] { background: #eceefb; }
+.chain-option > .asset-icon[src*="solana"] { background: #0c0d12; }
+.app-shell:not([data-dock="open"]) .dock-env > .asset-icon[src*="ethereum"], .app-shell:not([data-dock="open"]) .dock-env > .asset-icon[src*="solana"],
+.mobile-chain .env-button .asset-icon[src*="ethereum"], .mobile-chain .env-button .asset-icon[src*="solana"] { box-sizing: border-box; padding: 22%; object-fit: contain; border-radius: 50%; }
+.app-shell:not([data-dock="open"]) .dock-env > .asset-icon[src*="ethereum"] { background: #eceefb; }
+.app-shell:not([data-dock="open"]) .dock-env > .asset-icon[src*="solana"] { background: #0c0d12; }
