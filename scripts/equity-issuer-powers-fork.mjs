@@ -42,7 +42,7 @@ function buildArgs(fragment, { target, amount, value }) {
  * Finds the issuer operations on the given verified contracts (searched in order) and an account that is allowed to call
  * each one, by simulating the call from every candidate. Missing operations come back as `{ missing: reason }`.
  */
-export async function buildIssuerOps({ provider, sources, candidates }) {
+export async function buildIssuerOps({ provider, sources, candidates, probeTarget = '0x00000000000000000000000000000000000dead1' }) {
   const ops = {};
   for (const [op, names] of Object.entries(NAMES)) {
     let found = null;
@@ -55,7 +55,7 @@ export async function buildIssuerOps({ provider, sources, candidates }) {
       if (found) break;
     }
     if (!found) { ops[op] = { missing: `no function named ${names.join('/')} on the verified contracts` }; continue; }
-    const probe = buildArgs(found.fragment, { target: '0x00000000000000000000000000000000000dead1', amount: 1n, value: 1n });
+    const probe = buildArgs(found.fragment, { target: probeTarget, amount: 1n, value: 1n });
     let caller = null, lastError = '';
     for (const c of candidates) {
       try { await provider.call({ to: found.src.address, from: c, data: found.iface.encodeFunctionData(found.fragment, probe) }); caller = c; break; }
@@ -259,7 +259,7 @@ async function main() {
   const report = { scope: 'LOCAL FORK ONLY: nothing is sent to the public chain', network: net, chainId: def.chainId, block: head - 5, symbol, token: asset.address, holder, candidates: candidates.length };
   try {
     await provider.send('hardhat_metadata', []); await provider.send('evm_mine', []);
-    const ops = await buildIssuerOps({ provider, sources, candidates });
+    const ops = await buildIssuerOps({ provider, sources, candidates, probeTarget: holder }); // a target that holds tokens, so a burn probe fails on permissions rather than on balance
     report.issuerOps = Object.fromEntries(Object.entries(ops).map(([k, v]) => [k, v.missing ? { missing: v.missing } : { function: v.name, on: v.to, callerFound: true }]));
     for (const [k, v] of Object.entries(ops)) console.log(`  issuer op ${k}: ${v.missing ?? `${v.name} on ${v.to}`}`);
     const unit = 10n ** BigInt(asset.decimals ?? 18), virtualQuote = 20n * unit, need = virtualQuote * 4n;
