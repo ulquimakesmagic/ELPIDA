@@ -142,3 +142,13 @@ Done through your Chrome and public Base RPCs (the sandbox cannot reach them).
 - Coinbase Tokenized Stocks / Base: https://www.base.org/stocks , https://docs.base.org/base-chain/asset-issuance/tokenized-stocks-on-base , https://www.coinbase.com/tokenize
 
 Use the contact or support route each site offers; do not use addresses from third-party pages.
+
+## Local fork check (run on a PC with RPC access)
+
+`scripts/equity-fork-check.mjs` forks Robinhood Chain or Base mainnet in memory and checks, on the fork only, that a real stock token behaves with contracts the way our curve, pool and reward vault need: symbol and decimals match the registry, `balanceOf` is raw and `balanceOfUI` is raw x multiplier, pauses are off, a holder can send to an account and to a contract, the contract can send it on, an approve and `transferFrom` pull works (the pool and router pattern), and a single base unit moves exactly. Robinhood also checks the issuer registry is not paused and the probe contract is not blocked.
+
+- No private key, wallet or funds are used. It impersonates an existing holder on the fork; the upstream RPC is only read.
+- Run: `npm run test:equity-fork -- robinhood` and `npm run test:equity-fork -- base` (optionally add symbols, for example `TSLA AAPL`). Windows cmd: `set ELPIDA_EQUITY_FORK_RPC=https://your-rpc` before the command to use your own endpoint; the public Base RPC rate-limits.
+- Output: PASS/FAIL lines and `backups/equity-fork/<network>-report.json`.
+- It does not test the issuer's block, pause, burn or upgrade powers, our own factory/curve/vault deployments, or Uniswap pools. Those are the next layer once these pass.
+- `tests/equity-fork-check.test.mjs` exercises the same check logic offline against a local token.

@@ -288,7 +288,8 @@
       "chainId": 8453,
       "testnets": [
         "base-sepolia"
-      ]
+      ],
+      "rpc": "https://mainnet.base.org"
     }
   },
   "assets": [
