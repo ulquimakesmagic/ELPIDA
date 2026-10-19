@@ -148,7 +148,30 @@ Use the contact or support route each site offers; do not use addresses from thi
 `scripts/equity-fork-check.mjs` forks Robinhood Chain or Base mainnet in memory and checks, on the fork only, that a real stock token behaves with contracts the way our curve, pool and reward vault need: symbol and decimals match the registry, `balanceOf` is raw and `balanceOfUI` is raw x multiplier, pauses are off, a holder can send to an account and to a contract, the contract can send it on, an approve and `transferFrom` pull works (the pool and router pattern), and a single base unit moves exactly. Robinhood also checks the issuer registry is not paused and the probe contract is not blocked.
 
 - No private key, wallet or funds are used. It impersonates an existing holder on the fork; the upstream RPC is only read.
-- Run: `npm run test:equity-fork -- robinhood` and `npm run test:equity-fork -- base` (optionally add symbols, for example `TSLA AAPL`). Windows cmd: `set ELPIDA_EQUITY_FORK_RPC=https://your-rpc` before the command to use your own endpoint; the public Base RPC rate-limits.
+- Run: `npm run test:equity-fork -- robinhood` and `npm run test:equity-fork -- base` (optionally add symbols, for example `TSLA AAPL`). To use your own endpoint set `ELPIDA_EQUITY_FORK_RPC_ROBINHOOD` or `ELPIDA_EQUITY_FORK_RPC_BASE` (PowerShell: `$env:ELPIDA_EQUITY_FORK_RPC_BASE="https://..."`; cmd: `set ...`); the generic `ELPIDA_EQUITY_FORK_RPC` applies to whichever network is run, so clear it between networks. The public Base RPC rate-limits.
+- **Coinbase tokens on Base cannot run in a local fork.** They are node-level precompiles (on-chain code is a `0xef` stub), so Hardhat fails with `invalid opcode` (found on the first PC run, 19 Oct 2026). The script now reports them as SKIPPED. Testing them needs a real Base node: Base Sepolia, or `eth_call` simulations against a mainnet node.
 - Output: PASS/FAIL lines and `backups/equity-fork/<network>-report.json`.
 - It does not test the issuer's block, pause, burn or upgrade powers, our own factory/curve/vault deployments, or Uniswap pools. Those are the next layer once these pass.
 - `tests/equity-fork-check.test.mjs` exercises the same check logic offline against a local token.
+
+### Robinhood fork check result (19 Oct 2026, run on Malik's PC)
+
+`npm run test:equity-fork -- robinhood` returned **PASS** for AAPL, NVDA, SPY and TSLA: 14 checks each, run on a local fork with nothing sent to the chain. Holder used: the Uniswap v4 `PoolManager` (`0x8366a39CC670B4001A1121B8F6A443A643e40951`), impersonated on the fork only.
+
+- Symbols and 18 decimals match the registry. `balanceOf` is raw and `balanceOfUI` = raw x multiplier (AAPL 1.000566, NVDA 1.000775, SPY 1.001718, TSLA 1).
+- Token, oracle and issuer registry were not paused, and a fresh contract was not blocked.
+- Transfers conserved the raw amount for holder to wallet, wallet to wallet, holder to contract, contract to wallet, and approve plus `transferFrom` by a contract. One base unit moved exactly.
+
+What this does **not** show: our own factory, curve and vault contracts (only a stand-in probe), Uniswap pools, behaviour after the issuer blocks, pauses, burns or upgrades, or a multiplier change mid-position. It is evidence for a future `verification` record, not enablement. All capabilities stay OFF.
+
+Coinbase on Base is still untested: its tokens are node precompiles and cannot run in a local fork (see above).
+
+## Lifecycle check with our own contracts (Robinhood, local fork)
+
+`scripts/equity-lifecycle-fork.mjs` deploys our real `ElpidaDexFactory`, curve and Uniswap v3 migration adapter (plus a local Uniswap v3) on a fork of Robinhood Chain and runs a launch with a real stock token as the approved quote asset. The upstream RPC is only read; the stock is funded by impersonating an existing holder on the fork.
+
+Run: `npm run test:equity-lifecycle -- robinhood AAPL` (any registry symbol; Base tokens cannot run here, see above). Output: PASS lines and `backups/equity-fork/robinhood-lifecycle-report.json`.
+
+It checks, with the stock as the quote asset: factory `approveQuote`; paired launch with the first buy pulled by `transferFrom` (the factory and the curve both assert the balance delta equals the amount sent, which only holds because `balanceOf` is raw); the curve holding exactly its liabilities after every buy and sell; exact raw payouts on sell; protocol and creator fee payouts; curve completion; graduation into Uniswap v3 with price continuity and a permanently locked position; router buys and sells after graduation; fee collection with principal untouched.
+
+Not covered: the issuer blocking or pausing our curve, pool or locker mid-life, `adminBurn` from our contracts, a multiplier change while a position is open, and Uniswap pools on the real Robinhood Uniswap deployment (the local copy is used). The curve sizing in the script is test sizing, not a price. `tests/equity-lifecycle-fork.test.mjs` runs the same logic offline with a mock token.
