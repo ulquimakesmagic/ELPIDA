@@ -2353,5 +2353,12 @@
       "source": "https://docs.robinhood.com/chain/contracts"
     }
   ],
-  "verification": []
+  "verification": [],
+  "graduation": {
+    "minMarketCapUsd": 50000,
+    "minRealReserveUsd": 15000,
+    "decidedBy": "Malik",
+    "decidedOn": "2026-10-19",
+    "note": "Both must hold. Real reserve excludes virtual reserves. Enforced in checkGraduation for tokenized-stock pairs; the deployed curve contracts are unchanged and still use their own cap, so contract enforcement of these numbers needs a contract change and audit."
+  }
 }

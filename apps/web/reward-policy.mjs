@@ -10,6 +10,8 @@ export function normalizeRewardPolicy(input = {}, chain = 'local') {
     return s;
   };
   const threshold = decimal(input.threshold,'1',true), minimumHolding = decimal(input.minimumHolding,'1000');
+  const minimumHoldingUsd = decimal(input.minimumHoldingUsd,'0');
+  if (Number(minimumHoldingUsd) > 100000) throw new Error('The USD minimum cannot exceed $100,000.');
   const vestingDays = Number(input.vestingDays ?? 30);
   if (!Number.isInteger(vestingDays) || vestingDays < 1 || vestingDays > 3650) throw new Error('Vesting must be between 1 and 3,650 days.');
   const rewardToken = String(input.rewardToken ?? '').toLowerCase();
@@ -32,7 +34,7 @@ export function normalizeRewardPolicy(input = {}, chain = 'local') {
     return {kind,target,bps};
   });
   if (normalized.length && normalized.reduce((n,r)=>n+r.bps,0) !== 10000) throw new Error('Creator reward allocations must total exactly 100%.');
-  return {version:1,mode,threshold,minimumHolding,vestingDays,rewardToken,recipients:normalized};
+  return {version:1,mode,threshold,minimumHolding,minimumHoldingUsd,vestingDays,rewardToken,recipients:normalized};
 }
 // Largest-remainder allocation conserves every base unit, with stable address tie breaking.
 export function holderDistribution(budget, holdings, minimum, excluded = []) {

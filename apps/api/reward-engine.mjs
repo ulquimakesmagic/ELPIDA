@@ -3,6 +3,7 @@ import {randomBytes} from 'node:crypto';
 import {resolveTxt} from 'node:dns/promises';
 import {normalizeRewardPolicy,holderDistribution} from '../web/reward-policy.mjs';
 import {XVerification} from './x-verification.mjs';
+import {effectiveMinimum} from '../../packages/core/holder-minimum.mjs';
 const dead='0x000000000000000000000000000000000000dead';
 
 // Resume incomplete local holder epochs without recomputing the snapshot or
@@ -43,6 +44,7 @@ export class RewardEngine {
   return {policy:{...policy,recipients},vault,events:[],status:'Accumulating fees',epochs:0};
  }
  async attach(record,prepared,block){prepared.token=record.address;prepared.block=block;this.records.set(record.address,prepared);await(await prepared.vault.initialize(record.address,record.curve,record.pair==='native'?ZeroAddress:(record.quoteAddress||ZeroAddress))).wait();if(this.dex)await(await prepared.vault.configureDex(this.dex.v3.router.target,this.dex.v3.weth.target)).wait();record.rewardPolicy=prepared.policy;record.rewardVault=prepared.vault.target;}
+ async minimumFor(record,policy){const tokens=parseUnits(policy.minimumHolding,18);if(!(Number(policy.minimumHoldingUsd)>0))return tokens;const price=this.usdPrice?await this.usdPrice(record):null;return effectiveMinimum({tokens,usd:policy.minimumHoldingUsd,tokenPriceUsd:price});}
  async holders(record,snapshot){
   const token=new Contract(record.address,this.tokenAbi,this.provider);
   const logs=await token.queryFilter(token.filters.Transfer(),this.records.get(record.address).block,snapshot);
@@ -67,7 +69,8 @@ export class RewardEngine {
   const amount=await v.strategyBalance(source),threshold=parseUnits(r.policy.threshold,d);
   if(amount<threshold){r.status='Accumulating fees toward threshold';return;}
   const snapshot=await this.provider.getBlockNumber();const {balances,excluded}=await this.holders(record,snapshot);
-  if(!holderDistribution(amount,balances,parseUnits(r.policy.minimumHolding,18),excluded).length){r.status='Waiting for eligible holders';return;}
+  const minimum=await this.minimumFor(record,r.policy);if(minimum===null){r.status='Waiting for a fresh USD price to apply the USD minimum holding';return;}
+  if(!holderDistribution(amount,balances,minimum,excluded).length){r.status='Waiting for eligible holders';return;}
   let asset=source,budget=amount;
   if((r.policy.mode==='paired'&&r.policy.rewardToken!==source.toLowerCase())||r.policy.mode==='buyback'){
    asset=r.policy.mode==='buyback'?record.address:r.policy.rewardToken;
@@ -77,7 +80,7 @@ export class RewardEngine {
    if(out===0n){r.status='Waiting for a larger conversion amount';return;}
    await(await (route==='dex'?v.convertDex(source,asset,amount,out*9950n/10000n||1n):v.convert(source,asset,route,amount,out*9950n/10000n||1n))).wait();budget=await v.strategyBalance(asset);
   }
-  const allocations=holderDistribution(budget,balances,parseUnits(r.policy.minimumHolding,18),excluded);
+  const allocations=holderDistribution(budget,balances,minimum,excluded);
   if(!allocations.length){r.status='Waiting for eligible holders';return;}
   r.pendingEpoch={asset,snapshot,duration:r.policy.mode==='buyback'?r.policy.vestingDays*86400:0,
     budget:budget.toString(),mode:r.policy.mode,nextBatch:0,
