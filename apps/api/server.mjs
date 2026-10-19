@@ -26,8 +26,10 @@ import {HolderTheses,thesisIdentity} from './holder-theses.mjs';
 import {HolderChat} from './holder-chat.mjs';
 import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
+import { createTokenizedEquity } from '../../packages/core/tokenized-equity.mjs';
 import { MAX_METADATA_REQUEST_BYTES, normalizeMetadata } from '../web/metadata.mjs';
 import { WalletTokenLists, walletTokenEntries } from './wallet-tokenlist.mjs';
+const tokenizedEquity=createTokenizedEquity(JSON.parse(readFileSync(new URL('../../config/tokenized-equity-registry.json',import.meta.url),'utf8')),{env:process.env});
 import { evmTestnets, solanaDevnet, solanaLocalnet, solanaMainnet } from '../../packages/core/networks.mjs';
 import { isDexModel } from '../../packages/core/curve-model.mjs';
 
@@ -268,6 +270,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           for(const source of sources){const rows=source.trades;source.trades=(function*(){for(const row of rows)yield JSON.parse(row.data);})();}
           try{return send(200,protocolAnalytics({sources,prices:priceSnapshot(),period:url.searchParams.get('period')??'7d',network:url.searchParams.get('network')??'all'}));}catch(error){return send(400,{error:error.message});}
         }
+        if(url.pathname==='/api/public/tokenized-equity'){const view=tokenizedEquity.describeNetwork(url.searchParams.get('network')??'');return view?send(200,{...view,live:false,note:'Tokenized stocks are disabled until each capability is verified with the provider. Nothing here is an official partnership.'}):send(404,{error:'No tokenized-stock provider is designated for this network.'});}
         if(url.pathname==='/api/graduation/status')return send(200,graduationKeeper.status());
         if(url.pathname==='/api/public/status')return send(200,{graduation:graduationKeeper.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),simulationEphemeral:!runtime.config.simulation?.durable,simulation:runtime.config.simulation},networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,publicIndex.status(n.key)])),...(solanaIndex?{[solanaIndex.network.key]:{enabled:true,...solanaIndex.status()}}:{})}});
         if(url.pathname==='/api/public/recent-trades'){
