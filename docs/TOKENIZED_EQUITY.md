@@ -134,3 +134,13 @@ Done through your Chrome and public Base RPCs (the sandbox cannot reach them).
 - **`balanceOf` returns the raw balance**; `balanceOfUI` and `scaledBalanceOf` return raw x multiplier (NVDAc holder 15154950535 raw vs 15163102982 UI). Multipliers are 1.000538 (NVDAc), 1.000314 (METAc), 1.000377 (GOOGLc), 1.0 for the rest.
 - Every sampled NVDAc holder was a smart contract, so contracts hold these tokens in practice. Not tested: `isAuthorized` for our contracts (policy ID not identified), transfers, and per-function pause state.
 - Compared with Robinhood: both are raw balance plus multiplier with a total-return feed. Coinbase uses 8 decimals and has no upgradeable proxy (a precompile) but the issuer sets policies and pauses; Robinhood uses 18 decimals, a beacon-upgradable contract and a registry that can block accounts and `adminBurn`.
+
+## Local fork check (run on a PC with RPC access)
+
+`scripts/equity-fork-check.mjs` forks Robinhood Chain or Base mainnet in memory and checks, on the fork only, that a real stock token behaves with contracts the way our curve, pool and reward vault need: symbol and decimals match the registry, `balanceOf` is raw and `balanceOfUI` is raw x multiplier, pauses are off, a holder can send to an account and to a contract, the contract can send it on, an approve and `transferFrom` pull works (the pool and router pattern), and a single base unit moves exactly. Robinhood also checks the issuer registry is not paused and the probe contract is not blocked.
+
+- No private key, wallet or funds are used. It impersonates an existing holder on the fork; the upstream RPC is only read.
+- Run: `npm run test:equity-fork -- robinhood` and `npm run test:equity-fork -- base` (optionally add symbols, for example `TSLA AAPL`). Windows cmd: `set ELPIDA_EQUITY_FORK_RPC=https://your-rpc` before the command to use your own endpoint; the public Base RPC rate-limits.
+- Output: PASS/FAIL lines and `backups/equity-fork/<network>-report.json`.
+- It does not test the issuer's block, pause, burn or upgrade powers, our own factory/curve/vault deployments, or Uniswap pools. Those are the next layer once these pass.
+- `tests/equity-fork-check.test.mjs` exercises the same check logic offline against a local token.
