@@ -25,7 +25,7 @@ export function usdReferenceFor(token, nativeReference, now = Math.floor(Date.no
 export const PAIR_INFO = {
   native: { title: 'Native coin', glyph: 'coins', note: symbol => `Buyers pay in ${symbol}, the network’s own coin.` },
   usdc: { title: 'USDC', glyph: 'coins', note: () => 'Buyers pay in USDC. The curve and graduated pool stay paired with USDC; network gas is separate.' },
-  xstock: { title: 'xStock', glyph: 'chart-candlestick', note: () => 'Buyers pay in a tokenized stock. On test networks this is a simulated stock with no value.' },
+  xstock: { title: 'Tokenized stock', glyph: 'chart-candlestick', note: () => 'Buyers pay in a tokenized stock from the network’s designated provider. On test networks this is a simulated stock with no value; live provider assets stay off until verified.' },
   token: { title: 'Paired token', glyph: 'layers', note: () => 'Buyers pay in another approved token, such as a graduated Elpida token.' },
 };
 
@@ -36,7 +36,17 @@ export const PAIR_INFO = {
  * so a DAMM v2 graduation path is the way to add them.
  */
 export const PAIR_LIMITS = {
-  solana: { xstock: 'Not on Solana yet: xStocks carry an issuer permanent delegate, which PumpSwap does not accept, so the curve could never graduate. It needs a Meteora graduation path.' },
+  solana: { xstock: 'Not on Solana yet: xStocks carry an issuer permanent delegate, which PumpSwap does not accept, so the curve could never graduate. It needs a Meteora graduation path and written confirmation from xStocks (see docs/TOKENIZED_EQUITY.md).' },
+};
+
+/**
+ * Designated tokenized-stock provider per network (mainnet and test keys). One provider each; there is no
+ * fallback to another. Live capabilities are tracked in config/tokenized-equity-registry.json and are off
+ * until verified. Display names only; nothing here implies a partnership.
+ */
+export const EQUITY_PROVIDERS = {
+  ethereum: 'xStocks', 'ethereum-sepolia': 'xStocks', 'solana-mainnet': 'xStocks', 'solana-devnet': 'xStocks', 'solana-localnet': 'xStocks',
+  'robinhood-testnet': 'Robinhood Stock Tokens', 'bnb-testnet': 'Binance bStocks', 'base-sepolia': 'Coinbase Tokenized Stocks',
 };
 
 /**
