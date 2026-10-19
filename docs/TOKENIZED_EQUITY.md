@@ -101,6 +101,39 @@ All flags default off and are read server-side only.
 
 Primary: docs.xstocks.fi pages above; docs.robinhood.com/chain/stock-tokens and /contracts; binance.com/learn/bstocks; base.org/stocks; docs.base.org/base-chain/asset-issuance/tokenized-stocks-on-base; coinbase.com/tokenize. Secondary (not canonical): Beosin Robinhood stock-token analysis, Trustswap US availability, Mariblock (Luno Nigeria), Hackernoon and The Defiant (bStocks).
 
+## Robinhood Chain update (19 Oct 2026, later)
+
+- Mainnet chain id **4663**, RPC `https://rpc.mainnet.chain.robinhood.com`, explorer `https://robinhoodchain.blockscout.com` (docs.robinhood.com/chain/connecting). Testnet 46630.
+- Uniswap v2, v3 and v4 are live there and Uniswap says stock tokens are fully transferrable and tradable in its AMM pools (secondary source). This makes a self-integration path plausible without a partnership, because secondary use appears permissionless.
+- Oracles: one Chainlink feed per token, same `AggregatorV3Interface`, updates 24/5, the price already includes the multiplier, `oraclePaused()` marks corporate-action windows. Read feed addresses from Chainlink's Robinhood page, do not hardcode them. This matches the price-per-raw-token handling in `tokenValueUsd`.
+- Still open before enabling anything: the token address table on docs.robinhood.com/chain/contracts loads client-side and could not be read here, so no stock-token address is in the registry yet; contract-level behaviour with our curve, pool and vault (pause roles, sequencer filtering) is untested; eligibility for a Nigerian company is unconfirmed. Everything stays OFF.
+- **Update:** the stock-token table was read in the browser from the official page and the 195 addresses are now in the registry (source URL on each row). Matching them against the onchain asset registry is still required before anything is enabled.
+
+### Robinhood onchain check (19 Oct 2026, read-only)
+
+Done through your Chrome and the public RPC (the sandbox cannot reach it). No wallet, no transactions.
+
+- Chain id confirmed as 4663. TSLA is an EIP-1967 beacon proxy to a verified `Stock` implementation. The beacon is also the `AccessControlsRegistry` (`0xe10b6f6b275de231345c20d14ab812db62151b00`), which can block accounts, pause, upgrade and manage roles.
+- **`balanceOf` returns the raw balance; `balanceOfUI` = raw x multiplier.** Confirmed on AAPL holders. This resolves the open question: Robinhood is `raw-with-multiplier` with a raw `balanceOf`, and the Chainlink price already includes the multiplier, so the valuation code uses a per-raw-token price and never multiplies again.
+- Multipliers are already above 1 for AAPL, NVDA, SPY, SGOV and SCHD, so the multiplier is live and matters for accounting.
+- The two biggest AAPL holders are a Uniswap v4 `PoolManager` and `Morpho`, and neither is blocked. Third-party contracts can hold these tokens now.
+- Issuer powers: block any account, pause the registry or a token, `adminBurn` from any account, upgrade all tokens at once. These are a counterparty risk to reserves held by our contracts, and the launch UI should disclose them.
+- Not done: running our own contracts against the tokens (needs a fork or testnet from a machine with RPC access).
+
+### Coinbase on Base, from the Base docs page (19 Oct 2026)
+
+docs.base.org/build-on-base/integrate-defi/list-tokenized-stocks adds: a public Tokenized Stocks API with no key (addresses, multipliers, NAV), the Onchain Registry at `0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD`, secondary holding and trading described as permissionless with KYC only for Authorized Participants, address blocklists that make a blocked transfer revert, `scaledBalanceOf` as canonical with `balanceOfUI` as raw x multiplier, no built-in timelock, and feeds identical to those in the registry. `balanceOf` is still not stated, so read it from the chain as done for Robinhood before use.
+
+### Coinbase on Base onchain check (19 Oct 2026, read-only)
+
+Done through your Chrome and public Base RPCs (the sandbox cannot reach them).
+
+- All ten registry addresses return the expected symbols (NVDAc, METAc, AAPLc, GOOGLc, AMZNc, MSFTc, MSTRc, SNDKc, SPCXc, TSLAc) on chain id 8453, so the base.org list matches the chain.
+- **Decimals are 8, not 18.** The registry now records 8 for all ten, and valuation must use it.
+- **`balanceOf` returns the raw balance**; `balanceOfUI` and `scaledBalanceOf` return raw x multiplier (NVDAc holder 15154950535 raw vs 15163102982 UI). Multipliers are 1.000538 (NVDAc), 1.000314 (METAc), 1.000377 (GOOGLc), 1.0 for the rest.
+- Every sampled NVDAc holder was a smart contract, so contracts hold these tokens in practice. Not tested: `isAuthorized` for our contracts (policy ID not identified), transfers, and per-function pause state.
+- Compared with Robinhood: both are raw balance plus multiplier with a total-return feed. Coinbase uses 8 decimals and has no upgradeable proxy (a precompile) but the issuer sets policies and pauses; Robinhood uses 18 decimals, a beacon-upgradable contract and a registry that can block accounts and `adminBurn`.
+
 ## Where to send the inquiries (official pages only; no direct email addresses were found)
 
 - xStocks: https://xstocks.fi , docs https://docs.xstocks.fi , legal and country list https://assets.backed.fi/legal-documentation , DeFi portal https://defi.xstocks.fi
@@ -109,3 +142,13 @@ Primary: docs.xstocks.fi pages above; docs.robinhood.com/chain/stock-tokens and 
 - Coinbase Tokenized Stocks / Base: https://www.base.org/stocks , https://docs.base.org/base-chain/asset-issuance/tokenized-stocks-on-base , https://www.coinbase.com/tokenize
 
 Use the contact or support route each site offers; do not use addresses from third-party pages.
+
+## Local fork check (run on a PC with RPC access)
+
+`scripts/equity-fork-check.mjs` forks Robinhood Chain or Base mainnet in memory and checks, on the fork only, that a real stock token behaves with contracts the way our curve, pool and reward vault need: symbol and decimals match the registry, `balanceOf` is raw and `balanceOfUI` is raw x multiplier, pauses are off, a holder can send to an account and to a contract, the contract can send it on, an approve and `transferFrom` pull works (the pool and router pattern), and a single base unit moves exactly. Robinhood also checks the issuer registry is not paused and the probe contract is not blocked.
+
+- No private key, wallet or funds are used. It impersonates an existing holder on the fork; the upstream RPC is only read.
+- Run: `npm run test:equity-fork -- robinhood` and `npm run test:equity-fork -- base` (optionally add symbols, for example `TSLA AAPL`). Windows cmd: `set ELPIDA_EQUITY_FORK_RPC=https://your-rpc` before the command to use your own endpoint; the public Base RPC rate-limits.
+- Output: PASS/FAIL lines and `backups/equity-fork/<network>-report.json`.
+- It does not test the issuer's block, pause, burn or upgrade powers, our own factory/curve/vault deployments, or Uniswap pools. Those are the next layer once these pass.
+- `tests/equity-fork-check.test.mjs` exercises the same check logic offline against a local token.

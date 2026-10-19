@@ -36,7 +36,12 @@ test('registry holds only addresses taken from the issuer page and never repeats
   assert.equal(coinbase.length, 10);
   assert.equal(new Set(coinbase.map(a => a.address)).size, 10);
   for (const a of coinbase) { assert.match(a.address, /^0xb2[0-9a-f]{38}$/); assert.match(a.feed, /^0x[0-9a-fA-F]{40}$/); assert.equal(a.source, 'https://www.base.org/stocks'); }
-  for (const p of ['xstocks', 'robinhood', 'bstocks']) assert.equal(t.assets().filter(a => a.provider === p).length, 0, `${p} has no retrievable official list, so none is invented`);
+  for (const p of ['xstocks', 'bstocks']) assert.equal(t.assets().filter(a => a.provider === p).length, 0, `${p} has no retrievable official list, so none is invented`);
+  const rh = t.assets().filter(a => a.provider === 'robinhood');
+  assert.ok(rh.length > 150); assert.equal(new Set(rh.map(a => a.address)).size, rh.length); assert.equal(new Set(rh.map(a => a.symbol)).size, rh.length);
+  for (const a of rh) { assert.equal(a.source, 'https://docs.robinhood.com/chain/contracts'); assert.equal(a.decimals, 18); }
+  assert.equal(t.getAsset('robinhood', 'robinhood', '0x322F0929c4625eD5bAd873c95208D54E1c003b2d').symbol, 'TSLA');
+  assert.throws(() => t.getAsset('robinhood', 'robinhood', config.assets.find(a => a.provider === 'coinbase').address), /not in the verified registry/, 'a Coinbase token is not a Robinhood token');
 });
 
 test('every capability is off for every real asset by default, with an explanation', () => {
@@ -182,5 +187,26 @@ test('public API describes a network with provider identity and every capability
   assert.equal(v.assets.length, 10);
   for (const a of v.assets) for (const c of CAPABILITIES) assert.equal(a.capabilities[c].enabled, false);
   assert.equal(t.describeNetwork('polygon'), null);
-  for (const net of ['ethereum', 'solana', 'robinhood', 'bnb']) { const d = t.describeNetwork(net); assert.ok(d.providerName); assert.deepEqual(d.assets, []); assert.ok(d.unresolved.length); }
+  assert.ok(t.describeNetwork('robinhood-testnet').assets.length > 150);
+  for (const net of ['ethereum', 'solana', 'bnb']) { const d = t.describeNetwork(net); assert.ok(d.providerName); assert.deepEqual(d.assets, []); assert.ok(d.unresolved.length); }
+});
+
+test('Robinhood semantics are verified raw balance plus multiplier, with a total-return feed', () => {
+  const rh = config.providers.robinhood, sem = rh.balanceSemantics.robinhood;
+  assert.deepEqual([sem.model, sem.balanceOfKind, sem.feedIncludesMultiplier], ['raw-with-multiplier', 'raw', true]);
+  assert.equal(config.networks.robinhood.chainId, 4663);
+  const m = 1000566080061092436n, raw = 3855116611030921434773n;
+  assert.equal(shareExposure({ model: sem.model, balance: raw, multiplierWad: m, balanceOfKind: sem.balanceOfKind }), 3857298915677612283610n, 'matches the onchain balanceOfUI exactly');
+  assert.ok(rh.onchainFindings.risks.includes('block any account'));
+});
+
+test('Coinbase on Base: eight decimals, raw balanceOf, and a total-return feed', () => {
+  const sem = config.providers.coinbase.balanceSemantics.base;
+  assert.deepEqual([sem.model, sem.balanceOfKind, sem.feedIncludesMultiplier], ['raw-with-multiplier', 'raw', true]);
+  const cb = config.assets.filter(a => a.provider === 'coinbase');
+  assert.equal(cb.length, 10); for (const a of cb) assert.equal(a.decimals, 8);
+  const m = 1000538000000000000n, raw = 15154950535n;
+  const shares = shareExposure({ model: sem.model, balance: raw, multiplierWad: m, balanceOfKind: sem.balanceOfKind });
+  assert.ok(Math.abs(Number(shares - 15163102982n)) <= 1500, 'close to the onchain balanceOfUI (the multiplier here is rounded)');
+  assert.equal(tokenValueUsd({ model: sem.model, balance: raw, decimals: 8, balanceOfKind: 'raw', price: 200, priceBasis: 'per-raw-token' }), 151.54950535 * 200);
 });
