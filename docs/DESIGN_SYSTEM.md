@@ -104,3 +104,10 @@ Header "Explore the numbers", period segmented pill, chain select and a round re
 
 - Light theme now uses an indigo accent (`--accent` #5b5bd6, `--accent-text` #4338ca, white `--accent-ink`) on cool neutral surfaces. Dark theme keeps the lime accent. Only tokens changed, so every component follows.
 - Ethereum (tall PNG) and Solana (wide SVG) glyphs sit centred in a round badge (`padding` + `object-fit: contain`) in the chain menu, the collapsed dock and the mobile chain button. Base, Robinhood and BNB are unchanged.
+
+## Phase 6b: motion and accessibility pass
+
+- Route changes fade/rise the view (`.view-enter`, 240ms, set in `app.mjs` on `rerender('route')` only, so live data updates never replay it). `prefers-reduced-motion` turns it off; the global reduced-motion rule already zeroes the other durations.
+- Light-theme skeletons use `--panel-2`/`--panel-3` shimmer and stop under reduced motion.
+- Audit (Playwright, 7 routes x 5 widths x 2 themes): no page-level horizontal overflow at 320/390/768/1280/1440. Wide sort tabs, filter chips and the analytics table scroll inside their own containers. Every route has one `h1`, no unnamed buttons/links/inputs, no images without `alt`. Plain-text contrast has no failures; gradient buttons were checked visually (lime on near-black ink, white on indigo ~5.6:1).
+- Not covered: the token page route (the local simulation has no indexed tokens to open).
