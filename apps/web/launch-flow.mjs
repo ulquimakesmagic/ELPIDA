@@ -45,7 +45,7 @@ export function renderLaunch(ctx) {
   const preview = h('aside.preview', { 'aria-label': 'Live preview' });
   const root = h('div.lk',
     h('header.lk-head', h('h1', 'Launch your token, ', h('em', 'built on hope'), ' across any chain.'),
-      h('button.tk-pill', { type: 'button', on: { click: () => document.querySelector('#how-dialog')?.showModal() } }, icon('circle-help', 'icon-sm'), 'How it works')),
+      h('button.tk-pill', { type: 'button', on: { click: () => location.hash = '#/docs' } }, icon('circle-help', 'icon-sm'), 'How it works')),
     h('nav.lk-stepper', { 'aria-label': 'Create token progress' }, stepper),
     h('div.launch', panel, preview));
 
