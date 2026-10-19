@@ -65,7 +65,7 @@ async function main() {
   const net = process.argv[2];
   const def = config.networks[net];
   assert.ok(def && ['robinhood', 'base'].includes(net), 'Usage: node scripts/equity-fork-check.mjs robinhood|base [SYMBOL ...]');
-  const rpc = process.env.ELPIDA_EQUITY_FORK_RPC ?? def.rpc ?? { base: 'https://mainnet.base.org' }[net];
+  const rpc = process.env[`ELPIDA_EQUITY_FORK_RPC_${net.toUpperCase()}`] ?? process.env.ELPIDA_EQUITY_FORK_RPC ?? def.rpc ?? { base: 'https://mainnet.base.org' }[net];
   const remote = async (method, params = []) => { const r = await (await fetch(rpc, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(30000) })).json(); if (r.error) throw new Error(`${method}: ${r.error.message}`); return r.result; };
   assert.equal(Number(BigInt(await remote('eth_chainId'))), def.chainId, `upstream must be chain ${def.chainId}`);
   const head = Number(BigInt(await remote('eth_blockNumber')));
@@ -82,6 +82,12 @@ async function main() {
     await provider.send('evm_mine', []); // run against a local block: Hardhat has no hardfork history for these upstream chains
     for (const a of assets) {
       console.log(`\n== ${a.symbol} ${a.address}`);
+      const stub = await provider.getCode(a.address);
+      if (stub.toLowerCase().startsWith('0xef')) {
+        // Base's tokenized stocks are node-level precompiles: the on-chain code is a stub, so a local EVM cannot run them.
+        const msg = 'precompile token (code starts with 0xef): its logic runs inside the Base node, so a local Hardhat fork cannot execute it. Test it against a real Base node (Base Sepolia or an eth_call simulation), not this fork.';
+        report.results.push({ symbol: a.symbol, pass: false, skipped: true, error: msg }); console.log(`SKIP  ${a.symbol}: ${msg}`); continue;
+      }
       let holder = process.env.ELPIDA_EQUITY_HOLDER;
       if (!holder) {
         const topic = id('Transfer(address,address,uint256)'); let best = null, bestBal = 0n;
@@ -122,7 +128,7 @@ async function main() {
       const res = await runTokenChecks({ provider, tokenAddress: a.address, holder, probeArtifact, expect: { symbol: a.symbol, decimals: a.decimals ?? undefined }, registryAddress });
       report.results.push({ symbol: a.symbol, ...res });
     }
-    report.result = report.results.every(r => r.pass) ? 'PASS' : 'FAIL';
+    report.result = report.results.every(r => r.skipped) ? 'SKIPPED (cannot run on a local fork)' : report.results.every(r => r.pass || r.skipped) ? 'PASS' : 'FAIL';
   } finally {
     mkdirSync('backups/equity-fork', { recursive: true });
     writeFileSync(`backups/equity-fork/${net}-report.json`, JSON.stringify(report, null, 2));
