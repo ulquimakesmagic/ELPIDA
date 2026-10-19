@@ -95,3 +95,7 @@ Order: trade panel (accent-tinted border; Minimum received row; slippage in a co
 ## Portfolio and Docs (Phase 5a)
 
 `apps/web/docs.css` and `docs-view.mjs`. Portfolio (`#/portfolio?tab=launched|holdings|drafts`): header, segmented tabs with counts, empty-state card with a connect button, and a Drafts tab that shows the one launch draft kept in this browser session (Continue or Discard; nothing is uploaded). Docs (`#/docs`, `#/docs/<section>`): sticky sidebar with scroll-spy table of contents and seven numbered sections. Fees, the launch-protection window, the grace period and supply come from `curve-model.mjs`; the contract list is generated from the network registry, so it cannot drift. "How it works" now opens Docs. Also fixed: chain menu logos sit in a uniform 28px round slot; the light-theme footer watermark is readable.
+
+### Analytics (Phase 5b)
+
+Header "Explore the numbers", period segmented pill, chain select and a round refresh button that spins while loading. KPI tiles sit in one container card with Trading volume highlighted in the accent; the chart line is the accent with an area fill. Data and endpoints are unchanged (`public/analytics`); no figure was added that the indexer does not provide, so there is no graduations table or fees-by-currency card yet. Docs were also updated for optional creator buys, atomic graduation and the optional token tax (scope 18 Oct).

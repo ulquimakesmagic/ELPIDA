@@ -82,3 +82,32 @@
   .pf-tabs { display: flex; width: 100%; }
   .pf-tabs a { flex: 1 1 0; min-width: 0; justify-content: center; padding: 8px 6px; gap: 6px; }
 }
+
+/* Analytics (Phase 5b): header, KPI tiles, accent chart, calmer section cards. */
+.analytics-page { display: grid; gap: 16px; min-width: 0; }
+.an-eyebrow { display: flex; align-items: center; gap: 8px; margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+.an-eyebrow .icon { color: var(--accent-text); }
+.analytics-page .page-head h1 { font: 650 44px/1.05 var(--font-sans); letter-spacing: -1.5px; margin: 0 0 6px; }
+.analytics-controls { gap: 10px; }
+.analytics-filters { padding: 4px; gap: 2px; border-radius: var(--r-pill); background: var(--panel-2); border: .67px solid var(--line-soft); }
+.analytics-filters .btn { border: 0; background: transparent; border-radius: var(--r-pill); min-height: 34px; padding: 0 14px; color: var(--muted); font-weight: 600; }
+.analytics-filters .btn[aria-pressed="true"] { background: var(--panel-3); color: var(--ink); border: 0; }
+.analytics-refresh { flex: none; }
+.analytics-refresh[disabled] .icon { animation: an-spin 1s linear infinite; }
+@keyframes an-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .analytics-refresh[disabled] .icon { animation: none; } }
+.analytics-metrics { padding: 8px; gap: 8px; border: .67px solid var(--line-soft); border-radius: 26px; background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo)); }
+.analytics-metric.tile { display: grid; gap: 8px; padding: 18px; border: .67px solid var(--line-soft); border-radius: 18px; background: var(--panel-2); margin: 0; min-width: 0; }
+.analytics-metric[data-hl="true"] { background: linear-gradient(180deg, var(--accent-tint), transparent); border-color: var(--accent-line); }
+.analytics-metric[data-hl="true"] strong { color: var(--accent-text); }
+.an-tile-label { display: flex; align-items: center; gap: 8px; margin: 0; font-size: 12px; color: var(--muted); }
+.analytics-metric strong { font: 650 30px/1.1 var(--font-sans); letter-spacing: -1px; overflow-wrap: anywhere; }
+.analytics-body .panel { border-radius: var(--r-card); border: .67px solid var(--line-soft); background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo)); }
+.analytics-body h2 { font: 600 19px/1.2 var(--font-sans); letter-spacing: -.4px; }
+.analytics-line { stroke: var(--accent); stroke-width: 2.5; }
+.analytics-area { fill: var(--accent-tint); stroke: none; }
+.analytics-gridline { stroke: var(--line-faint); }
+.analytics-table th { font-size: 11px; text-transform: uppercase; letter-spacing: .05em; position: sticky; top: 0; background: var(--panel-hi); }
+.analytics-table-scroll { max-height: 420px; overflow: auto; }
+.analytics-table a { color: var(--accent-text); }
+@media (max-width: 640px) { .analytics-page .page-head h1 { font-size: 30px; letter-spacing: -.8px; } }
