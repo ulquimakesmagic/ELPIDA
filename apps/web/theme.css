@@ -470,3 +470,11 @@ main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; 
 .mobile-chain .env-button .asset-icon[src*="ethereum"], .mobile-chain .env-button .asset-icon[src*="solana"] { box-sizing: border-box; padding: 22%; object-fit: contain; border-radius: 50%; }
 .app-shell:not([data-dock="open"]) .dock-env > .asset-icon[src*="ethereum"] { background: #eceefb; }
 .app-shell:not([data-dock="open"]) .dock-env > .asset-icon[src*="solana"] { background: #0c0d12; }
+
+/* ---------- Phase 6b: route enter, light-theme polish ---------- */
+.view-enter { animation: view-in 240ms var(--ease, ease) both; }
+@keyframes view-in { from { opacity: 0; transform: translateY(8px); } }
+@media (prefers-reduced-motion: reduce) { .view-enter { animation: none; } }
+[data-theme="light"] .skeleton { background-image: linear-gradient(90deg, var(--panel-2), var(--panel-3), var(--panel-2)); animation: shimmer 1.4s linear infinite; }
+@media (prefers-reduced-motion: reduce) { [data-theme="light"] .skeleton { animation: none; } }
+[data-theme="light"] .label-xs, [data-theme="light"] .muted { color: var(--muted); }
