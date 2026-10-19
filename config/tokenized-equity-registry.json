@@ -5,19 +5,55 @@
     "xstocks": {
       "name": "xStocks",
       "issuer": "Backed Finance (xStocks)",
-      "networks": ["ethereum", "solana"],
+      "networks": [
+        "ethereum",
+        "solana"
+      ],
       "balanceSemantics": {
-        "ethereum": { "model": "rebased-balance", "note": "balanceOf() returns the equity-adjusted balance; the contract changes balances for corporate actions.", "feedIncludesMultiplier": null },
-        "solana": { "model": "raw-with-multiplier", "note": "SPL Token-2022 with the Scaled UI extension; the raw balance is constant and the display amount is raw x multiplier. PumpSwap refuses these mints because of the issuer permanent delegate (see PAIR_LIMITS).", "feedIncludesMultiplier": null }
+        "ethereum": {
+          "model": "rebased-balance",
+          "note": "balanceOf() returns the equity-adjusted balance; the contract changes balances for corporate actions.",
+          "feedIncludesMultiplier": null
+        },
+        "solana": {
+          "model": "raw-with-multiplier",
+          "note": "SPL Token-2022 with the Scaled UI extension; the raw balance is constant and the display amount is raw x multiplier. PumpSwap refuses these mints because of the issuer permanent delegate (see PAIR_LIMITS).",
+          "feedIncludesMultiplier": null
+        }
       },
-      "eligibility": { "usPersons": "excluded", "nigeria": "unconfirmed", "kyc": "Primary market: issuer KYC/AML and whitelisted wallets. Secondary holding: not stated in the pages read.", "summary": "Not intended for the United States, US persons or other prohibited jurisdictions; the country list is in the issuer's legal documentation (assets.backed.fi/legal-documentation). A third party (Luno) offered xStocks to Nigerian retail users from 2025-09-08, which is not an eligibility confirmation for a Nigerian company or for Elpida." },
+      "eligibility": {
+        "usPersons": "excluded",
+        "nigeria": "unconfirmed",
+        "kyc": "Primary market: issuer KYC/AML and whitelisted wallets. Secondary holding: not stated in the pages read.",
+        "summary": "Not intended for the United States, US persons or other prohibited jurisdictions; the country list is in the issuer's legal documentation (assets.backed.fi/legal-documentation). A third party (Luno) offered xStocks to Nigerian retail users from 2025-09-08, which is not an eligibility confirmation for a Nigerian company or for Elpida."
+      },
       "marketHours": "Issuance and redemption run 24/5 with US equity hours; secondary trading is described as 24/7 elsewhere but that was not confirmed in the pages read.",
       "sources": [
-        { "url": "https://docs.xstocks.fi/docs", "accessed": "2026-10-19", "used": "overview, eligibility, rebasing mention" },
-        { "url": "https://docs.xstocks.fi/developers", "accessed": "2026-10-19", "used": "balance semantics per chain, price-data endpoints" },
-        { "url": "https://docs.xstocks.fi/docs/dividends-and-stock-splits", "accessed": "2026-10-19", "used": "multiplier activation 00:30 UTC after ex-date; pause briefly around activation" },
-        { "url": "https://docs.xstocks.fi/docs/issuance-and-redemption", "accessed": "2026-10-19", "used": "primary market needs KYC/AML and whitelisted wallets" },
-        { "url": "https://www.mariblock.com/luno-expands-access-to-tokenized-us-stocks-to-nigeria/", "accessed": "2026-10-19", "used": "third-party report on Nigerian retail access via Luno; secondary source" }
+        {
+          "url": "https://docs.xstocks.fi/docs",
+          "accessed": "2026-10-19",
+          "used": "overview, eligibility, rebasing mention"
+        },
+        {
+          "url": "https://docs.xstocks.fi/developers",
+          "accessed": "2026-10-19",
+          "used": "balance semantics per chain, price-data endpoints"
+        },
+        {
+          "url": "https://docs.xstocks.fi/docs/dividends-and-stock-splits",
+          "accessed": "2026-10-19",
+          "used": "multiplier activation 00:30 UTC after ex-date; pause briefly around activation"
+        },
+        {
+          "url": "https://docs.xstocks.fi/docs/issuance-and-redemption",
+          "accessed": "2026-10-19",
+          "used": "primary market needs KYC/AML and whitelisted wallets"
+        },
+        {
+          "url": "https://www.mariblock.com/luno-expands-access-to-tokenized-us-stocks-to-nigeria/",
+          "accessed": "2026-10-19",
+          "used": "third-party report on Nigerian retail access via Luno; secondary source"
+        }
       ],
       "unresolved": [
         "Canonical mint/contract addresses: the docs point to the Assets endpoints and defi.xstocks.fi; neither was retrievable here.",
@@ -31,17 +67,44 @@
     "robinhood": {
       "name": "Robinhood Stock Tokens",
       "issuer": "Robinhood (Robinhood Chain, EU-issued; Authorised Participants subscribe directly)",
-      "networks": ["robinhood"],
+      "networks": [
+        "robinhood"
+      ],
       "balanceSemantics": {
-        "robinhood": { "model": "raw-with-multiplier", "note": "ERC-20 (18 decimals) with ERC-8056 uiMultiplier(); the docs do not say what balanceOf returns, so it must be read from the contract before use. The oracle price includes the multiplier.", "feedIncludesMultiplier": true }
+        "robinhood": {
+          "model": "raw-with-multiplier",
+          "note": "ERC-20 (18 decimals) with ERC-8056 uiMultiplier(); the docs do not say what balanceOf returns, so it must be read from the contract before use. The oracle price includes the multiplier.",
+          "feedIncludesMultiplier": true
+        }
       },
-      "eligibility": { "usPersons": "excluded", "nigeria": "unconfirmed", "kyc": "Direct subscription: KYB onboarding as an Authorised Participant. Chain access itself is permissionless; apps may screen.", "summary": "Not registered under US securities law and not offered to US persons; restrictions apply in other jurisdictions (list at docs.robinhood.com/rhj). Nigeria is not mentioned in any page read." },
+      "eligibility": {
+        "usPersons": "excluded",
+        "nigeria": "unconfirmed",
+        "kyc": "Direct subscription: KYB onboarding as an Authorised Participant. Chain access itself is permissionless; apps may screen.",
+        "summary": "Not registered under US securities law and not offered to US persons; restrictions apply in other jurisdictions (list at docs.robinhood.com/rhj). Nigeria is not mentioned in any page read."
+      },
       "marketHours": "Mint and burn orders Monday 02:00 to Saturday 02:00 CET/CEST only. Onchain transfers and swaps are described as available outside that window. Each token has a Chainlink price feed.",
       "sources": [
-        { "url": "https://docs.robinhood.com/chain/stock-tokens/", "accessed": "2026-10-19", "used": "standard, multiplier, eligibility, hours, oracle" },
-        { "url": "https://docs.robinhood.com/chain/contracts", "accessed": "2026-10-19", "used": "only WETH and USDG are listed statically; the token table is loaded live from the onchain registry" },
-        { "url": "https://beosin.com/resources/robinhood-chain-stock-token-practice-code-analysis-on-token-contract-and-blockchain-protocol", "accessed": "2026-10-19", "used": "third-party code analysis: upgradeable, two pause layers, 13 roles, sequencer-level filtering; secondary source" },
-        { "url": "https://trustswap.com/robinhood/us-availability", "accessed": "2026-10-19", "used": "third-party: mainnet live 1 July 2026, no geo-block on the chain; secondary source" }
+        {
+          "url": "https://docs.robinhood.com/chain/stock-tokens/",
+          "accessed": "2026-10-19",
+          "used": "standard, multiplier, eligibility, hours, oracle"
+        },
+        {
+          "url": "https://docs.robinhood.com/chain/contracts",
+          "accessed": "2026-10-19",
+          "used": "only WETH and USDG are listed statically; the token table is loaded live from the onchain registry"
+        },
+        {
+          "url": "https://beosin.com/resources/robinhood-chain-stock-token-practice-code-analysis-on-token-contract-and-blockchain-protocol",
+          "accessed": "2026-10-19",
+          "used": "third-party code analysis: upgradeable, two pause layers, 13 roles, sequencer-level filtering; secondary source"
+        },
+        {
+          "url": "https://trustswap.com/robinhood/us-availability",
+          "accessed": "2026-10-19",
+          "used": "third-party: mainnet live 1 July 2026, no geo-block on the chain; secondary source"
+        }
       ],
       "unresolved": [
         "Canonical token addresses: read them from the onchain asset registry or the live table on the Token Contracts page. A TSLA address appears in a third-party article and is deliberately not copied here.",
@@ -55,16 +118,39 @@
     "bstocks": {
       "name": "Binance bStocks",
       "issuer": "BTech Holdings Limited, a Binance group affiliate (ADGM prospectus)",
-      "networks": ["bnb"],
+      "networks": [
+        "bnb"
+      ],
       "balanceSemantics": {
-        "bnb": { "model": "raw-with-multiplier", "note": "BEP-20 that integrates BEP-677 (Scaled UI Amount). Dividends (net of 30% US withholding) and splits are applied through the multiplier.", "feedIncludesMultiplier": null }
+        "bnb": {
+          "model": "raw-with-multiplier",
+          "note": "BEP-20 that integrates BEP-677 (Scaled UI Amount). Dividends (net of 30% US withholding) and splits are applied through the multiplier.",
+          "feedIncludesMultiplier": null
+        }
       },
-      "eligibility": { "usPersons": "excluded", "nigeria": "unconfirmed", "kyc": "Not stated; the page refers to eligibility criteria only.", "summary": "Offered only in ADGM under the approved prospectus, not in other jurisdictions, not to US persons, and only on a secondary-market basis to eligible users. Nigeria is not mentioned. Binance has a history of regulatory action in Nigeria; this must be treated as an open legal question." },
+      "eligibility": {
+        "usPersons": "excluded",
+        "nigeria": "unconfirmed",
+        "kyc": "Not stated; the page refers to eligibility criteria only.",
+        "summary": "Offered only in ADGM under the approved prospectus, not in other jurisdictions, not to US persons, and only on a secondary-market basis to eligible users. Nigeria is not mentioned. Binance has a history of regulatory action in Nigeria; this must be treated as an open legal question."
+      },
       "marketHours": "Binance describes 24/7 onchain trading. Oracle and out-of-hours behaviour were not found.",
       "sources": [
-        { "url": "https://www.binance.com/learn/bstocks", "accessed": "2026-10-19", "used": "issuer, BEP-20 and BEP-677, multiplier for dividends and splits, eligibility" },
-        { "url": "https://hackernoon.com/binance-opens-bstocks-collateral-to-every-eligible-user-as-tokenized-stock-volume-tops-$30-billion", "accessed": "2026-10-19", "used": "third-party: launch assets, collateral use; secondary source" },
-        { "url": "https://thedefiant.io/news/tradfi-and-fintech/binance-launches-bstocks-tokenized-us-equities-24-7-onchain-trading", "accessed": "2026-10-19", "used": "third-party: launch on BNB Chain, initial assets; article body did not load" }
+        {
+          "url": "https://www.binance.com/learn/bstocks",
+          "accessed": "2026-10-19",
+          "used": "issuer, BEP-20 and BEP-677, multiplier for dividends and splits, eligibility"
+        },
+        {
+          "url": "https://hackernoon.com/binance-opens-bstocks-collateral-to-every-eligible-user-as-tokenized-stock-volume-tops-$30-billion",
+          "accessed": "2026-10-19",
+          "used": "third-party: launch assets, collateral use; secondary source"
+        },
+        {
+          "url": "https://thedefiant.io/news/tradfi-and-fintech/binance-launches-bstocks-tokenized-us-equities-24-7-onchain-trading",
+          "accessed": "2026-10-19",
+          "used": "third-party: launch on BNB Chain, initial assets; article body did not load"
+        }
       ],
       "unresolved": [
         "Contract addresses: no page read says where they are published.",
@@ -77,16 +163,39 @@
     "coinbase": {
       "name": "Coinbase Tokenized Stocks",
       "issuer": "Coinbase (prospectus filed under Coinbase Onchain SPV Ltd.)",
-      "networks": ["base"],
+      "networks": [
+        "base"
+      ],
       "balanceSemantics": {
-        "base": { "model": "raw-with-multiplier", "note": "B20 native precompile on Base. Corporate actions change a WAD-scaled multiplier, not balances. scaledBalanceOf is the canonical balance; balanceOfUI is raw x multiplier. Whether balanceOf equals the raw or UI amount must be read from the contract before use.", "feedIncludesMultiplier": true }
+        "base": {
+          "model": "raw-with-multiplier",
+          "note": "B20 native precompile on Base. Corporate actions change a WAD-scaled multiplier, not balances. scaledBalanceOf is the canonical balance; balanceOfUI is raw x multiplier. Whether balanceOf equals the raw or UI amount must be read from the contract before use.",
+          "feedIncludesMultiplier": true
+        }
       },
-      "eligibility": { "usPersons": "excluded", "nigeria": "unconfirmed", "kyc": "Mint and redeem: KYC-onboarded Authorized Participants only. Secondary trading is permissionless; transfers can be blocked by issuer allow/blocklist policies.", "summary": "Available only in eligible jurisdictions outside the US under Regulation S; the eligible-jurisdiction list was not on the pages read. Nigeria is not mentioned." },
+      "eligibility": {
+        "usPersons": "excluded",
+        "nigeria": "unconfirmed",
+        "kyc": "Mint and redeem: KYC-onboarded Authorized Participants only. Secondary trading is permissionless; transfers can be blocked by issuer allow/blocklist policies.",
+        "summary": "Available only in eligible jurisdictions outside the US under Regulation S; the eligible-jurisdiction list was not on the pages read. Nigeria is not mentioned."
+      },
       "marketHours": "Tokens trade around the clock. The Chainlink feeds update on a 0.5% deviation or a 24 hour heartbeat during market hours and hold the last value off-hours, so updatedAt stops advancing. Feeds pause on issuer flag until price and multiplier are confirmed.",
       "sources": [
-        { "url": "https://www.base.org/stocks", "accessed": "2026-10-19", "used": "ten token addresses on Base, venues, regions" },
-        { "url": "https://docs.base.org/base-chain/asset-issuance/tokenized-stocks-on-base", "accessed": "2026-10-19", "used": "B20, multiplier, policies, pauses, Chainlink feed addresses" },
-        { "url": "https://www.coinbase.com/tokenize", "accessed": "2026-10-19", "used": "issuer, Regulation S, AP-only mint and redeem" }
+        {
+          "url": "https://www.base.org/stocks",
+          "accessed": "2026-10-19",
+          "used": "ten token addresses on Base, venues, regions"
+        },
+        {
+          "url": "https://docs.base.org/base-chain/asset-issuance/tokenized-stocks-on-base",
+          "accessed": "2026-10-19",
+          "used": "B20, multiplier, policies, pauses, Chainlink feed addresses"
+        },
+        {
+          "url": "https://www.coinbase.com/tokenize",
+          "accessed": "2026-10-19",
+          "used": "issuer, Regulation S, AP-only mint and redeem"
+        }
       ],
       "unresolved": [
         "B20 tokens are precompiles, so they have no per-token bytecode to verify on Basescan; the address list on base.org/stocks must be matched against onchain B20Created events.",
@@ -99,23 +208,154 @@
     }
   },
   "networks": {
-    "ethereum": { "provider": "xstocks", "chainId": 1, "testnets": ["ethereum-sepolia"] },
-    "solana": { "provider": "xstocks", "cluster": "mainnet", "testnets": ["solana-devnet", "solana-localnet"], "networkKeys": ["solana-mainnet"] },
-    "robinhood": { "provider": "robinhood", "chainId": null, "testnets": ["robinhood-testnet"] },
-    "bnb": { "provider": "bstocks", "chainId": 56, "testnets": ["bnb-testnet"] },
-    "base": { "provider": "coinbase", "chainId": 8453, "testnets": ["base-sepolia"] }
+    "ethereum": {
+      "provider": "xstocks",
+      "chainId": 1,
+      "testnets": [
+        "ethereum-sepolia"
+      ]
+    },
+    "solana": {
+      "provider": "xstocks",
+      "cluster": "mainnet",
+      "testnets": [
+        "solana-devnet",
+        "solana-localnet"
+      ],
+      "networkKeys": [
+        "solana-mainnet"
+      ]
+    },
+    "robinhood": {
+      "provider": "robinhood",
+      "chainId": null,
+      "testnets": [
+        "robinhood-testnet"
+      ]
+    },
+    "bnb": {
+      "provider": "bstocks",
+      "chainId": 56,
+      "testnets": [
+        "bnb-testnet"
+      ]
+    },
+    "base": {
+      "provider": "coinbase",
+      "chainId": 8453,
+      "testnets": [
+        "base-sepolia"
+      ]
+    }
   },
   "assets": [
-    { "network": "base", "provider": "coinbase", "symbol": "NVDAc", "underlying": "NVIDIA", "address": "0xb20000000000000000000078ee7ce2fE4908108C", "decimals": null, "feed": "0x04689a41629776563E6822F76f2e57D148d28513", "source": "https://www.base.org/stocks" },
-    { "network": "base", "provider": "coinbase", "symbol": "METAc", "underlying": "Meta", "address": "0xb2000000000000000000008bC8786B856E61707C", "decimals": null, "feed": "0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D", "source": "https://www.base.org/stocks" },
-    { "network": "base", "provider": "coinbase", "symbol": "AAPLc", "underlying": "Apple", "address": "0xb200000000000000000000C2e324d24d7eEcd1fb", "decimals": null, "feed": "0x787f13dEa48Db0897CbCDD985de77809D837F988", "source": "https://www.base.org/stocks" },
-    { "network": "base", "provider": "coinbase", "symbol": "GOOGLc", "underlying": "Alphabet", "address": "0xb2000000000000000000002D0BA3164cc74f58B7", "decimals": null, "feed": "0x5bF49E0ffA937CE2FfF033c739aD7C634c4D34F2", "source": "https://www.base.org/stocks" },
-    { "network": "base", "provider": "coinbase", "symbol": "AMZNc", "underlying": "Amazon", "address": "0xb200000000000000000000d9192b6B456483C2E8", "decimals": null, "feed": "0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295", "source": "https://www.base.org/stocks" },
-    { "network": "base", "provider": "coinbase", "symbol": "MSFTc", "underlying": "Microsoft", "address": "0xB200000000000000000000Ab99cFa739E253872B", "decimals": null, "feed": "0xeB10A6c9aa7E537aEd766C08c35Dae35B321b18c", "source": "https://www.base.org/stocks" },
-    { "network": "base", "provider": "coinbase", "symbol": "MSTRc", "underlying": "Strategy", "address": "0xb2000000000000000000004884b426556b92883d", "decimals": null, "feed": "0xB3cE282CD188b35DA0E38D8Bc7d58e33173D202a", "source": "https://www.base.org/stocks" },
-    { "network": "base", "provider": "coinbase", "symbol": "SNDKc", "underlying": "SanDisk", "address": "0xb200000000000000000000397293Cb8cda9a10c5", "decimals": null, "feed": "0x388b0dC46C0Fb05A74BeE0994fa5b02c6Fcca2eA", "source": "https://www.base.org/stocks" },
-    { "network": "base", "provider": "coinbase", "symbol": "SPCXc", "underlying": "SpaceX", "address": "0xb2000000000000000000007b9fcbd005511aCBd5", "decimals": null, "feed": "0x6A634B235903C4ad6376892180d6fF8612e3Fa68", "source": "https://www.base.org/stocks" },
-    { "network": "base", "provider": "coinbase", "symbol": "TSLAc", "underlying": "Tesla", "address": "0xb2000000000000000000001e800a7f5189430cD0", "decimals": null, "feed": "0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4", "source": "https://www.base.org/stocks" }
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "symbol": "NVDAc",
+      "underlying": "NVIDIA",
+      "address": "0xb20000000000000000000078ee7ce2fE4908108C",
+      "decimals": null,
+      "feed": "0x04689a41629776563E6822F76f2e57D148d28513",
+      "source": "https://www.base.org/stocks"
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "symbol": "METAc",
+      "underlying": "Meta",
+      "address": "0xb2000000000000000000008bC8786B856E61707C",
+      "decimals": null,
+      "feed": "0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D",
+      "source": "https://www.base.org/stocks"
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "symbol": "AAPLc",
+      "underlying": "Apple",
+      "address": "0xb200000000000000000000C2e324d24d7eEcd1fb",
+      "decimals": null,
+      "feed": "0x787f13dEa48Db0897CbCDD985de77809D837F988",
+      "source": "https://www.base.org/stocks"
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "symbol": "GOOGLc",
+      "underlying": "Alphabet",
+      "address": "0xb2000000000000000000002D0BA3164cc74f58B7",
+      "decimals": null,
+      "feed": "0x5bF49E0ffA937CE2FfF033c739aD7C634c4D34F2",
+      "source": "https://www.base.org/stocks"
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "symbol": "AMZNc",
+      "underlying": "Amazon",
+      "address": "0xb200000000000000000000d9192b6B456483C2E8",
+      "decimals": null,
+      "feed": "0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295",
+      "source": "https://www.base.org/stocks"
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "symbol": "MSFTc",
+      "underlying": "Microsoft",
+      "address": "0xB200000000000000000000Ab99cFa739E253872B",
+      "decimals": null,
+      "feed": "0xeB10A6c9aa7E537aEd766C08c35Dae35B321b18c",
+      "source": "https://www.base.org/stocks"
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "symbol": "MSTRc",
+      "underlying": "Strategy",
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "decimals": null,
+      "feed": "0xB3cE282CD188b35DA0E38D8Bc7d58e33173D202a",
+      "source": "https://www.base.org/stocks"
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "symbol": "SNDKc",
+      "underlying": "SanDisk",
+      "address": "0xb200000000000000000000397293Cb8cda9a10c5",
+      "decimals": null,
+      "feed": "0x388b0dC46C0Fb05A74BeE0994fa5b02c6Fcca2eA",
+      "source": "https://www.base.org/stocks"
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "symbol": "SPCXc",
+      "underlying": "SpaceX",
+      "address": "0xb2000000000000000000007b9fcbd005511aCBd5",
+      "decimals": null,
+      "feed": "0x6A634B235903C4ad6376892180d6fF8612e3Fa68",
+      "source": "https://www.base.org/stocks"
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "symbol": "TSLAc",
+      "underlying": "Tesla",
+      "address": "0xb2000000000000000000001e800a7f5189430cD0",
+      "decimals": null,
+      "feed": "0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4",
+      "source": "https://www.base.org/stocks"
+    }
   ],
-  "verification": []
+  "verification": [],
+  "graduation": {
+    "minMarketCapUsd": 50000,
+    "minRealReserveUsd": 15000,
+    "decidedBy": "Malik",
+    "decidedOn": "2026-10-19",
+    "note": "Both must hold. Real reserve excludes virtual reserves. Enforced in checkGraduation for tokenized-stock pairs; the deployed curve contracts are unchanged and still use their own cap, so contract enforcement of these numbers needs a contract change and audit."
+  }
 }

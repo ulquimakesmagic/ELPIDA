@@ -108,7 +108,7 @@ function treasury(ctx, row, data) {
   if (row.policy.mode === 'exclusive') groups.push(group('Awaiting ownership verification', 'shield-check', unverified, 'No unverified X or website allocations.'));
   if (!automated) groups.push(group('Verified allocations', 'badge-check', verified, 'No verified allocations yet.'));
   if (row.policy.mode === 'buyback') groups.push(group('Vesting', 'clock', vesting, 'Bought-back tokens appear here as they vest.'));
-  const settings = automated ? `Distribution threshold ${row.policy.threshold} · minimum token holding ${number(row.policy.minimumHolding, 0)} ${row.symbol}${row.policy.mode === 'buyback' ? ` · ${row.policy.vestingDays}-day vesting` : ''}` : `${row.recipients.length} ${row.recipients.length === 1 ? 'recipient' : 'recipients'}, fixed at launch`;
+  const settings = automated ? `Distribution threshold ${row.policy.threshold} · minimum token holding ${number(row.policy.minimumHolding, 0)} ${row.symbol}${Number(row.policy.minimumHoldingUsd) > 0 ? ` and at least $${number(row.policy.minimumHoldingUsd, 0)}` : ''}${row.policy.mode === 'buyback' ? ` · ${row.policy.vestingDays}-day vesting` : ''}` : `${row.recipients.length} ${row.recipients.length === 1 ? 'recipient' : 'recipients'}, fixed at launch`;
   return h('article.treasury', h('header', h('div', h('h3', `${row.symbol} · ${strategy.name}`), h('p.small.muted', settings)), h('span.chip', row.status)),
     h('div.treasury-groups', groups),
     h('details.tech', { class: 'treasury-tech' }, h('summary', 'Technical details', icon('chevron-down', 'icon-sm')), h('dl.kv', h('dt', 'Treasury contract'), h('dd', row.vault), h('dt', 'Token'), h('dd', row.token))));
