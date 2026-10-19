@@ -165,3 +165,13 @@ Use the contact or support route each site offers; do not use addresses from thi
 What this does **not** show: our own factory, curve and vault contracts (only a stand-in probe), Uniswap pools, behaviour after the issuer blocks, pauses, burns or upgrades, or a multiplier change mid-position. It is evidence for a future `verification` record, not enablement. All capabilities stay OFF.
 
 Coinbase on Base is still untested: its tokens are node precompiles and cannot run in a local fork (see above).
+
+## Lifecycle check with our own contracts (Robinhood, local fork)
+
+`scripts/equity-lifecycle-fork.mjs` deploys our real `ElpidaDexFactory`, curve and Uniswap v3 migration adapter (plus a local Uniswap v3) on a fork of Robinhood Chain and runs a launch with a real stock token as the approved quote asset. The upstream RPC is only read; the stock is funded by impersonating an existing holder on the fork.
+
+Run: `npm run test:equity-lifecycle -- robinhood AAPL` (any registry symbol; Base tokens cannot run here, see above). Output: PASS lines and `backups/equity-fork/robinhood-lifecycle-report.json`.
+
+It checks, with the stock as the quote asset: factory `approveQuote`; paired launch with the first buy pulled by `transferFrom` (the factory and the curve both assert the balance delta equals the amount sent, which only holds because `balanceOf` is raw); the curve holding exactly its liabilities after every buy and sell; exact raw payouts on sell; protocol and creator fee payouts; curve completion; graduation into Uniswap v3 with price continuity and a permanently locked position; router buys and sells after graduation; fee collection with principal untouched.
+
+Not covered: the issuer blocking or pausing our curve, pool or locker mid-life, `adminBurn` from our contracts, a multiplier change while a position is open, and Uniswap pools on the real Robinhood Uniswap deployment (the local copy is used). The curve sizing in the script is test sizing, not a price. `tests/equity-lifecycle-fork.test.mjs` runs the same logic offline with a mock token.
