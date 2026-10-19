@@ -36,7 +36,12 @@ test('registry holds only addresses taken from the issuer page and never repeats
   assert.equal(coinbase.length, 10);
   assert.equal(new Set(coinbase.map(a => a.address)).size, 10);
   for (const a of coinbase) { assert.match(a.address, /^0xb2[0-9a-f]{38}$/); assert.match(a.feed, /^0x[0-9a-fA-F]{40}$/); assert.equal(a.source, 'https://www.base.org/stocks'); }
-  for (const p of ['xstocks', 'robinhood', 'bstocks']) assert.equal(t.assets().filter(a => a.provider === p).length, 0, `${p} has no retrievable official list, so none is invented`);
+  for (const p of ['xstocks', 'bstocks']) assert.equal(t.assets().filter(a => a.provider === p).length, 0, `${p} has no retrievable official list, so none is invented`);
+  const rh = t.assets().filter(a => a.provider === 'robinhood');
+  assert.ok(rh.length > 150); assert.equal(new Set(rh.map(a => a.address)).size, rh.length); assert.equal(new Set(rh.map(a => a.symbol)).size, rh.length);
+  for (const a of rh) { assert.equal(a.source, 'https://docs.robinhood.com/chain/contracts'); assert.equal(a.decimals, 18); }
+  assert.equal(t.getAsset('robinhood', 'robinhood', '0x322F0929c4625eD5bAd873c95208D54E1c003b2d').symbol, 'TSLA');
+  assert.throws(() => t.getAsset('robinhood', 'robinhood', config.assets.find(a => a.provider === 'coinbase').address), /not in the verified registry/, 'a Coinbase token is not a Robinhood token');
 });
 
 test('every capability is off for every real asset by default, with an explanation', () => {
@@ -182,5 +187,6 @@ test('public API describes a network with provider identity and every capability
   assert.equal(v.assets.length, 10);
   for (const a of v.assets) for (const c of CAPABILITIES) assert.equal(a.capabilities[c].enabled, false);
   assert.equal(t.describeNetwork('polygon'), null);
-  for (const net of ['ethereum', 'solana', 'robinhood', 'bnb']) { const d = t.describeNetwork(net); assert.ok(d.providerName); assert.deepEqual(d.assets, []); assert.ok(d.unresolved.length); }
+  assert.ok(t.describeNetwork('robinhood-testnet').assets.length > 150);
+  for (const net of ['ethereum', 'solana', 'bnb']) { const d = t.describeNetwork(net); assert.ok(d.providerName); assert.deepEqual(d.assets, []); assert.ok(d.unresolved.length); }
 });
