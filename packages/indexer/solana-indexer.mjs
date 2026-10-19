@@ -162,6 +162,7 @@ export class SolanaIndexer {
           // Creator transparency (D6): the launch buy and the creator wallet's live holding, % of supply.
           ...(x.devBoughtRaw !== undefined ? { devBoughtRaw: x.devBoughtRaw.toString(), devBoughtPct: supplyPercent(x.devBoughtRaw, TOKEN_SUPPLY) } : {}),
           ...(x.devHoldingRaw !== undefined ? { devHoldingRaw: x.devHoldingRaw.toString(), devHoldingPct: supplyPercent(x.devHoldingRaw, TOKEN_SUPPLY) } : {}),
+          ...(x.launchSignature ? { launchHash: x.launchSignature } : {}),
           metadataURI: x.metadataURI ?? '',
         }));
       }
@@ -175,12 +176,12 @@ export class SolanaIndexer {
   async poolExtras(pools, configs) {
     const { PublicKey } = this.web3, out = new Map(pools.map(p => [p.mint.toBase58(), {}]));
     const batch = async keys => { const result = []; for (let i = 0; i < keys.length; i += 100) result.push(...await this.connection.getMultipleAccountsInfo(keys.slice(i, i + 100), 'confirmed')); return result; };
-    const launchBuy = this.db.prepare("SELECT data FROM trades WHERE mint=? AND json_extract(data,'$.launch')=1 ORDER BY slot LIMIT 1");
+    const launchBuy = this.db.prepare("SELECT signature, data FROM trades WHERE mint=? AND json_extract(data,'$.launch')=1 ORDER BY slot LIMIT 1");
     // Creator holdings (the creator's associated token account for the mint).
     const holdings = await batch(pools.map(p => this.client.ata(p.creator, p.mint)));
     pools.forEach((p, i) => {
       const row = launchBuy.get(p.mint.toBase58()), x = out.get(p.mint.toBase58());
-      if (row) x.devBoughtRaw = BigInt(JSON.parse(row.data).tokenRaw);
+      if (row) { x.devBoughtRaw = BigInt(JSON.parse(row.data).tokenRaw); x.launchSignature = row.signature; }
       x.devHoldingRaw = this.client.tokenAmount(holdings[i]?.data);
     });
     // Metaplex URIs, read once per token (metadata is immutable).

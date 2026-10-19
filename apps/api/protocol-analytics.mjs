@@ -6,13 +6,14 @@ export function protocolAnalytics({sources, prices, period='7d', network='all', 
   if(network!=='all'&&!sources.some(s=>s.key===network))throw new Error('Unknown analytics network.');
   const selected=sources.filter(s=>network==='all'||s.key===network), start=now-windows[period];
   const totals={volumeUsd:0,trades:0,launches:0,addresses:0,unpricedTrades:0,tokens:0,graduated:0};
-  const accounts=new Set(), assets=new Map(), rankings=[], activity=[];
+  const accounts=new Set(), assets=new Map(), rankings=[], activity=[], graduations=[];
   const coverage=selected.map(s=>({key:s.key,name:s.name,...s.status}));
   for(const source of selected){
     const tokens=new Map(source.tokens.map(t=>[t.address,t]));
     const ranks=new Map();
     for(const t of tokens.values()){
       totals.tokens++;if(t.graduated)totals.graduated++;
+      if(t.graduated&&Number(t.completedAt)>0&&Number(t.completedAt)<=now)graduations.push({address:t.address,name:t.metadata?.name??t.name,symbol:t.metadata?.symbol??t.symbol,network:source.key,chain:source.name,quoteSymbol:t.quoteSymbol??'Quote asset',graduatedAt:Number(t.completedAt),dex:t.dex??null});
       if(t.created/1000>=start&&t.created/1000<=now){totals.launches++;activity.push({timestamp:t.created/1000,launches:1});}
       const ref=usdReferenceFor(t,prices[source.key],now);
       const rate=ref?.status==='fresh'&&Number.isFinite(ref.usd)&&ref.usd>0&&now-ref.updatedAt<=(ref.maxAge??180)&&ref.updatedAt<=now+60?ref.usd:null;
@@ -39,5 +40,5 @@ export function protocolAnalytics({sources, prices, period='7d', network='all', 
   const from=Number.isFinite(start)?start:earliest, step=period==='24h'?3600:period==='all'?Math.max(86400,Math.ceil((now-from)/86400/60)*86400):86400;
   const buckets=new Map();for(let t=Math.floor(from/step)*step;t<=now;t+=step)buckets.set(t,{timestamp:t,volumeUsd:0,trades:0,launches:0});
   for(const a of activity){const b=buckets.get(Math.floor(a.timestamp/step)*step);if(b){b.volumeUsd+=a.volumeUsd??0;b.trades+=a.trades??0;b.launches+=a.launches??0;}}
-  return {period,network,updatedAt:now,totals,series:[...buckets.values()],assets:[...assets.values()],topTokens:rankings.sort((a,b)=>b.volumeUsd-a.volumeUsd||b.trades-a.trades).slice(0,10).map(({rate,asset,...r})=>r),coverage,basis:'Confirmed indexed activity only. USD volume uses current fresh price references, not historical exchange rates. Unpriced assets are excluded from USD totals. Trading addresses can include routers. Fee balances are current unclaimed amounts, not protocol revenue.'};
+  return {period,network,updatedAt:now,totals,series:[...buckets.values()],assets:[...assets.values()],graduations:graduations.sort((x,y)=>y.graduatedAt-x.graduatedAt).slice(0,8),topTokens:rankings.sort((a,b)=>b.volumeUsd-a.volumeUsd||b.trades-a.trades).slice(0,10).map(({rate,asset,...r})=>r),coverage,basis:'Confirmed indexed activity only. USD volume uses current fresh price references, not historical exchange rates. Unpriced assets are excluded from USD totals. Trading addresses can include routers. Fee balances are current unclaimed amounts, not protocol revenue.'};
 }

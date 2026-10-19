@@ -49,6 +49,8 @@ export function renderToken(ctx, address) {
   const solana = ctx.mode === 'testnet' && ctx.wallet === ctx.solWallet;
   const explorer = token.url ? token.url.replace(/\/(token|address)\/.*$/, '') : ctx.mode === 'testnet' ? ctx.wallet?.net?.explorer : null;
   const addressUrl = a => explorer ? `${explorer}/address/${a}${solana && ctx.wallet.net.cluster !== 'mainnet' ? `?cluster=${ctx.wallet.net.cluster}` : ''}` : null;
+  const launchHash = token.launchHash ?? token.hash ?? null;
+  const txUrl = hash => explorer && hash ? `${explorer}/tx/${hash}${solana && ctx.wallet.net.cluster !== 'mainnet' ? `?cluster=${ctx.wallet.net.cluster}` : ''}` : null;
   const created = toSeconds(token.created);
   const isCreator = a => a && token.creator && a.toLowerCase() === token.creator.toLowerCase();
   const external = (href, label) => href ? h('a.icon-link', { href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': label, title: label }, icon('external-link', 'icon-sm')) : null;
@@ -113,7 +115,7 @@ export function renderToken(ctx, address) {
           created ? h('span.tk-tag', { title: new Date(created * 1000).toLocaleString() }, `Launched ${ago(created)} ago`) : null,
           h('span.tk-tag.tk-addr', { title: token.address }, short(token.address), copyButton(token.address, '')),
           token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null),
-        h('div.tk-links', ...linkPills, explorerHref ? h('a.tk-pill.tk-pill-end', { href: explorerHref, target: '_blank', rel: 'noopener noreferrer', title: 'Open in explorer' }, 'Explorer', icon('arrow-up-right', 'icon-sm')) : null))),
+        h('div.tk-links', ...linkPills, explorerHref ? h('a.tk-pill.tk-pill-end', { href: explorerHref, target: '_blank', rel: 'noopener noreferrer', title: 'Open in explorer' }, 'Explorer', icon('arrow-up-right', 'icon-sm')) : null, txUrl(launchHash) ? h('a.tk-pill', { href: txUrl(launchHash), target: '_blank', rel: 'noopener noreferrer', title: 'The transaction that created this token' }, 'Launch transaction', icon('arrow-up-right', 'icon-sm')) : null))),
     h('div.tk-about', descText, descMore),
     token.metadataURI ? h('p.tk-lock', icon('lock', 'icon-xs'), 'Details are recorded at launch and cannot be edited.') : null);
   const chart = terminalChart(ctx, token, q);

@@ -28,3 +28,8 @@ test('USDC pairs are valued at $1 per USDC; other paired tokens stay unpriced',(
  assert.equal(r.totals.volumeUsd,25);assert.equal(r.totals.unpricedTrades,1);
  assert.equal(r.assets.find(a=>a.symbol==='USDC').priced,true);assert.equal(r.assets.find(a=>a.symbol==='MEME').priced,false);
 });
+test('recent graduations list completed curves newest first and ignore future or missing timestamps',()=>{
+ const g=(address,completedAt,graduated=true)=>({...token,address,graduated,completedAt});
+ const r=protocolAnalytics({sources:[{...source,tokens:[g('Old',now-500),g('New',now-10),g('Future',now+99),g('Open',0,false),g('NoTime',0)],trades:[]}],prices,now});
+ assert.deepEqual(r.graduations.map(x=>x.address),['New','Old']);
+});
