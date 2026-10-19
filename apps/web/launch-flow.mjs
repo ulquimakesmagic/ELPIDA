@@ -28,7 +28,7 @@ const STRATEGY_TEXT = {
   buyback: 'At the threshold, creator fees buy back your token and vest it to eligible holders over a period you set.',
   exclusive: 'Fees are allocated by percentage to wallets, X accounts or websites. X and website shares stay in the treasury until ownership is verified.',
 };
-const blankDraft = () => ({ name: '', symbol: '', description: '', image: '', imageUrl: '', website: '', twitter: '', telegram: '', discord: '', chain: '', pair: 'native', quoteAsset: '', rewardMode: 'creator', recipients: [{ kind: 'wallet', target: '', percent: '100' }], threshold: '0.01', minimumHolding: '1000', vestingDays: '30', rewardToken: '', feeCurrency:'native', firstBuy: '0', taxBuy:'0', taxSell:'0' });
+const blankDraft = () => ({ name: '', symbol: '', description: '', image: '', imageUrl: '', website: '', twitter: '', telegram: '', discord: '', chain: '', pair: 'native', quoteAsset: '', rewardMode: 'creator', recipients: [{ kind: 'wallet', target: '', percent: '100' }], threshold: '0.01', minimumHolding: '1000', minimumHoldingUsd: '', vestingDays: '30', rewardToken: '', feeCurrency:'native', firstBuy: '0', taxBuy:'0', taxSell:'0' });
 
 export function renderLaunch(ctx) {
   const draft = { ...blankDraft(), ...(storage.get(DRAFT_KEY) ?? {}) };
@@ -264,7 +264,8 @@ export function renderLaunch(ctx) {
     if (automated) {
       settings.append(h('div.row-2',
         field({ label: 'Distribution threshold', control: h('div.input-affix', input('threshold', { type: 'number', min: '0.000001', step: 'any' }), h('span.affix', pairSymbol())), hint: 'Creator fees collected before each distribution runs, in the trading asset.' }),
-        field({ label: 'Minimum token holding', control: h('div.input-affix', input('minimumHolding', { type: 'number', min: '0', step: 'any' }), h('span.affix', (draft.symbol || 'tokens').toUpperCase())), hint: 'Wallets holding less are skipped. Pools, the curve and treasuries never qualify.' })));
+        field({ label: 'Minimum token holding', control: h('div.input-affix', input('minimumHolding', { type: 'number', min: '0', step: 'any' }), h('span.affix', (draft.symbol || 'tokens').toUpperCase())), hint: 'Wallets holding less are skipped. Pools, the curve and treasuries never qualify.' })),
+        field({ label: 'Minimum holding value (optional)', control: h('div.input-affix', input('minimumHoldingUsd', { type: 'number', min: '0', max: '100000', step: 'any', placeholder: 'e.g. 30' }), h('span.affix', 'USD')), hint: 'Holders must also hold at least this much in USD, converted to tokens at each distribution using a fresh price. The larger of the two minimums applies. If no fresh USD price exists for the pair, distributions wait instead of guessing.' }));
       if (draft.rewardMode === 'paired') settings.append(field({ label: 'Reward asset', control: h('select.select', { on: { change: e => { draft.rewardToken = e.target.value; save(); drawPreview(); } } }, (rewardData?.assets ?? []).map(a => h('option', { value: a.address, selected: a.address === draft.rewardToken }, a.symbol))), hint: 'The asset holders receive. It can differ from the trading pair; if it is the same, fees are paid directly without a swap.' }));
       if (draft.rewardMode === 'buyback') settings.append(field({ label: 'Vesting duration', control: h('div.input-affix', input('vestingDays', { type: 'number', min: '1', max: '3650', step: '1' }), h('span.affix', 'days')), hint: 'Bought-back tokens unlock linearly over this period for the eligible holders at each snapshot.' }));
       settings.append(callout('', 'info', 'Holder payouts are weighted by each wallet’s eligible token balance at the recorded snapshot, not by total supply.'));
@@ -307,7 +308,7 @@ export function renderLaunch(ctx) {
       exclusive ? callout('warn', 'shield-check', 'X and website shares stay in the treasury until the owner verifies the account or domain and chooses a payout wallet. Nobody else, including you, can claim them.') : null);
   }
   function buildPolicy() {
-    const policy = normalizeRewardPolicy({ mode: draft.rewardMode, threshold: draft.threshold, minimumHolding: draft.minimumHolding, vestingDays: draft.vestingDays, rewardToken: draft.rewardToken, recipients: draft.recipients }, draft.chain || 'local');
+    const policy = normalizeRewardPolicy({ mode: draft.rewardMode, threshold: draft.threshold, minimumHolding: draft.minimumHolding, minimumHoldingUsd: draft.minimumHoldingUsd || '0', vestingDays: draft.vestingDays, rewardToken: draft.rewardToken, recipients: draft.recipients }, draft.chain || 'local');
     const taxed=!solana()&&(Number(draft.taxBuy)>0||Number(draft.taxSell)>0)&&!!ctx.wallet?.net?.taxDeployment;
     if (draft.chain !== 'local' && (policy.mode !== 'creator' || (!taxed&&policy.recipients.length!==1) || policy.recipients.some(r=>r.kind!=='wallet'))) throw new Error('Public standard launches support one creator wallet. Verified tax deployments support fixed wallet allocations.');
     return policy;

@@ -12,7 +12,7 @@ Custom-pair starting reserve templates use the quote asset's price at approval, 
 
 ## Holder rounds
 
-A local worker processes treasuries after trading and every 30 seconds while localhost runs. Collection from migrated Uniswap positions reaches the same vault. Native position rewards in WETH are unwrapped for native payouts. Eligible holder balances are read at a recorded block; liquidity pools, curve inventories, known dead addresses and reward treasuries are excluded. Minimum holdings are in whole main-token units; thresholds are in the trading asset's units.
+A local worker processes treasuries after trading and every 30 seconds while localhost runs. Collection from migrated Uniswap positions reaches the same vault. Native position rewards in WETH are unwrapped for native payouts. Eligible holder balances are read at a recorded block; liquidity pools, curve inventories, known dead addresses and reward treasuries are excluded. A creator can also set an optional minimum holding value in USD (for example $30). It is converted to tokens at each distribution using a fresh USD price (simulated oracle for native pairs, $1 parity for USDC pairs), rounded up, and the larger of the token and USD minimums applies. With no fresh USD price the distribution waits. Minimum holdings are in whole main-token units; thresholds are in the trading asset's units.
 
 Payout weight = wallet eligible main-token balance / total eligible main-token balances. This spends the full distribution budget among eligible holders. It does not divide by the one-billion total including unsold curve inventory. Largest-remainder rounding conserves base units. Distribution transactions are capped at 64 recipients per batch; balances already paid cannot be replayed from the treasury.
 

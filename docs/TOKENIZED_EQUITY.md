@@ -52,7 +52,7 @@ No provider confirms eligibility for a Nigeria-based founder or company. Luno (a
 
 - Equity reference price and executable token price are different inputs. `executableValuation` needs a fresh reference **and** a pool TWAP within a divergence limit (default 300 bps) and uses the lower of the two, so a thin pool cannot lift reserves.
 - `referencePriceStatus`: `fresh` is usable; `stale` (market open) and `market-closed` show the last price but block graduation and reward conversion; invalid or future-dated data is `outage`.
-- `checkGraduation` needs both the USD market cap and the **real** quote reserve in USD. `realQuoteReserve` subtracts virtual reserves. A null threshold returns `unresolved-threshold` and blocks. The repo has no numeric dual USD threshold in code today (it has start FDV $5,000 on mainnet and the 24 h grace), so both numbers are **unresolved decisions for Malik**; none was invented.
+- `checkGraduation` needs both the USD market cap and the **real** quote reserve in USD. `realQuoteReserve` subtracts virtual reserves. A null threshold returns `unresolved-threshold` and blocks. The repo has no numeric dual USD threshold in code today (it has start FDV $5,000 on mainnet and the 24 h grace), so the numbers were left for Malik, who decided on 19 Oct 2026: **minimum market cap $50,000 and minimum real quote reserve $15,000**, both required (`graduation` in the registry config). `checkGraduation` enforces them for tokenized-stock pairs; the deployed curve contracts are unchanged, so on-chain enforcement needs a contract change and goes into the audit scope.
 - `verifyMigration` requires the pool plus fees to equal the curve's reserves and, for multiplier tokens, an unchanged multiplier across the migration.
 - Double-application guard: a total-return feed (Coinbase, Robinhood) is priced per raw token and the multiplier is never applied again; a plain equity price needs shares = raw x multiplier; if the kind of `balanceOf` is unverified the code refuses.
 
@@ -85,7 +85,6 @@ All flags default off and are read server-side only.
 - Whether contracts (curve, pool, vault) can hold and move each token; pause, freeze, upgrade powers.
 - Meteora DAMM v2 graduation path for Solana xStocks (not built).
 - Price feeds for xStocks and bStocks; what `balanceOf` returns for the raw+multiplier tokens.
-- The two graduation thresholds (market cap USD, real reserve USD).
 - Legal review (checklist D5).
 
 ## Integration inquiries (send from a business address; do not imply a partnership)
@@ -101,3 +100,12 @@ All flags default off and are read server-side only.
 ## Sources (accessed 19 Oct 2026)
 
 Primary: docs.xstocks.fi pages above; docs.robinhood.com/chain/stock-tokens and /contracts; binance.com/learn/bstocks; base.org/stocks; docs.base.org/base-chain/asset-issuance/tokenized-stocks-on-base; coinbase.com/tokenize. Secondary (not canonical): Beosin Robinhood stock-token analysis, Trustswap US availability, Mariblock (Luno Nigeria), Hackernoon and The Defiant (bStocks).
+
+## Where to send the inquiries (official pages only; no direct email addresses were found)
+
+- xStocks: https://xstocks.fi , docs https://docs.xstocks.fi , legal and country list https://assets.backed.fi/legal-documentation , DeFi portal https://defi.xstocks.fi
+- Robinhood Chain: https://docs.robinhood.com/chain/stock-tokens/ , https://docs.robinhood.com/chain/contracts , builder interest form https://go.robinhood.com/chain-interest-form
+- Binance bStocks: https://www.binance.com/learn/bstocks
+- Coinbase Tokenized Stocks / Base: https://www.base.org/stocks , https://docs.base.org/base-chain/asset-issuance/tokenized-stocks-on-base , https://www.coinbase.com/tokenize
+
+Use the contact or support route each site offers; do not use addresses from third-party pages.
