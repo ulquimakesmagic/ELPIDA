@@ -202,7 +202,7 @@ export class EvmIndexer {
     return [...balances].filter(([a,n])=>n>0n&&!excluded.has(a)).sort((a,b)=>a[1]>b[1]?-1:a[1]<b[1]?1:0).slice(0,limit).map(([address,n])=>({address,balance:formatUnits(n,18),supplyShare:ratio(n,supply,12)}));
   }
   candles(address,interval=60,limit=100) {
-    if(![60,300,3600,86400].includes(interval))throw new Error('Unsupported candle interval.');
+    if(![60,300,900,3600,14400,86400].includes(interval))throw new Error('Unsupported candle interval.');
     const rows=this.db.prepare('SELECT data FROM trades WHERE address=? ORDER BY height,idx').all(address.toLowerCase()),buckets=new Map();
     const compare=(a,b)=>{const scale=s=>BigInt(s.split('.')[0]+(s.split('.')[1]??'').padEnd(24,'0'));return scale(a)<scale(b);};
     for(const row of rows){const t=decode(row.data),time=Math.floor(t.timestamp/interval)*interval,p=t.priceQuote;if(p===null)continue;

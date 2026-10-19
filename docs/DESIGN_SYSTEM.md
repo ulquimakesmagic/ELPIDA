@@ -121,3 +121,10 @@ Header "Explore the numbers", period segmented pill, chain select and a round re
 ## Solana test binaries
 
 `contracts/solana/build/*.so` were built on 17 Oct, before the 18 Oct program change that allows a zero first buy. The test "Solana launch rejects bad input" therefore saw the old `FirstBuyRequired` (0x1775) instead of `Slippage` (0x1777). Rebuilt both binaries from current source with Solana CLI 2.3.13 (commands in `contracts/solana/README.md`); the Solana suite passes 26/26. Nothing was deployed. Upgrading devnet from these binaries is a separate step for the owner.
+
+## Token chart (Phase 7, 19 Oct 2026)
+
+- Chart rebuilt around Lightweight Charts: one chart instance updated with `setData`, 20 s quiet refresh that skips unchanged data, horizontal grid only, dashed crosshair with theme label colours, volume histogram under the price pane, OHLC + change % + volume legend that follows the crosshair.
+- Intervals 1m, 5m, 15m, 1h, 4h, 1D (indexers now accept 4h and 1D, still capped at 100 buckets). Market cap or price, candles or area, and a Fit button; choices are remembered per token in the session.
+- Empty state, loading shimmer and an error state with Retry; the status line says data is executed trades only and USD uses the current reference rate.
+- Not covered: a real indexed token on the live site (verified with mocked candles locally).
