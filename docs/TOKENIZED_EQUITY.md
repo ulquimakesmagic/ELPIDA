@@ -101,3 +101,10 @@ All flags default off and are read server-side only.
 ## Sources (accessed 19 Oct 2026)
 
 Primary: docs.xstocks.fi pages above; docs.robinhood.com/chain/stock-tokens and /contracts; binance.com/learn/bstocks; base.org/stocks; docs.base.org/base-chain/asset-issuance/tokenized-stocks-on-base; coinbase.com/tokenize. Secondary (not canonical): Beosin Robinhood stock-token analysis, Trustswap US availability, Mariblock (Luno Nigeria), Hackernoon and The Defiant (bStocks).
+
+## Robinhood Chain update (19 Oct 2026, later)
+
+- Mainnet chain id **4663**, RPC `https://rpc.mainnet.chain.robinhood.com`, explorer `https://robinhoodchain.blockscout.com` (docs.robinhood.com/chain/connecting). Testnet 46630.
+- Uniswap v2, v3 and v4 are live there and Uniswap says stock tokens are fully transferrable and tradable in its AMM pools (secondary source). This makes a self-integration path plausible without a partnership, because secondary use appears permissionless.
+- Oracles: one Chainlink feed per token, same `AggregatorV3Interface`, updates 24/5, the price already includes the multiplier, `oraclePaused()` marks corporate-action windows. Read feed addresses from Chainlink's Robinhood page, do not hardcode them. This matches the price-per-raw-token handling in `tokenValueUsd`.
+- Still open before enabling anything: the token address table on docs.robinhood.com/chain/contracts loads client-side and could not be read here, so no stock-token address is in the registry yet; contract-level behaviour with our curve, pool and vault (pause roles, sequencer filtering) is untested; eligibility for a Nigerian company is unconfirmed. Everything stays OFF.
