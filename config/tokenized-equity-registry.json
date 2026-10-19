@@ -73,8 +73,9 @@
       "balanceSemantics": {
         "robinhood": {
           "model": "raw-with-multiplier",
-          "note": "ERC-20 (18 decimals) with ERC-8056 uiMultiplier(); the docs do not say what balanceOf returns, so it must be read from the contract before use. The oracle price includes the multiplier.",
-          "feedIncludesMultiplier": true
+          "note": "Verified onchain 2026-10-19 (read-only calls through the public RPC): balanceOf() returns the RAW balance and balanceOfUI() returns raw x uiMultiplier() (AAPL holders: 3855116611030921434773 raw vs 3857298915677612283610 UI at multiplier 1.000566). Multipliers differ from 1 for AAPL, NVDA, SPY, SGOV and SCHD. The Chainlink price already includes the multiplier.",
+          "feedIncludesMultiplier": true,
+          "balanceOfKind": "raw"
         }
       },
       "eligibility": {
@@ -119,16 +120,31 @@
           "url": "https://blog.uniswap.org/robinhood-chain-is-live",
           "accessed": "2026-10-19",
           "used": "Uniswap v2/v3/v4 live; says stock tokens trade in the AMM; secondary source for transferability"
+        },
+        {
+          "url": "https://robinhoodchain.blockscout.com/address/0x322F0929c4625eD5bAd873c95208D54E1c003b2d",
+          "accessed": "2026-10-19",
+          "used": "verified contract, beacon proxy, ABI, onchain reads via the public RPC"
         }
       ],
       "unresolved": [
-        "Transfer restrictions for contracts: the token is upgradeable and has pause roles; sequencer-level filtering can reject transactions involving listed addresses.",
-        "What balanceOf returns relative to uiMultiplier().",
-        "Whether any DEX with a usable pool or router exists on the chain for stock tokens.",
         "Eligibility for a Nigeria-based founder or company; whether an AP-style relationship is required for primary access.",
         "Contract-level transfer behaviour: Uniswap says stock tokens are fully transferrable and tradable in its v2/v3/v4 pools, but our curve, pool and reward contracts have not been tested against the pause roles or sequencer filtering.",
-        "Token addresses come from the official page's table (generated from the onchain asset registry, read 2026-10-19). They have not been matched against the registry contract onchain from our side; do that before enabling. Chainlink feed addresses are not stored; read them from Chainlink's Robinhood feeds page."
-      ]
+        "Token addresses come from the official page's table (generated from the onchain asset registry, read 2026-10-19). They have not been matched against the registry contract onchain from our side; do that before enabling. Chainlink feed addresses are not stored; read them from Chainlink's Robinhood feeds page.",
+        "Our own curve, pool and reward contracts have not been run against these tokens; only third-party contracts (Uniswap v4 PoolManager, Morpho) are seen holding them.",
+        "Issuer powers (block, pause, adminBurn, beacon upgrade) are a counterparty risk for reserves; decide whether to accept it, cap exposure, or require disclosure in the launch UI."
+      ],
+      "onchainFindings": {
+        "checkedOn": "2026-10-19",
+        "chainId": 4663,
+        "token": "TSLA 0x322F0929c4625eD5bAd873c95208D54E1c003b2d",
+        "proxy": "EIP-1967 beacon proxy; implementation 'Stock' 0xb35490d6f9163DE4F80d88dc75c3516eb64C5aE2 (verified on Blockscout)",
+        "registryAndBeacon": "0xe10b6f6b275de231345c20d14ab812db62151b00 (AccessControlsRegistry, verified). It is both the beacon and the access registry: functions blockAccounts, unblockAccounts, pause, unpause, upgradeTo, role management.",
+        "tokenFunctions": "mint, burn, adminBurn (issuer can burn from any account), pause/unpause, pauseOracle/unpauseOracle, updateMultiplier, setMetadata, permit, uiMultiplier, balanceOfUI, totalSupplyUI, tokenPaused, oraclePaused, terms (points to robinhood.com/stocktoken/rhj).",
+        "state": "TSLA decimals 18, multiplier 1.0, not paused, oracle not paused; registry not paused.",
+        "deFiEvidence": "The two largest AAPL holders are contracts named PoolManager (a Uniswap v4 pool manager) and Morpho; neither is blocked in the registry. Smart contracts can therefore hold and move these tokens today.",
+        "risks": "The issuer can block any account (a blocked pool or vault would be unable to move funds), pause the registry or a token, burn from any account with adminBurn, and upgrade every token through the beacon. These are issuer powers over any reserve our contracts hold."
+      }
     },
     "bstocks": {
       "name": "Binance bStocks",

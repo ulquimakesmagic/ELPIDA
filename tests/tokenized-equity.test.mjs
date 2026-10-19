@@ -190,3 +190,12 @@ test('public API describes a network with provider identity and every capability
   assert.ok(t.describeNetwork('robinhood-testnet').assets.length > 150);
   for (const net of ['ethereum', 'solana', 'bnb']) { const d = t.describeNetwork(net); assert.ok(d.providerName); assert.deepEqual(d.assets, []); assert.ok(d.unresolved.length); }
 });
+
+test('Robinhood semantics are verified raw balance plus multiplier, with a total-return feed', () => {
+  const rh = config.providers.robinhood, sem = rh.balanceSemantics.robinhood;
+  assert.deepEqual([sem.model, sem.balanceOfKind, sem.feedIncludesMultiplier], ['raw-with-multiplier', 'raw', true]);
+  assert.equal(config.networks.robinhood.chainId, 4663);
+  const m = 1000566080061092436n, raw = 3855116611030921434773n;
+  assert.equal(shareExposure({ model: sem.model, balance: raw, multiplierWad: m, balanceOfKind: sem.balanceOfKind }), 3857298915677612283610n, 'matches the onchain balanceOfUI exactly');
+  assert.ok(rh.onchainFindings.risks.includes('block any account'));
+});

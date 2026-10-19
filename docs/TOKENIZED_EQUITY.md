@@ -109,3 +109,18 @@ Primary: docs.xstocks.fi pages above; docs.robinhood.com/chain/stock-tokens and 
 - Oracles: one Chainlink feed per token, same `AggregatorV3Interface`, updates 24/5, the price already includes the multiplier, `oraclePaused()` marks corporate-action windows. Read feed addresses from Chainlink's Robinhood page, do not hardcode them. This matches the price-per-raw-token handling in `tokenValueUsd`.
 - Still open before enabling anything: the token address table on docs.robinhood.com/chain/contracts loads client-side and could not be read here, so no stock-token address is in the registry yet; contract-level behaviour with our curve, pool and vault (pause roles, sequencer filtering) is untested; eligibility for a Nigerian company is unconfirmed. Everything stays OFF.
 - **Update:** the stock-token table was read in the browser from the official page and the 195 addresses are now in the registry (source URL on each row). Matching them against the onchain asset registry is still required before anything is enabled.
+
+### Robinhood onchain check (19 Oct 2026, read-only)
+
+Done through your Chrome and the public RPC (the sandbox cannot reach it). No wallet, no transactions.
+
+- Chain id confirmed as 4663. TSLA is an EIP-1967 beacon proxy to a verified `Stock` implementation. The beacon is also the `AccessControlsRegistry` (`0xe10b6f6b275de231345c20d14ab812db62151b00`), which can block accounts, pause, upgrade and manage roles.
+- **`balanceOf` returns the raw balance; `balanceOfUI` = raw x multiplier.** Confirmed on AAPL holders. This resolves the open question: Robinhood is `raw-with-multiplier` with a raw `balanceOf`, and the Chainlink price already includes the multiplier, so the valuation code uses a per-raw-token price and never multiplies again.
+- Multipliers are already above 1 for AAPL, NVDA, SPY, SGOV and SCHD, so the multiplier is live and matters for accounting.
+- The two biggest AAPL holders are a Uniswap v4 `PoolManager` and `Morpho`, and neither is blocked. Third-party contracts can hold these tokens now.
+- Issuer powers: block any account, pause the registry or a token, `adminBurn` from any account, upgrade all tokens at once. These are a counterparty risk to reserves held by our contracts, and the launch UI should disclose them.
+- Not done: running our own contracts against the tokens (needs a fork or testnet from a machine with RPC access).
+
+### Coinbase on Base, from the Base docs page (19 Oct 2026)
+
+docs.base.org/build-on-base/integrate-defi/list-tokenized-stocks adds: a public Tokenized Stocks API with no key (addresses, multipliers, NAV), the Onchain Registry at `0x3f3E8cf41cdd3b1D118c16471aB0113DfDDd5CaD`, secondary holding and trading described as permissionless with KYC only for Authorized Participants, address blocklists that make a blocked transfer revert, `scaledBalanceOf` as canonical with `balanceOfUI` as raw x multiplier, no built-in timelock, and feeds identical to those in the registry. `balanceOf` is still not stated, so read it from the chain as done for Robinhood before use.
