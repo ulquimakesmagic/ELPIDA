@@ -85,14 +85,19 @@ async function main() {
       if (!holder) {
         const topic = id('Transfer(address,address,uint256)'); let best = null, bestBal = 0n;
         const tk = new Contract(a.address, ERC, provider);
-        for (const span of [1000, 4000]) {
-          const logs = await remote('eth_getLogs', [{ address: a.address, topics: [topic], fromBlock: '0x' + (head - span).toString(16), toBlock: 'latest' }]).catch(() => []);
-          for (const addr of [...new Set(logs.flatMap(l => [l.topics[2]]).map(t => '0x' + t.slice(-40)))].slice(0, 25)) { const b = await tk.balanceOf(addr, { blockTag: head - 5 }).catch(() => 0n); if (b > bestBal) { best = addr; bestBal = b; } }
-          if (best) break;
+        // Stock tokens trade rarely, so scan back in small chunks (public RPCs cap getLogs ranges) until a holder shows up.
+        const CHUNK = 1000, MAX_CHUNKS = Number(process.env.ELPIDA_EQUITY_SCAN_CHUNKS ?? 300); let logErr = null, scanned = 0;
+        for (let i = 0; i < MAX_CHUNKS && !best; i++) {
+          const to = head - i * CHUNK, from = to - CHUNK + 1; scanned++;
+          const logs = await remote('eth_getLogs', [{ address: a.address, topics: [topic], fromBlock: '0x' + from.toString(16), toBlock: '0x' + to.toString(16) }]).catch(e => { logErr = e.message; return []; });
+          const cands = [...new Set(logs.flatMap(l => [l.topics[1], l.topics[2]]).filter(Boolean).map(t => '0x' + t.slice(-40)))].filter(x => x !== '0x0000000000000000000000000000000000000000').slice(0, 25);
+          for (const addr of cands) { const b = await tk.balanceOf(addr, { blockTag: head - 5 }).catch(() => 0n); if (b > bestBal) { best = addr; bestBal = b; } }
+          if (logErr && i >= 3 && !best) break; // the RPC keeps refusing the range: stop and say so
         }
+        if (!best) console.log(`  no holder found after ${scanned} chunk(s) of ${CHUNK} blocks.${logErr ? ' Last RPC error: ' + logErr : ''} Set ELPIDA_EQUITY_HOLDER=<address> (a wallet or contract holding this token, from the explorer's holders tab) and retry.`);
         holder = best;
       }
-      if (!holder) { report.results.push({ symbol: a.symbol, pass: false, error: 'no holder found; set ELPIDA_EQUITY_HOLDER' }); continue; }
+      if (!holder) { report.results.push({ symbol: a.symbol, pass: false, error: 'no holder found; set ELPIDA_EQUITY_HOLDER' }); console.log(`FAIL  ${a.symbol}: no holder found`); continue; }
       const res = await runTokenChecks({ provider, tokenAddress: a.address, holder, probeArtifact, expect: { symbol: a.symbol, decimals: a.decimals ?? undefined }, registryAddress });
       report.results.push({ symbol: a.symbol, ...res });
     }
