@@ -153,3 +153,15 @@ Use the contact or support route each site offers; do not use addresses from thi
 - Output: PASS/FAIL lines and `backups/equity-fork/<network>-report.json`.
 - It does not test the issuer's block, pause, burn or upgrade powers, our own factory/curve/vault deployments, or Uniswap pools. Those are the next layer once these pass.
 - `tests/equity-fork-check.test.mjs` exercises the same check logic offline against a local token.
+
+### Robinhood fork check result (19 Oct 2026, run on Malik's PC)
+
+`npm run test:equity-fork -- robinhood` returned **PASS** for AAPL, NVDA, SPY and TSLA: 14 checks each, run on a local fork with nothing sent to the chain. Holder used: the Uniswap v4 `PoolManager` (`0x8366a39CC670B4001A1121B8F6A443A643e40951`), impersonated on the fork only.
+
+- Symbols and 18 decimals match the registry. `balanceOf` is raw and `balanceOfUI` = raw x multiplier (AAPL 1.000566, NVDA 1.000775, SPY 1.001718, TSLA 1).
+- Token, oracle and issuer registry were not paused, and a fresh contract was not blocked.
+- Transfers conserved the raw amount for holder to wallet, wallet to wallet, holder to contract, contract to wallet, and approve plus `transferFrom` by a contract. One base unit moved exactly.
+
+What this does **not** show: our own factory, curve and vault contracts (only a stand-in probe), Uniswap pools, behaviour after the issuer blocks, pauses, burns or upgrades, or a multiplier change mid-position. It is evidence for a future `verification` record, not enablement. All capabilities stay OFF.
+
+Coinbase on Base is still untested: its tokens are node precompiles and cannot run in a local fork (see above).
