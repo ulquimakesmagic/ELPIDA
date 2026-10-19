@@ -79,6 +79,7 @@ async function main() {
   const report = { scope: 'LOCAL FORK ONLY: nothing is sent to the public chain', network: net, chainId: def.chainId, block: head - 5, results: [] };
   try {
     await provider.send('hardhat_metadata', []); // refuse any provider without the local testing API
+    await provider.send('evm_mine', []); // run against a local block: Hardhat has no hardfork history for these upstream chains
     for (const a of assets) {
       console.log(`\n== ${a.symbol} ${a.address}`);
       let holder = process.env.ELPIDA_EQUITY_HOLDER;
