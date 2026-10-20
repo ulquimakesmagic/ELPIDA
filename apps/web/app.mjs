@@ -18,6 +18,7 @@ import { renderToken } from './token-page.mjs';
 import { renderRewards } from './rewards-view.mjs';
 import { circleFundingPanel } from './circle-funding.mjs';
 import { initShell, renderLastSale, syncSearch } from './shell.mjs';
+import { startResilience } from './resilience.mjs';
 
 let config, evmWallet, solWallet, wallet;
 let mode = 'local', account = '0', state = null, busy = false, refreshRevision = 0, progressHook = null;
@@ -455,6 +456,7 @@ async function init() {
   const selectChain=key=>chooseChain(key).catch(e=>{toast(errorText(e),{kind:'error'});updateChrome();});
   chainControls=[['#env-button','chain-options'],['#env-button-mobile','chain-options-mobile']].filter(([id])=>$(id)).map(([id,listId])=>chainSelector({button:$(id),listId,networks,current:()=>mode==='local'?'local':currentChain(),onSelect:selectChain}));
   $('#account-button').addEventListener('click', () => (mode === 'testnet' && !wallet.address ? connectCurrent() : openTools()));
+  startResilience();
   initShell({ onHow: () => { location.hash = '#/docs'; }, onSearch: (query,{submit=false}={}) => { if(currentRoute.name==='explore'&&exploreView)exploreView.setQuery(query,{reveal:submit});else if(query||submit||currentRoute.name==='explore'){pendingSearchReveal=submit;location.hash=exploreHash({query});} } });
   window.addEventListener('hashchange', route);
   updateChrome(); route();

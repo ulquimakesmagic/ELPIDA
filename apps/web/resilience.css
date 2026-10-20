@@ -1,0 +1,7 @@
+/* The reconnect strip. Theme variables only, no inline styles (CSP). */
+.conn-bar { position: fixed; left: 50%; bottom: 16px; transform: translateX(-50%); z-index: 50; display: flex; align-items: center; gap: 12px; max-width: calc(100vw - 32px); padding: 10px 16px; border-radius: var(--r-pill); background: var(--panel-hi); color: var(--ink); border: 1px solid var(--line-soft); box-shadow: 0 6px 24px rgb(0 0 0 / .35); font-size: .9rem; }
+.conn-bar[hidden], .conn-action[hidden] { display: none; }
+.conn-bar[data-kind="offline"]::before { content: ""; width: 8px; height: 8px; border-radius: 50%; background: var(--accent); animation: conn-pulse 1.2s ease-in-out infinite; }
+.conn-action { background: var(--accent); color: var(--bg); border: 0; border-radius: var(--r-pill); padding: 6px 14px; font: inherit; font-weight: 600; cursor: pointer; }
+@keyframes conn-pulse { 50% { opacity: .25; } }
+@media (prefers-reduced-motion: reduce) { .conn-bar[data-kind="offline"]::before { animation: none; } }

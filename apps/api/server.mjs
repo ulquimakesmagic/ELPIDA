@@ -74,6 +74,8 @@ resources.set('/token.css', ['token.css', 'text/css']);
 resources.set('/launch.css', ['launch.css', 'text/css']);
 resources.set('/docs.css', ['docs.css', 'text/css']);
 resources.set('/learn.css', ['learn.css', 'text/css']);
+resources.set('/resilience.mjs', ['resilience.mjs', 'text/javascript']);
+resources.set('/resilience.css', ['resilience.css', 'text/css']);
 resources.set('/token-landing.mjs', ['token-landing.mjs', 'text/javascript']);
 resources.set('/docs-view.mjs', ['docs-view.mjs', 'text/javascript']);
 const assetTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8' };
@@ -210,7 +212,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     const walletRead=req.method==='GET'&&(String(req.url).split('?')[0]==='/api/wallet-tokenlist.json'||/^\/api\/wallet-logo\/[a-z0-9-]+\/0x[0-9a-fA-F]{40}$/.test(req.url)||/^\/api\/content\/(b[a-z2-7]{30,100}|Qm[1-9A-HJ-NP-Za-km-z]{44})$/.test(req.url));
     if (!acceptsRequest({host:req.headers.host,origin:walletRead?undefined:req.headers.origin,method:req.method,path:req.url,port:actualPort,publicUrl})) return send(403, { error: 'Host or origin not allowed.' });
     if(walletRead)res.setHeader('Access-Control-Allow-Origin','*');
-    if (req.method === 'GET' && req.url === '/health') return send(200, {status:'ok',mode:'simulation'});
+    if (req.method === 'GET' && req.url === '/health') return send(200, {status:'ok',mode:'simulation',build:String(process.env.RAILWAY_GIT_COMMIT_SHA??process.env.ELPIDA_BUILD??'dev').slice(0,12)});
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
       if (req.method === 'GET') {
