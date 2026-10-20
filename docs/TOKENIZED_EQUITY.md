@@ -201,3 +201,29 @@ Limits: every call is stateless, so receive-then-sweep and approve-then-pull seq
 - The policy accepted: a holder sending to a fresh wallet (one base unit and 1%), to an address given contract code, approving a contract spender, and a contract sending to a wallet.
 
 What this does not show: sequences (receive then sweep, approve then pull), `isAuthorized` for our own contracts, the issuer blocking or pausing mid-life, or our factory and curve running on Base. Those need Base Sepolia or mainnet deployments. Capabilities stay OFF.
+
+## Issuer-power check (Robinhood, local fork)
+
+`scripts/equity-issuer-powers-fork.mjs` deploys our real factory, curve and adapter on a fork of Robinhood Chain with a real stock as the quote asset, then plays the issuer: it finds the issuer functions in the verified contract ABIs on Blockscout (token implementation and the access registry), finds accounts that hold issuer roles from `RoleGranted` logs, simulates each function from each candidate to see who may call it, and impersonates that account on the fork only. Nothing is signed or sent to the public chain.
+
+Run: `npm run test:equity-issuer -- robinhood AAPL`. If the role lookup finds nobody, set `$env:ELPIDA_EQUITY_ADMIN="0xaddr1,0xaddr2"` (accounts with the roles, from the registry's Read Contract tab). Output: PASS/NOTE/SKIP lines and `backups/equity-fork/robinhood-issuer-powers-report.json`. Scenarios whose function or caller cannot be found are skipped and say why; none is invented.
+
+- **A. Issuer blocks our curve:** records whether buys and sells revert while blocked, then checks that unblocking restores trading with the curve fully backed.
+- **B. Issuer pauses the token:** the same, for pause and unpause.
+- **C. Issuer burns half of the curve's reserve:** checks the shortfall equals the burned amount (the curve is then insolvent) and records whether sells and fee withdrawals still work. This is a counterparty risk that the launch UI must disclose; no contract can prevent it.
+- **D. Issuer changes the multiplier:** checks raw balances and curve accounting are untouched and trading continues.
+- **E. After graduation the issuer blocks the Uniswap pool:** records the swap result, then checks that unblocking restores swaps.
+
+`tests/equity-issuer-powers.test.mjs` runs the same logic offline against `tests/fixtures/MockIssuerStock.sol`, a local token with the same powers.
+
+### Issuer-power result (19 Oct 2026, run on Malik's PC, first run)
+
+`npm run test:equity-issuer -- robinhood AAPL` returned PASS with 15 issuer-role candidate accounts found. The issuer functions resolved on the verified contracts: `blockAccounts` and `unblockAccounts` on the access registry (`0xe10b...1b00`); `pause`, `unpause` and `updateMultiplier` on the AAPL token.
+
+- **A. Issuer blocks our curve:** both buys and sells **revert** while the curve is blocked, so holders cannot exit until the issuer unblocks. After unblocking, trading resumed and the curve was fully backed.
+- **B. Issuer pauses the token:** buys and sells revert while paused; trading resumed after the unpause.
+- **D. Multiplier change:** the AAPL multiplier moved from 1.000566 to 1.050594. Raw balances and the curve accounting were untouched and trading continued.
+- **E. Issuer blocks the Uniswap pool after graduation:** the swap reverted (`STF`) while the pool was blocked, and swaps resumed after the unblock.
+- **C. Issuer burns from our curve: not tested in the first run.** The script could not find an account allowed to call `adminBurn` among the 15 candidates (the probe tried to burn from an empty address and the token returned a custom error, which was treated as a permission failure). The probe now uses an address that holds tokens; rerun to settle it.
+
+What this means for the product: an issuer block or pause freezes trading and exits for the whole curve or pool, and recovery depends on the issuer. This is a counterparty risk to disclose in the launch UI. Nothing here changes any capability, which all stay OFF.
