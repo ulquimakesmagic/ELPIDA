@@ -233,3 +233,13 @@ What this means for the product: an issuer block or pause freezes trading and ex
 The rerun found `adminBurn` and a caller for it, and scenarios A, B, D and E repeated their earlier results. Scenario C: the issuer burned half of the curve's reserve (1 AAPL of 2). The curve was then short by exactly the burned amount, 50% of its reserve. The first run's sell results were taken in a fixed order that made the "small sell reverted" line meaningless (the trader's tokens were already sold), so the script now measures each case from the same post-burn state and adds a bank-run order check.
 
 Local-mock result for the corrected measurement, which shows the shape of the risk: the first seller after a burn is paid in full, the second seller's sell reverts on the curve's missing balance, and fee withdrawal still pays out. Holders who exit first are made whole; the last holders bear the whole loss. This is why the launch UI must disclose issuer burn power. Rerun `npm run test:equity-issuer -- robinhood AAPL` after merging to record the corrected figures for the real token.
+
+### Issuer burn, corrected run on the real AAPL token (20 Oct 2026, Malik's PC)
+
+With each case measured from the same post-burn state, on a local fork of Robinhood Chain with our real contracts and the real AAPL token:
+
+- The issuer burned half of the curve's reserve (1 AAPL of 2); the curve was short by exactly 1 AAPL, 50% of its reserve.
+- The trader selling everything after the burn was paid **0.975156 AAPL, identical to the pre-burn quote**. A small sell and `withdrawFees` also still succeeded.
+- **Bank-run order:** the first seller succeeded and the second seller's sell **reverted**. Whoever exits first after a burn is made whole; the holders who exit last absorb the whole loss, and no holder can tell in advance that a burn has happened until the curve cannot pay.
+
+Blocking the curve, pausing the token and blocking the pool froze all buys, sells and swaps until the issuer reversed them (earlier results unchanged). These are issuer powers over any funds our contracts hold; the launch warning added in PR #42 covers them, and capabilities stay OFF.
