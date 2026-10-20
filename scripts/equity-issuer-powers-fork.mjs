@@ -157,11 +157,21 @@ export async function runIssuerPowers({ provider, stockAddress, fund, ops, virtu
     await ops.burn.run({ target: curve.target, amount: burned });
     const shortfall = await liabilities() - await stock.balanceOf(curve.target);
     assert.equal(shortfall, burned);
-    const sellAll = await attempt(async () => { await mined(token.connect(trader).approve(curve.target, held)); await mined(curve.connect(trader).sell(held, 0)); });
-    const sellOne = await attempt(sellSmall);
-    const fees = await attempt(() => mined(curve.withdrawFees()));
+    // Each measurement starts from the same post-burn state, so one cannot disturb another.
+    const afterBurn = await snapshot(); let state = afterBurn;
+    const fresh = async fn => { const r = await fn(); await restore(state); state = await snapshot(); return r; };
+    const sellAllOf = async (signer, amount) => attempt(async () => { await mined(token.connect(signer).approve(curve.target, amount)); await mined(curve.connect(signer).sell(amount, 0)); });
+    const traderHeld = held, creatorHeld = await token.balanceOf(addresses[0]);
+    const [fairTrader] = await curve.quoteSell(traderHeld);
+    const paidBefore = await stock.balanceOf(addresses[1]);
+    const traderSell = await fresh(async () => { const r = await sellAllOf(trader, traderHeld); r.paid = (await stock.balanceOf(addresses[1])) - paidBefore; return r; });
+    const smallSell = await fresh(() => attempt(sellSmall));
+    const feeClaim = await fresh(() => attempt(() => mined(curve.withdrawFees())));
+    // The bank-run order: the trader exits first, then the creator tries to exit from what is left.
+    const order = await fresh(async () => { const first = await sellAllOf(trader, traderHeld); const second = creatorHeld > 0n ? await sellAllOf(signers[0], creatorHeld) : { ok: null }; return { first, second }; });
     obs('C. issuer burns half of the curve reserve: shortfall against liabilities', `${shortfall} raw units (${(Number(shortfall) * 100 / Number(before)).toFixed(0)}% of the reserve)`);
-    obs('C. after the burn: selling everything / a small sell / withdrawFees', `${sellAll.ok ? 'succeeded' : 'reverted'} / ${sellOne.ok ? 'succeeded' : 'reverted'} / ${fees.ok ? 'succeeded' : 'reverted'}`);
+    obs('C. after the burn, each from the same state: sell all of the trader\'s tokens / a small sell / withdrawFees', `${traderSell.ok ? 'succeeded' : 'reverted'} (paid ${traderSell.paid ?? 0n} vs ${fairTrader} before the burn) / ${smallSell.ok ? 'succeeded' : 'reverted'} / ${feeClaim.ok ? 'succeeded' : 'reverted'}`);
+    obs('C. bank-run order after the burn: first seller / second seller', `${order.first.ok ? 'succeeded' : 'reverted'} / ${order.second.ok === null ? 'n/a' : order.second.ok ? 'succeeded' : 'reverted'}${order.second.ok === false ? ' (' + order.second.error + ')' : ''}`);
     ok('C. an issuer burn from the curve makes it insolvent by exactly the burned amount (risk confirmed, must be disclosed)');
     await restore(s);
   } else skip('C. issuer burns from the curve', ops.burn?.missing ?? 'adminBurn not available');

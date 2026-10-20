@@ -25,6 +25,8 @@ test('issuer-power scenarios run end to end and record what blocking, pausing an
   assert.match(noteA.detail, /sell reverted, buy reverted/);
   const noteC = res.observations.find(o => o.name.startsWith('C. issuer burns half of the curve reserve: shortfall'));
   assert.match(noteC.detail, /raw units/);
+  const run = res.observations.find(o => o.name.startsWith('C. bank-run order'));
+  assert.match(run.detail, /^succeeded \/ reverted/); // the first seller is paid, the second is not
 });
 
 test('missing issuer powers are reported, not invented', async t => {
