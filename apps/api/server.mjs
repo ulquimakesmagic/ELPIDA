@@ -26,6 +26,7 @@ import {HolderTheses,thesisIdentity} from './holder-theses.mjs';
 import {HolderChat} from './holder-chat.mjs';
 import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
+import { TOKEN_PATH, renderTokenPage, renderTokenNotFound } from '../../packages/core/token-seo.mjs';
 import { PAGES, canonicalOrigin, renderPage, renderSitemap, renderRobots, renderLlms } from '../../packages/core/seo.mjs';
 import { createTokenizedEquity } from '../../packages/core/tokenized-equity.mjs';
 import { MAX_METADATA_REQUEST_BYTES, normalizeMetadata } from '../web/metadata.mjs';
@@ -73,6 +74,7 @@ resources.set('/token.css', ['token.css', 'text/css']);
 resources.set('/launch.css', ['launch.css', 'text/css']);
 resources.set('/docs.css', ['docs.css', 'text/css']);
 resources.set('/learn.css', ['learn.css', 'text/css']);
+resources.set('/token-landing.mjs', ['token-landing.mjs', 'text/javascript']);
 resources.set('/docs-view.mjs', ['docs-view.mjs', 'text/javascript']);
 const assetTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8' };
 const vendorFiles = new Map([
@@ -306,6 +308,20 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         const seoOrigin = canonicalOrigin(), seoPage = PAGES.find(p => p.path === url.pathname);
         const seoBody = url.pathname === '/robots.txt' ? [renderRobots(seoOrigin), 'text/plain'] : url.pathname === '/sitemap.xml' ? [renderSitemap(seoOrigin), 'application/xml'] : url.pathname === '/llms.txt' ? [renderLlms(seoOrigin), 'text/plain'] : seoPage ? [renderPage(seoPage, seoOrigin), 'text/html'] : null;
         if (seoBody) { res.setHeader('Cache-Control', 'public, max-age=3600'); res.writeHead(200, { 'Content-Type': `${seoBody[1]}; charset=utf-8` }); return res.end(seoBody[0]); }
+        const tokenRoute = url.pathname.match(TOKEN_PATH);
+        if (tokenRoute) {
+          const [, key, addr] = tokenRoute, nets = new Map([['local', 'Local simulation'], ...evmTestnets.map(n => [n.key, n.name]), ...[solanaDevnet, solanaLocalnet, solanaMainnet].map(n => [n.key, n.name])]);
+          const found = async () => {
+            if (!nets.has(key)) return null;
+            if (key === 'local') { await runtime.indexer.sync(); return runtime.listings().find(t => t.address === addr.toLowerCase()) ?? null; }
+            if (key.startsWith('solana-')) return solanaIndex && solanaIndex.network.key === key ? solanaIndex.token(addr) ?? null : null;
+            return /^0x/.test(addr) ? publicIndex.detail(key, addr) : null;
+          };
+          let token = null; try { token = await found(); } catch { token = null; }
+          res.setHeader('Cache-Control', token ? 'public, max-age=60' : 'no-store');
+          res.writeHead(token ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' });
+          return res.end(token ? renderTokenPage({ token, network: key, networkName: nets.get(key), origin: canonicalOrigin(), testnet: key !== 'solana-mainnet' }) : renderTokenNotFound({ origin: canonicalOrigin() }));
+        }
         const resource = resources.get(url.pathname);
         if (resource) { const content = await readFile(resolve(webRoot, resource[0])); res.writeHead(200, { 'Content-Type': `${resource[1]}; charset=utf-8` }); return res.end(content); }
         if (url.pathname.startsWith('/assets/')) {

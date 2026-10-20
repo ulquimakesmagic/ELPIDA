@@ -76,3 +76,47 @@ test('the server serves the SEO files and pages with the right types and headers
     assert.equal((await fetch(base + '/learn/nope')).status, 404);
   } finally { await s.close(); }
 });
+
+import { renderTokenPage, renderTokenNotFound, cleanText, tokenMeta, TOKEN_PATH } from '../packages/core/token-seo.mjs';
+
+const sample = { address: '0x603e1bd79259ebcbaaed0c83eec09ca0b89a5bcc', name: 'Lucky <b>Sprout</b>', symbol: '$LUCK', quoteSymbol: 'ETH', fdvQuote: '2.05', graduated: false, complete: false, metadata: { description: 'A "test" token\n<script>alert(1)</script>', image: '' } };
+
+test('token page: escapes user content, is noindex on testnets, canonical and absolute', () => {
+  const html = renderTokenPage({ token: sample, network: 'base-sepolia', networkName: 'Base Sepolia', origin: 'https://elpida.fun' });
+  assert.ok(!html.includes('<b>Sprout') && !html.includes('<script>alert'));
+  assert.match(html, /<meta name="robots" content="noindex, follow">/);
+  assert.ok(html.includes('<link rel="canonical" href="https://elpida.fun/token/base-sepolia/0x603e1bd79259ebcbaaed0c83eec09ca0b89a5bcc">'));
+  assert.match(html, /property="og:image" content="https:\/\/elpida\.fun\/assets\/brand\/og-image\.png/);
+  assert.ok(!/\sstyle=|<style/.test(html) && !/<script(?![^>]*src=)/.test(html));
+  assert.equal((html.match(/<h1[ >]/g) ?? []).length, 1);
+  assert.match(html, /no value|not financial advice/i);
+});
+
+test('token page: a mainnet token is indexable; metadata stays bounded and plain', () => {
+  assert.match(renderTokenPage({ token: sample, network: 'solana-mainnet', networkName: 'Solana', origin: 'https://elpida.fun', testnet: false }), /index, follow/);
+  assert.ok(cleanText('x'.repeat(500), 50).length <= 50);
+  assert.equal(cleanText('a‮b\n\tc', 20), 'a b c');
+  assert.ok(tokenMeta({ ...sample, metadata: { description: 'd'.repeat(400) } }, 'Base Sepolia').description.length <= 200);
+});
+
+test('token path pattern accepts EVM and Solana addresses only', () => {
+  assert.ok(TOKEN_PATH.test('/token/base-sepolia/0x603e1bd79259ebcbaaed0c83eec09ca0b89a5bcc'));
+  assert.ok(TOKEN_PATH.test('/token/solana-devnet/So11111111111111111111111111111111111111112'));
+  for (const bad of ['/token/x/0x1', '/token/base-sepolia/..%2f', '/token/base-sepolia/0xZZ03e1bd79259ebcbaaed0c83eec09ca0b89a5bcc', '/token//0x603e1bd79259ebcbaaed0c83eec09ca0b89a5bcc']) assert.ok(!TOKEN_PATH.test(bad), bad);
+  assert.match(renderTokenNotFound({ origin: 'https://elpida.fun' }), /noindex, nofollow/);
+});
+
+test('server: a local token page renders with previews, unknown tokens 404, and /token pages stay out of the sitemap', async () => {
+  const s = await startServer({ port: 0, seed: true });
+  try {
+    const list = await (await fetch(s.url + '/api/tokens')).json();
+    const t = list[0], r = await fetch(`${s.url}/token/local/${t.address}`), html = await r.text();
+    assert.equal(r.status, 200);
+    assert.ok(html.includes(`og:title" content="${t.name}`.replace(/&/g, '&amp;')) || html.includes('og:title'));
+    assert.match(html, /noindex/);
+    assert.equal((await fetch(`${s.url}/token/local/0x${'1'.repeat(40)}`)).status, 404);
+    assert.equal((await fetch(`${s.url}/token/nope-net/${t.address}`)).status, 404);
+    assert.equal((await fetch(s.url + '/token-landing.mjs')).status, 200);
+    assert.ok(!(await (await fetch(s.url + '/sitemap.xml')).text()).includes('/token/'));
+  } finally { await s.close(); }
+});
