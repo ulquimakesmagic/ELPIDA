@@ -227,3 +227,9 @@ Run: `npm run test:equity-issuer -- robinhood AAPL`. If the role lookup finds no
 - **C. Issuer burns from our curve: not tested in the first run.** The script could not find an account allowed to call `adminBurn` among the 15 candidates (the probe tried to burn from an empty address and the token returned a custom error, which was treated as a permission failure). The probe now uses an address that holds tokens; rerun to settle it.
 
 What this means for the product: an issuer block or pause freezes trading and exits for the whole curve or pool, and recovery depends on the issuer. This is a counterparty risk to disclose in the launch UI. Nothing here changes any capability, which all stay OFF.
+
+### Issuer burn result (20 Oct 2026, run on Malik's PC)
+
+The rerun found `adminBurn` and a caller for it, and scenarios A, B, D and E repeated their earlier results. Scenario C: the issuer burned half of the curve's reserve (1 AAPL of 2). The curve was then short by exactly the burned amount, 50% of its reserve. The first run's sell results were taken in a fixed order that made the "small sell reverted" line meaningless (the trader's tokens were already sold), so the script now measures each case from the same post-burn state and adds a bank-run order check.
+
+Local-mock result for the corrected measurement, which shows the shape of the risk: the first seller after a burn is paid in full, the second seller's sell reverts on the curve's missing balance, and fee withdrawal still pays out. Holders who exit first are made whole; the last holders bear the whole loss. This is why the launch UI must disclose issuer burn power. Rerun `npm run test:equity-issuer -- robinhood AAPL` after merging to record the corrected figures for the real token.
