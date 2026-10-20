@@ -1,5 +1,12 @@
 # Actions that need Malik
 
+## Cloudflare in front of elpida.fun, 20 October 2026
+
+Nameservers moved from Vercel to Cloudflare; DNS, SSL and the `elpida-fallback` Worker are configured as recorded in
+`DEPLOY_RESILIENCE.md`. Redeploys now show Elpida's own "updating" page. Still open for Malik: check the Railway
+deploy logs for `backup_disabled`; if present, production has no off-site backups and that must be fixed before mainnet.
+Search Console sitemap: Google's live test fetches it; the "Couldn't fetch" row is waiting on Google's refresh.
+
 ## Solana binaries rebuilt, 19 October 2026
 
 `contracts/solana/build/*.so` were rebuilt from current source (optional creator buy) with Solana CLI 2.3.13. New SHA256: test build `89d96d53856ba206a8a3a96b0b971d503d6fcfb0dd028587cf654fbc5f6d0b88`, mainnet build `1a1db96d0654a10ffc321e01cd055bd4c807d5ff1ad243bdabe04e02a25f865a`. The hash quoted in item 3 below (`4e96…9623`) belongs to the earlier build. The devnet program has not been upgraded from these yet; that is the next Solana step. See `MAINNET_CHECKLIST_2026-10-19.md`.

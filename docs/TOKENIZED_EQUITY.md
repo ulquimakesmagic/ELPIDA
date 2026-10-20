@@ -9,7 +9,7 @@ Supersedes the xStocks-versus-Dinari plan. Dinari is not an integration target. 
 | Ethereum | xStocks (Backed Finance) | Rebasing: `balanceOf()` already includes corporate actions |
 | Solana | xStocks | SPL Token-2022 Scaled UI: raw balance constant, display = raw x multiplier |
 | Robinhood Chain | Robinhood Stock Tokens | ERC-20 + ERC-8056 `uiMultiplier()`; oracle price includes the multiplier |
-| BNB Smart Chain | Binance bStocks (BTech Holdings, ADGM) | BEP-20 + BEP-677 Scaled UI Amount |
+| BNB Smart Chain | Binance bStocks (BTech Holdings, ADGM) | BEP-20 with a multiplier; BscScan reports the standard as BEP-8056 (see the 20 Oct findings) |
 | Base | Coinbase Tokenized Stocks | B20 precompile; WAD multiplier; Chainlink feeds are total-return (include the multiplier) |
 
 Code: `getAsset(network, provider, address)` throws if the provider is not the designated one.
@@ -33,7 +33,7 @@ Per provider, what the pages say (details and URLs are in `config/tokenized-equi
 
 - **xStocks.** Docs: docs.xstocks.fi (overview, developers, dividends and stock splits, issuance and redemption). Corporate actions via a multiplier, activated at 00:30 UTC the day after ex-date; the docs advise pausing interactions briefly around activation. Primary market needs issuer KYC/AML and whitelisted wallets. Not offered to US persons or prohibited jurisdictions; the list is in assets.backed.fi legal documentation (not read). No addresses on the pages read. Pause/freeze/upgrade powers not documented there.
 - **Robinhood Chain.** Docs: docs.robinhood.com/chain/stock-tokens and /contracts. 18 decimals, per-asset Chainlink feed, mint/burn windows Mon 02:00 to Sat 02:00 CET/CEST, not offered to US persons. The contracts page lists only WETH and USDG statically; stock tokens load from the onchain registry. Third-party analysis (Beosin, secondary) says the contract is upgradeable with pause layers and 13 roles, and sequencer-level filtering can reject transactions involving listed addresses. A TSLA address in that article was **not** copied into the registry.
-- **Binance bStocks.** Page: binance.com/learn/bstocks. BEP-20 with BEP-677 Scaled UI Amount; dividends net of 30% US withholding and splits go through the multiplier; offered only in ADGM under the prospectus, not to US persons, on a secondary-market basis. No addresses, DEX status, oracle or pause/upgrade details found.
+- **Binance bStocks.** Page: binance.com/learn/bstocks. BEP-20 with a multiplier (earlier noted as BEP-677; BscScan reports BEP-8056, see the 20 Oct findings); dividends net of 30% US withholding and splits go through the multiplier; offered only in ADGM under the prospectus, not to US persons, on a secondary-market basis. No addresses, DEX status, oracle or pause/upgrade details found.
 - **Coinbase on Base.** Pages: base.org/stocks, docs.base.org/base-chain/asset-issuance/tokenized-stocks-on-base, coinbase.com/tokenize. Ten tokens with published addresses (in the registry) and ten Chainlink feeds (8 decimals, total-return). B20 tokens are precompiles with issuer-set allow/blocklist policies, scheduled multiplier updates, and per-function pauses. Feeds update on 0.5% deviation or a 24 hour heartbeat in market hours and hold the last value out of hours. Reg S, eligible jurisdictions outside the US; mint/redeem for Authorized Participants only.
 
 ### Nigeria
@@ -243,3 +243,28 @@ With each case measured from the same post-burn state, on a local fork of Robinh
 - **Bank-run order:** the first seller succeeded and the second seller's sell **reverted**. Whoever exits first after a burn is made whole; the holders who exit last absorb the whole loss, and no holder can tell in advance that a burn has happened until the curve cannot pay.
 
 Blocking the curve, pausing the token and blocking the pool froze all buys, sells and swaps until the issuer reversed them (earlier results unchanged). These are issuer powers over any funds our contracts hold; the launch warning added in PR #42 covers them, and capabilities stay OFF.
+
+## Binance bStocks: what could be verified (20 Oct 2026)
+
+Nothing here enters the registry: the registry only takes addresses from an issuer-published source, and none was reachable.
+
+- **Issuer list not reachable.** bstocks.finance (linked from BscScan as the token website) opens with a gate that requires
+  confirming "I am located in the ADGM". We did not click it: it is a legal statement about location that is not true
+  for Elpida's team. The Binance digital-securities documentation page could not be fetched.
+- **Explorer attribution (BscScan, not the issuer).** BscScan's `bStocks` label lists 96 tokens, described as
+  "tokenized representations of select U.S. stocks and ETFs that are used within the Binance ecosystem". The full list
+  needs a BscScan account. Two were checked:
+  - `NVDAB` NVIDIA Corp, `0x02Fca66C1D1aFB4E2A7884261eB00F63598a7436`: proxy, implementation
+    `0xCFEd6c4679297ea4889F8183bC057B4A86C64e46`, standard shown as **BEP-8056**, multiplier 1.000778x,
+    about 144,600 holders and more than 16.3 million transfers, tags "Custodial Model" and "Tokenized Stocks".
+  - `SPCXB` SpaceX, `0xbe9d156892e55e7154bcd3cb0fea677f9d3103e1`: proxy with the same implementation (`0xCFEd6c46…A86C64e46`),
+    created by the address BscScan labels "bStocks: Deployer".
+  - A third-party aggregator lists `MSTRB` at `0xe87afb3076aeb0f9b14e368de8145ae6a2826a14`; not checked on BscScan.
+- **What this means.** The tokens are real, upgradeable proxies sharing one implementation, with a multiplier like the
+  Robinhood and Coinbase tokens. A BNB fork check (transfers, pause and block powers, curve lifecycle) is technically
+  possible with `NVDAB`, but it would rest on explorer labels, so it stays a research run and nothing is switched on.
+- **Eligibility is the real blocker.** bStocks are offered only in the ADGM under its prospectus and the issuer's own site
+  gates entry on being located there. Listing them as a pair on a public launchpad would put them in front of people
+  outside that jurisdiction. Do not plan a bStocks pair without legal advice; xStocks, Robinhood and Coinbase remain the
+  candidates, all still OFF.
+
