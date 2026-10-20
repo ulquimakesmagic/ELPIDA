@@ -11,3 +11,6 @@ contracts/solana/target/
 # Program deploy keypair: private key material, keep local.
 contracts/solana/keys/
 contracts/solana/host-tests/target/
+
+# Also ignore a node_modules symlink (the trailing-slash pattern only matches directories)
+node_modules
