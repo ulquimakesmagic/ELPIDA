@@ -33,3 +33,6 @@
 .brand-light { display: none; }
 :root[data-theme="light"] .brand-dark { display: none; }
 :root[data-theme="light"] .brand-light { display: inline; }
+.lp-sym { color: var(--ink-3); font-family: var(--font-mono); font-size: .6em; font-weight: 500; }
+.lp-facts li { padding: 10px 16px; margin: 8px 0; }
+.lp-facts li::before { content: none; }
