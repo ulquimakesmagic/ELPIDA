@@ -46,3 +46,15 @@ test('EVM test xStock and paired token: owner approval, faucet, paired launch at
     assert.equal(listing.pair, t.kind); assert.equal(listing.quoteSymbol, t.symbol);
   }
 });
+
+import { issuerNotice, ISSUER_NOTICES, EQUITY_PROVIDERS } from '../packages/core/pairs.mjs';
+test('issuer-risk notices: every provider gets the generic warning, only verified providers get specifics', () => {
+  for (const provider of new Set(Object.values(EQUITY_PROVIDERS))) {
+    const text = issuerNotice(provider);
+    assert.match(text, /issued and controlled by its provider, not by Elpida/);
+    assert.match(text, /US persons/);
+  }
+  assert.match(issuerNotice('Robinhood Stock Tokens'), /burn tokens from any account/);
+  assert.equal(issuerNotice('Binance bStocks'), issuerNotice('unknown provider')); // no invented specifics for unverified providers
+  assert.ok(!('Binance bStocks' in ISSUER_NOTICES));
+});

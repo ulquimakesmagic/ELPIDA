@@ -9,7 +9,7 @@ import { normalizeRewardPolicy } from './reward-policy.mjs';
 import { launchProfile } from './launch-capabilities.mjs';
 import { STRATEGIES } from './rewards-view.mjs';
 import { usdcFunding } from './usdc-funding.mjs';
-import { PAIR_KINDS, PAIR_INFO, EQUITY_PROVIDERS } from '/pairs.mjs';
+import { PAIR_KINDS, PAIR_INFO, EQUITY_PROVIDERS, issuerNotice } from '/pairs.mjs';
 import { curveShape, DEX_MODEL, BETA_MODEL, BASE_FEE_BPS, LOCAL_START_FDV_USD } from '/curve-model.mjs';
 
 const DRAFT_KEY = 'elpida:launch-draft';
@@ -236,6 +236,7 @@ export function renderLaunch(ctx) {
       group.assets.length > 1 ? field({ label: `${PAIR_INFO[draft.pair].title} asset`, control: h('select.select', { on: { change: e => { draft.quoteAsset = e.target.value; draft.firstBuy = defaultBuy(draft.pair, selectedAsset()); save(); draw(); } } }, group.assets.map(a => h('option', { value: a.id, selected: a.id === asset.id }, `${a.symbol} · ${a.name}`))) }) : null,
       h('div.connection-row', assetIcon(asset.symbol), h('div.grow', h('strong', asset.symbol), h('p.small.muted', [asset.name, balanceOf(asset) != null ? `Balance: ${number(balanceOf(asset), 4)} ${asset.symbol}` : null, `Creation fee: ${number(Number(asset.feeAmount ?? 0), 6)} ${asset.feeSymbol ?? nativeSymbol()}`].filter(Boolean).join(' · '))), fund(asset)),
       asset.test && draft.pair === 'xstock' ? callout('warn', 'flask-conical', `${asset.symbol} is a simulated stock for testing. It is not an issued token from ${EQUITY_PROVIDERS[draft.chain] ?? 'any provider'} and has no real-world backing. Live tokenized stocks stay off until the provider and our checks are verified.`) : null,
+      !asset.test && draft.pair === 'xstock' ? callout('warn', 'triangle-alert', issuerNotice(EQUITY_PROVIDERS[draft.chain])) : null,
       asset.wsol ? callout('', 'info', 'You pay and receive plain SOL. Elpida wraps it for each trade and unwraps what is left in the same transaction.') : null) : null;
     return { body: [
       h('p.chain-context',chainIcon(draft.chain),`Launching on ${net()?.name??'Simulation'}. Change the chain in the header.`), connection,

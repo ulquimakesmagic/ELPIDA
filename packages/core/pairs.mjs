@@ -50,6 +50,22 @@ export const EQUITY_PROVIDERS = {
 };
 
 /**
+ * Issuer-risk text shown before a live (non-test) tokenized stock is used as a trading pair. Every sentence is
+ * backed by the provider's own documentation or by the local fork checks recorded in docs/TOKENIZED_EQUITY.md.
+ * Providers we have not verified get the generic text only; nothing is invented for them.
+ */
+const GENERIC_ISSUER_NOTICE = 'This is a tokenized stock issued and controlled by its provider, not by Elpida. The provider can restrict, pause or change it, and eligibility rules apply, including exclusions for US persons. Elpida cannot reverse an issuer action.';
+export const ISSUER_NOTICES = {
+  'Robinhood Stock Tokens': 'Robinhood can block any account, pause a token, burn tokens from any account and upgrade every token at once. In our fork tests a block on a curve or pool stopped all buys and sells until the issuer unblocked it, and a burn from a curve would leave it short of funds.',
+  'Coinbase Tokenized Stocks': 'Coinbase sets transfer policies and can pause these tokens; a transfer to a blocked address fails. A policy change could stop a curve or pool from trading until it is reversed.',
+  xStocks: 'xStocks are issued by Backed Finance and can be paused around corporate actions such as dividends and splits. On Solana the mint carries an issuer permanent delegate, which some pools refuse.',
+};
+export function issuerNotice(provider) {
+  const specific = ISSUER_NOTICES[provider];
+  return specific ? `${specific} ${GENERIC_ISSUER_NOTICE}` : GENERIC_ISSUER_NOTICE;
+}
+
+/**
  * Solana pair templates for a cluster. `native` is that cluster's entry in config/native-pricing.json
  * (launchFee in SOL, startFdv / endFdv in SOL). Test networks add a labelled test paired token, minted
  * only by the program's faucet PDA; its curve is sized in that token, its creation fee is still SOL.
