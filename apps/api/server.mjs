@@ -203,6 +203,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' ${connectSources}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
+    // Crawlers and link checkers probe public pages with HEAD. Node drops the body of a HEAD response itself, so a public
+    // non-API path is handled exactly like GET; the API keeps its strict method rules.
+    if (req.method === 'HEAD' && !/^\/(api\/|health)/.test(String(req.url))) req.method = 'GET';
     // Public read-only wallet assets allow cross-origin consumers; mutations retain origin checks.
     const walletRead=req.method==='GET'&&(String(req.url).split('?')[0]==='/api/wallet-tokenlist.json'||/^\/api\/wallet-logo\/[a-z0-9-]+\/0x[0-9a-fA-F]{40}$/.test(req.url)||/^\/api\/content\/(b[a-z2-7]{30,100}|Qm[1-9A-HJ-NP-Za-km-z]{44})$/.test(req.url));
     if (!acceptsRequest({host:req.headers.host,origin:walletRead?undefined:req.headers.origin,method:req.method,path:req.url,port:actualPort,publicUrl})) return send(403, { error: 'Host or origin not allowed.' });

@@ -120,3 +120,16 @@ test('server: a local token page renders with previews, unknown tokens 404, and 
     assert.ok(!(await (await fetch(s.url + '/sitemap.xml')).text()).includes('/token/'));
   } finally { await s.close(); }
 });
+
+test('crawler probes: HEAD works on public pages with no body, and stays refused on the API', async () => {
+  const s = await startServer({ port: 0, seed: false });
+  try {
+    for (const path of ['/', '/sitemap.xml', '/robots.txt', '/llms.txt', '/learn', '/learn/faq', '/theme.css']) {
+      const r = await fetch(s.url + path, { method: 'HEAD', headers: { 'user-agent': 'Googlebot/2.1' } });
+      assert.equal(r.status, 200, path);
+      assert.equal((await r.text()).length, 0, `${path} HEAD has no body`);
+    }
+    assert.equal((await fetch(s.url + '/sitemap.xml', { headers: { 'user-agent': 'Googlebot/2.1', 'accept-encoding': 'gzip, br' } })).status, 200);
+    assert.notEqual((await fetch(s.url + '/api/tokens', { method: 'HEAD' })).status, 200);
+  } finally { await s.close(); }
+});
