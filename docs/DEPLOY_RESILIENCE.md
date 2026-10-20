@@ -18,20 +18,42 @@ old container before the new one can mount the same volume, so a volume-backed s
 This covers people who already have Elpida open. Someone who opens the site *during* the gap still reaches Railway's
 page, because the app is not running to answer them. Hiding that page needs something in front of Railway.
 
-## Hiding Railway's error page (needs Malik)
+## Hiding Railway's error page (live since 20 October 2026)
 `ops/cloudflare/fallback-worker.js` is a Cloudflare Worker that passes every request through and only replaces a
 Railway failure (502, 503, 504, 52x, or no answer) with Elpida's own page: it reloads itself every 10 s and returns
 `503` + `Retry-After: 10`, the correct signal for search engines that the outage is temporary. API calls get a JSON 503.
 Responses that came from Elpida itself (they carry `X-Request-Id`) are never replaced.
 
-Setup (free Cloudflare plan is enough):
-1. Move the `elpida.fun` DNS to Cloudflare (change nameservers at the registrar). Keep the Railway CNAME, proxied (orange cloud).
-2. Workers & Pages → Create Worker → paste `ops/cloudflare/fallback-worker.js` → Deploy.
-3. Worker → Settings → Triggers → add route `elpida.fun/*`.
-4. SSL/TLS mode: **Full (strict)**.
-5. Check: during the next redeploy, elpida.fun shows "Elpida is updating" instead of Railway's page.
+### What is configured (Cloudflare free plan)
+- Registrar stays Vercel; only the nameservers moved to Cloudflare (`ada.ns.cloudflare.com`, `cullen.ns.cloudflare.com`).
+  Undo: Vercel → Domains → elpida.fun → Nameservers → **Restore Original Nameservers**. DNSSEC is off.
+- DNS records (nothing else; the scan's Vercel leftovers, CAA records and the fixed-IP apex record were removed):
 
-Moving DNS also changes how Google verification works: the Search Console TXT record must be copied to Cloudflare first.
+  | Type | Name | Content | Proxy |
+  |---|---|---|---|
+  | CNAME | `elpida.fun` | the service's `*.up.railway.app` host (flattened at the apex) | Proxied |
+  | TXT | `elpida.fun` | `google-site-verification=…` (Search Console) | DNS only |
+  | TXT | `_railway-verify` | `railway-verify=…` (Railway custom domain) | DNS only |
+
+  If the Railway service or its domain is recreated, update the CNAME target to the new `*.up.railway.app` host.
+- SSL/TLS: Cloudflare **Automatic SSL/TLS** (it scans the origin and picks the mode). Never use Flexible: it loops with Railway.
+- Worker `elpida-fallback`, code identical to `ops/cloudflare/fallback-worker.js` (pasted, not retyped).
+  Attached as a **Route** `elpida.fun/*` (not a Custom Domain, which would replace Railway as the origin).
+  Failure mode **Fail open**: past the free 100k requests/day, traffic bypasses the Worker straight to Railway.
+- Checked after setup: `/`, `/learn`, `/learn/faq`, `/sitemap.xml`, `/robots.txt`, `/health`, `/api/config` return 200
+  through Cloudflare with Elpida's `X-Request-Id`; HEAD on the sitemap returns 200.
+
+### Changing the Worker
+Edit `ops/cloudflare/fallback-worker.js`, run `npm test` (the Worker has tests in `tests/resilience.test.mjs`), merge,
+then in Cloudflare: Workers & Pages → `elpida-fallback` → Edit code → replace all → Deploy. Keep the two copies identical.
+
+### Setting it up again from scratch
+1. Cloudflare → Add a domain → `elpida.fun` → Free. Make the records match the table above exactly.
+2. At the registrar, replace the nameservers with the two Cloudflare assigns; make sure DNSSEC is off first.
+3. After the "active" email, check the site loads through Cloudflare.
+4. Workers & Pages → Create → Start with Hello World → name it → Deploy → Edit code → paste the file → Deploy.
+5. Worker → Domains → **Add Route** → zone `elpida.fun`, route `elpida.fun/*`, Fail open.
+6. Check: during the next redeploy, elpida.fun shows "Elpida is updating" instead of Railway's page.
 
 ## Shortening the gap on Railway
 - Keep `healthcheckPath: /health` (already in `railway.json`): Railway only routes to a new deployment once it is healthy.
