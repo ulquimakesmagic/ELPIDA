@@ -246,6 +246,10 @@ Blocking the curve, pausing the token and blocking the pool froze all buys, sell
 
 ## Binance bStocks: what could be verified (20 Oct 2026)
 
+**Status: excluded.** `providers.bstocks.excluded` in the registry keeps every bStocks capability and eligibility check off,
+even with a verification record and every flag set (tested in `tests/tokenized-equity.test.mjs`). Lifting it needs
+legal advice, an issuer-published address list, and a reviewed registry change. A website disclaimer is not enough.
+
 Nothing here enters the registry: the registry only takes addresses from an issuer-published source, and none was reachable.
 
 - **Issuer list not reachable.** bstocks.finance (linked from BscScan as the token website) opens with a gate that requires

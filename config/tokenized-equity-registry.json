@@ -149,13 +149,18 @@
     "bstocks": {
       "name": "Binance bStocks",
       "issuer": "BTech Holdings Limited, a Binance group affiliate (ADGM prospectus)",
+      "excluded": {
+        "since": "2026-10-20",
+        "reason": "bStocks are offered only in the ADGM under its prospectus, and the issuer's site gates entry on being located there. A disclaimer cannot make a public listing eligible, so no bStocks pair is offered until legal advice says otherwise.",
+        "evidence": "docs/TOKENIZED_EQUITY.md, section 'Binance bStocks: what could be verified (20 Oct 2026)'"
+      },
       "networks": [
         "bnb"
       ],
       "balanceSemantics": {
         "bnb": {
           "model": "raw-with-multiplier",
-          "note": "BEP-20 that integrates BEP-677 (Scaled UI Amount). Dividends (net of 30% US withholding) and splits are applied through the multiplier.",
+          "note": "BEP-20 with a multiplier; BscScan reports the standard as BEP-8056 (earlier noted as BEP-677). Dividends (net of 30% US withholding) and splits are applied through the multiplier.",
           "feedIncludesMultiplier": null
         }
       },
