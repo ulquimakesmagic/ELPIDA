@@ -26,6 +26,7 @@ import {HolderTheses,thesisIdentity} from './holder-theses.mjs';
 import {HolderChat} from './holder-chat.mjs';
 import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
+import { PAGES, canonicalOrigin, renderPage, renderSitemap, renderRobots, renderLlms } from '../../packages/core/seo.mjs';
 import { createTokenizedEquity } from '../../packages/core/tokenized-equity.mjs';
 import { MAX_METADATA_REQUEST_BYTES, normalizeMetadata } from '../web/metadata.mjs';
 import { WalletTokenLists, walletTokenEntries } from './wallet-tokenlist.mjs';
@@ -71,6 +72,7 @@ resources.set('/explore.css', ['explore.css', 'text/css']);
 resources.set('/token.css', ['token.css', 'text/css']);
 resources.set('/launch.css', ['launch.css', 'text/css']);
 resources.set('/docs.css', ['docs.css', 'text/css']);
+resources.set('/learn.css', ['learn.css', 'text/css']);
 resources.set('/docs-view.mjs', ['docs-view.mjs', 'text/javascript']);
 const assetTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8' };
 const vendorFiles = new Map([
@@ -195,6 +197,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     const requestId=randomBytes(8).toString('hex');res.setHeader('X-Request-Id',requestId);
     const send = (code, data) => { if(code>=400)console.error(JSON.stringify({event:'request_failed',requestId,status:code,method:req.method,path:String(req.url).split('?')[0].slice(0,160)}));res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
     res.setHeader('Cache-Control', 'no-store');
+    if (/^\/(api\/|health)/.test(String(req.url))) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' ${connectSources}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
@@ -300,6 +303,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         // Simulation buys for the Explore live feed: the same public shape as /api/public/recent-trades.
         if (url.pathname === '/api/recent-trades') { const limit=Math.max(1,Math.min(50,Number(url.searchParams.get('limit'))||20)),tokens=new Map(runtime.listings().map(t=>[t.address.toLowerCase(),t])); return send(200, runtime.indexer.recentTrades(limit).flatMap(trade=>{const t=tokens.get(String(trade.token).toLowerCase());return t?[recentTrade('local',t,trade)]:[];})); }
         if (vendorFiles.has(url.pathname)) { res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' }); return res.end(await readFile(vendorFiles.get(url.pathname))); }
+        const seoOrigin = canonicalOrigin(), seoPage = PAGES.find(p => p.path === url.pathname);
+        const seoBody = url.pathname === '/robots.txt' ? [renderRobots(seoOrigin), 'text/plain'] : url.pathname === '/sitemap.xml' ? [renderSitemap(seoOrigin), 'application/xml'] : url.pathname === '/llms.txt' ? [renderLlms(seoOrigin), 'text/plain'] : seoPage ? [renderPage(seoPage, seoOrigin), 'text/html'] : null;
+        if (seoBody) { res.setHeader('Cache-Control', 'public, max-age=3600'); res.writeHead(200, { 'Content-Type': `${seoBody[1]}; charset=utf-8` }); return res.end(seoBody[0]); }
         const resource = resources.get(url.pathname);
         if (resource) { const content = await readFile(resolve(webRoot, resource[0])); res.writeHead(200, { 'Content-Type': `${resource[1]}; charset=utf-8` }); return res.end(content); }
         if (url.pathname.startsWith('/assets/')) {
