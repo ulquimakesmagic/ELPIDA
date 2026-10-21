@@ -15,7 +15,9 @@ interface IV3MigrationManager {
     function safeTransferFrom(address,address,uint256) external;
 }
 interface IV3MigrationPool {
-    function slot0() external view returns(uint160,int24,uint16,uint16,uint16,uint8,bool);
+    /// The sixth field is feeProtocol: uint8 on Uniswap v3, uint32 on PancakeSwap v3. Declared as uint32 so both decode
+    /// (a uint8 value always fits; a PancakeSwap value above 255 would make a uint8 declaration revert).
+    function slot0() external view returns(uint160,int24,uint16,uint16,uint16,uint32,bool);
     function liquidity() external view returns(uint128);
     function swap(address,bool,int256,uint160,bytes calldata) external returns(int256,int256);
 }
@@ -119,7 +121,10 @@ contract ElpidaV3MigrationAdapter {
         result.tokenUsed=used0;result.quoteUsed=used1;return result;
     }
     /// Pays only the pool being rebalanced, only during a migration, only in the input asset and only up to the budget.
-    function uniswapV3SwapCallback(int256 amount0,int256 amount1,bytes calldata) external {
+    function uniswapV3SwapCallback(int256 amount0,int256 amount1,bytes calldata) external { _payRebalance(amount0,amount1); }
+    /// PancakeSwap v3 pools call this name instead; same rules.
+    function pancakeV3SwapCallback(int256 amount0,int256 amount1,bytes calldata) external { _payRebalance(amount0,amount1); }
+    function _payRebalance(int256 amount0,int256 amount1) private {
         require(entered && repricePool!=address(0) && msg.sender==repricePool,"rebalance callback");
         uint256 owed=amount0>0?uint256(amount0):amount1>0?uint256(amount1):0;
         if(owed==0)return;

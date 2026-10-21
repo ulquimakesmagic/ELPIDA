@@ -7,7 +7,7 @@ import { testnets, evmTestnets } from '../../packages/core/networks.mjs';
 import { amount } from './runtime.mjs';
 import { EvmIndexer } from '../../packages/indexer/evm-indexer.mjs';
 import { indexedActivity, activityOf } from '../web/discovery.mjs';
-import {deployLocalV3,v3Artifacts,baseSepoliaDex} from '../../packages/core/uniswap.mjs';
+import {deployLocalV3,v3Artifacts,baseSepoliaDex,testnetDexes} from '../../packages/core/uniswap.mjs';
 import { normalizeMetadata } from '../web/metadata.mjs';
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync, appendFileSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -80,7 +80,7 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   let queue = Promise.resolve();
   const config = {
     rewardAutomation:{localEnabled:true,publicEnabled:false},
-    oracles:usdOracles(),model:dex?DEX_MODEL:BETA_MODEL,dex:dex?v3.config:null,publicDex:baseSepoliaDex,pricing:{local:{launchFee:local.launchFee,startFdv:local.startFdv}},local:{chainId:31337,name:'Local devnet',nativeSymbol:'ETH',factory:await factory.getAddress(),treasury:addresses[2],launchFee:local.launchFee,feeUsdc:feeCoin.target,price:{usd:2500,updatedAt:(await provider.getBlock('latest')).timestamp,source:'Simulated on-chain oracle',status:'fresh',maxAge:86400,simulation:true}},
+    oracles:usdOracles(),model:dex?DEX_MODEL:BETA_MODEL,dex:dex?v3.config:null,publicDex:baseSepoliaDex,publicDexes:Object.fromEntries(Object.entries(testnetDexes).filter(([,d])=>d.enabled)),pricing:{local:{launchFee:local.launchFee,startFdv:local.startFdv}},local:{chainId:31337,name:'Local devnet',nativeSymbol:'ETH',factory:await factory.getAddress(),treasury:addresses[2],launchFee:local.launchFee,feeUsdc:feeCoin.target,price:{usd:2500,updatedAt:(await provider.getBlock('latest')).timestamp,source:'Simulated on-chain oracle',status:'fresh',maxAge:86400,simulation:true}},
     accounts:addresses.slice(0,2).map((address,i) => ({id:String(i),address,name:i?'Trader':'Creator'})),testnets:evmTestnets,
     plannedTestnets:testnets.filter(n => !n.enabled).map(({key,name,note}) => ({key,name,note})),
     contracts:{...(dex?{dexPool:{abi:v3Artifacts.pool.abi},router:{abi:v3Artifacts.router.abi},quoter:{abi:v3Artifacts.quoter.abi},locker:{abi:artifact('ElpidaV3FeeLocker').abi},splitter:{abi:artifact('ElpidaFeeSplitter').abi}}:{}),dexFactory:{abi:artifact('ElpidaDexFactory').abi,bytecode:'0x'+artifact('ElpidaDexFactory').evm.bytecode.object},dexCurve:{abi:artifact('ElpidaDexCurve').abi},adapter:{abi:artifact('ElpidaV3MigrationAdapter').abi,bytecode:'0x'+artifact('ElpidaV3MigrationAdapter').evm.bytecode.object},legacyFactory:{abi:artifact('ElpidaBetaFactory').abi,bytecode:'0x'+artifact('ElpidaBetaFactory').evm.bytecode.object},legacyCurve:{abi:artifact('ElpidaBetaCurve').abi},factory:{abi:fa.abi,bytecode:`0x${fa.evm.bytecode.object}`},token:{abi:artifact('ElpidaToken').abi},curve:{abi:artifact(dex?'ElpidaDexCurve':'ElpidaBetaCurve').abi},pool:{abi:artifact('ElpidaLockedPool').abi},quote:{abi:mock.abi},testAsset:{abi:compiled['contracts/evm/testnet/ElpidaTestAsset.sol'].ElpidaTestAsset.abi,bytecode:'0x'+compiled['contracts/evm/testnet/ElpidaTestAsset.sol'].ElpidaTestAsset.evm.bytecode.object}},

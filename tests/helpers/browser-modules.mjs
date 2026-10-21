@@ -7,6 +7,7 @@ const map = {
   '/vendor/ethers.js': 'ethers',
   '/pairs.mjs': ${JSON.stringify(new URL('../../packages/core/pairs.mjs', import.meta.url).href)},
   '/curve-model.mjs': ${JSON.stringify(new URL('../../packages/core/curve-model.mjs', import.meta.url).href)},
+  '/dex-router.mjs': ${JSON.stringify(new URL('../../packages/core/dex-router.mjs', import.meta.url).href)},
 };
 export async function resolve(specifier, context, next) {
   return map[specifier] ? next(map[specifier], context) : next(specifier, context);
