@@ -27,6 +27,7 @@ import {HolderChat} from './holder-chat.mjs';
 import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
 import { TOKEN_PATH, renderTokenPage, renderTokenNotFound } from '../../packages/core/token-seo.mjs';
+import { productionGuard, formatGuardReport } from './production-guard.mjs';
 import { PAGES, canonicalOrigin, renderPage, renderSitemap, renderRobots, renderLlms } from '../../packages/core/seo.mjs';
 import { createTokenizedEquity } from '../../packages/core/tokenized-equity.mjs';
 import { MAX_METADATA_REQUEST_BYTES, normalizeMetadata } from '../web/metadata.mjs';
@@ -404,6 +405,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   console.log('Starting Elpida API, private simulation and public chain indexer…');
+  const guard = productionGuard({ env: process.env, solana: solanaConfig() });
+  if (guard.mainnet) console.log(formatGuardReport(guard));
+  if (!guard.ok) { console.error('Refusing to start: fix the errors above (see docs/PRODUCTION_GUARD.md).'); process.exit(1); }
   let app;
   try { app = await startServer(); }
   catch (error) {
