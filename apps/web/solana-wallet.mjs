@@ -329,6 +329,15 @@ export class SolanaWallet {
       remote: { pubkey, sign: async message => fromBase64((await post('solana/vanity-sign', { id: reserved.id, wallet, message: toBase64(message) })).signature) } };
   }
   /** `remoteSigners`: [{ pubkey, sign(messageBytes) → signature bytes }], applied after the wallet (vanity mint). */
+  /** True when these instructions fit in one transaction and simulate cleanly. Nothing is signed or sent. */
+  async fitsOneTransaction(instructions) {
+    try {
+      const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
+      const tx = new web3.Transaction({ feePayer: this.publicKey, blockhash, lastValidBlockHeight }).add(...instructions);
+      if (tx.serializeMessage().length + 1 + 64 * tx.compileMessage().header.numRequiredSignatures > 1232) return false;
+      return !(await this.connection.simulateTransaction(tx)).value.err;
+    } catch { return false; }
+  }
   async sendInstructions(instructions, extraSigners = [], message = 'Confirm the transaction in your wallet…', remoteSigners = []) {
     this.checkWallet();
     const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
@@ -457,16 +466,21 @@ export class SolanaWallet {
       return { hash: signature, message: 'Migrated to PumpSwap. The liquidity is locked for good; LP trading fees can be harvested from Rewards.' };
     }
     if (action === 'withdraw') {
-      // Curve fees and PumpSwap LP fee growth are separate transactions (both permissionless).
+      // Curve fees and PumpSwap LP fee growth (both permissionless). When both are due they go in ONE transaction if it
+      // fits and simulates; otherwise two, exactly as before. The check signs nothing.
       const hashes = [];
-      if (pool.protocolFees + pool.creatorFees > 0n) {
-        hashes.push(await this.sendInstructions([this.client.withdrawFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward })], [], 'Confirm curve fee distribution in your wallet…'));
-      }
+      const curveFees = pool.protocolFees + pool.creatorFees > 0n ? [this.client.withdrawFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward })] : [];
+      let harvest = [];
       if (pool.status === STATUS_MIGRATED) {
         const [state] = (await this.pumpStates([pool])).values();
-        if (state?.harvestable > 0n) {
-          hashes.push(await this.sendInstructions([this.client.computeBudget(HARVEST_COMPUTE_UNITS), ...this.client.harvestLpFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward })], [], 'Confirm the PumpSwap LP fee harvest in your wallet…'));
-        }
+        if (state?.harvestable > 0n) harvest = this.client.harvestLpFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward });
+      }
+      const combined = curveFees.length && harvest.length ? [this.client.computeBudget(HARVEST_COMPUTE_UNITS + 100_000), ...curveFees, ...harvest] : null;
+      if (combined && await this.fitsOneTransaction(combined)) {
+        hashes.push(await this.sendInstructions(combined, [], 'Confirm the curve fee distribution and PumpSwap LP fee harvest (one transaction) in your wallet…'));
+      } else {
+        if (curveFees.length) hashes.push(await this.sendInstructions(curveFees, [], 'Confirm curve fee distribution in your wallet…'));
+        if (harvest.length) hashes.push(await this.sendInstructions([this.client.computeBudget(HARVEST_COMPUTE_UNITS), ...harvest], [], 'Confirm the PumpSwap LP fee harvest in your wallet…'));
       }
       if (!hashes.length) throw new Error('Nothing to distribute yet. LP fees become harvestable once PumpSwap trading has earned at least 0.01% of the locked position.');
       return { hash: hashes.at(-1), message: 'Fees distributed 50/50 to the treasury and the creator reward wallet.' };
