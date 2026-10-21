@@ -9,3 +9,10 @@ coverage
 contracts/solana/target
 contracts/solana/keys
 docs/screenshots
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+id.json
+*keypair*.json

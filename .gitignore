@@ -14,3 +14,12 @@ contracts/solana/host-tests/target/
 
 # Also ignore a node_modules symlink (the trailing-slash pattern only matches directories)
 node_modules
+
+# Defense in depth: key material must never be committed (C6, 21 Oct 2026).
+*.pem
+*.key
+*.p12
+*.pfx
+*.keystore
+id.json
+*keypair*.json
