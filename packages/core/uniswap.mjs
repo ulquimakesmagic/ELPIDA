@@ -9,6 +9,21 @@ export const baseSepoliaDex={name:'Uniswap v3',fee:10000,factory:'0x4752ba5DBc23
 // Sources: Uniswap sdk-core src/addresses.ts (SEPOLIA_ADDRESSES); pancakeswap/pancake-v3-contracts
 // projects/v3-core and projects/v3-periphery deployments/bscTestnet.json. `weth` is confirmed by the fork check
 // against the position manager's WETH9(); the app also refuses to deploy if they differ.
+// Pool ABI that reads both Uniswap v3 and PancakeSwap v3 pools. PancakeSwap differs in two places that matter to us
+// (confirmed from @pancakeswap/v3-core 1.0.2): slot0().feeProtocol is uint32 (Uniswap: uint8; a uint32 declaration
+// decodes both), and its Swap event carries two extra protocol-fee fields, so it has a different topic. Both Swap
+// events are included; logs are matched by topic, and both decode amount0/amount1 the same way.
+const PANCAKE_SWAP_EVENT={type:'event',name:'Swap',anonymous:false,inputs:[
+ {indexed:true,name:'sender',type:'address',internalType:'address'},{indexed:true,name:'recipient',type:'address',internalType:'address'},
+ {indexed:false,name:'amount0',type:'int256',internalType:'int256'},{indexed:false,name:'amount1',type:'int256',internalType:'int256'},
+ {indexed:false,name:'sqrtPriceX96',type:'uint160',internalType:'uint160'},{indexed:false,name:'liquidity',type:'uint128',internalType:'uint128'},
+ {indexed:false,name:'tick',type:'int24',internalType:'int24'},{indexed:false,name:'protocolFeesToken0',type:'uint128',internalType:'uint128'},
+ {indexed:false,name:'protocolFeesToken1',type:'uint128',internalType:'uint128'}]};
+export function v3PoolAbi(){
+ const abi=v3Artifacts.pool.abi.map(f=>f.type==='function'&&f.name==='slot0'?{...f,outputs:f.outputs.map(o=>o.name==='feeProtocol'?{...o,type:'uint32',internalType:'uint32'}:o)}:f);
+ return [...abi,PANCAKE_SWAP_EVENT];
+}
+
 export const testnetDexes={
  'base-sepolia':{...baseSepoliaDex,enabled:true},
  'ethereum-sepolia':{name:'Uniswap v3',fee:10000,factory:'0x0227628f3F023bb0B980b67D528571c95c6DaC1c',manager:'0x1238536071E1c677A632429e3655c799b22cDA52',router:'0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E',quoter:'0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3',weth:'0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14',routerVersion:2,enabled:false},

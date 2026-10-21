@@ -37,7 +37,7 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
    npm.cmd run test:chain-fork -- ethereum-sepolia
    npm.cmd run test:chain-fork -- bnb-testnet
    ```
-   Each prints 11 checks and PASS or FAIL, and writes `backups/chain-fork/<network>.json` with the gas of every step
+   Each prints 13 checks and PASS or FAIL, and writes `backups/chain-fork/<network>.json` with the gas of every step
    and how much to collect at today's gas price. If the public RPC is slow, set your own:
    `$env:ELPIDA_FORK_RPC_BNB_TESTNET="https://…"` (PowerShell) before the command.
 3. **Switch the chain on** (Claude, one small PR per chain): set `enabled: true` in `testnetDexes` with the report attached.

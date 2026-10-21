@@ -22,7 +22,7 @@ for (const version of [2, 1]) {
     const lines = [];
     const result = await runChainLifecycle({ provider: f.provider, signer: f.signers[0], attacker: f.signers[1], dex, feed: f.feed.target, maxAge: 86400, art, log: l => lines.push(l) });
     t.diagnostic(lines.join('\n'));
-    assert.ok(result.checks.length === 11 && result.checks.every(c => c.ok));
+    assert.ok(result.checks.length === 13 && result.checks.every(c => c.ok));
     assert.ok(result.gas.some(g => g.step === 'DEX sell (native out)'));
     assert.ok(result.gas.some(g => /pre-created pool/.test(g.step)), 'the rebalance path ran');
   });

@@ -24,3 +24,21 @@ test('the adapter answers both swap-callback names, with the same guard', async 
   assert.ok(abi.includes('uniswapV3SwapCallback') && abi.includes('pancakeV3SwapCallback'));
   for (const name of ['uniswapV3SwapCallback', 'pancakeV3SwapCallback']) await assert.rejects(adapter[name](1n, 0n, '0x'), /rebalance callback/, `${name} pays only the pool being rebalanced during a migration`);
 });
+
+test('the shared pool ABI decodes PancakeSwap Swap events and slot0, and still decodes Uniswap ones', async () => {
+  const { Interface, AbiCoder, zeroPadValue } = await import('ethers');
+  const { v3PoolAbi, v3Artifacts } = await import('../packages/core/uniswap.mjs');
+  const i = new Interface(v3PoolAbi()), coder = AbiCoder.defaultAbiCoder();
+  const pancake = i.getEvent('Swap(address,address,int256,int256,uint160,uint128,int24,uint128,uint128)');
+  const uni = i.getEvent('Swap(address,address,int256,int256,uint160,uint128,int24)');
+  const sender = zeroPadValue('0x00000000000000000000000000000000000000aa', 32), recipient = zeroPadValue('0x00000000000000000000000000000000000000bb', 32);
+  const log = (ev, extra) => ({ topics: [ev.topicHash, sender, recipient], data: coder.encode(['int256', 'int256', 'uint160', 'uint128', 'int24', ...extra.map(() => 'uint128')], [-5n, 7n, 1n << 96n, 10n, 0, ...extra]) });
+  for (const [ev, extra] of [[pancake, [1n, 2n]], [uni, []]]) {
+    const parsed = i.parseLog(log(ev, extra));
+    assert.equal(parsed.name, 'Swap'); assert.equal(parsed.args.amount0, -5n); assert.equal(parsed.args.amount1, 7n);
+  }
+  const slot = coder.encode(['uint160', 'int24', 'uint16', 'uint16', 'uint16', 'uint32', 'bool'], [1n << 96n, 0, 0, 1, 1, PANCAKE_FEE_PROTOCOL, true]);
+  assert.equal(i.decodeFunctionResult('slot0', slot)[5], BigInt(PANCAKE_FEE_PROTOCOL), 'PancakeSwap slot0 decodes');
+  // ethers masks rather than throws, so the old uint8 declaration silently reads a wrong feeProtocol.
+  assert.notEqual(new Interface(v3Artifacts.pool.abi).decodeFunctionResult('slot0', slot)[5], BigInt(PANCAKE_FEE_PROTOCOL), 'the plain Uniswap ABI misreads it');
+});

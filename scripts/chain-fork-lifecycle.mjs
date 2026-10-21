@@ -11,6 +11,8 @@ import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Contract, ContractFactory, Interface, ZeroAddress, formatEther, parseEther } from 'ethers';
 import { swapCalldata } from '../packages/core/dex-router.mjs';
+import { v3PoolAbi } from '../packages/core/uniswap.mjs';
+import { EvmIndexer } from '../packages/indexer/evm-indexer.mjs';
 
 const MANAGER_ABI = ['function factory() view returns(address)', 'function WETH9() view returns(address)', 'function createAndInitializePoolIfNecessary(address,address,uint24,uint160) payable returns(address)'];
 const V3_FACTORY_ABI = ['function feeAmountTickSpacing(uint24) view returns(int24)', 'function getPool(address,address,uint24) view returns(address)'];
@@ -41,6 +43,7 @@ export async function runChainLifecycle({ provider, signer, attacker, dex, feed,
   // 2. Our contracts, deployed exactly as the app deploys them (testnet terms: $50 start, 24 h grace).
   const adapter = await deploy('ElpidaV3MigrationAdapter', dex.manager, weth, dex.fee);
   const factory = await deploy('ElpidaAtomicDexFactory', me, adapter.target, startFdvUsd, grace);
+  const deployBlock = (await factory.deploymentTransaction().wait()).blockNumber;
   await send('configure USD pricing', factory.configureUsdPricing(feed, maxAge, ZeroAddress));
   const fee = await factory.launchFee();
   check('the $10 launch fee is priced by the live feed', fee > 0n, `${formatEther(fee)} native`);
@@ -101,6 +104,16 @@ export async function runChainLifecycle({ provider, signer, attacker, dex, feed,
   const poolB = await finish(b, 'B, pre-created pool');
   const [price] = await new Contract(poolB, POOL_ABI, provider).slot0();
   check('graduation repriced the pre-created pool and locked liquidity', poolB !== ZeroAddress && price !== (1n << 96n) && await new Contract(await b.curve.locker(), art('ElpidaV3FeeLocker').abi, provider).locked(), `slot0 price ${price}`);
+
+  // 7. Elpida's own indexer reads this DEX: trades on the graduated pool appear with the right sides.
+  const contracts = { factory: art('ElpidaAtomicDexFactory'), curve: art('ElpidaDexCurve'), token: art('ElpidaToken'), pool: art('ElpidaLockedPool'), dexPool: { abi: v3PoolAbi() }, locker: art('ElpidaV3FeeLocker'), splitter: art('ElpidaFeeSplitter') };
+  const index = new EvmIndexer({ provider, factory: factory.target, contracts, fromBlock: deployBlock, chainId: Number((await provider.getNetwork()).chainId) });
+  try {
+    await index.sync();
+    const dexTrades = index.trades(a.token.target.toLowerCase()).filter(t => t.venue === 'dexPool');
+    check('indexer recorded the DEX buy and sell with the right sides', dexTrades.length === 2 && dexTrades.some(t => t.side === 'buy') && dexTrades.some(t => t.side === 'sell'), dexTrades.map(t => t.side).join(', '));
+    check('indexer shows both tokens as graduated into the DEX', index.snapshot(a.token.target)?.graduated === true && index.snapshot(b.token.target)?.graduated === true);
+  } finally { await index.close(); }
 
   return { checks, gas, addresses: { adapter: adapter.target, factory: factory.target, weth, poolA, poolB } };
 }
