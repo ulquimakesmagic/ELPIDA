@@ -210,3 +210,28 @@ test('Coinbase on Base: eight decimals, raw balanceOf, and a total-return feed',
   assert.ok(Math.abs(Number(shares - 15163102982n)) <= 1500, 'close to the onchain balanceOfUI (the multiplier here is rounded)');
   assert.equal(tokenValueUsd({ model: sem.model, balance: raw, decimals: 8, balanceOfKind: 'raw', price: 200, priceBasis: 'per-raw-token' }), 151.54950535 * 200);
 });
+
+test('an excluded provider (bStocks) stays off even when verified and every flag is on', () => {
+  assert.ok(config.providers.bstocks.excluded?.reason, 'bStocks carries an exclusion with a reason');
+  const nvdab = { network: 'bnb', provider: 'bstocks', symbol: 'NVDAB', underlying: 'NVIDIA Corp', address: '0x02Fca66C1D1aFB4E2A7884261eB00F63598a7436', decimals: 18, source: 'test-only' };
+  const verification = CAPABILITIES.map(capability => ({ network: 'bnb', provider: 'bstocks', capability, verifiedAt: '2026-11-01', evidence: 'test-only record' }));
+  const env = { ELPIDA_TOKENIZED_EQUITY: '1', ...Object.fromEntries(CAPABILITIES.map(c => [`ELPIDA_TOKENIZED_EQUITY_BSTOCKS_${c.replace(/[A-Z]/g, x => `_${x}`).toUpperCase()}`, '1'])) };
+  const t = createTokenizedEquity({ ...config, assets: [...config.assets, nvdab], verification: [...(config.verification ?? []), ...verification] }, { env });
+  const asset = t.getAsset('bnb', 'bstocks', nvdab.address);
+  for (const [cap, state] of Object.entries(t.capabilities(asset))) {
+    assert.equal(state.enabled, false, cap);
+    assert.equal(state.excluded, true, cap);
+    assert.match(state.reason, /excluded from Elpida/);
+  }
+  const elig = t.evaluateEligibility('bstocks', { country: 'AE', kycVerified: true });
+  assert.equal(elig.allowed, false); assert.match(elig.reasons[0], /excluded/);
+  assert.equal(t.describeNetwork('bnb').excluded.since, '2026-10-20');
+  assert.equal(t.describeNetwork('base').excluded, null, 'other providers are not excluded');
+  const rec = { network: 'base', provider: 'coinbase', capability: 'secondaryTrading', verifiedAt: '2026-11-01', evidence: 'test' };
+  const t2 = createTokenizedEquity({ ...config, verification: [rec] }, { env: { ELPIDA_TOKENIZED_EQUITY: '1', ELPIDA_TOKENIZED_EQUITY_COINBASE_SECONDARY_TRADING: '1' } });
+  assert.equal(t2.capabilityState(t2.getAsset('base', 'coinbase', config.assets.find(a => a.symbol === 'NVDAc').address), 'secondaryTrading').enabled, true, 'exclusion does not leak to Coinbase');
+});
+
+test('registry: no bStocks asset is listed while the provider is excluded', () => {
+  assert.equal(config.assets.filter(a => a.provider === 'bstocks').length, 0);
+});

@@ -79,6 +79,9 @@ export function createTokenizedEquity(config, { env = {}, fixtures = false } = {
     if (!CAPABILITIES.includes(capability)) throw new Error(`Unknown capability ${capability}.`);
     if (asset.mode === 'simulated') return { enabled: true, mode: 'simulated', reason: 'Simulated fixture with no value; for tests and demos only.' };
     const label = CAPABILITY_LABELS[capability], name = providers[asset.provider]?.name ?? asset.provider;
+    // An excluded provider stays off whatever is verified or flagged; lifting it needs a registry change and review.
+    const excluded = providers[asset.provider]?.excluded;
+    if (excluded) return { enabled: false, mode: 'live', excluded: true, reason: `${name} is excluded from Elpida: ${excluded.reason}` };
     if (!globalOn) return { enabled: false, mode: 'live', reason: 'Tokenized stocks are switched off on this deployment (ELPIDA_TOKENIZED_EQUITY).' };
     const rec = verification.find(v => v.network === asset.network && v.provider === asset.provider && v.capability === capability && (!v.address || normalizeAddress(asset.network, v.address) === asset.address));
     if (!rec) return { enabled: false, mode: 'live', reason: `${label} for ${name} on ${asset.network} is not verified yet. It needs a recorded test against the real contracts and written provider confirmation.` };
@@ -91,6 +94,7 @@ export function createTokenizedEquity(config, { env = {}, fixtures = false } = {
   function evaluateEligibility(provider, { country, usPerson = false, kycVerified = false } = {}) {
     const p = providers[provider];
     if (!p) return { allowed: false, reasons: [`Unknown provider ${provider}.`] };
+    if (p.excluded) return { allowed: false, reasons: [`${p.name} is excluded from Elpida: ${p.excluded.reason}`] };
     const reasons = [];
     if (usPerson || String(country).toUpperCase() === 'US') reasons.push(`${p.name} is not offered to US persons.`);
     const confirmed = (p.eligibility?.confirmedCountries ?? []).map(c => c.toUpperCase());
@@ -106,6 +110,7 @@ export function createTokenizedEquity(config, { env = {}, fixtures = false } = {
     if (!p) return null;
     return {
       network: net, provider: pid, providerName: p.name, issuer: p.issuer, eligibility: p.eligibility.summary, nigeria: p.eligibility.nigeria,
+      excluded: p.excluded ? { since: p.excluded.since, reason: p.excluded.reason } : null,
       marketHours: p.marketHours, balanceSemantics: p.balanceSemantics[net], unresolved: p.unresolved, sources: p.sources,
       assets: [...assets.values()].filter(a => a.network === net).map(a => ({ symbol: a.symbol, underlying: a.underlying, address: a.address, capabilities: capabilities(a) })),
     };
