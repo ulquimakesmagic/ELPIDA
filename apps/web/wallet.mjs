@@ -1,6 +1,7 @@
 import { nowSeconds } from './clock.mjs';
 import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
-import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, parseUnits, formatUnits, isAddress, ZeroAddress } from '/vendor/ethers.js';
+import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, ZeroAddress } from '/vendor/ethers.js';
+import { routerAbi, swapCalldata } from '/dex-router.mjs';
 
 import { normalizeMetadata } from './metadata.mjs';
 import { readMetadataCache, writeMetadataCache } from './metadata-cache.mjs';
@@ -63,9 +64,10 @@ export class TestnetWallet {
     if (this.net?.key !== key) { this.net = net; this.atomicLaunch=undefined; this.launches = new Map(); this.scannedBlock = undefined; this.launchFee = undefined; this.pairsScanned=undefined;this.approvedQuotes=[]; this.nativeVirtualQuote = undefined; this.factoryStartFdvUsd = undefined; this.needsMetadataUpgrade = false;this.feeAccountingVersion=undefined; }
     return net;
   }
-  get dex(){return this.net.key==='base-sepolia'?this.config.publicDex:null;}
+  /** The graduation DEX for this network, only when it is switched on (Base Sepolia, and others once their fork check passes). */
+  get dex(){return this.config.publicDexes?.[this.net.key]??(this.net.key==='base-sepolia'?this.config.publicDex:null);}
   get artifacts(){return {...this.config.contracts,factory:this.dex?(this.config.contracts.atomicFactory??this.config.contracts.dexFactory):this.config.contracts.legacyFactory,curve:this.dex?this.config.contracts.dexCurve:this.config.contracts.legacyCurve};}
-  router(runner=this.provider){return new Contract(this.dex.router,['function exactInputSingle((address tokenIn,address tokenOut,uint24 fee,address recipient,uint256 amountIn,uint256 amountOutMinimum,uint160 sqrtPriceLimitX96)) payable returns(uint256)','function multicall(uint256 deadline,bytes[] data) payable returns(bytes[])','function unwrapWETH9(uint256 amountMinimum,address recipient) payable'],runner);}
+  router(runner=this.provider){return new Contract(this.dex.router,routerAbi(this.dex.routerVersion??2),runner);}
   txUrl(hash) { return `${this.net.explorer}/tx/${hash}`; }
   /**
    * Estimated launch pricing before a wallet connects: the $10 creation fee and the deployment's starting FDV
@@ -488,15 +490,15 @@ export class TestnetWallet {
     const percent=Number(body.slippage);if(!Number.isFinite(percent)||percent<0.1||percent>5)throw new Error('Slippage must be between 0.1% and 5%.');
     const input=parseUnits(body.amount,side==='buy'?this.qd(item):18);if(input<=0n)throw new Error('Enter a positive amount.');
     const out=await this.dexQuote(item,side,input),minimum=out*(10000n-BigInt(Math.round(percent*100)))/10000n,asset=this.qaddr(item),router=this.router(this.signer),unwrap=side==='sell'&&item.pair==='native';
-    const params={tokenIn:side==='buy'?asset:item.address,tokenOut:side==='buy'?item.address:asset,fee:10000,recipient:unwrap?router.target:this.address,amountIn:input,amountOutMinimum:minimum,sqrtPriceLimitX96:0};
+    const params={tokenIn:side==='buy'?asset:item.address,tokenOut:side==='buy'?item.address:asset,fee:this.dex.fee??10000,recipient:this.address,amountIn:input,amountOutMinimum:minimum};
     // An exact approval (only when needed) and the swap go out together: one confirmation on wallets that batch.
     const steps=[];
     if(side==='sell'||item.pair!=='native'){const payment=new Contract(params.tokenIn,this.config.contracts.quote.abi,this.signer);if(await payment.allowance(this.address,router.target)<input)steps.push({to:payment.target,data:payment.interface.encodeFunctionData('approve',[router.target,input]),label:'Approve exactly this trade amount…'});}
-    // Router02 single-hop has no deadline; always wrap in its deadline-checked multicall.
-    const calls=[router.interface.encodeFunctionData('exactInputSingle',[params])];if(unwrap)calls.push(router.interface.encodeFunctionData('unwrapWETH9',[minimum,this.address]));
+    // Deadline-checked swap for this DEX's router layout (Uniswap SwapRouter02 or PancakeSwap's v3 SwapRouter).
     const deadline=BigInt((await this.provider.getBlock('latest')).timestamp+300);
-    steps.push({to:router.target,data:router.interface.encodeFunctionData('multicall(uint256,bytes[])',[deadline,calls]),value:side==='buy'&&item.pair==='native'?input:0n,label:'Confirm the Uniswap trade…'});
-    return this.sendCalls(steps,'Confirm the Uniswap trade.');
+    const data=swapCalldata(Interface,this.dex.routerVersion??2,router.target,params,{deadline,unwrapTo:unwrap?this.address:null});
+    steps.push({to:router.target,data,value:side==='buy'&&item.pair==='native'?input:0n,label:`Confirm the ${this.dex.name??'DEX'} trade…`});
+    return this.sendCalls(steps,`Confirm the ${this.dex.name??'DEX'} trade.`);
   }
   async market(item, runner = this.provider) {
     const curve = new Contract(item.curve, this.artifacts.curve.abi, runner);

@@ -18,6 +18,7 @@
     "indexer": "node scripts/indexer.mjs",
     "testnet:check": "node scripts/testnet-readiness.mjs",
     "test:base-fork": "node scripts/base-fork-lifecycle.mjs",
+    "test:chain-fork": "node scripts/chain-fork-lifecycle.mjs",
     "test:equity-fork": "node scripts/equity-fork-check.mjs",
     "test:equity-lifecycle": "node scripts/equity-lifecycle-fork.mjs",
     "test:equity-sim": "node scripts/equity-ethcall-sim.mjs",
