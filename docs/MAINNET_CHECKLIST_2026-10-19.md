@@ -60,3 +60,11 @@ Status as of today: testnet only. Public site live at elpida.fun.
 5. A limited beta: one chain, small caps, creator-wallet rewards only, invite-only gate on.
 
 There is no honest date until C1 and A2 to A7 are done. My rough judgement is several weeks of testnet soak plus the audit before a limited beta, and that depends mostly on audit availability.
+
+## Update, 21 October 2026
+
+- **D6 done.** elpida.fun is on Cloudflare (DNS, Automatic SSL, fallback Worker for redeploys); SEO pages, sitemap and token link previews are live. See `DEPLOY_RESILIENCE.md`.
+- **Graduation thresholds resolved without a contract change.** Stock-paired curves graduate on completion like every curve (rule `on-completion`); the retired $15,000 real-reserve floor was unreachable under Model 10 (about $12,013 at completion). Native and USDC curves were never affected. Not a mainnet blocker.
+- **bStocks excluded in code** (ADGM-only offering). Tokenized stocks remain off and are not on the mainnet-beta path.
+- **Backups:** Railway shows an `elpida-backups` bucket (about 839 MB on 21 Oct); C5 still needs a timed restore drill and a check that `backup_disabled` is absent from production logs.
+- Still the long poles: A2 to A7 (testnet evidence, needs Malik's wallet), C1 (audit not booked), C3 (multisig), D5 (legal).

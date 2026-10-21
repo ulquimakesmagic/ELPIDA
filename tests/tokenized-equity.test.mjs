@@ -129,24 +129,25 @@ test('executable valuation cross-checks the pool TWAP and uses the lower price',
   assert.equal(executableValuation({ reference: { status: 'stale', usable: false }, twapPriceUsd: 100 }).usable, false);
 });
 
-test('graduation needs both USD market cap and REAL quote reserves; virtual reserves do not count', () => {
-  const valuation = { usable: true, status: 'ok' }, thresholds = { minMarketCapUsd: 69000, minRealReserveUsd: 12000 };
+test('stock-paired graduation follows curve completion; virtual reserves are excluded from the reported reserve', () => {
+  const valuation = { usable: true, status: 'ok' };
   const real = realQuoteReserve({ totalQuoteRaw: 40n * 10n ** 18n, virtualQuoteRaw: 30n * 10n ** 18n });
   assert.equal(real, 10n * 10n ** 18n);
-  const base = { quoteDecimals: 18, quotePriceUsd: 1000, valuation, thresholds };
-  assert.equal(checkGraduation({ ...base, marketCapUsd: 70000, realQuoteRaw: real }).reserveOk, false, '$10,000 real reserve is below $12,000');
-  const both = checkGraduation({ ...base, marketCapUsd: 70000, realQuoteRaw: 13n * 10n ** 18n });
-  assert.deepEqual([both.ok, both.status], [true, 'ready']);
-  assert.equal(checkGraduation({ ...base, marketCapUsd: 1000, realQuoteRaw: 13n * 10n ** 18n }).ok, false, 'reserve alone is not enough');
   assert.equal(realQuoteReserve({ totalQuoteRaw: 1n, virtualQuoteRaw: 5n }), 0n);
+  const base = { rule: 'on-completion', valuation, realQuoteRaw: real, quoteDecimals: 18, quotePriceUsd: 1000, marketCapUsd: 50000 };
+  const open = checkGraduation({ ...base, complete: false });
+  assert.deepEqual([open.ok, open.status, open.reserveUsd], [false, 'curve-open', 10000]);
+  const done = checkGraduation({ ...base, complete: true });
+  assert.deepEqual([done.ok, done.status], [true, 'ready'], 'no separate USD floor once the curve completes');
 });
 
-test('unresolved thresholds and unusable valuations block graduation instead of defaulting', () => {
-  const common = { marketCapUsd: 1e9, realQuoteRaw: 10n ** 24n, quoteDecimals: 18, quotePriceUsd: 1000 };
-  const r = checkGraduation({ ...common, valuation: { usable: true }, thresholds: { minMarketCapUsd: 69000, minRealReserveUsd: null } });
-  assert.deepEqual([r.ok, r.status, r.unresolved], [false, 'unresolved-threshold', ['minRealReserveUsd']]);
-  const s = checkGraduation({ ...common, valuation: { usable: false, status: 'stale' }, thresholds: { minMarketCapUsd: 1, minRealReserveUsd: 1 } });
+test('a missing or unknown rule and unusable valuations block graduation instead of defaulting', () => {
+  const r = checkGraduation({ complete: true, valuation: { usable: true } });
+  assert.deepEqual([r.ok, r.status], [false, 'unresolved-rule']);
+  assert.equal(checkGraduation({ rule: 'thresholds', complete: true, valuation: { usable: true } }).status, 'unresolved-rule');
+  const s = checkGraduation({ rule: 'on-completion', complete: true, valuation: { usable: false, status: 'stale' } });
   assert.deepEqual([s.ok, s.status], [false, 'valuation-stale']);
+  assert.equal(checkGraduation({ rule: 'on-completion', complete: true }).status, 'valuation-unavailable');
 });
 
 test('migration conserves reserves and refuses to straddle a multiplier change', () => {

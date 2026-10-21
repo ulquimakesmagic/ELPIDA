@@ -184,13 +184,19 @@ export const realQuoteReserve = ({ totalQuoteRaw, virtualQuoteRaw }) => { const 
  * Dual requirement: minimum USD market cap AND minimum real quote reserves in USD. A null threshold is
  * unresolved and blocks graduation, so a missing decision never turns into a silent default.
  */
-export function checkGraduation({ marketCapUsd, realQuoteRaw, quoteDecimals, quotePriceUsd, valuation, thresholds }) {
-  const unresolved = ['minMarketCapUsd', 'minRealReserveUsd'].filter(k => !(Number(thresholds?.[k]) > 0));
-  if (unresolved.length) return { ok: false, status: 'unresolved-threshold', unresolved };
-  if (!valuation?.usable) return { ok: false, status: `valuation-${valuation?.status ?? 'unavailable'}`, reason: valuation?.reason };
-  const reserveUsd = Number(BigInt(realQuoteRaw)) / 10 ** quoteDecimals * quotePriceUsd;
-  const capOk = marketCapUsd >= thresholds.minMarketCapUsd, reserveOk = reserveUsd >= thresholds.minRealReserveUsd;
-  return { ok: capOk && reserveOk, status: capOk && reserveOk ? 'ready' : 'waiting', marketCapOk: capOk, reserveOk, reserveUsd };
+/**
+ * Graduation for a stock-paired curve. Rule 'on-completion' (decided 21 Oct 2026): graduate when the Model 10 curve has
+ * completed AND the stock's valuation is usable (fresh reference price that agrees with the pool TWAP). There is no
+ * separate USD minimum: Model 10 completes at a $50,000 cap with about $12,013 of real reserve, so a higher reserve
+ * floor could never be met. Any other or missing rule blocks instead of defaulting. Reserve and cap are reported only.
+ */
+export function checkGraduation({ rule, complete, valuation, marketCapUsd = null, realQuoteRaw = null, quoteDecimals = null, quotePriceUsd = null }) {
+  if (rule !== 'on-completion') return { ok: false, status: 'unresolved-rule', rule: rule ?? null };
+  const reserveUsd = realQuoteRaw != null && quoteDecimals != null && Number.isFinite(quotePriceUsd) ? Number(BigInt(realQuoteRaw)) / 10 ** quoteDecimals * quotePriceUsd : null;
+  const info = { marketCapUsd, reserveUsd };
+  if (complete !== true) return { ok: false, status: 'curve-open', ...info };
+  if (!valuation?.usable) return { ok: false, status: `valuation-${valuation?.status ?? 'unavailable'}`, reason: valuation?.reason, ...info };
+  return { ok: true, status: 'ready', ...info };
 }
 
 /** Migration must conserve value and must not straddle a corporate action. */

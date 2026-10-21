@@ -2361,10 +2361,10 @@
   ],
   "verification": [],
   "graduation": {
-    "minMarketCapUsd": 50000,
-    "minRealReserveUsd": 15000,
+    "rule": "on-completion",
     "decidedBy": "Malik",
-    "decidedOn": "2026-10-19",
-    "note": "Both must hold. Real reserve excludes virtual reserves. Enforced in checkGraduation for tokenized-stock pairs; the deployed curve contracts are unchanged and still use their own cap, so contract enforcement of these numbers needs a contract change and audit."
+    "decidedOn": "2026-10-21",
+    "note": "Stock-paired curves graduate when the Model 10 curve completes, like every other curve, provided the stock's reference price is fresh and agrees with the pool TWAP. Model 10 completes at a $50,000 market cap with about $12,013 of real reserve (virtual quote $5,556 x (sqrt(10) - 1), before fees), so the separate minimums decided on 19 Oct ($50,000 cap and $15,000 real reserve) could never both be met and are retired. No contract change: the curve contracts already graduate on completion.",
+    "supersedes": { "minMarketCapUsd": 50000, "minRealReserveUsd": 15000, "decidedOn": "2026-10-19" }
   }
 }
