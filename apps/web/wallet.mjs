@@ -9,7 +9,7 @@ import { EVM_TEST_PAIRS } from '/pairs.mjs';
 import { DEX_MODEL, LEGACY_DEX_MODEL, BETA_MODEL, MODEL_VERSIONS, isDexModel, curveShape, startFdvUsdFor, assertDeploymentTerms, usdQuoteTemplate, GRADUATION_GRACE_SECONDS, BASE_FEE_BPS, SNIPE_START_BPS, SNIPE_WINDOW_SECONDS, SALE_CAP } from '/curve-model.mjs';
 import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
 import {nativeFundingError} from './payment-errors.mjs';
-import {supportsAtomicLaunch,waitAtomicLaunch} from './wallet-batch.mjs';
+import {supportsAtomicLaunch,waitAtomicLaunch,waitAtomicBatch,atomicBatchRequest} from './wallet-batch.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 
 // EIP-6963: every installed EVM wallet announces itself, so Elpida can use the one the person picks
@@ -301,6 +301,36 @@ export class TestnetWallet {
     if (!receipt || receipt.status !== 1) throw new Error('Transaction did not succeed.');
     return { tx, receipt };
   }
+  /**
+   * Sends several calls with as few wallet confirmations as possible. A wallet that supports atomic batches
+   * (EIP-5792) gets ONE confirmation for all of them; otherwise each call is sent in order. Callers pass only
+   * calls that are safe when they have nothing to do, so an all-or-nothing batch never fails on an empty step.
+   * `calls` are {to, data, value?, label}. Returns {tx:{hash}, receipt} for the last transaction.
+   */
+  /** True when the connected wallet advertises atomic batches on this chain (checked once per network). */
+  async canBatch() {
+    const key = `${this.address}:${this.net?.chainId}`;
+    if (this.batchSupport?.key !== key) this.batchSupport = { key, value: await supportsAtomicLaunch(args => this.eth.request(args), this.address, this.net.chainId) };
+    return this.batchSupport.value;
+  }
+  async sendCalls(calls, message) {
+    if (!calls.length) throw new Error('Nothing to send.');
+    const request = args => this.eth.request(args);
+    if (calls.length > 1 && await this.canBatch()) {
+      await this.checkNetwork();
+      this.onProgress(`${message} One confirmation covers all ${calls.length} steps.`);
+      const sent = await withWalletTimeout(request(atomicBatchRequest({ from: this.address, chainId: this.net.chainId, calls, id: crypto.randomUUID() })), this.walletName);
+      if (typeof sent?.id !== 'string' || !sent.id) throw new Error('Wallet did not return a batch ID. Check it before retrying.');
+      this.onProgress('Batch submitted. Waiting for confirmation…');
+      const receipts = await waitAtomicBatch(request, sent.id, this.net.chainId);
+      const hash = receipts.at(-1).transactionHash, receipt = await this.provider.getTransactionReceipt(hash);
+      if (!receipt || receipt.status !== 1) throw new Error('The batch receipt is not available yet. Check your wallet before retrying.');
+      return { tx: { hash }, receipt };
+    }
+    let result;
+    for (const [i, c] of calls.entries()) result = await this.wait(this.signer.sendTransaction({ to: c.to, data: c.data, value: c.value ?? 0n }), calls.length > 1 ? `Step ${i + 1} of ${calls.length}: ${c.label ?? message}` : (c.label ?? message));
+    return result;
+  }
   async approvePayment(coin,spender,amount,message,feeInUsdc) {
     const gas=await coin.approve.estimateGas(spender,amount),fees=await this.provider.getFeeData();
     const error=nativeFundingError({balance:await this.provider.getBalance(this.address),gasCost:gas*(fees.maxFeePerGas??fees.gasPrice??0n),native:this.net.nativeCurrency.symbol,network:this.net.name,feeInUsdc,stage:'approval'});
@@ -459,11 +489,14 @@ export class TestnetWallet {
     const input=parseUnits(body.amount,side==='buy'?this.qd(item):18);if(input<=0n)throw new Error('Enter a positive amount.');
     const out=await this.dexQuote(item,side,input),minimum=out*(10000n-BigInt(Math.round(percent*100)))/10000n,asset=this.qaddr(item),router=this.router(this.signer),unwrap=side==='sell'&&item.pair==='native';
     const params={tokenIn:side==='buy'?asset:item.address,tokenOut:side==='buy'?item.address:asset,fee:10000,recipient:unwrap?router.target:this.address,amountIn:input,amountOutMinimum:minimum,sqrtPriceLimitX96:0};
-    if(side==='sell'||item.pair!=='native'){const payment=new Contract(params.tokenIn,this.config.contracts.quote.abi,this.signer);if(await payment.allowance(this.address,router.target)<input)await this.wait(payment.approve(router.target,input),'Approve the DEX trade…');}
+    // An exact approval (only when needed) and the swap go out together: one confirmation on wallets that batch.
+    const steps=[];
+    if(side==='sell'||item.pair!=='native'){const payment=new Contract(params.tokenIn,this.config.contracts.quote.abi,this.signer);if(await payment.allowance(this.address,router.target)<input)steps.push({to:payment.target,data:payment.interface.encodeFunctionData('approve',[router.target,input]),label:'Approve exactly this trade amount…'});}
     // Router02 single-hop has no deadline; always wrap in its deadline-checked multicall.
     const calls=[router.interface.encodeFunctionData('exactInputSingle',[params])];if(unwrap)calls.push(router.interface.encodeFunctionData('unwrapWETH9',[minimum,this.address]));
     const deadline=BigInt((await this.provider.getBlock('latest')).timestamp+300);
-    return this.wait(router['multicall(uint256,bytes[])'](deadline,calls,{value:side==='buy'&&item.pair==='native'?input:0}),'Confirm the Uniswap trade…');
+    steps.push({to:router.target,data:router.interface.encodeFunctionData('multicall(uint256,bytes[])',[deadline,calls]),value:side==='buy'&&item.pair==='native'?input:0n,label:'Confirm the Uniswap trade…'});
+    return this.sendCalls(steps,'Confirm the Uniswap trade.');
   }
   async market(item, runner = this.provider) {
     const curve = new Contract(item.curve, this.artifacts.curve.abi, runner);
@@ -608,8 +641,28 @@ export class TestnetWallet {
       if (action === 'reopen') { if (this.modelOf(item) !== DEX_MODEL) throw new Error('Only model 10 curves can be reopened.'); result = await this.wait(original.reopen(), 'Confirm reopening the curve for trading…'); }
       else if (action === 'graduate') result = await this.wait(original.graduate(), this.dex?'Confirm graduation into Uniswap v3…':'Confirm graduation into the locked test pool…');
       else if (action === 'withdraw') {
-        result = await this.wait(original.withdrawFees(), 'Claim bonding-curve fees…');
-        if(await original.pool()!==ZeroAddress){if(this.dex){const locker=new Contract(await original.locker(),this.config.contracts.locker.abi,this.signer);result=await this.wait(locker.collectFees(),'Collect Uniswap position fees…');const splitter=new Contract(await original.feeSplitter(),this.config.contracts.splitter.abi,this.signer);for(const asset of [item.address,this.qaddr(item)])for(const recipient of [await this.factoryOf(item).treasury(),await original.creatorRewardVault()])if(await splitter.claimable(asset,recipient)>0n)result=await this.wait(splitter.claim(asset,recipient),'Pay fees to their fixed recipient…');}else result=await this.wait(curve.withdrawFees(),'Claim locked-pool fees…');}
+        // Every step is zero-safe on-chain (withdrawFees, collectFees and claim all succeed with nothing owed), so a
+        // batching wallet gets them all in ONE confirmation. Other wallets get only the steps that will move money.
+        const steps = [], add = (contract, fn, label) => steps.push({ to: contract.target, data: contract.interface.encodeFunctionData(fn.name, fn.args), label });
+        const batch = await this.canBatch();
+        if ((await original.protocolFees()) + (await original.creatorFees()) > 0n) add(original, { name: 'withdrawFees', args: [] }, 'Claim bonding-curve fees…');
+        if (await original.pool() !== ZeroAddress) {
+          if (this.dex) {
+            const locker = new Contract(await original.locker(), this.config.contracts.locker.abi, this.signer);
+            const splitter = new Contract(await original.feeSplitter(), this.config.contracts.splitter.abi, this.signer);
+            // What a collect would move right now (read-only dry run); unknown counts as "something".
+            let collected = null; try { const [a0, a1] = await locker.collectFees.staticCall(); collected = new Map([[(await locker.token0()).toLowerCase(), a0], [(await locker.token1()).toLowerCase(), a1]]); } catch { collected = null; }
+            const willCollect = collected === null || [...collected.values()].some(v => v > 0n);
+            if (batch || willCollect) add(locker, { name: 'collectFees', args: [] }, 'Collect Uniswap position fees…');
+            const recipients = [...new Set([(await this.factoryOf(item).treasury()).toLowerCase(), (await original.creatorRewardVault()).toLowerCase()])];
+            for (const asset of [item.address, this.qaddr(item)]) {
+              const incoming = collected === null ? 1n : (collected.get(String(asset).toLowerCase()) ?? 0n);
+              for (const recipient of recipients) if (batch ? true : (await splitter.claimable(asset, recipient)) > 0n || incoming > 1n) add(splitter, { name: 'claim', args: [asset, recipient] }, 'Pay fees to their fixed recipient…');
+            }
+          } else add(curve, { name: 'withdrawFees', args: [] }, 'Claim locked-pool fees…');
+        }
+        if (!steps.length) throw new Error('Nothing to claim yet. Fees appear here once the curve or the pool has traded.');
+        result = await this.sendCalls(steps, 'Claim fees to their fixed recipients.');
       }
       else if(this.dex&&await original.pool()!==ZeroAddress)result=await this.dexTrade(item,action,body);
       else {
@@ -620,9 +673,11 @@ export class TestnetWallet {
         const [out] = action === 'buy' ? await curve.quoteBuy(input) : await curve.quoteSell(input);
         const payment = action === 'buy' ? new Contract(this.qaddr(item) ?? ZeroAddress, this.config.contracts.quote.abi, this.signer) : new Contract(item.address, this.config.contracts.token.abi, this.signer);
         const marketAddress = await curve.getAddress();
-        if (!(action === 'buy' && item.pair === 'native') && await payment.allowance(this.address, marketAddress) < input) await this.wait(payment.approve(marketAddress, input), 'Approve this trade in your wallet…');
+        const steps = [];
+        if (!(action === 'buy' && item.pair === 'native') && await payment.allowance(this.address, marketAddress) < input) steps.push({ to: payment.target, data: payment.interface.encodeFunctionData('approve', [marketAddress, input]), label: 'Approve exactly this trade amount…' });
         const minimum = out * (10000n - BigInt(Math.round(percent * 100))) / 10000n;
-        result = await this.wait(action === 'buy' ? curve.buy(input, minimum, {value: item.pair === 'native' ? input : 0n}) : curve.sell(input, minimum), 'Confirm the trade in your wallet…');
+        steps.push({ to: marketAddress, data: action === 'buy' ? curve.interface.encodeFunctionData('buy', [input, minimum]) : curve.interface.encodeFunctionData('sell', [input, minimum]), value: action === 'buy' && item.pair === 'native' ? input : 0n, label: 'Confirm the trade in your wallet…' });
+        result = await this.sendCalls(steps, 'Confirm the trade.');
       }
     }
     return { hash: result.tx.hash, token:launchedToken, metadataSaved, metadataPublished, metadataStorage, message: action === 'launch' ? `Your token is live on ${this.net.name}.${metadataPublished ? (metadataStorage==='public-ipfs'?' Metadata pinned to public IPFS and linked on-chain.':' Metadata hosted by Elpida and linked on-chain; public IPFS pinning is not configured.') : metadataSaved ? ' Metadata saved in this browser.' : ' Browser metadata storage failed; keep a copy of your token details.'}` : action === 'withdraw' ? 'Fees distributed to their recipient wallets.' : `Trade confirmed on ${this.net.name}.` };
