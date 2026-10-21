@@ -23,6 +23,7 @@
     "test:equity-sim": "node scripts/equity-ethcall-sim.mjs",
     "test:equity-issuer": "node scripts/equity-issuer-powers-fork.mjs",
     "security:package": "node scripts/security-package.mjs",
+    "check:production": "node scripts/check-production.mjs",
     "test:operations": "node --test tests/operations-monitoring.test.mjs tests/storage-operations.test.mjs tests/backup-retention.test.mjs",
     "backup:key": "node scripts/backup-key.mjs",
     "backup:offsite": "node --env-file-if-exists=.env scripts/offsite-backup.mjs",

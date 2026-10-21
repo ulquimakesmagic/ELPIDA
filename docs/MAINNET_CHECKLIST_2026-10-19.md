@@ -35,7 +35,7 @@ Status as of today: testnet only. Public site live at elpida.fun.
 | C1 | Independent audit: contracts, oracle validation, graduation adapter, fee locker, Solana program | Not started | Written report, findings fixed or documented | Auditor (Malik engages) |
 | C2 | Economic invariant and adversarial tests (fee splits, rounding, griefing at the cap, anti-snipe) | Partly covered by unit tests | Property tests added; results recorded | Claude, Other agent |
 | C3 | Treasury and upgrade keys: move from a single connected wallet to a multisig with a hardware signer; document who can upgrade what | Open | Addresses, signer list, upgrade authority transferred and verified on chain | Malik |
-| C4 | Production config excludes test faucets and test instructions | Open | Config review and an automated check in the deploy script | Claude |
+| C4 | Production config excludes test faucets and test instructions | Done for Solana mainnet (21 Oct): the server refuses to start on a failing mainnet config; `npm run check:production -- --as-mainnet` previews it. EVM mainnet checks to add when an EVM mainnet is configured | `PRODUCTION_GUARD.md`, `tests/production-guard.test.mjs` | Claude |
 | C5 | Backup restore drill and incident procedure | Open | A timed restore from the offsite backup into a clean service; written runbook | Claude, Malik |
 | C6 | Dependency and secrets review (no keys in repo, minimal env, rotated credentials) | Open | Checklist signed off | Claude, Malik |
 
