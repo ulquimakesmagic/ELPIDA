@@ -11,11 +11,11 @@ Status as of today: testnet only. Public site live at elpida.fun.
 | # | Gate | Status | Evidence that closes it | Owner |
 |---|------|--------|--------------------------|-------|
 | A1 | Zero-creator-buy launch, buys, sell, shared-wallet fee claim | Done (SONGOKU) | Tx hashes and balances recorded | Malik |
-| A2 | Atomic graduation: final buy creates the V3 pool; failure reverts only that buy | Open | A fresh token driven to the cap on the atomic factory `0x98a0…7145`; pool address, locked position owner, tx hashes | Malik (funds), Claude (checks) |
+| A2 | Atomic graduation: final buy creates the V3 pool; failure reverts only that buy | **Done (21 Oct)**: SONGOKU `0x27a4…0e4b` on the atomic factory `0x98a0…7145` (model 10). One transaction `0x284ca031a4fd714a984a491d485776940c8d9261564729657f9c4a86a09d5535` (block 48364694) emitted Bought, CurveCompleted, PoolCreated, Initialize, Mint/IncreaseLiquidity (full-range position 83037), position to locker `0x2A71…b56d`, then Graduated. Pool `0x7c4C…E3FC` (Uniswap v3, 1%), liquidity locked, fee splitter `0x9c6F…Ce1d`. The revert-only-that-buy path is covered by `atomic-graduation.test.mjs` | Malik (funds), Claude (checks) |
 | A3 | Post-graduation buy and sell on the DEX, indexed on the token page | Open | Trades appear in the indexer with correct side, price and fees | Malik, Claude |
 | A4 | USDC-pair launch end to end | Open | Same as A1 to A3 on a USDC curve (enabled at block 48289999) | Malik |
 | A5 | Fee collection and claims after graduation | Open | Creator and protocol claims succeed; amounts match the fee ledger | Malik, Claude |
-| A6 | Restart and recovery: restart the service, catch up the index, simulate an RPC outage | Open | Index identical before and after; no skipped transactions | Claude |
+| A6 | Restart and recovery: restart the service, catch up the index, simulate an RPC outage | **Done (21 Oct), simulated**: `tests/restart-recovery.test.mjs` injects random RPC failures (5%) mid-sync with 16+ restarts from the SQLite file, in per-block and 100-block range modes, and a full outage during new trades; the result is identical to a clean rebuild (trades, snapshots, holders, indexed block), and an outage never advances the index. Note: a block is all-or-nothing, so a very unreliable RPC (25%+ failures) stalls on busy blocks; the operations monitor already raises a critical alert on indexer lag | Claude |
 | A7 | Repeat A2 to A5 on each other chain you intend to enable | Open per chain | One validated chain does not validate the others | Malik |
 | A8 | Old curves (AIZEN): keeper or manual graduation path still works | Open | One old curve graduated via the keeper | Other agent |
 
@@ -46,7 +46,7 @@ Status as of today: testnet only. Public site live at elpida.fun.
 | D1 | Per-chain DEX addresses, quote assets, price feeds and finality settings confirmed | Open per chain | Table of verified addresses with links | Other agent, Claude |
 | D2 | Token tax stays disabled on public networks until a verified `taxDeployment` is registered | Enforced in code | Verified V2 deployment, then registry entry | Other agent |
 | D3 | Holder rewards, buybacks, tokenized-stock rewards, identity claims stay off | Off | UI hides them; tests confirm | Claude |
-| D4 | Pay the Railway past-due balance; confirm the plan covers production load and backups | Open | Account in good standing | Malik |
+| D4 | Pay the Railway past-due balance; confirm the plan covers production load and backups | **Paid (21 Oct)**, Pro plan restored; backups check still open | Account in good standing | Malik |
 | D5 | Legal, terms and risk disclosures reviewed for the launch jurisdiction | Not started | Reviewed by a professional | Malik |
 | D6 | Domain: elpida.fun live; `ELPIDA_PUBLIC_URL` set; X redirect URI updated if X verification is used | Mostly done | Site loads on the domain; verification flow tested | Malik |
 | D7 | Public status page and an owner for monitoring and incident response | Open | Alerts reach a person | Malik, Claude |
@@ -67,4 +67,5 @@ There is no honest date until C1 and A2 to A7 are done. My rough judgement is se
 - **Graduation thresholds resolved without a contract change.** Stock-paired curves graduate on completion like every curve (rule `on-completion`); the retired $15,000 real-reserve floor was unreachable under Model 10 (about $12,013 at completion). Native and USDC curves were never affected. Not a mainnet blocker.
 - **bStocks excluded in code** (ADGM-only offering). Tokenized stocks remain off and are not on the mainnet-beta path.
 - **Backups:** Railway shows an `elpida-backups` bucket (about 839 MB on 21 Oct); C5 still needs a timed restore drill and a check that `backup_disabled` is absent from production logs.
-- Still the long poles: A2 to A7 (testnet evidence, needs Malik's wallet), C1 (audit not booked), C3 (multisig), D5 (legal).
+- Later on 21 Oct: A2 done (SONGOKU atomic graduation), A6 done (restart and recovery tests), C2 done for EVM (invariant tests), C4 done for Solana mainnet (production guard), D4 paid.
+- Still the long poles: A3 to A5 and A7 (post-graduation trades, USDC pair, claims, other chains; needs Malik's wallet), C1 (audit not booked), C3 (multisig), D5 (legal).
