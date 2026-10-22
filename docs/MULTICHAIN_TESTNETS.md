@@ -28,12 +28,35 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
 
 | Chain | Fork check | Model 10 | Team launchpad (`shared`) | A2 to A5 live |
 |---|---|---|---|---|
-| Ethereum Sepolia | PASS 13/13, block 11965619 | On | Not yet: deploy, then send the factory address and block | Open |
+| Ethereum Sepolia | PASS 13/13, block 11965619 | On | `0xD641…6d2`, block 11972040 (22 Oct); setup txs below | **Done 22 Oct** (VEGETA, below) |
 | BNB Testnet | Steps 1 to 4 PASS on 22 Oct; step 5 lost upstream state (`missing revert data` = the RPC failed, not a revert). Rerun with the archive-first RPC choice | Off | | |
 | Robinhood Testnet | No DEX or feed | Off | | |
 
 Until a chain's team launchpad is pinned in `packages/core/networks.mjs`, its launches show only in the deploying
 browser, and token details are not staged (they would expire unindexed). After pinning, the public indexer lists them.
+
+### Ethereum Sepolia setup (22 Oct, Malik's wallet `0xf5B0…639D`)
+
+| Step | Transaction | Block | Result |
+|---|---|---|---|
+| Graduation adapter (WETH) | `0xf3921e4fd6de1840558a3798cec15e35446d896e14083763735c9f555a7ad934` | 11972038 | `0xf3a249e1abf044bee5324d02b99ee0fecb34d887` |
+| Atomic factory | `0xdad271f4bd4dbb7e7e66054c3e14389a8733c31bfcba93669667daa039282be9` | 11972040 | `0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2` |
+| USD pricing activated | `0x3cb7ffeccfab605142eb9a8b27bb3635ae4a479f4457b9b37d11912538361ee3` | 11972044 | |
+| USDC adapter | `0x8854e4305d4584dce73486e7afb65f595d59f5754bb681dd59ba7b87843e48dc` | 11972045 | `0xfaf81e4a0624d7fabf39bcbd011cf2259d01790c` |
+| USDC pair approved | `0x3f5b3b0d506da4f604a222f434fd4fc3351dffa15917d4ce9a36b612f4cb39f7` | 11972046 | |
+| First launch, VEGETA, with a 0.05 ETH creator buy | `0xdff8182721ac50bf1d8b6c758159103709620a9604e7bd565b474581edba48b3` | 11972076 | token `0x824932198c224e52a5b73e8c412e2987ef9b03a4`, curve `0x267629dda69505ac233fc92b3d7a4b09d6933924`; 754.0M of the 759.7M sale cap bought |
+
+The same factory address as an old Base Sepolia launchpad is expected: the deployer's nonce matched on both chains.
+
+VEGETA end to end (reported by Malik, 22 Oct):
+
+| Check | Transaction |
+|---|---|
+| Final buy completed the curve and graduated it into Uniswap v3 in the same transaction (A2) | `0x0a8706affadcf063e3e7b6c829ccbf7fad8a685e0a3fb04bab6a1ead17d1009a` |
+| Sell after graduation (A3) | `0x1d56d92660211de82f7a532e7b3219d7c536e4dc78ec06ee503f56f39fa76329` |
+| Fee claim (A5) | `0x6cbd0da943bdd2e0ed85e68598da056d2b4f7b18463366d7c83adaab3a693faa` |
+
+It ran smoothly; the feedback was too many confirmations for sells and claims, addressed in `WALLET_CONFIRMATIONS.md`.
 
 ## Order
 

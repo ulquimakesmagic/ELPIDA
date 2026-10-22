@@ -12,6 +12,7 @@ import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './u
 import {nativeFundingError} from './payment-errors.mjs';
 import {supportsAtomicLaunch,waitAtomicLaunch,waitAtomicBatch,atomicBatchRequest} from './wallet-batch.mjs';
 import { PublicRpcSigner } from './public-rpc-signer.mjs';
+import { MULTICALL3, multicallData, approvalFor } from './one-confirmation.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 
 // EIP-6963: every installed EVM wallet announces itself, so Elpida can use the one the person picks
@@ -312,6 +313,23 @@ export class TestnetWallet {
    * `calls` are {to, data, value?, label}. Returns {tx:{hash}, receipt} for the last transaction.
    */
   /** True when the connected wallet advertises atomic batches on this chain (checked once per network). */
+  /** Multicall3 is deployed on this chain (checked once per network). */
+  async multicallAvailable() {
+    const key = String(this.net?.chainId);
+    if (this.multicallSupport?.key !== key) this.multicallSupport = { key, value: await this.provider.getCode(MULTICALL3).then(code => code !== '0x', () => false) };
+    return this.multicallSupport.value;
+  }
+  /**
+   * Sends permissionless, zero-value steps (fee claims) as ONE transaction through Multicall3 when the chain has it,
+   * whatever the wallet; otherwise as before (an atomic batch, or the steps in order).
+   */
+  async sendPermissionless(steps, message) {
+    if (steps.length > 1 && await this.multicallAvailable()) {
+      await this.checkNetwork();
+      return this.wait(this.signer.sendTransaction({ to: MULTICALL3, data: multicallData(Interface, steps), value: 0n }), `${message} One confirmation covers all ${steps.length} steps…`);
+    }
+    return this.sendCalls(steps, message);
+  }
   async canBatch() {
     const key = `${this.address}:${this.net?.chainId}`;
     if (this.batchSupport?.key !== key) this.batchSupport = { key, value: await supportsAtomicLaunch(args => this.eth.request(args), this.address, this.net.chainId) };
@@ -493,9 +511,10 @@ export class TestnetWallet {
     const input=parseUnits(body.amount,side==='buy'?this.qd(item):18);if(input<=0n)throw new Error('Enter a positive amount.');
     const out=await this.dexQuote(item,side,input),minimum=out*(10000n-BigInt(Math.round(percent*100)))/10000n,asset=this.qaddr(item),router=this.router(this.signer),unwrap=side==='sell'&&item.pair==='native';
     const params={tokenIn:side==='buy'?asset:item.address,tokenOut:side==='buy'?item.address:asset,fee:this.dex.fee??10000,recipient:this.address,amountIn:input,amountOutMinimum:minimum};
-    // An exact approval (only when needed) and the swap go out together: one confirmation on wallets that batch.
+    // An approval (only when needed: the launched token once for selling, payment assets exactly) and the swap go out
+    // together: one confirmation on wallets that batch.
     const steps=[];
-    if(side==='sell'||item.pair!=='native'){const payment=new Contract(params.tokenIn,this.config.contracts.quote.abi,this.signer);if(await payment.allowance(this.address,router.target)<input)steps.push({to:payment.target,data:payment.interface.encodeFunctionData('approve',[router.target,input]),label:'Approve exactly this trade amount…'});}
+    if(side==='sell'||item.pair!=='native'){const payment=new Contract(params.tokenIn,this.config.contracts.quote.abi,this.signer),approval=approvalFor({allowance:await payment.allowance(this.address,router.target),input,sellingLaunchedToken:side==='sell',symbol:item.symbol});if(approval)steps.push({to:payment.target,data:payment.interface.encodeFunctionData('approve',[router.target,approval.amount]),label:approval.label});}
     // Deadline-checked swap for this DEX's router layout (Uniswap SwapRouter02 or PancakeSwap's v3 SwapRouter).
     const deadline=BigInt((await this.provider.getBlock('latest')).timestamp+300);
     const data=swapCalldata(Interface,this.dex.routerVersion??2,router.target,params,{deadline,unwrapTo:unwrap?this.address:null});
@@ -648,7 +667,7 @@ export class TestnetWallet {
         // Every step is zero-safe on-chain (withdrawFees, collectFees and claim all succeed with nothing owed), so a
         // batching wallet gets them all in ONE confirmation. Other wallets get only the steps that will move money.
         const steps = [], add = (contract, fn, label) => steps.push({ to: contract.target, data: contract.interface.encodeFunctionData(fn.name, fn.args), label });
-        const batch = await this.canBatch();
+        const batch = await this.multicallAvailable() || await this.canBatch();
         if ((await original.protocolFees()) + (await original.creatorFees()) > 0n) add(original, { name: 'withdrawFees', args: [] }, 'Claim bonding-curve fees…');
         if (await original.pool() !== ZeroAddress) {
           if (this.dex) {
@@ -666,7 +685,7 @@ export class TestnetWallet {
           } else add(curve, { name: 'withdrawFees', args: [] }, 'Claim locked-pool fees…');
         }
         if (!steps.length) throw new Error('Nothing to claim yet. Fees appear here once the curve or the pool has traded.');
-        result = await this.sendCalls(steps, 'Claim fees to their fixed recipients.');
+        result = await this.sendPermissionless(steps, 'Claim fees to their fixed recipients.');
       }
       else if(this.dex&&await original.pool()!==ZeroAddress)result=await this.dexTrade(item,action,body);
       else {
@@ -678,7 +697,7 @@ export class TestnetWallet {
         const payment = action === 'buy' ? new Contract(this.qaddr(item) ?? ZeroAddress, this.config.contracts.quote.abi, this.signer) : new Contract(item.address, this.config.contracts.token.abi, this.signer);
         const marketAddress = await curve.getAddress();
         const steps = [];
-        if (!(action === 'buy' && item.pair === 'native') && await payment.allowance(this.address, marketAddress) < input) steps.push({ to: payment.target, data: payment.interface.encodeFunctionData('approve', [marketAddress, input]), label: 'Approve exactly this trade amount…' });
+        if (!(action === 'buy' && item.pair === 'native')) { const approval = approvalFor({ allowance: await payment.allowance(this.address, marketAddress), input, sellingLaunchedToken: action === 'sell', symbol: item.symbol }); if (approval) steps.push({ to: payment.target, data: payment.interface.encodeFunctionData('approve', [marketAddress, approval.amount]), label: approval.label }); }
         const minimum = out * (10000n - BigInt(Math.round(percent * 100))) / 10000n;
         steps.push({ to: marketAddress, data: action === 'buy' ? curve.interface.encodeFunctionData('buy', [input, minimum]) : curve.interface.encodeFunctionData('sell', [input, minimum]), value: action === 'buy' && item.pair === 'native' ? input : 0n, label: 'Confirm the trade in your wallet…' });
         result = await this.sendCalls(steps, 'Confirm the trade.');
