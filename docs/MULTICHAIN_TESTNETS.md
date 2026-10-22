@@ -29,7 +29,7 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
 | Chain | Fork check | Model 10 | Team launchpad (`shared`) | A2 to A5 live |
 |---|---|---|---|---|
 | Ethereum Sepolia | PASS 13/13, block 11965619 | On | Not yet: deploy, then send the factory address and block | Open |
-| BNB Testnet | Rerun after the RPC fix | Off | | |
+| BNB Testnet | Steps 1 to 4 PASS on 22 Oct; step 5 lost upstream state (`missing revert data` = the RPC failed, not a revert). Rerun with the archive-first RPC choice | Off | | |
 | Robinhood Testnet | No DEX or feed | Off | | |
 
 Until a chain's team launchpad is pinned in `packages/core/networks.mjs`, its launches show only in the deploying
@@ -52,7 +52,9 @@ browser, and token details are not staged (they would expire unindexed). After p
    and how much to collect at today's gas price. Forking needs an RPC that still holds recent state. Public BNB nodes
    prune it within seconds (error `missing trie node`), so the check tests several public RPCs first, forks one block
    behind the head of the first good one, and retries on another if state disappears mid-run. If all of them fail,
-   use a free archive RPC (NodeReal MegaNode, dRPC, QuickNode or Chainstack) for that one command:
+   use a free archive RPC (NodeReal MegaNode, dRPC, QuickNode or Chainstack) for that one command. The check now tries
+   OnFinality's public BNB endpoint first (it advertises archive data) and prints the real cause behind
+   "missing revert data", which ethers shows for any RPC failure during gas estimation:
    `$env:ELPIDA_FORK_RPC_BNB_TESTNET="https://…"` (PowerShell). The key stays in your terminal; never commit it.
 3. **Switch the chain on** (Claude, one small PR per chain): set `enabled: true` in `testnetDexes` with the report attached.
 4. **Deploy the launchpad** from the app: Network and funds → switch to the chain → set up the launchpad. It deploys
