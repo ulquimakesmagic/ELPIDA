@@ -45,8 +45,9 @@ export function walletErrorText(error, name = 'your wallet') {
 }
 const metadataKey = (chain, factory, token) => `elpida:metadata:${chain}:${factory.toLowerCase()}:${token.toLowerCase()}`;
 // New deployments: model 10 (DEX, Base Sepolia) and model 8 (basic). A pinned model 9 team deployment stays usable.
-const modelOf = chainId => chainId===84532?DEX_MODEL:BETA_MODEL;
-const deploymentKey = chainId => `elpida:${modelOf(chainId)}:deployment:${chainId}`;
+// Model 10 (DEX graduation) runs on every network with an enabled public DEX; the rest keep the beta curve.
+const modelOf = (chainId, dex = false) => chainId===84532||dex?DEX_MODEL:BETA_MODEL;
+const deploymentKey = (chainId, dex = false) => `elpida:${modelOf(chainId, dex)}:deployment:${chainId}`;
 /** Whole native coins (a decimal string) to wei. */
 const wei = text => parseUnits(String(text), 18);
 const read = key => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
@@ -81,7 +82,7 @@ export class TestnetWallet {
     return {launchFee:String(10/p.usd),startFdv:String(start/p.usd),launchFeeWei:BigInt(Math.ceil(10/p.usd*1e18)),virtualQuoteWei:BigInt(Math.ceil(start/p.usd*shape.virtualFactor*1e18))};
   }
   /** Curve model of this network's deployment (or of a new deployment when none exists yet). */
-  get model() { return this.deployment?.model ?? modelOf(this.net.chainId); }
+  get model() { return this.deployment?.model ?? modelOf(this.net.chainId, !!this.dex); }
   /** Starting FDV in US dollars: read from a model 10 factory, else $5,000 for legacy, else the testnet size. */
   get startFdvUsd() {
     if (this.factoryStartFdvUsd) return this.factoryStartFdvUsd;
@@ -98,7 +99,7 @@ export class TestnetWallet {
   get deployment() {
     // Team deployment is authoritative across visitors; saved private deployments remain intact.
     // A model 10 record saved by this browser takes precedence over a pinned legacy model 9 team deployment.
-    const shared=this.net.shared, model=modelOf(this.net.chainId), saved=read(deploymentKey(this.net.chainId));
+    const shared=this.net.shared, model=modelOf(this.net.chainId, !!this.dex), saved=read(deploymentKey(this.net.chainId, !!this.dex));
     if(saved?.launchFeaturesVersion===1&&saved.model===DEX_MODEL&&(shared?.launchFeaturesVersion??0)<1)return saved;
     if(this.net.key==='base-sepolia'&&saved?.model===DEX_MODEL&&saved.feeAccountingVersion===1&&(shared?.feeAccountingVersion??0)<1)return saved;
     if (shared?.factory && shared.model === model) return { ...shared, shared: true };
@@ -378,10 +379,10 @@ export class TestnetWallet {
     this.onProgress('Deployment submitted. Waiting for confirmation…');
     await contract.waitForDeployment();
     const receipt = await contract.deploymentTransaction().wait();
-    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, migrationAdapter, model: modelOf(this.net.chainId), metadataVersion:this.dex?1:undefined,feeAccountingVersion:this.dex?Number(await contract.FEE_ACCOUNTING_VERSION()):undefined,launchFeaturesVersion:this.dex&&this.config.contracts.atomicFactory?1:undefined };
+    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, migrationAdapter, model: modelOf(this.net.chainId, !!this.dex), metadataVersion:this.dex?1:undefined,feeAccountingVersion:this.dex?Number(await contract.FEE_ACCOUNTING_VERSION()):undefined,launchFeaturesVersion:this.dex&&this.config.contracts.atomicFactory?1:undefined };
     if(previousDeployment && !write('elpida:previous-factory:'+this.net.chainId+':'+previousDeployment.factory,previousDeployment))throw new Error('Factory deployed, but previous deployment could not be archived. Save the new factory '+record.factory+' manually.');
     this.launches.clear(); this.scannedBlock = undefined; this.factoryStartFdvUsd = undefined;this.pairsScanned=undefined;this.approvedQuotes=[];this.nativeVirtualQuote=undefined;this.launchFee=undefined;
-    if (!write(deploymentKey(this.net.chainId), record)) throw new Error(`Deployed, but this browser blocks storage. Save factory ${record.factory} (block ${record.block}) in packages/core/networks.mjs.`);
+    if (!write(deploymentKey(this.net.chainId, !!this.dex), record)) throw new Error(`Deployed, but this browser blocks storage. Save factory ${record.factory} (block ${record.block}) in packages/core/networks.mjs.`);
     await this.wait(contract.configureUsdPricing(this.oracle.feed,this.oracle.maxAge,this.oracle.usdc??ZeroAddress),'Activate verified USD pricing. This fixes the oracle and enables launches…');
     if(this.dex&&this.oracle.usdc&&this.oracle.usdc!==ZeroAddress)await this.setupUsdcPair(contract);
     this.needsMetadataUpgrade=false;this.feeAccountingVersion=record.feeAccountingVersion;
@@ -587,7 +588,7 @@ export class TestnetWallet {
       const pairToken = paired ? new Contract(asset.address, this.config.contracts.quote.abi, this.signer) : null;
       if (paired && await pairToken.balanceOf(this.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, asset.decimals)} ${asset.symbol} for the first buy.${asset.test ? ' Use its test faucet in Network and funds.' : ''}`);
       let published;
-      if(publishForLaunch({chain:this.net.key,publicEnabled:this.config.metadataPublishing?.publicEnabled,metadataSupported:!this.needsMetadataUpgrade})){
+      if(publishForLaunch({chain:this.net.key,publicEnabled:this.config.metadataPublishing?.publicEnabled,metadataSupported:!this.needsMetadataUpgrade,publiclyIndexed:!!this.deployment?.shared&&this.model===DEX_MODEL})){
         this.onProgress('Preparing public token details for the launch transaction…');
         const payload=JSON.stringify({network:this.net.key,name,symbol,...details}),proof=await prepareUploadProof(payload);
         const response=await fetch('/api/metadata/stage',{method:'POST',headers:{'Content-Type':'application/json','X-Elpida-Token':this.config.csrf,...proof},body:payload});

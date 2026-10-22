@@ -5,6 +5,8 @@ export function launchProfile(chain) {
 }
 // Metadata is staged before launching and its content identifier is signed in the launch transaction.
 // Solana always does: the launch instruction writes the URI into immutable Metaplex metadata (D11).
-export function publishForLaunch({chain,publicEnabled,metadataSupported}) {
-  return (chain==='base-sepolia' && metadataSupported===true) || chain.startsWith('solana-');
+// Other EVM chains stage details only on the team launchpad that Elpida indexes: staged details are kept once the
+// public indexer sees the launch, and would expire on a private per-browser launchpad.
+export function publishForLaunch({chain,publicEnabled,metadataSupported,publiclyIndexed=false}) {
+  return ((chain==='base-sepolia' || publiclyIndexed===true) && metadataSupported===true) || chain.startsWith('solana-');
 }

@@ -17,3 +17,8 @@ test('a compatible Base launch always stages metadata in its launch transaction'
  assert.equal(publishForLaunch({chain:'base-sepolia',publicEnabled:true,metadataSupported:false}),false);
  assert.equal(publishForLaunch({chain:'base-sepolia',publicEnabled:false,metadataSupported:true}),true);
 });
+test('other EVM chains stage details only on the publicly indexed team launchpad',()=>{
+ assert.equal(publishForLaunch({chain:'ethereum-sepolia',publicEnabled:true,metadataSupported:true}),false,'a private per-browser launchpad would let staged details expire');
+ assert.equal(publishForLaunch({chain:'ethereum-sepolia',publicEnabled:true,metadataSupported:true,publiclyIndexed:true}),true);
+ assert.equal(publishForLaunch({chain:'ethereum-sepolia',publicEnabled:true,metadataSupported:false,publiclyIndexed:true}),false);
+});
