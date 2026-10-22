@@ -16,7 +16,29 @@ one splitter `claim` per asset). Seen on Base Sepolia with SONGOKU: claim txs `0
 | Solana curve fees + PumpSwap LP harvest | **1** transaction when it fits and simulates (checked without signing) | otherwise 2, as before |
 | Launch | already 1 with batching wallets (unchanged) | unchanged |
 
-Approvals stay **exact** (only the amount of this trade); no unlimited approvals were introduced.
+Approvals were exact (only the amount of this trade) until 22 October; see the update below for selling launched tokens.
+
+## Update, 22 October: one confirmation without a batching wallet
+
+Testing on Ethereum Sepolia with Zerion (no EIP-5792 batches), sells still took two confirmations and claims several.
+
+| Flow | Any wallet, from 22 Oct |
+|---|---|
+| EVM fee claim | **1 transaction** through Multicall3 (`0xcA11bde05977b3631167028862bE2a173976CA11`, the same contract on nearly every EVM chain) whenever the chain has it; otherwise as in the table above |
+| Selling a launched token (curve or DEX) | 2 the **first** time for that token (approve once, then sell), **1** for every later sell |
+| Paying with USDC, an xStock or a paired token | unchanged: exact approval per trade (1 with batching wallets, 2 without) |
+
+Why these are safe:
+- **Claims:** every step (`withdrawFees`, `collectFees`, `claim`) is callable by anyone and pays only the fixed
+  recipients, so running them from Multicall3 changes nothing but the number of transactions. The app checks that
+  Multicall3's code exists on the chain first. `tests/one-confirmation.test.mjs` runs curve fees, pool fees and
+  every claim in one Multicall3 transaction on a real local chain, and again with nothing owed.
+- **Sells:** the curve's `sell` and the DEX routers pull tokens only from `msg.sender`, so a standing approval of the
+  launched token can be used only by its holder. This is the same trade-off the Uniswap app makes. Valuable payment
+  assets keep exact approvals. An approval can be revoked from the token's explorer page or a revoke tool.
+
+The first sell of each token still shows two confirmations because ERC-20 approvals must come from the holder and
+these tokens have no `permit`. Wallets that batch get one confirmation there too.
 
 ## Why batching a claim is safe
 
