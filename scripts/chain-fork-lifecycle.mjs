@@ -9,7 +9,7 @@ import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Contract, ContractFactory, Interface, ZeroAddress, formatEther, parseEther } from 'ethers';
+import { Contract, ContractFactory, Interface, ZeroAddress, formatEther, formatUnits, parseEther } from 'ethers';
 import { swapCalldata } from '../packages/core/dex-router.mjs';
 import { v3PoolAbi } from '../packages/core/uniswap.mjs';
 import { EvmIndexer } from '../packages/indexer/evm-indexer.mjs';
@@ -125,33 +125,84 @@ async function main() {
   ]);
   const net = testnets.find(n => n.key === key), dex = testnetDexes[key], oracle = usdOracles()[key];
   assert.ok(net && dex && oracle?.feed, `Usage: npm run test:chain-fork -- <${Object.keys(testnetDexes).join('|')}>`);
-  const rpc = process.env[`ELPIDA_FORK_RPC_${key.toUpperCase().replace(/-/g, '_')}`] ?? net.rpcUrl;
-  const remote = async (method, params = []) => { const r = await (await fetch(rpc, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(30000) })).json(); if (r.error) throw new Error(`${method}: ${r.error.message}`); return r.result; };
-  assert.equal(Number(BigInt(await remote('eth_chainId'))), net.chainId, `the RPC must be ${net.name}`);
-  const block = process.env.ELPIDA_FORK_BLOCK ? Number(process.env.ELPIDA_FORK_BLOCK) : Number(BigInt(await remote('eth_blockNumber'))) - 5;
-  const gasPrice = BigInt(await remote('eth_gasPrice'));
-  console.log(`Forking ${net.name} at block ${block} (local only; nothing is sent to the chain)…`);
+  const override = process.env[`ELPIDA_FORK_RPC_${key.toUpperCase().replace(/-/g, '_')}`];
+  const candidates = override ? [override] : [...new Set([net.rpcUrl, ...(FORK_RPC_FALLBACKS[key] ?? [])])];
   const compiled = compileContracts(), art = n => compiled[`contracts/evm/src/${n}.sol`][n];
-  const connection = await network.create({ network: 'localTest', override: { chainId: 31337, hardfork: 'cancun', forking: { url: rpc, blockNumber: block } } });
-  const provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 }); provider.pollingInterval = 10;
-  const report = { scope: 'LOCAL FORK ONLY', network: key, chainId: net.chainId, block, dex: dex.name, routerVersion: dex.routerVersion ?? 2 };
+  const report = { scope: 'LOCAL FORK ONLY', network: key, chainId: net.chainId, dex: dex.name, routerVersion: dex.routerVersion ?? 2 };
+  let lastError = null;
   try {
-    assert.equal(Number((await provider.getNetwork()).chainId), 31337, 'writes must stay on the local fork');
-    await provider.send('evm_mine', []); // run on a local block, not upstream hardfork history
-    const result = await runChainLifecycle({ provider, signer: await provider.getSigner(0), attacker: await provider.getSigner(1), dex, feed: oracle.feed, maxAge: oracle.maxAge, art, log: console.log });
-    const deployGas = result.gas.filter(g => /^deploy|configure/.test(g.step)).reduce((s, g) => s + BigInt(g.gas), 0n);
-    const allGas = result.gas.reduce((s, g) => s + BigInt(g.gas), 0n);
-    Object.assign(report, result, { result: 'PASS', estimate: { gasPrice: gasPrice.toString(), deployNative: formatEther(deployGas * gasPrice), fullRunNative: formatEther(allGas * gasPrice), suggestedFaucetNative: formatEther(allGas * gasPrice * 3n + parseEther('0.05')) } });
-    console.log(`\nResult: PASS. Deploying costs about ${report.estimate.deployNative} ${net.nativeCurrency.symbol} at today's gas price; a full test run about ${report.estimate.fullRunNative}. Collect about ${report.estimate.suggestedFaucetNative} ${net.nativeCurrency.symbol} (3x margin plus curve buys).`);
+    // Forking reads chain state at a past block. Pruned nodes (common on BNB, where blocks are under a second) drop that
+    // state within seconds, so each RPC is checked first, and a run that loses state mid-way retries on the next one.
+    for (let attempt = 0; attempt < FORK_ATTEMPTS && !report.result; attempt++) {
+      const pick = await chooseForkRpc(candidates, net.chainId, attempt);
+      if (!pick) { lastError = new Error(`None of these RPCs answered with recent ${net.name} state: ${candidates.map(u => new URL(u).host).join(', ')}`); break; }
+      const { rpc, block, gasPrice } = pick;
+      console.log(`Forking ${net.name} at block ${block} via ${new URL(rpc).host} (local only; nothing is sent to the chain)…`);
+      let connection;
+      try {
+        connection = await network.create({ network: 'localTest', override: { chainId: 31337, hardfork: 'cancun', forking: { url: rpc, blockNumber: block } } });
+        const provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 }); provider.pollingInterval = 10;
+        assert.equal(Number((await provider.getNetwork()).chainId), 31337, 'writes must stay on the local fork');
+        await provider.send('evm_mine', []); // run on a local block, not upstream hardfork history
+        const result = await runChainLifecycle({ provider, signer: await provider.getSigner(0), attacker: await provider.getSigner(1), dex, feed: oracle.feed, maxAge: oracle.maxAge, art, log: console.log });
+        const deployGas = result.gas.filter(g => /^deploy|configure/.test(g.step)).reduce((s, g) => s + BigInt(g.gas), 0n);
+        const allGas = result.gas.reduce((s, g) => s + BigInt(g.gas), 0n);
+        Object.assign(report, result, { rpcHost: new URL(rpc).host, block, result: 'PASS', estimate: { gasPrice: gasPrice.toString(), gasPriceGwei: formatUnits(gasPrice, 'gwei'), deployGas: deployGas.toString(), fullRunGas: allGas.toString(), deployNative: formatEther(deployGas * gasPrice), fullRunNative: formatEther(allGas * gasPrice), suggestedFaucetNative: formatEther(allGas * gasPrice * 3n + parseEther('0.05')) } });
+        const sym = net.nativeCurrency.symbol, e = report.estimate;
+        console.log(`\nResult: PASS. Gas price today ${e.gasPriceGwei} gwei. Deploying uses ${deployGas} gas (about ${e.deployNative} ${sym}); a full test run ${allGas} gas (about ${e.fullRunNative} ${sym}). Collect about ${e.suggestedFaucetNative} ${sym} (3x gas margin plus 0.05 for curve buys).`);
+      } catch (error) {
+        lastError = error;
+        if (!isPrunedState(error)) break;
+        console.log(`  ${new URL(rpc).host} no longer has the state for block ${block} (pruned node). Retrying on a fresh block${candidates.length > 1 ? ' or another RPC' : ''}…`);
+      } finally { await connection?.close().catch(() => {}); }
+    }
+    if (!report.result) throw lastError ?? new Error('fork check did not run');
   } catch (error) {
     Object.assign(report, { result: 'FAIL', error: error.shortMessage ?? error.message });
     console.log(`\nResult: FAIL. ${report.error}`);
+    if (isPrunedState(error) || /answered with recent/.test(report.error)) console.log(`If those RPCs are up, they keep too little history for a fork. Use an RPC with archive state (free tiers: NodeReal MegaNode, dRPC, QuickNode, Chainstack) and run again with\n  $env:${`ELPIDA_FORK_RPC_${key.toUpperCase().replace(/-/g, '_')}`}="https://…"`);
     process.exitCode = 1;
   } finally {
     mkdirSync('backups/chain-fork', { recursive: true });
     writeFileSync(`backups/chain-fork/${key}.json`, JSON.stringify(report, (k, v) => typeof v === 'bigint' ? v.toString() : v, 2));
     console.log(`Report: backups/chain-fork/${key}.json`);
-    await connection.close();
   }
+}
+
+const FORK_ATTEMPTS = 4;
+// Extra public RPCs tried after the network's own when the fork check needs state the first one has pruned.
+export const FORK_RPC_FALLBACKS = Object.freeze({
+  'bnb-testnet': ['https://bsc-testnet-rpc.publicnode.com', 'https://bsc-testnet.drpc.org', 'https://data-seed-prebsc-1-s1.bnbchain.org:8545', 'https://data-seed-prebsc-2-s1.bnbchain.org:8545', 'https://data-seed-prebsc-1-s2.bnbchain.org:8545'],
+  'ethereum-sepolia': ['https://ethereum-sepolia-rpc.publicnode.com', 'https://sepolia.drpc.org'],
+});
+const FORK_PROBE = '0x90f79bf6eb2c4f870365e785982e1f101e93b906'; // a local test account the fork reads at startup
+
+export function isPrunedState(error) {
+  return /missing trie node|state (is )?not available|historical state|state histories|pruned|header not found|unknown block/i.test(`${error?.message ?? ''} ${error?.cause?.message ?? ''}`);
+}
+
+async function rpcCall(rpc, method, params = []) {
+  const r = await (await fetch(rpc, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(15000) })).json();
+  if (r.error) throw new Error(`${method}: ${r.error.message}`);
+  return r.result;
+}
+
+/**
+ * The first RPC (rotating by attempt) that is on the right chain and can still serve state a little behind its head.
+ * Forks one block behind the head, so the state is as fresh as possible. `call` is injectable for tests.
+ */
+export async function chooseForkRpc(candidates, chainId, attempt = 0, { call = rpcCall, depth = 32, log = console.log } = {}) {
+  const order = candidates.map((_, i) => candidates[(i + attempt) % candidates.length]);
+  for (const rpc of order) {
+    try {
+      if (Number(BigInt(await call(rpc, 'eth_chainId'))) !== chainId) { log(`  skip ${rpc}: wrong chain`); continue; }
+      const head = Number(BigInt(await call(rpc, 'eth_blockNumber')));
+      const block = process.env.ELPIDA_FORK_BLOCK ? Number(process.env.ELPIDA_FORK_BLOCK) : head - 1;
+      await call(rpc, 'eth_getCode', [FORK_PROBE, '0x' + Math.max(0, block - depth).toString(16)]); // proves some history is kept
+      await call(rpc, 'eth_getCode', [FORK_PROBE, '0x' + block.toString(16)]);
+      return { rpc, block, gasPrice: BigInt(await call(rpc, 'eth_gasPrice')) };
+    } catch (error) { log(`  skip ${new URL(rpc).host}: ${(error.message ?? String(error)).slice(0, 120)}`); }
+  }
+  return null;
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();
