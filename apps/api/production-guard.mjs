@@ -32,6 +32,7 @@ export function productionGuard({ env = {}, solana = null } = {}) {
   if (!env.PINATA_JWT) error('pinning_missing', 'Set PINATA_JWT: mainnet token details must be pinned to public IPFS before a launch.');
   if (!env.RAILWAY_VOLUME_MOUNT_PATH && !env.ELPIDA_DATA_DIR) error('storage_ephemeral', 'Attach a persistent volume: indexes, journals and holder data must survive restarts.');
   if (env.ELPIDA_BACKUP_ENABLED !== 'true') error('backup_disabled', 'Enable verified off-site backups (ELPIDA_BACKUP_ENABLED=true with the ELPIDA_BACKUP_S3_* settings) before mainnet.');
+  else if (!env.ELPIDA_BACKUP_MIRROR_S3_ENDPOINT) warn('backup_single_provider', 'Backups are stored at one provider only. Add ELPIDA_BACKUP_MIRROR_S3_* (for example Cloudflare R2) so a hosting outage cannot also take the backups.');
 
   // Test-only features that must be off.
   if (env.CIRCLE_API_KEY || env.ELPIDA_CIRCLE_ADMIN_TOKEN) error('circle_test_funding', 'Circle test-wallet funding is configured. Remove CIRCLE_API_KEY and ELPIDA_CIRCLE_ADMIN_TOKEN from the mainnet service.');

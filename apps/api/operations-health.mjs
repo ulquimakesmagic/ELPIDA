@@ -16,6 +16,11 @@ export function evaluateOperations({now=Date.now(),startedAt=now,storage={},netw
  else if(!backup.enabled)add('backup_disabled','warning','Automatic off-site backups are not configured.');
  else if(!warm&&backup.running&&!backup.lastSuccess&&now-Date.parse(backup.lastAttempt)<3600000)add('backup_initializing','warning','The first off-site backup is being verified.');
  else if(!warm&&(!Number.isFinite(Date.parse(backup.lastSuccess))||now-Date.parse(backup.lastSuccess)>backup.intervalMs*2))add('backup_overdue','critical','A verified off-site backup is overdue.');
+ // A mirror problem is a warning: the primary backup still protects against data loss, but not a provider outage.
+ if(backup.mirror?.enabled&&!backup.lastError&&backup.enabled){
+  if(backup.mirror.lastError)add('backup_mirror_failed','warning','The second-provider backup copy failed; the primary backup is unaffected.');
+  else if(!warm&&backup.lastSuccess&&!backup.mirror.current&&now-Date.parse(backup.lastSuccess)>3*3600000)add('backup_mirror_behind','warning','The latest backup has not reached the second provider yet.');
+ }
  return {status:incidents.some(i=>i.severity==='critical')?'critical':incidents.length?'degraded':'ok',checkedAt:new Date(now).toISOString(),incidents};
 }
 export class OperationsMonitor{
