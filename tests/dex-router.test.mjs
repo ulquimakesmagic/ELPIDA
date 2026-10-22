@@ -30,9 +30,9 @@ test('version 1 (PancakeSwap v3 SwapRouter) carries the deadline inside the swap
   assert.throws(() => routerAbi(3), /Unknown router version/);
 });
 
-test('testnet DEX config: Base is on, Ethereum Sepolia and BNB Testnet wait for their fork check', () => {
+test('testnet DEX config: Base and Ethereum Sepolia are on (fork check passed); BNB Testnet waits for its fork check', () => {
   assert.equal(testnetDexes['base-sepolia'].enabled, true); assert.equal(testnetDexes['base-sepolia'].manager, baseSepoliaDex.manager);
-  assert.equal(testnetDexes['ethereum-sepolia'].enabled, false); assert.equal(testnetDexes['ethereum-sepolia'].routerVersion, 2);
+  assert.equal(testnetDexes['ethereum-sepolia'].enabled, true); assert.equal(testnetDexes['ethereum-sepolia'].routerVersion, 2);
   assert.equal(testnetDexes['bnb-testnet'].enabled, false); assert.equal(testnetDexes['bnb-testnet'].routerVersion, 1); assert.match(testnetDexes['bnb-testnet'].name, /PancakeSwap/);
   for (const d of Object.values(testnetDexes)) { assert.equal(d.fee, 10000); for (const k of ['factory', 'manager', 'router', 'quoter', 'weth']) assert.match(d[k], /^0x[0-9a-fA-F]{40}$/, k); }
 });

@@ -24,6 +24,17 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
 3. PancakeSwap's periphery router uses the original layout: the deadline is inside the swap, and `multicall(bytes[])`
    has no deadline. `packages/core/dex-router.mjs` encodes both layouts; the wallet picks one per network.
 
+## Status (22 Oct)
+
+| Chain | Fork check | Model 10 | Team launchpad (`shared`) | A2 to A5 live |
+|---|---|---|---|---|
+| Ethereum Sepolia | PASS 13/13, block 11965619 | On | Not yet: deploy, then send the factory address and block | Open |
+| BNB Testnet | Rerun after the RPC fix | Off | | |
+| Robinhood Testnet | No DEX or feed | Off | | |
+
+Until a chain's team launchpad is pinned in `packages/core/networks.mjs`, its launches show only in the deploying
+browser, and token details are not staged (they would expire unindexed). After pinning, the public indexer lists them.
+
 ## Order
 
 1. **Collect test coins** (faucets have daily limits):
