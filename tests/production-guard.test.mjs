@@ -12,6 +12,7 @@ const goodEnv = () => ({
   PINATA_JWT: 'SECRET-PINATA-JWT',
   RAILWAY_VOLUME_MOUNT_PATH: '/data',
   ELPIDA_BACKUP_ENABLED: 'true',
+  ELPIDA_BACKUP_MIRROR_S3_ENDPOINT: 'https://example.r2.cloudflarestorage.com',
 });
 const codes = r => r.errors.map(e => e.code).sort();
 

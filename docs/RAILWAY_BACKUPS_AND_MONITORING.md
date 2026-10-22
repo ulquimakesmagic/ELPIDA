@@ -33,6 +33,15 @@ Railway's current bucket URLs normally use virtual-hosted addressing. Leave ELPI
 
 The AWS S3 client runs server-side. Bucket credentials and the encryption key never appear in the browser configuration or public status. No user wallet key is read, and no extra launch signature is added.
 
+## Second-provider mirror (22 Oct 2026)
+
+Railway's bucket protects against losing the volume, not against Railway itself being down. With
+`ELPIDA_BACKUP_MIRROR_S3_ENDPOINT`, `_BUCKET`, `_REGION`, `_ACCESS_KEY_ID` and `_SECRET_ACCESS_KEY` set (all or none,
+at a different host than the primary), every verified snapshot is also copied to that bucket, manifest last, each
+object read back and hash-checked. A mirror failure is logged as `backup_mirror_failed` and reported as a warning;
+it never fails or delays the primary backup, and it retries hourly. Restore from it with
+`npm run backup:offsite -- restore SNAPSHOT_ID NEW_DATA_DIR --from-mirror`. See `INCIDENT_RUNBOOK.md`.
+
 ## Scope, retention and limits
 
 Backups include metadata (including provisional drafts), retention state and recognized public index databases. SQLite backup includes committed WAL data. Circle wallet/entity-secret material, private simulation journals and upload-admission state are excluded and require separately reviewed recovery procedures.
