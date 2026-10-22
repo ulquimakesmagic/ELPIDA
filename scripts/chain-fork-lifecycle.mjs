@@ -28,7 +28,7 @@ const eq = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
 export async function runChainLifecycle({ provider, signer, attacker, dex, feed, maxAge = 3900, startFdvUsd = 50, grace = 86400, art, log = () => {} }) {
   const checks = [], gas = [];
   const check = (name, ok, detail = '') => { checks.push({ name, ok: !!ok, detail: String(detail) }); log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  ' + detail : ''}`); if (!ok) throw new Error(`Check failed: ${name}${detail ? ' (' + detail + ')' : ''}`); };
-  const send = async (step, pending) => { const r = await (await pending).wait(); if (r.status !== 1) throw new Error(`${step} reverted`); gas.push({ step, gas: r.gasUsed.toString() }); return r; };
+  const send = async (step, pending) => { let r; try { r = await (await pending).wait(); } catch (error) { error.step ??= step; throw error; } if (r.status !== 1) throw new Error(`${step} reverted`); gas.push({ step, gas: r.gasUsed.toString() }); return r; };
   const deploy = async (name, ...args) => { const a = art(name), c = await new ContractFactory(a.abi, a.evm.bytecode.object, signer).deploy(...args); const r = await c.deploymentTransaction().wait(); gas.push({ step: `deploy ${name}`, gas: r.gasUsed.toString() }); return c; };
   const advance = async seconds => { await provider.send('evm_increaseTime', [seconds]); await provider.send('evm_mine', []); };
   const me = await signer.getAddress(), version = dex.routerVersion ?? 2;
@@ -136,8 +136,8 @@ async function main() {
     for (let attempt = 0; attempt < FORK_ATTEMPTS && !report.result; attempt++) {
       const pick = await chooseForkRpc(candidates, net.chainId, attempt);
       if (!pick) { lastError = new Error(`None of these RPCs answered with recent ${net.name} state: ${candidates.map(u => new URL(u).host).join(', ')}`); break; }
-      const { rpc, block, gasPrice } = pick;
-      console.log(`Forking ${net.name} at block ${block} via ${new URL(rpc).host} (local only; nothing is sent to the chain)…`);
+      const { rpc, block, gasPrice, depth } = pick;
+      console.log(`Forking ${net.name} at block ${block} via ${new URL(rpc).host}${depth < FORK_DEEP_HISTORY ? ' (keeps little history; may need a retry)' : ' (keeps deep history)'} (local only; nothing is sent to the chain)…`);
       let connection;
       try {
         connection = await network.create({ network: 'localTest', override: { chainId: 31337, hardfork: 'cancun', forking: { url: rpc, blockNumber: block } } });
@@ -153,13 +153,14 @@ async function main() {
       } catch (error) {
         lastError = error;
         if (!isPrunedState(error)) break;
-        console.log(`  ${new URL(rpc).host} no longer has the state for block ${block} (pruned node). Retrying on a fresh block${candidates.length > 1 ? ' or another RPC' : ''}…`);
+        console.log(`  ${new URL(rpc).host} dropped the state for block ${block} or refused service (${rootCause(error).slice(0, 120)}). Retrying on a fresh block${candidates.length > 1 ? ' or another RPC' : ''}…`);
       } finally { await connection?.close().catch(() => {}); }
     }
     if (!report.result) throw lastError ?? new Error('fork check did not run');
   } catch (error) {
-    Object.assign(report, { result: 'FAIL', error: error.shortMessage ?? error.message });
-    console.log(`\nResult: FAIL. ${report.error}`);
+    const cause = rootCause(error), headline = error.shortMessage ?? error.message;
+    Object.assign(report, { result: 'FAIL', error: headline, cause, failedAt: error.step ?? null });
+    console.log(`\nResult: FAIL${report.failedAt ? ' at ' + report.failedAt : ''}. ${report.error}${!headline.startsWith(cause) ? `\nCause: ${cause}` : ''}`);
     if (isPrunedState(error) || /answered with recent/.test(report.error)) console.log(`If those RPCs are up, they keep too little history for a fork. Use an RPC with archive state (free tiers: NodeReal MegaNode, dRPC, QuickNode, Chainstack) and run again with\n  $env:${`ELPIDA_FORK_RPC_${key.toUpperCase().replace(/-/g, '_')}`}="https://…"`);
     process.exitCode = 1;
   } finally {
@@ -169,16 +170,34 @@ async function main() {
   }
 }
 
-const FORK_ATTEMPTS = 4;
+const FORK_ATTEMPTS = 4, FORK_DEEP_HISTORY = 5000;
 // Extra public RPCs tried after the network's own when the fork check needs state the first one has pruned.
 export const FORK_RPC_FALLBACKS = Object.freeze({
-  'bnb-testnet': ['https://bsc-testnet-rpc.publicnode.com', 'https://bsc-testnet.drpc.org', 'https://data-seed-prebsc-1-s1.bnbchain.org:8545', 'https://data-seed-prebsc-2-s1.bnbchain.org:8545', 'https://data-seed-prebsc-1-s2.bnbchain.org:8545'],
+  'bnb-testnet': ['https://bnb-testnet.api.onfinality.io/public', 'https://bsc-testnet-rpc.publicnode.com', 'https://bsc-testnet.drpc.org', 'https://data-seed-prebsc-1-s1.bnbchain.org:8545', 'https://data-seed-prebsc-2-s1.bnbchain.org:8545', 'https://data-seed-prebsc-1-s2.bnbchain.org:8545'],
   'ethereum-sepolia': ['https://ethereum-sepolia-rpc.publicnode.com', 'https://sepolia.drpc.org'],
 });
 const FORK_PROBE = '0x90f79bf6eb2c4f870365e785982e1f101e93b906'; // a local test account the fork reads at startup
 
+/**
+ * Every message in an error chain. ethers reports ANY failure during gas estimation as "missing revert data" and keeps
+ * the real cause (for a fork: the upstream RPC losing state or rate-limiting) in `info.error`, so look inside.
+ */
+export function errorMessages(error, seen = new Set()) {
+  if (!error || typeof error !== 'object' || seen.has(error)) return typeof error === 'string' ? [error] : [];
+  seen.add(error);
+  const own = [error.shortMessage, error.message, error.reason, error.data?.message].filter(m => typeof m === 'string');
+  return [...own, ...[error.info?.error, error.error, error.cause].flatMap(e => errorMessages(e, seen))];
+}
+/** The deepest message that explains a failure, for the report. */
+export function rootCause(error) {
+  const all = errorMessages(error).filter(m => m && !/^0x[0-9a-f]*$/i.test(m)), deep = all.filter(m => !/^missing revert data/i.test(m));
+  return (deep.at(-1) ?? all[0] ?? String(error)).slice(0, 300);
+}
+/** The upstream RPC dropped the fork's state or refused service: retrying on a fresh block or another RPC helps. */
 export function isPrunedState(error) {
-  return /missing trie node|state (is )?not available|historical state|state histories|pruned|header not found|unknown block/i.test(`${error?.message ?? ''} ${error?.cause?.message ?? ''}`);
+  // A contract revert always carries data (at least "0x"); "missing revert data" means the node failed, not the contract.
+  if (error?.code === 'CALL_EXCEPTION' && error.data == null && /^missing revert data/.test(error.shortMessage ?? '')) return true;
+  return /missing trie node|state (is )?not available|historical state|state histories|pruned|header not found|unknown block|too many requests|rate limit|\b429\b|ECONNRESET|socket hang up|fetch failed|timed? ?out/i.test(errorMessages(error).join(' | '));
 }
 
 async function rpcCall(rpc, method, params = []) {
@@ -191,17 +210,18 @@ async function rpcCall(rpc, method, params = []) {
  * The first RPC (rotating by attempt) that is on the right chain and can still serve state a little behind its head.
  * Forks one block behind the head, so the state is as fresh as possible. `call` is injectable for tests.
  */
-export async function chooseForkRpc(candidates, chainId, attempt = 0, { call = rpcCall, depth = 32, log = console.log } = {}) {
+export async function chooseForkRpc(candidates, chainId, attempt = 0, { call = rpcCall, depths = [FORK_DEEP_HISTORY, 32], log = console.log } = {}) {
   const order = candidates.map((_, i) => candidates[(i + attempt) % candidates.length]);
-  for (const rpc of order) {
+  // Prefer an RPC that keeps deep history (an archive node); fall back to one that keeps a little.
+  for (const [pass, depth] of depths.entries()) for (const rpc of order) {
     try {
       if (Number(BigInt(await call(rpc, 'eth_chainId'))) !== chainId) { log(`  skip ${rpc}: wrong chain`); continue; }
       const head = Number(BigInt(await call(rpc, 'eth_blockNumber')));
       const block = process.env.ELPIDA_FORK_BLOCK ? Number(process.env.ELPIDA_FORK_BLOCK) : head - 1;
       await call(rpc, 'eth_getCode', [FORK_PROBE, '0x' + Math.max(0, block - depth).toString(16)]); // proves some history is kept
       await call(rpc, 'eth_getCode', [FORK_PROBE, '0x' + block.toString(16)]);
-      return { rpc, block, gasPrice: BigInt(await call(rpc, 'eth_gasPrice')) };
-    } catch (error) { log(`  skip ${new URL(rpc).host}: ${(error.message ?? String(error)).slice(0, 120)}`); }
+      return { rpc, block, depth, gasPrice: BigInt(await call(rpc, 'eth_gasPrice')) };
+    } catch (error) { if (pass === depths.length - 1) log(`  skip ${new URL(rpc).host}: ${(error.message ?? String(error)).slice(0, 120)}`); }
   }
   return null;
 }
