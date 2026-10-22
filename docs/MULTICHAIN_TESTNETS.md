@@ -38,8 +38,11 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
    npm.cmd run test:chain-fork -- bnb-testnet
    ```
    Each prints 13 checks and PASS or FAIL, and writes `backups/chain-fork/<network>.json` with the gas of every step
-   and how much to collect at today's gas price. If the public RPC is slow, set your own:
-   `$env:ELPIDA_FORK_RPC_BNB_TESTNET="https://…"` (PowerShell) before the command.
+   and how much to collect at today's gas price. Forking needs an RPC that still holds recent state. Public BNB nodes
+   prune it within seconds (error `missing trie node`), so the check tests several public RPCs first, forks one block
+   behind the head of the first good one, and retries on another if state disappears mid-run. If all of them fail,
+   use a free archive RPC (NodeReal MegaNode, dRPC, QuickNode or Chainstack) for that one command:
+   `$env:ELPIDA_FORK_RPC_BNB_TESTNET="https://…"` (PowerShell). The key stays in your terminal; never commit it.
 3. **Switch the chain on** (Claude, one small PR per chain): set `enabled: true` in `testnetDexes` with the report attached.
 4. **Deploy the launchpad** from the app: Network and funds → switch to the chain → set up the launchpad. It deploys
    the graduation adapter and the factory and activates USD pricing.
