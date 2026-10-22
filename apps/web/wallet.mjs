@@ -11,6 +11,7 @@ import { DEX_MODEL, LEGACY_DEX_MODEL, BETA_MODEL, MODEL_VERSIONS, isDexModel, cu
 import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
 import {nativeFundingError} from './payment-errors.mjs';
 import {supportsAtomicLaunch,waitAtomicLaunch,waitAtomicBatch,atomicBatchRequest} from './wallet-batch.mjs';
+import { PublicRpcSigner } from './public-rpc-signer.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 
 // EIP-6963: every installed EVM wallet announces itself, so Elpida can use the one the person picks
@@ -153,11 +154,11 @@ export class TestnetWallet {
     this.provider?.destroy();
     this.signerProvider?.destroy();
     this.signerProvider = new BrowserProvider(eth, undefined, { cacheTimeout: -1 });
-    this.signer = await this.signerProvider.getSigner();
-    // Wallet RPCs often restrict historical logs. Read from the registry's chain RPC;
-    // signatures and transaction submissions always stay with the selected wallet.
+    // Wallet RPCs often restrict historical logs, and some are slow or broken on testnets. Read, estimate gas and
+    // wait for receipts through the registry's chain RPC; signatures and submissions always stay with the wallet.
     const rpc=new FetchRequest(net.rpcUrl);rpc.timeout=15000;
     this.provider = new JsonRpcProvider(rpc, net.chainId, { staticNetwork:true,cacheTimeout: -1, batchMaxCount: 1 });
+    this.signer = new PublicRpcSigner(await this.signerProvider.getSigner(), this.provider, { onSlow: message => this.onProgress?.(message) });
     this.address = await this.signer.getAddress();
     await this.checkNetwork();
     this.atomicLaunch=await supportsAtomicLaunch(args=>eth.request(args),this.address,net.chainId);
