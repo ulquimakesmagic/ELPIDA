@@ -63,6 +63,7 @@ resources.set('/wallet-batch.mjs', ['wallet-batch.mjs', 'text/javascript']);
 resources.set('/public-rpc-signer.mjs', ['public-rpc-signer.mjs', 'text/javascript']);
 resources.set('/one-confirmation.mjs', ['one-confirmation.mjs', 'text/javascript']);
 resources.set('/graduation-unblock.mjs', ['graduation-unblock.mjs', 'text/javascript']);
+resources.set('/safe-batch.mjs', ['safe-batch.mjs', 'text/javascript']);
 resources.set('/upload-proof.mjs', ['upload-proof.mjs', 'text/javascript']);
 resources.set('/upload-proof-worker.mjs', ['upload-proof-worker.mjs', 'text/javascript']);
 resources.set('/circle-funding.mjs', ['circle-funding.mjs', 'text/javascript']);

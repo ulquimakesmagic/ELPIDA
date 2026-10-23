@@ -1,6 +1,6 @@
 import { nowSeconds } from './clock.mjs';
 import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
-import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, ZeroAddress } from '/vendor/ethers.js';
+import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, ZeroAddress } from '/vendor/ethers.js';
 import { routerAbi, swapCalldata } from '/dex-router.mjs';
 
 import { normalizeMetadata } from './metadata.mjs';
@@ -13,6 +13,7 @@ import {nativeFundingError} from './payment-errors.mjs';
 import {supportsAtomicLaunch,waitAtomicLaunch,waitAtomicBatch,atomicBatchRequest} from './wallet-batch.mjs';
 import { PublicRpcSigner } from './public-rpc-signer.mjs';
 import { MULTICALL3, multicallData, approvalFor } from './one-confirmation.mjs';
+import { readSafe, treasuryError, safeBatch } from './safe-batch.mjs';
 import { graduationSqrtPriceX96, blockedByPool, tokenCheaperInPool } from './graduation-unblock.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 
@@ -206,17 +207,36 @@ export class TestnetWallet {
     return { vq: Number(formatUnits(this.nativeVirtualQuote, 18)), vt: shape.virtualTokens, cap: shape.saleCap, feeBps: BASE_FEE_BPS };
   }
   /** Reads the DEX factory's approved quotes (QuoteApproved events) and labels each by `pairKind()`. */
+  /** The USDC graduation adapter for this launchpad: reused from this browser if valid, else deployed (gas only, no powers). */
+  async usdcAdapter(factory, usdc = this.feeUsdc) {
+    const adapterKey=`elpida:usdc-adapter:${this.net.chainId}:${factory.target.toLowerCase()}`;
+    let adapterAddress=localStorage.getItem(adapterKey);
+    if(adapterAddress){const a=new Contract(adapterAddress,['function manager() view returns(address)','function usdc() view returns(address)','function fee() view returns(uint24)'],this.provider);if((await a.manager()).toLowerCase()!==this.dex.manager.toLowerCase()||(await a.usdc()).toLowerCase()!==usdc.toLowerCase()||await a.fee()!==10000n)throw new Error('Saved USDC adapter does not match this launchpad.');}
+    else {const a=this.config.contracts.adapter;this.onProgress('Confirm the USDC graduation adapter deployment…');const adapter=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,usdc,10000);await adapter.waitForDeployment();adapterAddress=adapter.target;localStorage.setItem(adapterKey,adapterAddress);}
+    return adapterAddress;
+  }
+  /**
+   * The treasury-only setup steps still open on this launchpad (activate USD pricing; approve USDC trading), as a
+   * Safe Transaction Builder batch, or null when nothing is left. Used when the treasury is a Safe.
+   */
+  async treasuryBatch(factory = this.factoryContract().connect(this.signer)) {
+    const steps = [], usdc = this.oracle?.usdc;
+    if (await factory.usdFeed() === ZeroAddress) steps.push({ to: factory.target, data: factory.interface.encodeFunctionData('configureUsdPricing', [this.oracle.feed, this.oracle.maxAge, usdc ?? ZeroAddress]) });
+    if (this.dex && usdc && usdc !== ZeroAddress && (await factory.approvedQuotes(usdc)).adapter === ZeroAddress) {
+      const adapter = await this.usdcAdapter(factory, usdc);
+      steps.push({ to: factory.target, data: factory.interface.encodeFunctionData('approveQuote', [usdc, usdQuoteTemplate(await factory.startFdvUsd(), 6), adapter]) });
+    }
+    if (!steps.length) return null;
+    return safeBatch({ chainId: this.net.chainId, safe: await factory.treasury(), name: `Elpida ${this.net.name} launchpad setup`, description: `Treasury-only setup for launchpad ${factory.target}: ${steps.length} step(s), activating USD pricing and approving USDC trading.`, transactions: steps });
+  }
   async setupUsdcPair(configuredFactory=null) {
     await this.checkNetwork(); const factory=(configuredFactory??await this.verifyFactory()).connect(this.signer);
     this.feeUsdc=await factory.feeUsdc();
     if(!this.dex||!this.feeUsdc||this.feeUsdc===ZeroAddress)throw new Error('A configured USDC asset and DEX adapter are required on this network.');
-    if((await factory.treasury()).toLowerCase()!==this.address.toLowerCase())throw new Error('Only the launchpad treasury can approve the USDC trading pair.');
+    if((await factory.treasury()).toLowerCase()!==this.address.toLowerCase()){const batch=await this.treasuryBatch(factory);return batch?{safeBatch:batch,message:'The treasury is a Safe: the setup file is downloading. Import it in the Safe Transaction Builder for its signers to approve.'}:{message:'Nothing left for the treasury to sign.'};}
     if((await factory.approvedQuotes(this.feeUsdc)).adapter!==ZeroAddress)return {message:'USDC trading pair is already approved.'};
     if(Number(await new Contract(this.feeUsdc,['function decimals() view returns(uint8)'],this.provider).decimals())!==6)throw new Error('The configured USDC asset must use six decimals.');
-    const adapterKey=`elpida:usdc-adapter:${this.net.chainId}:${factory.target.toLowerCase()}`;
-    let adapterAddress=localStorage.getItem(adapterKey);
-    if(adapterAddress){const a=new Contract(adapterAddress,['function manager() view returns(address)','function usdc() view returns(address)','function fee() view returns(uint24)'],this.provider);if((await a.manager()).toLowerCase()!==this.dex.manager.toLowerCase()||(await a.usdc()).toLowerCase()!==this.feeUsdc.toLowerCase()||await a.fee()!==10000n)throw new Error('Saved USDC adapter does not match this launchpad.');}
-    else {const a=this.config.contracts.adapter;this.onProgress('Confirm the USDC graduation adapter deployment…');const adapter=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,this.feeUsdc,10000);await adapter.waitForDeployment();adapterAddress=adapter.target;localStorage.setItem(adapterKey,adapterAddress);}
+    const adapterAddress=await this.usdcAdapter(factory);
     // Model 10: start FDV x 10/9 in USDC units. Legacy model 9: $5,000 x 16/15.
     const legacy=this.model===LEGACY_DEX_MODEL,start=legacy?5000n:await factory.startFdvUsd();
     const vq=legacy?5_000_000_000n*await factory.VIRTUAL_TOKEN()/await factory.TOKEN_SUPPLY():usdQuoteTemplate(start,6);
@@ -402,8 +422,19 @@ export class TestnetWallet {
       localStorage.removeItem(key);return {tx:{hash:receipt.transactionHash},receipt:{...actual,logs}};
     }catch(error){if(error.batchFailed)localStorage.removeItem(key);throw error;}
   }
-  async deploy() {
+  /**
+   * `body.treasury`: optional Safe address that becomes the factory's immutable treasury (required on mainnet). The
+   * connected wallet then only deploys and pays gas; the treasury-only setup comes back as a Safe batch to sign.
+   */
+  async deploy(body = {}) {
     await this.checkNetwork();
+    const entered = String(body.treasury ?? '').trim();
+    if (entered && !isAddress(entered)) throw new Error('Enter a valid treasury address (a Safe), or leave it empty to use this wallet on testnet. Nothing was deployed.');
+    const treasury = entered ? getAddress(entered) : this.address, external = treasury.toLowerCase() !== this.address.toLowerCase();
+    const safe = external || this.net.mainnet ? await readSafe(Contract, this.provider, treasury) : null;
+    const treasuryProblem = treasuryError({ mainnet: !!this.net.mainnet, treasury, connected: this.address, safe });
+    if (treasuryProblem) throw new Error(treasuryProblem);
+    if (external && !this.dex) throw new Error('A multisig treasury needs the DEX launchpad on this network. Nothing was deployed.');
     if (this.deployment && !this.needsMetadataUpgrade && !this.modelUpgradeAvailable && !this.feeFixUpgradeAvailable && !this.launchUpgradeAvailable) throw new Error(`This ${this.net.name} launchpad is already set up. Use it for your launches.`);
     const previousDeployment=this.deployment;
     await this.oraclePrice();
@@ -423,14 +454,19 @@ export class TestnetWallet {
     // Model 10 terms are fixed at deployment: $50 test-sized curves on testnets, $5,000 on mainnet (enforced).
     const terms=this.dex?assertDeploymentTerms(this.net,{startFdvUsd:startFdvUsdFor(this.net),graduationGrace:GRADUATION_GRACE_SECONDS}):null;
     this.onProgress(`Confirm the launchpad deployment. Oracle pricing will enforce the $10 launch fee and $${(terms?.startFdvUsd??5000).toLocaleString()} starting FDV…`);
-    const contract = await new ContractFactory(artifact.abi, artifact.bytecode, this.signer).deploy(this.address, ...(this.dex?[migrationAdapter,terms.startFdvUsd,terms.graduationGrace]:[0n,1n]));
+    const contract = await new ContractFactory(artifact.abi, artifact.bytecode, this.signer).deploy(treasury, ...(this.dex?[migrationAdapter,terms.startFdvUsd,terms.graduationGrace]:[0n,1n]));
     this.onProgress('Deployment submitted. Waiting for confirmation…');
     await contract.waitForDeployment();
     const receipt = await contract.deploymentTransaction().wait();
-    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, migrationAdapter, model: modelOf(this.net.chainId, !!this.dex), metadataVersion:this.dex?1:undefined,feeAccountingVersion:this.dex?Number(await contract.FEE_ACCOUNTING_VERSION()):undefined,launchFeaturesVersion:this.dex&&this.config.contracts.atomicFactory?1:undefined };
+    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, treasury, migrationAdapter, model: modelOf(this.net.chainId, !!this.dex), metadataVersion:this.dex?1:undefined,feeAccountingVersion:this.dex?Number(await contract.FEE_ACCOUNTING_VERSION()):undefined,launchFeaturesVersion:this.dex&&this.config.contracts.atomicFactory?1:undefined };
     if(previousDeployment && !write('elpida:previous-factory:'+this.net.chainId+':'+previousDeployment.factory,previousDeployment))throw new Error('Factory deployed, but previous deployment could not be archived. Save the new factory '+record.factory+' manually.');
     this.launches.clear(); this.scannedBlock = undefined; this.factoryStartFdvUsd = undefined;this.pairsScanned=undefined;this.approvedQuotes=[];this.nativeVirtualQuote=undefined;this.launchFee=undefined;
     if (!write(deploymentKey(this.net.chainId, !!this.dex), record)) throw new Error(`Deployed, but this browser blocks storage. Save factory ${record.factory} (block ${record.block}) in packages/core/networks.mjs.`);
+    if(external){
+      this.needsMetadataUpgrade=false;this.feeAccountingVersion=record.feeAccountingVersion;
+      const batch=await this.treasuryBatch(contract.connect(this.signer));
+      return { hash: receipt.hash, safeBatch: batch, message: `Your ${this.net.name} launchpad is deployed with the Safe ${treasury} as its treasury (${safe.threshold} of ${safe.owners.length} signatures). The treasury setup file is downloading: import it in the Safe's Transaction Builder, then the signers approve it. Launches open once it executes.` };
+    }
     await this.wait(contract.configureUsdPricing(this.oracle.feed,this.oracle.maxAge,this.oracle.usdc??ZeroAddress),'Activate verified USD pricing. This fixes the oracle and enables launches…');
     if(this.dex&&this.oracle.usdc&&this.oracle.usdc!==ZeroAddress)await this.setupUsdcPair(contract);
     this.needsMetadataUpgrade=false;this.feeAccountingVersion=record.feeAccountingVersion;
@@ -459,6 +495,7 @@ export class TestnetWallet {
     await this.checkNetwork();await this.oraclePrice();
     const factory=this.factoryContract().connect(this.signer);
     if(await factory.usdFeed()!==ZeroAddress)throw new Error('Oracle pricing is already fixed. Manual pricing is disabled.');
+    if((await factory.treasury()).toLowerCase()!==this.address.toLowerCase()){const batch=await this.treasuryBatch(factory);return {safeBatch:batch,message:'The treasury is a Safe: the setup file is downloading. Import it in the Safe Transaction Builder for its signers to approve; launches open once it executes.'};}
     const result=await this.wait(factory.configureUsdPricing(this.oracle.feed,this.oracle.maxAge,this.oracle.usdc??ZeroAddress),'Activate verified USD pricing…');
     if(this.dex&&this.oracle.usdc&&this.oracle.usdc!==ZeroAddress)await this.setupUsdcPair(factory);
     return result;
