@@ -11,10 +11,21 @@ Search Console sitemap: Google's live test fetches it; the "Couldn't fetch" row 
 
 `contracts/solana/build/*.so` were rebuilt from current source (optional creator buy) with Solana CLI 2.3.13. New SHA256: test build `89d96d53856ba206a8a3a96b0b971d503d6fcfb0dd028587cf654fbc5f6d0b88`, mainnet build `1a1db96d0654a10ffc321e01cd055bd4c807d5ff1ad243bdabe04e02a25f865a`. The hash quoted in item 3 below (`4e96…9623`) belongs to the earlier build. The devnet program has not been upgraded from these yet; that is the next Solana step. See `MAINNET_CHECKLIST_2026-10-19.md`.
 
-## Next test funds: finish SONGOKU, then tax rehearsal
+## Resuming work — updated 23 October 2026
 
-SONGOKU's zero-buy launch, buys, sell and shared-wallet fee claim are verified.
-Automatic graduation and post-migration trading remain outstanding. See
+Read `CODEBASE_CATCHUP_2026-10-23.md` and the latest entries in
+`MAINNET_CHECKLIST_2026-10-19.md`. SONGOKU graduation, DEX trades and claims are
+recorded complete on 21 October; Ethereum Sepolia is now enabled and pinned.
+Next public lifecycle gap is the Base Sepolia USDC pair (A4). Solana binaries
+have been rebuilt but still require the devnet upgrade and verification. Tax
+launches remain gated. `AGENTS.md` requires fetching and reviewing new work
+before continuing a resumed chat.
+
+## Previous test-funds plan (18 October; SONGOKU steps now complete)
+
+SONGOKU's zero-buy launch, buys, sell and shared-wallet fee claim were verified
+in this chat. The later A2/A3/A5 evidence closes graduation and post-migration
+trading/claims; do not repeat the earlier outstanding-work assumption. See
 `BASE_SEPOLIA_TAX_REHEARSAL.md` for the snapshot, acceptance checks and separate
 V2 deployment order; `config/base-sepolia-tax-plan.json` is an inert plan, not
 an active registry entry. No official Base Sepolia V2 factory was found in the
