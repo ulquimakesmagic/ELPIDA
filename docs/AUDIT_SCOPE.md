@@ -88,8 +88,8 @@ Evidence: `tests/economic-invariants.test.mjs` (seeded multi-trader fuzzing, ETH
 `PATH=<solana bin>:$PATH npm test`.
 
 `npm run test:chain-fork -- <network>` runs the whole lifecycle (13 checks) on a fork of a real testnet DEX and
-feed. It passed on Ethereum Sepolia (Uniswap v3). A rerun is pending on BNB Testnet (PancakeSwap v3). Base Sepolia
-was exercised live instead (section 6).
+feed. It passed on Ethereum Sepolia (Uniswap v3) and BNB Testnet (PancakeSwap v3). Base Sepolia was exercised live
+instead (section 6).
 
 ## 5. Findings from our own review (before the audit)
 
@@ -149,9 +149,11 @@ Our findings:
 |---|---|---|
 | Base Sepolia (Uniswap v3) | `0x98a0E75dbBe9EdA5D228319C72D496b814bA7145` | 48289973 |
 | Ethereum Sepolia (Uniswap v3) | `0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2` | 11972040 |
+| BNB Testnet (PancakeSwap v3; requires token details) | `0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE` | 138485798 |
 
-Both have been exercised end to end: launch, completion with graduation in the same transaction, DEX trades and
-claims. The transaction hashes are in `MAINNET_CHECKLIST_2026-10-19.md` (A2–A7).
+All three have been exercised live: launch, completion with graduation in the same transaction, and claims; DEX
+trades on Base and Ethereum Sepolia. The transaction hashes are in `MAINNET_CHECKLIST_2026-10-19.md` (A2–A7) and
+`MULTICHAIN_TESTNETS.md`.
 
 ## 7. Reproducing the static analysis
 
