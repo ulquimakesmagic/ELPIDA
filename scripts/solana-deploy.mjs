@@ -27,6 +27,7 @@ import { solanaPricing } from '../packages/core/pricing.mjs';
 import { SOLANA_ORACLES } from '../packages/core/usd-oracles.mjs';
 import { createElpidaSolana, poolStats } from '../packages/solana/client.mjs';
 import { declaredProgramId } from '../packages/solana/program-id.mjs';
+import { savedTestAssets } from '../packages/solana/deploy-record.mjs';
 import { deployProgram, upgradeProgram, upgradeCost, programStatus, deploymentCost, airdrop, findExistingBuffer, closeStaleBuffers, ensurePairConfigs, ensureBetaGate, rejectsTestInstructions, transferUpgradeAuthority, upgradeAuthority, ensurePricing } from '../packages/solana/deploy.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -156,8 +157,10 @@ const client = createElpidaSolana(web3, programId);
 const isAuthority = (await upgradeAuthority(connection, programId))?.equals(payer.publicKey) ?? false;
 if (!isAuthority) console.log('The upgrade authority is not this deployer (multisig?): existing pair configs are left as they are. Reprice with node scripts/native-pricing.mjs --export.');
 // Native SOL pair (and, on test networks, a test paired token), created or repriced to config/native-pricing.json.
+const publishedPath = `${root}deployments/solana-${args.cluster}.json`;
+const published = !localnet && existsSync(publishedPath) ? JSON.parse(readFileSync(publishedPath, 'utf8')) : null;
 const pairs = await ensurePairConfigs({ connection, payer, programId: programId, treasury: args.treasury ?? payer.publicKey.toBase58(),
-  templates: solanaPairTemplates(pricing, { test: !mainnet && !args['no-test-pairs'], usdcMint: SOLANA_ORACLES[args.cluster]?.usdcMint, usdcStartFdv: mainnet?'5000':'50' }), saved: state.testAssets ?? {}, reprice: isAuthority, onProgress: message => console.log(message) });
+  templates: solanaPairTemplates(pricing, { test: !mainnet && !args['no-test-pairs'], usdcMint: SOLANA_ORACLES[args.cluster]?.usdcMint, usdcStartFdv: mainnet?'5000':'50' }), saved: savedTestAssets(state, published, programId.toBase58()), reprice: isAuthority, onProgress: message => console.log(message) });
 state.testAssets = Object.fromEntries(pairs.filter(p => p.test).map(p => [p.key, p.mint]));
 writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
 for (const p of pairs) console.log(`${p.symbol} pair config ${p.created ? 'created' : p.repriced ? 'repriced for future launches' : 'up to date'} (${p.kind}, mint ${p.mint}).`);
