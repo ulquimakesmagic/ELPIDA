@@ -178,7 +178,7 @@ async function main() {
   }
 }
 
-const FORK_ATTEMPTS = 4, FORK_DEEP_HISTORY = 5000;
+const FORK_ATTEMPTS = 6, FORK_DEEP_HISTORY = 5000;
 // Chains checked only on a fork of their mainnet, because their testnet has no DEX or price feed. Read-only upstream;
 // every write happens on the local fork. Robinhood Chain (23 Oct 2026): Chainlink lists no feeds on its testnet, and
 // Uniswap's official v3 deployment is on mainnet only. Sources: Uniswap's Robinhood Chain v3 deployments page and
@@ -224,7 +224,9 @@ export const FORK_RPC_FALLBACKS = Object.freeze({
   'ethereum-sepolia': ['https://ethereum-sepolia-rpc.publicnode.com', 'https://sepolia.drpc.org'],
   'base-mainnet': ['https://base-rpc.publicnode.com', 'https://base.drpc.org'],
   'ethereum-mainnet': ['https://eth.drpc.org'],
-  'bnb-mainnet': ['https://bsc.drpc.org', 'https://bsc-dataseed.bnbchain.org'],
+  // Public BNB mainnet nodes prune old state within minutes and rate-limit heavy fork reads; deep-history ones are
+  // preferred automatically. A free archive key (NodeReal MegaNode) via ELPIDA_FORK_RPC_BNB_MAINNET is the sure route.
+  'bnb-mainnet': ['https://bnb.api.onfinality.io/public', 'https://binance.llamarpc.com', 'https://1rpc.io/bnb', 'https://bsc-mainnet.public.blastapi.io', 'https://bsc.drpc.org', 'https://bsc-dataseed.bnbchain.org', 'https://bsc-dataseed1.defibit.io'],
 });
 const FORK_PROBE = '0x90f79bf6eb2c4f870365e785982e1f101e93b906'; // a local test account the fork reads at startup
 
@@ -247,7 +249,7 @@ export function rootCause(error) {
 export function isPrunedState(error) {
   // A contract revert always carries data (at least "0x"); "missing revert data" means the node failed, not the contract.
   if (error?.code === 'CALL_EXCEPTION' && error.data == null && /^missing revert data/.test(error.shortMessage ?? '')) return true;
-  return /missing trie node|state (is )?not available|historical state|state histories|pruned|header not found|unknown block|too many requests|rate limit|\b429\b|ECONNRESET|socket hang up|fetch failed|timed? ?out/i.test(errorMessages(error).join(' | '));
+  return /missing trie node|state (is )?not available|historical state|state histories|pruned|header not found|unknown block|too many requests|rate limit|\b429\b|\b403\b|forbidden|ECONNRESET|socket hang up|fetch failed|timed? ?out/i.test(errorMessages(error).join(' | '));
 }
 
 async function rpcCall(rpc, method, params = []) {

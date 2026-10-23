@@ -127,6 +127,20 @@ Notes:
   listed). Uniswap v3 stays the Robinhood choice because it has the router the app uses.
 - **L2 sequencer:** Base and Robinhood Chain are rollups; see audit finding F-7.
 
+**Results (23 Oct, Malik's PC), each 14/14 unless noted:**
+
+| Chain | Result | Block, RPC | Fee priced at | Real deployment gas |
+|---|---|---|---|---|
+| Base | **PASS 14/14** | 53001266, mainnet.base.org (deep history) | 0.004168 ETH | 9,846,059 gas, about 0.000059 ETH at 0.006 gwei |
+| Ethereum | **PASS 14/14** | 26258156, eth.drpc.org (deep history) | 0.004166 ETH | 9,848,558 gas, about 0.000497 ETH at 0.050 gwei |
+| Robinhood Chain | **PASS 14/14** | 96216786, rpc.mainnet.chain.robinhood.com | 0.004174 ETH | 9,846,287 gas, about 0.000197 ETH |
+| BNB Chain | **Not finished: RPC** | publicnode answered 403 mid-run; dataseed had pruned the state; drpc rate-limited | | |
+
+On BNB every attempt passed the DEX and feed checks (PancakeSwap manager, WBNB, 1% tier, `BNB / USD`), then the public
+node refused the fork's state reads. The fallback list now has more BNB nodes, a 403 counts as retryable, and there are
+six attempts. The sure route is a free archive key: NodeReal MegaNode, then
+`$env:ELPIDA_FORK_RPC_BNB_MAINNET="https://bsc-mainnet.nodereal.io/v1/<key>"` (keep the key in the terminal only).
+
 ### Robinhood Chain: mainnet fork check (23 Oct)
 
 Robinhood Chain's testnet cannot be tested live: Chainlink's feed list says "Robinhood Chain feeds are not available on
