@@ -4,6 +4,7 @@
 //   npm run test:chain-fork -- bnb-testnet
 //   npm run test:chain-fork -- base-sepolia
 //   npm run test:chain-fork -- robinhood-mainnet   (fork only: Robinhood's testnet has no DEX or price feed)
+//   npm run test:chain-fork -- base-mainnet | ethereum-mainnet | bnb-mainnet   (mainnet forks; nothing is sent)
 // Optional env: ELPIDA_FORK_RPC_<NETWORK> (e.g. ELPIDA_FORK_RPC_BNB_TESTNET) to use your own RPC; ELPIDA_FORK_BLOCK.
 // Writes backups/chain-fork/<network>.json with every check, the gas each step used, and what to collect from faucets.
 import assert from 'node:assert/strict';
@@ -177,17 +178,41 @@ async function main() {
   }
 }
 
-const FORK_ATTEMPTS = 4, FORK_DEEP_HISTORY = 5000;
+const FORK_ATTEMPTS = 6, FORK_DEEP_HISTORY = 5000;
 // Chains checked only on a fork of their mainnet, because their testnet has no DEX or price feed. Read-only upstream;
 // every write happens on the local fork. Robinhood Chain (23 Oct 2026): Chainlink lists no feeds on its testnet, and
 // Uniswap's official v3 deployment is on mainnet only. Sources: Uniswap's Robinhood Chain v3 deployments page and
 // Chainlink's price-feed address list (Robinhood Chain Mainnet, ETH / USD standard proxy). The run re-checks each
 // address on-chain: the manager must belong to the factory, WETH must match, and the feed must describe ETH / USD.
+// Mainnet fork targets (checklist D1, 23 Oct 2026), from the official pages: Uniswap's v3 deployment pages (Base,
+// Ethereum, Robinhood Chain), PancakeSwap's v3 address page (BSC), and Chainlink's price-feed address list (standard
+// proxies, with each feed's heartbeat). The run re-checks them on-chain before deploying anything on the fork.
+// maxAge here only has to cover the fork run (the check advances time about a minute); production values are in
+// docs/MULTICHAIN_TESTNETS.md.
 export const FORK_ONLY = Object.freeze({
+  'base-mainnet': {
+    net: { key: 'base-mainnet', name: 'Base (mainnet fork)', chainId: 8453, rpcUrl: 'https://mainnet.base.org', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 } },
+    dex: { name: 'Uniswap v3', fee: 10000, factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', manager: '0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1', router: '0x2626664c2603336E57B271c5C0b26F421741e481', quoter: '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a', weth: '0x4200000000000000000000000000000000000006', routerVersion: 2 },
+    oracle: { feed: '0x50015f8b17fb2C290Dde41fDc246ed0dcEE93a8b', maxAge: 1500, description: 'ETH / USD' }, // 1200 s heartbeat
+    startFdvUsd: 5000,
+  },
+  'ethereum-mainnet': {
+    net: { key: 'ethereum-mainnet', name: 'Ethereum (mainnet fork)', chainId: 1, rpcUrl: 'https://ethereum-rpc.publicnode.com', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 } },
+    dex: { name: 'Uniswap v3', fee: 10000, factory: '0x1F98431c8aD98523631AE4a59f267346ea31F984', manager: '0xC36442b4a4522E871399CD717aBDD847Ab11FE88', router: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45', quoter: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e', weth: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', routerVersion: 2 },
+    oracle: { feed: '0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419', maxAge: 3900, description: 'ETH / USD' }, // 3600 s heartbeat
+    startFdvUsd: 5000,
+  },
+  'bnb-mainnet': {
+    net: { key: 'bnb-mainnet', name: 'BNB Chain (mainnet fork)', chainId: 56, rpcUrl: 'https://bsc-rpc.publicnode.com', nativeCurrency: { name: 'BNB', symbol: 'BNB', decimals: 18 } },
+    // PancakeSwap's original v3 router layout (deadline in the struct), as on BNB Testnet. WBNB is read from the manager.
+    dex: { name: 'PancakeSwap v3', fee: 10000, factory: '0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865', manager: '0x46A15B0b27311cedF172AB29E4f4766fbE7F4364', router: '0x1b81D678ffb9C0263b24A97847620C99d213eB14', quoter: '0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997', weth: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', routerVersion: 1 },
+    oracle: { feed: '0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE', maxAge: 300, description: 'BNB / USD' }, // 27 s heartbeat, 8 decimals
+    startFdvUsd: 5000,
+  },
   'robinhood-mainnet': {
     net: { key: 'robinhood-mainnet', name: 'Robinhood Chain (mainnet fork)', chainId: 4663, rpcUrl: 'https://rpc.mainnet.chain.robinhood.com', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 } },
     dex: { name: 'Uniswap v3', fee: 10000, factory: '0x1f7d7550B1b028f7571E69A784071F0205FD2EfA', manager: '0x73991a25C818Bf1f1128dEAaB1492D45638DE0D3', router: '0xCaf681a66D020601342297493863E78C959E5cb2', quoter: '0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7', weth: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73', routerVersion: 2 },
-    // Crypto feeds on Arbitrum-based chains update on deviation with a 24 h heartbeat, so allow a full day here.
+    // Chainlink lists a 86400 s heartbeat (0.5% deviation) for this feed.
     oracle: { feed: '0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9', maxAge: 86400, description: 'ETH / USD' },
     startFdvUsd: 5000, // mainnet terms
   },
@@ -197,6 +222,11 @@ export const FORK_ONLY = Object.freeze({
 export const FORK_RPC_FALLBACKS = Object.freeze({
   'bnb-testnet': ['https://bnb-testnet.api.onfinality.io/public', 'https://bsc-testnet-rpc.publicnode.com', 'https://bsc-testnet.drpc.org', 'https://data-seed-prebsc-1-s1.bnbchain.org:8545', 'https://data-seed-prebsc-2-s1.bnbchain.org:8545', 'https://data-seed-prebsc-1-s2.bnbchain.org:8545'],
   'ethereum-sepolia': ['https://ethereum-sepolia-rpc.publicnode.com', 'https://sepolia.drpc.org'],
+  'base-mainnet': ['https://base-rpc.publicnode.com', 'https://base.drpc.org'],
+  'ethereum-mainnet': ['https://eth.drpc.org'],
+  // Public BNB mainnet nodes prune old state within minutes and rate-limit heavy fork reads; deep-history ones are
+  // preferred automatically. A free archive key (NodeReal MegaNode) via ELPIDA_FORK_RPC_BNB_MAINNET is the sure route.
+  'bnb-mainnet': ['https://bnb.api.onfinality.io/public', 'https://binance.llamarpc.com', 'https://1rpc.io/bnb', 'https://bsc-mainnet.public.blastapi.io', 'https://bsc.drpc.org', 'https://bsc-dataseed.bnbchain.org', 'https://bsc-dataseed1.defibit.io'],
 });
 const FORK_PROBE = '0x90f79bf6eb2c4f870365e785982e1f101e93b906'; // a local test account the fork reads at startup
 
@@ -219,7 +249,7 @@ export function rootCause(error) {
 export function isPrunedState(error) {
   // A contract revert always carries data (at least "0x"); "missing revert data" means the node failed, not the contract.
   if (error?.code === 'CALL_EXCEPTION' && error.data == null && /^missing revert data/.test(error.shortMessage ?? '')) return true;
-  return /missing trie node|state (is )?not available|historical state|state histories|pruned|header not found|unknown block|too many requests|rate limit|\b429\b|ECONNRESET|socket hang up|fetch failed|timed? ?out/i.test(errorMessages(error).join(' | '));
+  return /missing trie node|state (is )?not available|historical state|state histories|pruned|header not found|unknown block|too many requests|rate limit|\b429\b|\b403\b|forbidden|ECONNRESET|socket hang up|fetch failed|timed? ?out/i.test(errorMessages(error).join(' | '));
 }
 
 async function rpcCall(rpc, method, params = []) {

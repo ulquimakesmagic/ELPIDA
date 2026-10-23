@@ -38,6 +38,8 @@ test('pruned-state errors are recognised, including the exact BNB error and a wr
   assert.ok(isPrunedState(new Error('The response reported error `-32000`: `missing trie node`. (optional data: None)')));
   assert.ok(isPrunedState({ message: 'UnknownError', cause: new Error('missing trie node') }));
   assert.ok(isPrunedState(new Error('historical state not available in path scheme yet')));
+  // BNB mainnet, 23 Oct: publicnode refused heavy fork reads mid-run.
+  assert.ok(isPrunedState(new Error('The Http server returned error status code: HTTP status client self (403 Forbidden) for host (bsc-rpc.publicnode.com)')));
   assert.ok(!isPrunedState(new Error('execution reverted: rebalance callback')));
   assert.ok(FORK_RPC_FALLBACKS['bnb-testnet'].length >= 3 && FORK_RPC_FALLBACKS['bnb-testnet'].every(u => u.startsWith('https://')));
 });

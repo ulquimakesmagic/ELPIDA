@@ -88,8 +88,9 @@ Evidence: `tests/economic-invariants.test.mjs` (seeded multi-trader fuzzing, ETH
 `PATH=<solana bin>:$PATH npm test`.
 
 `npm run test:chain-fork -- <network>` runs the whole lifecycle (13 checks) on a fork of a real testnet DEX and
-feed. It passed on Ethereum Sepolia (Uniswap v3), BNB Testnet (PancakeSwap v3) and a fork of Robinhood Chain mainnet
-(Uniswap v3, Chainlink ETH/USD, mainnet terms; 14 checks). Base Sepolia was exercised live
+feed. It passed on Ethereum Sepolia (Uniswap v3) and BNB Testnet (PancakeSwap v3), and on forks of the four intended
+mainnets with mainnet terms (14 checks each): Base, Ethereum and Robinhood Chain (Uniswap v3) and BNB Chain
+(PancakeSwap v3), each against its real Chainlink feed. Base Sepolia was exercised live
 instead (section 6).
 
 ## 5. Findings from our own review (before the audit)

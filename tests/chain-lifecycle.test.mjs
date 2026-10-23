@@ -39,11 +39,18 @@ test('fork-check lifecycle passes with mainnet terms ($5,000 start) and verifies
   await assert.rejects(runChainLifecycle({ provider: g.provider, signer: g.signers[0], attacker: g.signers[1], dex: { ...g.dex.config, name: 'Uniswap v3 (local)' }, feed: g.feed.target, feedDescription: 'BTC / USD', maxAge: 86400, art }), /price feed is BTC \/ USD/);
 });
 
-test('the Robinhood mainnet fork target uses checksummed, consistent addresses', async () => {
-  const { FORK_ONLY } = await import('../scripts/chain-fork-lifecycle.mjs');
+test('mainnet fork targets: checksummed addresses, mainnet terms, the right feed pair and router layout', async () => {
+  const { FORK_ONLY, FORK_RPC_FALLBACKS } = await import('../scripts/chain-fork-lifecycle.mjs');
   const { getAddress } = await import('ethers');
-  const rh = FORK_ONLY['robinhood-mainnet'];
-  assert.equal(rh.net.chainId, 4663);
-  for (const a of [rh.dex.factory, rh.dex.manager, rh.dex.router, rh.dex.quoter, rh.dex.weth, rh.oracle.feed]) assert.equal(getAddress(a), a);
-  assert.equal(rh.dex.routerVersion, 2); assert.equal(rh.oracle.description, 'ETH / USD'); assert.equal(rh.startFdvUsd, 5000);
+  const expected = { 'base-mainnet': [8453, 'ETH / USD', 2], 'ethereum-mainnet': [1, 'ETH / USD', 2], 'bnb-mainnet': [56, 'BNB / USD', 1], 'robinhood-mainnet': [4663, 'ETH / USD', 2] };
+  assert.deepEqual(Object.keys(FORK_ONLY).sort(), Object.keys(expected).sort());
+  for (const [key, t] of Object.entries(FORK_ONLY)) {
+    const [chainId, pair, router] = expected[key];
+    assert.equal(t.net.chainId, chainId, key); assert.equal(t.net.key, key);
+    for (const a of [t.dex.factory, t.dex.manager, t.dex.router, t.dex.quoter, t.dex.weth, t.oracle.feed]) assert.equal(getAddress(a), a, `${key} ${a}`);
+    assert.equal(t.oracle.description, pair, key); assert.equal(t.dex.routerVersion, router, key);
+    assert.equal(t.dex.fee, 10000); assert.equal(t.startFdvUsd, 5000, `${key} uses mainnet terms`);
+    assert.ok(t.oracle.maxAge >= 300 && t.oracle.maxAge <= 86400, key);
+    assert.ok(new URL(t.net.rpcUrl).protocol === 'https:' && (FORK_RPC_FALLBACKS[key] ?? []).every(u => u.startsWith('https://')), key);
+  }
 });
