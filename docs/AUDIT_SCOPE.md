@@ -6,13 +6,13 @@ will run on mainnet. **Nothing here is audited yet.** Commit to audit: the `main
 
 ## 1. Scope
 
-**EVM, in scope: 9 files, 627 source lines** (Solidity 0.8.24, optimizer on with 1 run, `shanghai`). Everything that
+**EVM, in scope: 9 files, 631 source lines** (Solidity 0.8.24, optimizer on with 1 run, `shanghai`). Everything that
 `ElpidaAtomicDexFactory` deploys or calls:
 
 | File | SLOC | Role |
 |---|---|---|
-| `contracts/evm/src/ElpidaAtomicDexFactory.sol` | 7 | Mainnet factory: `ElpidaDexFactory` with graduation inside the completing buy |
-| `contracts/evm/src/ElpidaDexFactory.sol` | 98 | Launch (native or approved-asset pair), $10 fee, metadata URI once, curve deployer |
+| `contracts/evm/src/ElpidaAtomicDexFactory.sol` | 8 | Mainnet factory: `ElpidaDexFactory` with graduation inside the completing buy, and token details required at launch |
+| `contracts/evm/src/ElpidaDexFactory.sol` | 101 | Launch (native or approved-asset pair), $10 fee, metadata URI once, curve deployer |
 | `contracts/evm/src/ElpidaUsdPricing.sol` | 63 | Chainlink-compatible USD pricing, configured once, staleness checks |
 | `contracts/evm/src/ElpidaDexCurve.sol` | 196 | Virtual constant-product curve, anti-snipe fee, fees, completion, graduation, reopen |
 | `contracts/evm/src/ElpidaV3MigrationAdapter.sol` | 122 | Uniswap v3 / PancakeSwap v3 pool creation, repricing a pre-created pool, full-range mint |
@@ -137,10 +137,10 @@ Our findings:
 - **F-4 (Low):** `migrate` is permissionless and refunds `min(balance, supplied)` to its caller. Assets sent to the
   adapter by mistake could be taken by the next caller. In normal operation the adapter holds nothing between
   calls.
-- **F-6 (Design, decision pending): token details on-chain at launch.** The site always includes the metadata URI in
-  the launch transaction and refuses to launch where it cannot (`LAUNCH_GUARANTEES.md`). But `launch`/`launchPaired`
-  and `launchWithPayment` with an empty URI still accept a launch without details when called directly. Option:
-  have the mainnet factory require a valid `ipfs://` URI on every launch path (the Solana program already does).
+- **F-6 (Design, resolved 23 Oct): token details on-chain at launch.** The mainnet factory now requires them.
+  `ElpidaAtomicDexFactory.requiresMetadata()` returns true; `launch` and `launchPaired` revert with
+  `metadata required`, and `launchWithPayment` reverts on an empty or non-`ipfs://` URI. The Solana program already
+  required a URI. Older factories are unchanged (`launch-guarantees.test.mjs`).
 - **F-5 (Informational, operations):** the treasury is immutable and must accept the native coin (see section 3).
 
 ## 6. Deployments for reference (testnets)

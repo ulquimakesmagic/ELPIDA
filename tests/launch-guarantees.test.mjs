@@ -31,3 +31,25 @@ test('EVM atomic curve: there is no state in which it is complete but not gradua
   await f.advance(86400 * 2);
   await assert.rejects(l.curve.reopen(), /not reopenable/, 'and a graduated curve is never reopened');
 });
+
+test('mainnet factory (atomic): every launch must carry token details on-chain; there is no launch without them', async t => {
+  const { ZeroAddress, parseEther } = await import('ethers');
+  const { FEE, TEST_URI, art } = await import('./helpers/dex-fixture.mjs');
+  const f = await dexFixture(t, { factoryName: 'ElpidaAtomicDexFactory' }), me = f.addresses[0], buy = parseEther('0.01');
+  assert.equal(await f.factory.requiresMetadata(), true);
+  await assert.rejects(f.factory.launch.staticCall('No', 'NO', buy, 0, me, { value: FEE + buy }), /metadata required/);
+  await mined(f.usdc.approve(f.factory.target, 10n ** 8n));
+  await assert.rejects(f.factory.launchPaired.staticCall('No', 'NO', f.usdc.target, 10n ** 8n, 0, me, { value: FEE }), /metadata required/);
+  await assert.rejects(f.factory.launchWithPayment.staticCall('No', 'NO', ZeroAddress, buy, 0, me, '', false, { value: FEE + buy }), /metadata required/);
+  await assert.rejects(f.factory.launchWithPayment.staticCall('Bad', 'BAD', ZeroAddress, buy, 0, me, 'https://example.com/x.json', false, { value: FEE + buy }), /IPFS URI required/);
+  const r = await mined(f.factory.launchWithPayment('Yes', 'YES', ZeroAddress, buy, 0, me, TEST_URI, false, { value: FEE + buy }));
+  const ev = r.logs.map(l => { try { return f.factory.interface.parseLog(l); } catch { return null; } }).find(e => e?.name === 'Launched');
+  assert.equal(await f.factory.tokenMetadataURI(ev.args.token), TEST_URI, 'recorded once, in the launch transaction');
+  assert.equal(f.factory.interface.fragments.some(x => x.type === 'function' && /^set.*(metadata|uri)/i.test(x.name)), false, 'and there is no setter');
+});
+
+test('older (non-atomic) factories keep their earlier behaviour', async t => {
+  const f = await dexFixture(t);
+  assert.equal(await f.factory.requiresMetadata(), false);
+  await launch(f);
+});

@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Contract,ZeroAddress,parseEther} from 'ethers';
-import {dexFixture,launch,complete,art,FEE,mined,parse} from './helpers/dex-fixture.mjs';
+import {dexFixture,launch,complete,art,FEE,mined,parse,TEST_URI} from './helpers/dex-fixture.mjs';
 for(const native of [true,false])test('final purchase graduates and locks real V3 liquidity in the same transaction: '+(native?'native':'USDC'),async t=>{
  const f=await dexFixture(t,{factoryName:'ElpidaAtomicDexFactory'});
  const l=await launch(f,{native,firstBuy:0n});
@@ -16,7 +16,7 @@ for(const native of [true,false])test('final purchase graduates and locks real V
 });
 test('creator can complete and migrate atomically at launch; zero buy does not bypass slippage or fee checks',async t=>{
  const f=await dexFixture(t,{factoryName:'ElpidaAtomicDexFactory',startFdvUsd:50});
- await assert.rejects(f.factory.launch.staticCall('Zero','ZERO',0,1,f.addresses[0],{value:FEE}),/empty first buy/);
+ await assert.rejects(f.factory.launchWithMetadata.staticCall('Zero','ZERO',0,1,f.addresses[0],TEST_URI,{value:FEE}),/empty first buy/);
  const l=await launch(f,{firstBuy:parseEther('1')});assert.notEqual(await l.curve.pool(),ZeroAddress);
  assert.equal(parse(l.curve,l.receipt,'Graduated').length,1);
 });
