@@ -76,7 +76,14 @@ Phase 2 adds the 24 h reopen escape hatch, immutable Metaplex metadata at launch
 4. Double-click `solana-upgrade.cmd` in the ELPIDA folder (or `npm.cmd run solana:deploy -- --upgrade`). The upload resumes if interrupted.
 5. Tell Claude when it finishes. The next Solana launch from the site then writes immutable metadata (visible in Phantom and Solscan), and the token page offers *Reopen curve trading* for a curve stuck 24 h after completion.
 
-## 3b. Upgrade the Solana devnet program to the 19 Oct build (checklist B1) — open
+## 3b. Upgrade the Solana devnet program to the 19 Oct build (checklist B1) — done, 23 October 2026
+
+Done from `elpida-fork` with the original deployer passed directly:
+`npm.cmd run solana:deploy -- --upgrade --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`.
+The program printed `Program upgraded.` Then run `git checkout -- deployments/solana-devnet.json` so the record keeps the
+published TEST-MEME mint (that run created a duplicate test mint; scripts now reuse the published ones). The steps below
+are kept for the next upgrade.
+
 
 The 23 Oct attempt from `elpida-fork` stopped because the program's keys live in `elpida-v1`. Two private files matter;
 never paste, commit or share either:

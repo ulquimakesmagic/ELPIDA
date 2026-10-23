@@ -23,3 +23,14 @@ test('--upgrade without the original deployer stops before creating a keypair or
   assert.match(run.stderr, /No deployer keypair.*upgrade authority.*elpida-v1/s);
   assert.equal(existsSync(missing), false, 'no new deployer is created for an upgrade');
 });
+
+test('a run without local deploy state reuses the published test mints instead of creating new ones', async () => {
+  const { savedTestAssets, publishedTestAssets } = await import('../packages/solana/deploy-record.mjs');
+  const record = JSON.parse(readFileSync(join(root, 'deployments/solana-devnet.json'), 'utf8'));
+  const published = publishedTestAssets(record);
+  assert.ok(Object.keys(published).length > 0 && Object.values(published).every(m => typeof m === 'string'));
+  assert.ok(!('sol' in published) && !('usdc' in published), 'only test assets, never SOL or USDC');
+  assert.deepEqual(savedTestAssets({}, record, record.programId), published, 'fresh checkout: published mints');
+  assert.deepEqual(savedTestAssets({ testAssets: { 'test-meme': 'Local111' } }, record, record.programId), { 'test-meme': 'Local111' }, 'local state wins');
+  assert.deepEqual(savedTestAssets({}, record, 'AnotherProgram1111111111111111111111111111'), {}, 'never another program\'s mints');
+});

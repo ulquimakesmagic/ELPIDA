@@ -30,7 +30,7 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
 |---|---|---|---|---|
 | Ethereum Sepolia | PASS 13/13, block 11965619 | On | `0xD641…6d2`, block 11972040 (22 Oct); setup txs below | **Done 22 Oct** (VEGETA, below) |
 | BNB Testnet | **PASS 13/13 (23 Oct)**, block 138477356 via publicnode (PancakeSwap v3, router v1) | On | `0x8c48…fBbE`, block 138485798 (23 Oct); setup below | **Done 23 Oct** (MIDORIYA, below) |
-| Robinhood Testnet | No DEX or feed on testnet. **Mainnet fork check ready** (`robinhood-mainnet`, below) | Off | | Not possible on testnet |
+| Robinhood Testnet | No DEX or feed on testnet. **Mainnet fork check PASS 14/14 (23 Oct)**, block 96216786 (`robinhood-mainnet`, below) | Off | | Not possible on testnet |
 
 Until a chain's team launchpad is pinned in `packages/core/networks.mjs`, its launches show only in the deploying
 browser, and token details are not staged (they would expire unindexed). After pinning, the public indexer lists them.
@@ -108,6 +108,18 @@ The run uses mainnet terms ($5,000 start, 24 h grace), allows the feed a 24 h ag
 chains have a 24 h heartbeat), and adds a 14th check that the feed's `description()` is `ETH / USD`. The other 13 are
 the same as BNB and Ethereum Sepolia. RPC: `https://rpc.mainnet.chain.robinhood.com`; override with
 `$env:ELPIDA_FORK_RPC_ROBINHOOD_MAINNET`.
+
+**Result (23 Oct, Malik's PC): PASS 14/14** at Robinhood mainnet block 96216786, via `rpc.mainnet.chain.robinhood.com`
+(deep history):
+- Uniswap v3: the manager belongs to the factory, WETH matches, and the 1% tier has tick spacing 200.
+- The feed is `ETH / USD`. The $10 fee priced at 0.004174 ETH (about $2,396 per ETH).
+- The final buy graduated atomically into pool `0x214E…23CE`, and the position is held by the locker.
+- A DEX buy through SwapRouter02 delivered tokens; a sell unwrapped ETH to the seller.
+- Pool fees were credited from both trades; claims paid out and cleared.
+- A pre-created pool was repriced at graduation.
+- The indexer recorded both trades and both graduations.
+
+A real deployment would use 9,846,287 gas: about 0.000197 ETH at that day's 0.020 gwei. Nothing was spent.
 
 ## Order
 
