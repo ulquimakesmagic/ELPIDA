@@ -7,8 +7,8 @@ something that would fail.
 | Chain | Graduation DEX | Router layout | Price feed | Status |
 |---|---|---|---|---|
 | Base Sepolia | Uniswap v3 | SwapRouter02 (v2) | Chainlink ETH/USD | Live, A2 to A5 done |
-| Ethereum Sepolia | Uniswap v3 (addresses from Uniswap sdk-core) | SwapRouter02 (v2) | Chainlink ETH/USD `0x694A…5306` | Configured, waiting for its fork check |
-| BNB Chain Testnet | PancakeSwap v3 (addresses from pancake-v3-contracts) | original v3 SwapRouter (v1) | Chainlink BNB/USD `0x2514…7526` | Configured, waiting for its fork check |
+| Ethereum Sepolia | Uniswap v3 (addresses from Uniswap sdk-core) | SwapRouter02 (v2) | Chainlink ETH/USD `0x694A…5306` | Live, A2 to A5 done |
+| BNB Chain Testnet | PancakeSwap v3 (addresses from pancake-v3-contracts) | original v3 SwapRouter (v1) | Chainlink BNB/USD `0x2514…7526` | Live, A2 and A5 done; pool sell (A3) open |
 | Robinhood Chain Testnet | none confirmed on testnet | — | none confirmed on testnet | Not possible yet; our contracts were checked against Robinhood **mainnet** Uniswap on a fork |
 
 ## PancakeSwap differences found and fixed before any deployment
@@ -24,12 +24,12 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
 3. PancakeSwap's periphery router uses the original layout: the deadline is inside the swap, and `multicall(bytes[])`
    has no deadline. `packages/core/dex-router.mjs` encodes both layouts; the wallet picks one per network.
 
-## Status (22 Oct)
+## Status (23 Oct)
 
 | Chain | Fork check | Model 10 | Team launchpad (`shared`) | A2 to A5 live |
 |---|---|---|---|---|
 | Ethereum Sepolia | PASS 13/13, block 11965619 | On | `0xD641…6d2`, block 11972040 (22 Oct); setup txs below | **Done 22 Oct** (VEGETA, below) |
-| BNB Testnet | **PASS 13/13 (23 Oct)**, block 138477356 via publicnode (PancakeSwap v3, router v1) | On | `0x8c48…fBbE`, block 138485798 (23 Oct); setup below | Open |
+| BNB Testnet | **PASS 13/13 (23 Oct)**, block 138477356 via publicnode (PancakeSwap v3, router v1) | On | `0x8c48…fBbE`, block 138485798 (23 Oct); setup below | **A2 and A5 done 23 Oct** (MIDORIYA, below); A3 pool sell open |
 | Robinhood Testnet | No DEX or feed | Off | | |
 
 Until a chain's team launchpad is pinned in `packages/core/networks.mjs`, its launches show only in the deploying
@@ -69,6 +69,20 @@ The first attempt read through `bsc-testnet-dataseed`, which Malik's network cou
 | Graduation adapter (WBNB) | `0xd0f67ea9d1d055a7c76ce66aded35b70912958e47777994e85dae69f45ed1e8f`, then `0xa5557614a0c27e0c22fc0290189b79a9860bb9fee0cca97d34fdf45de2ff7060` on retry | `0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2` in use |
 | Atomic factory (requires token details on-chain) | `0x7b0cefee34089772dbf5d698f72da1c66608e7be5a66fe08f22f1fe299d7247f` (block 138485798) | `0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE` |
 | USD pricing activated | `0xce6dc1d636a7c059aee6284ffe11744cdc56ef47461266404e504bdbbe3392f5` | confirmed ("Oracle pricing is already fixed" on retry) |
+
+On BNB the graduation adapter has the same address as the Ethereum Sepolia factory: same deployer, same nonce.
+
+MIDORIYA end to end (23 Oct). Malik reported the hashes; Claude read each receipt from the BNB testnet RPC.
+
+| Check | Transaction | Block | What the receipt shows |
+|---|---|---|---|
+| Launch with token details on-chain | `0xa4d033c16fe988d3d4e39d526e5bc91e8d6a0cc5d0e7858df9bce9019150b26b` | 138493545 | `Launched` and `MetadataPublished` in the launch transaction; token `0xf7aa1a19ed16573f8dba8ef46a16c56703b433a4`, curve `0xb5955ca4a026f033bb062a3572324bdef72cc2a6` |
+| Final buy completed the curve and graduated it into PancakeSwap v3 in the same transaction (A2) | `0x9919cfb1a274d307ed72d3c0615eb8ec6d5adbb8116dcb1b2e8ce72d9382a8f6` | 138495097 | 0.112774 tBNB in. `CurveCompleted`, PancakeSwap pool `0x7f186f7a2b9577fc2f8f69f14637f7ca847e3179` created and initialised, full-range mint, `Migrated`, position #39190 locked in locker `0x1d26eed604b92d1364ea807692db9006b2c6fcfd`. The token page then shows trading on PancakeSwap at about $500 market cap (10× the $50 start) |
+| Fee claim in one confirmation (A5) | `0xc7abaeb1223a5e70c54e15aa66d688be9c03c5009f89b7c1094eea8c5c4baf57` | 138495267 | One Multicall3 transaction: curve `FeesWithdrawn`, pool `Burn` and `Collect`, locker `PositionFeesCollected` |
+| Sell on the pool (A3) | open | | |
+
+A second MIDORIYA launch (`0xf9541ad9523e4af4e03d1a861b8c2c8b9afbbd39918949de621a867bb2581bb3`, token
+`0x7c7e935069048d541433b59a0512a1bdae041559`) is still trading on its curve.
 
 ## Order
 
