@@ -137,6 +137,10 @@ Our findings:
 - **F-4 (Low):** `migrate` is permissionless and refunds `min(balance, supplied)` to its caller. Assets sent to the
   adapter by mistake could be taken by the next caller. In normal operation the adapter holds nothing between
   calls.
+- **F-6 (Design, decision pending): token details on-chain at launch.** The site always includes the metadata URI in
+  the launch transaction and refuses to launch where it cannot (`LAUNCH_GUARANTEES.md`). But `launch`/`launchPaired`
+  and `launchWithPayment` with an empty URI still accept a launch without details when called directly. Option:
+  have the mainnet factory require a valid `ipfs://` URI on every launch path (the Solana program already does).
 - **F-5 (Informational, operations):** the treasury is immutable and must accept the native coin (see section 3).
 
 ## 6. Deployments for reference (testnets)

@@ -348,6 +348,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if (req.method !== 'POST' || !url.pathname.startsWith('/api/')) return send(405, { error: 'Method not allowed.' });
       if (req.headers['x-elpida-token'] !== csrf || req.headers['content-type'] !== 'application/json') return send(403, { error: 'Refresh this page before submitting.' });
       // A disabled route must not parse large bodies or spend the protected upload budget.
+      // Token details are published only inside the launch transaction (never after), on every network.
+      if(['/api/public/metadata/prepare','/api/public/metadata/save'].includes(url.pathname))return send(410,{error:'Token details are published only at launch, inside the launch transaction. They cannot be added afterwards.'});
       if(publicUrl&&url.pathname==='/api/metadata/publish')return send(410,{error:'Public metadata uploads must use the launch staging flow; retention is verified from the launch transaction.'});
       let uploadDigest;
       if(url.pathname==='/api/metadata/stage'){
@@ -356,7 +358,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       }
       const chunks = [];
       let size = 0;
-      for await (const chunk of req) { size += chunk.length; if (size > (['/api/launch','/api/metadata/stage','/api/metadata/publish','/api/public/metadata/prepare','/api/public/metadata/save'].includes(url.pathname) ? MAX_METADATA_REQUEST_BYTES : 8192)) { send(413, { error: 'Request too large.' }); return; } chunks.push(chunk); }
+      for await (const chunk of req) { size += chunk.length; if (size > (['/api/launch','/api/metadata/stage','/api/metadata/publish'].includes(url.pathname) ? MAX_METADATA_REQUEST_BYTES : 8192)) { send(413, { error: 'Request too large.' }); return; } chunks.push(chunk); }
       let body;
       const rawBody=Buffer.concat(chunks);if(uploadDigest&&keccak256(rawBody)!==uploadDigest)return send(403,{error:'Upload payload changed. Prepare it again; no launch was submitted.'});
       try { body = JSON.parse(rawBody.toString()); } catch { return send(400, { error: 'Invalid request.' }); }
@@ -365,8 +367,6 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if(['chat/report/prepare','chat/report/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat reporting is busy. Retry shortly.'});return send(200,action==='chat/report/prepare'?await chat.prepareReport(body):await chat.saveReport(body));}
       if(['chat/prepare','chat/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat publishing is busy. Retry shortly.'});return send(200,action==='chat/prepare'?await chat.prepare(body):await chat.save(body));}
       if(['theses/prepare','theses/save'].includes(action)){if(Date.now()-terminalWindow>=60000){terminalWindow=Date.now();terminalCount=0;thesisCount=0;}if(++thesisCount>30)return send(429,{error:'Thesis publishing is busy. Retry in a minute.'});return send(200,action==='theses/prepare'?await theses.prepare(body):await theses.save(body));}
-      if(action==='public/metadata/prepare')return send(200,{message:publicIndex.metadataMessage(body).message});
-      if(action==='public/metadata/save')return send(200,publicIndex.saveMetadata(body));
       if(action==='client-error'){if(Date.now()-diagnosticWindow>=60000){diagnosticWindow=Date.now();diagnosticCount=0;}if(++diagnosticCount>60)return send(429,{error:'Diagnostics request limit reached.'});const stage=String(body.stage??'unknown').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40),code=String(body.code??'UNKNOWN').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40),rpcMethod=/^eth_[a-zA-Z]{1,40}$/.test(body.rpcMethod??'')?body.rpcMethod:undefined,rpcCode=Number.isSafeInteger(body.rpcCode)?body.rpcCode:undefined;console.error(JSON.stringify({event:'client_error',requestId,stage,code,rpcMethod,rpcCode}));return send(200,{recorded:true,requestId});}
       if (action === 'circle/funding') {
         try { return send(200, await circle.execute(req.headers.authorization, body)); }

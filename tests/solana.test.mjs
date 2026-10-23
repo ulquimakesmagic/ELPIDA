@@ -515,6 +515,26 @@ test('Solana migration to PumpSwap moves all liquidity into a pool whose LP stay
   assert.equal(await balance(f.client.ata(f.client.poolPda(mint), f.quoteMint)), 0n);
 });
 
+test('Solana completing buy and PumpSwap migration in ONE transaction: the curve is never left closed', { skip: pumpSkip }, async () => {
+  const { mint } = await launch({ symbol: 'ATOM' });
+  await buy(f.trader, mint, 1_000n * USDC, 1n);
+  await afterSnipeWindow(mint);
+  const finalBuy = (units) => [f.client.computeBudget(units), f.client.buy({ buyer: f.trader.publicKey, config: f.config, mint, grossIn: 20_000n * USDC, minTokensOut: 1n }), f.client.migrateToPumpswap({ payer: f.trader.publicKey, config: f.config, mint })];
+  // Size: one legacy transaction must fit Solana's 1,232-byte limit.
+  const { blockhash } = await f.connection.getLatestBlockhash('confirmed');
+  const tx = new web3.Transaction({ feePayer: f.trader.publicKey, recentBlockhash: blockhash }).add(...finalBuy(MIGRATE_COMPUTE_UNITS + 200_000));
+  const bytes = tx.serializeMessage().length + 1 + 64 * tx.compileMessage().header.numRequiredSignatures;
+  assert.ok(bytes <= 1232, `fits one transaction (${bytes} bytes)`);
+  // If anything in the migration fails, the buy fails with it and the curve keeps trading.
+  const before = await pool(mint);
+  await failsWith(send(f.connection, f.trader, finalBuy(150_000), [], 1), /exceeded|compute|ComputationalBudgetExceeded|0x/i);
+  const unchanged = await pool(mint);
+  assert.equal(unchanged.status, before.status, 'still trading'); assert.equal(unchanged.sold, before.sold, 'the buy was rolled back too');
+  // With enough compute: complete and migrate together.
+  await send(f.connection, f.trader, finalBuy(MIGRATE_COMPUTE_UNITS + 200_000), [], 1);
+  assert.equal((await pool(mint)).status, STATUS_MIGRATED, 'completed and on PumpSwap in the same transaction');
+});
+
 test('Solana harvest withdraws only LP fee growth, splits it 50/50 and never touches the principal', { skip: pumpSkip }, async () => {
   const mint = await completedCurve('HARV');
   const p = f.client.pumpAccounts(mint, f.quoteMint);
