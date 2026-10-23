@@ -8,7 +8,7 @@ something that would fail.
 |---|---|---|---|---|
 | Base Sepolia | Uniswap v3 | SwapRouter02 (v2) | Chainlink ETH/USD | Live, A2 to A5 done |
 | Ethereum Sepolia | Uniswap v3 (addresses from Uniswap sdk-core) | SwapRouter02 (v2) | Chainlink ETH/USD `0x694A…5306` | Live, A2 to A5 done |
-| BNB Chain Testnet | PancakeSwap v3 (addresses from pancake-v3-contracts) | original v3 SwapRouter (v1) | Chainlink BNB/USD `0x2514…7526` | Live, A2 and A5 done; pool sell (A3) open |
+| BNB Chain Testnet | PancakeSwap v3 (addresses from pancake-v3-contracts) | original v3 SwapRouter (v1) | Chainlink BNB/USD `0x2514…7526` | Live, A2 to A5 done |
 | Robinhood Chain Testnet | none confirmed on testnet | — | none confirmed on testnet | Not possible yet; our contracts were checked against Robinhood **mainnet** Uniswap on a fork |
 
 ## PancakeSwap differences found and fixed before any deployment
@@ -29,7 +29,7 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
 | Chain | Fork check | Model 10 | Team launchpad (`shared`) | A2 to A5 live |
 |---|---|---|---|---|
 | Ethereum Sepolia | PASS 13/13, block 11965619 | On | `0xD641…6d2`, block 11972040 (22 Oct); setup txs below | **Done 22 Oct** (VEGETA, below) |
-| BNB Testnet | **PASS 13/13 (23 Oct)**, block 138477356 via publicnode (PancakeSwap v3, router v1) | On | `0x8c48…fBbE`, block 138485798 (23 Oct); setup below | **A2 and A5 done 23 Oct** (MIDORIYA, below); A3 pool sell open |
+| BNB Testnet | **PASS 13/13 (23 Oct)**, block 138477356 via publicnode (PancakeSwap v3, router v1) | On | `0x8c48…fBbE`, block 138485798 (23 Oct); setup below | **Done 23 Oct** (MIDORIYA, below) |
 | Robinhood Testnet | No DEX or feed | Off | | |
 
 Until a chain's team launchpad is pinned in `packages/core/networks.mjs`, its launches show only in the deploying
@@ -79,7 +79,7 @@ MIDORIYA end to end (23 Oct). Malik reported the hashes; Claude read each receip
 | Launch with token details on-chain | `0xa4d033c16fe988d3d4e39d526e5bc91e8d6a0cc5d0e7858df9bce9019150b26b` | 138493545 | `Launched` and `MetadataPublished` in the launch transaction; token `0xf7aa1a19ed16573f8dba8ef46a16c56703b433a4`, curve `0xb5955ca4a026f033bb062a3572324bdef72cc2a6` |
 | Final buy completed the curve and graduated it into PancakeSwap v3 in the same transaction (A2) | `0x9919cfb1a274d307ed72d3c0615eb8ec6d5adbb8116dcb1b2e8ce72d9382a8f6` | 138495097 | 0.112774 tBNB in. `CurveCompleted`, PancakeSwap pool `0x7f186f7a2b9577fc2f8f69f14637f7ca847e3179` created and initialised, full-range mint, `Migrated`, position #39190 locked in locker `0x1d26eed604b92d1364ea807692db9006b2c6fcfd`. The token page then shows trading on PancakeSwap at about $500 market cap (10× the $50 start) |
 | Fee claim in one confirmation (A5) | `0xc7abaeb1223a5e70c54e15aa66d688be9c03c5009f89b7c1094eea8c5c4baf57` | 138495267 | One Multicall3 transaction: curve `FeesWithdrawn`, pool `Burn` and `Collect`, locker `PositionFeesCollected` |
-| Sell on the pool (A3) | open | | |
+| Sell on the pool after graduation (A3) | `0xf566d91c20b63a41b3f548d8cfb024ca9b405bca469e57cc551b7b9d180f4a63` | 138503521 | Through PancakeSwap's v1 router `multicall`: 189,936,731.66 MIDORIYA in, 0.070571 WBNB out of pool `0x7f18…3179` (PancakeSwap `Swap` event), unwrapped to tBNB in the same transaction |
 
 A second MIDORIYA launch (`0xf9541ad9523e4af4e03d1a861b8c2c8b9afbbd39918949de621a867bb2581bb3`, token
 `0x7c7e935069048d541433b59a0512a1bdae041559`) is still trading on its curve.

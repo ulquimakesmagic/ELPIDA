@@ -151,8 +151,8 @@ Our findings:
 | Ethereum Sepolia (Uniswap v3) | `0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2` | 11972040 |
 | BNB Testnet (PancakeSwap v3; requires token details) | `0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE` | 138485798 |
 
-All three have been exercised live: launch, completion with graduation in the same transaction, and claims; DEX
-trades on Base and Ethereum Sepolia. The transaction hashes are in `MAINNET_CHECKLIST_2026-10-19.md` (A2–A7) and
+All three have been exercised live end to end: launch, completion with graduation in the same transaction, DEX
+trades and claims. The transaction hashes are in `MAINNET_CHECKLIST_2026-10-19.md` (A2–A7) and
 `MULTICHAIN_TESTNETS.md`.
 
 ## 7. Reproducing the static analysis
