@@ -27,7 +27,7 @@ export const testnets = [
   },
   {
     key: 'bnb-testnet', name: 'BNB Chain Testnet', short: 'BNB TESTNET', kind: 'evm', enabled: true,
-    chainId: 97, rpcUrl: 'https://bsc-testnet-dataseed.bnbchain.org', explorer: 'https://testnet.bscscan.com',
+    chainId: 97, rpcUrl: 'https://bsc-testnet-rpc.publicnode.com', explorer: 'https://testnet.bscscan.com',
     nativeCurrency: { name: 'Test BNB', symbol: 'tBNB', decimals: 18 },
     gasFaucet: 'https://www.bnbchain.org/en/testnet-faucet',
     shared: null,
