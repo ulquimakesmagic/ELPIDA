@@ -4,6 +4,7 @@ import { readFileSync, existsSync, writeFileSync, renameSync } from 'node:fs';
 import { EvmIndexer } from '../../packages/indexer/evm-indexer.mjs';
 import { normalizeMetadata } from '../web/metadata.mjs';
 import { isDexModel, MODEL_VERSIONS } from '../../packages/core/curve-model.mjs';
+import { testnetDexes } from '../../packages/core/uniswap.mjs';
 
 // A read-only worker per configured deployment. Never accepts user RPCs or private keys.
 export class PublicIndexer {
@@ -60,7 +61,7 @@ export const recentTrade=(network,token,trade)=>({network,address:token.address,
 function openEntry({net,deployment,provider,contracts,dataDir,legacy=false}){
   const tax=deployment.model==='curve-tax-v10',dex=isDexModel(deployment.model)||tax,factory=deployment.factory.toLowerCase();
   const taxPair={abi:['function token0() view returns(address)','function token1() view returns(address)','function getReserves() view returns(uint112,uint112,uint32)','function totalSupply() view returns(uint256)','function balanceOf(address) view returns(uint256)','event Swap(address indexed sender,uint256 amount0In,uint256 amount1In,uint256 amount0Out,uint256 amount1Out,address indexed to)']};
-  const index=new EvmIndexer({provider,factory:deployment.factory,contracts:{...contracts,factory:tax?contracts.taxFactory:dex?contracts.dexFactory:contracts.legacyFactory,curve:tax?contracts.taxCurve:dex?contracts.dexCurve:contracts.legacyCurve,...(!dex?{dexPool:undefined}:{}),...(tax?{tax:true,token:contracts.taxToken,dexPool:taxPair,pool:taxPair}:{})},path:join(dataDir,`public-${net.chainId}-${factory}.sqlite`),chainId:net.chainId,fromBlock:deployment.block,confirmations:2,nativeSymbol:net.nativeCurrency.symbol,batchSize:100});
+  const index=new EvmIndexer({provider,factory:deployment.factory,contracts:{...contracts,factory:tax?contracts.taxFactory:dex?contracts.dexFactory:contracts.legacyFactory,curve:tax?contracts.taxCurve:dex?contracts.dexCurve:contracts.legacyCurve,...(!dex?{dexPool:undefined}:{}),...(tax?{tax:true,token:contracts.taxToken,dexPool:taxPair,pool:taxPair}:{})},path:join(dataDir,`public-${net.chainId}-${factory}.sqlite`),chainId:net.chainId,fromBlock:deployment.block,confirmations:2,nativeSymbol:net.nativeCurrency.symbol,batchSize:100,dexName:testnetDexes[net.key]?.name??'Uniswap v3'});
   const metadataPath=join(dataDir,`public-metadata-${net.chainId}-${factory}.json`);
   const metadata=new Map(existsSync(metadataPath)?Object.entries(JSON.parse(readFileSync(metadataPath,'utf8'))):[]);
   return {net,deployment,legacy,index,provider,metadata,metadataPath,validated:false,error:null,lastSuccess:null};

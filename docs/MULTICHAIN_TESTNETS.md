@@ -29,7 +29,7 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
 | Chain | Fork check | Model 10 | Team launchpad (`shared`) | A2 to A5 live |
 |---|---|---|---|---|
 | Ethereum Sepolia | PASS 13/13, block 11965619 | On | `0xD641…6d2`, block 11972040 (22 Oct); setup txs below | **Done 22 Oct** (VEGETA, below) |
-| BNB Testnet | Steps 1 to 4 PASS on 22 Oct; step 5 lost upstream state (`missing revert data` = the RPC failed, not a revert). Rerun with the archive-first RPC choice | Off | | |
+| BNB Testnet | **PASS 13/13 (23 Oct)**, block 138477356 via publicnode (PancakeSwap v3, router v1) | On | Not yet: deploy (new factory requires token details on-chain), then send the factory address and block | Open |
 | Robinhood Testnet | No DEX or feed | Off | | |
 
 Until a chain's team launchpad is pinned in `packages/core/networks.mjs`, its launches show only in the deploying

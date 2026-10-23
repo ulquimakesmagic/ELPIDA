@@ -306,7 +306,7 @@ export class TestnetWallet {
       const art = this.config.contracts.testAsset, adapterArt = this.config.contracts.adapter;
       this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm the ${t.symbol} test asset deployment…`);
       const asset = await new ContractFactory(art.abi, art.bytecode, this.signer).deploy(t.name, t.symbol, t.kind, t.decimals, BigInt(t.faucet)); await asset.waitForDeployment();
-      this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm its Uniswap migration adapter…`);
+      this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm its ${this.dex?.name??'DEX'} migration adapter…`);
       const adapter = await new ContractFactory(adapterArt.abi, adapterArt.bytecode, this.signer).deploy(this.dex.manager, asset.target, 10000); await adapter.waitForDeployment();
       const virtualQuote = parseUnits(t.startFdv, t.decimals) * vt / supply;
       last = await this.wait(factory.approveQuote(asset.target, virtualQuote, adapter.target), `Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: approve ${t.symbol} as a trading pair…`);
@@ -443,13 +443,13 @@ export class TestnetWallet {
     let migrationAdapter;
     if(this.dex){
       const manager=new Contract(this.dex.manager,['function factory() view returns(address)','function WETH9() view returns(address)'],this.provider);
-      if((await manager.factory()).toLowerCase()!==this.dex.factory.toLowerCase()||(await manager.WETH9()).toLowerCase()!==this.dex.weth.toLowerCase())throw new Error('Unexpected Uniswap manager configuration.');
+      if((await manager.factory()).toLowerCase()!==this.dex.factory.toLowerCase()||(await manager.WETH9()).toLowerCase()!==this.dex.weth.toLowerCase())throw new Error(`Unexpected ${this.dex.name??'DEX'} position manager configuration.`);
       // Native pairs graduate through an adapter whose ERC-20 side is WETH.
       const key='elpida:dex-adapter:'+this.net.chainId+':native',saved=read(key);
       if(saved&&isAddress(saved)&&await this.provider.getCode(saved)!=='0x'){
         const existing=new Contract(saved,this.config.contracts.adapter.abi,this.provider);
         if((await existing.manager()).toLowerCase()!==this.dex.manager.toLowerCase()||(await existing.usdc()).toLowerCase()!==this.dex.weth.toLowerCase()||await existing.fee()!==10000n)throw new Error('Saved adapter configuration mismatch.');migrationAdapter=saved;
-      }else{this.onProgress('Step 1 of 2: confirm the Uniswap migration adapter deployment…');const a=this.config.contracts.adapter,c=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,this.dex.weth,10000);await c.waitForDeployment();migrationAdapter=c.target;write(key,migrationAdapter);}
+      }else{this.onProgress(`Step 1 of 2: confirm the ${this.dex.name??'DEX'} migration adapter deployment…`);const a=this.config.contracts.adapter,c=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,this.dex.weth,10000);await c.waitForDeployment();migrationAdapter=c.target;write(key,migrationAdapter);}
     }
     // Model 10 terms are fixed at deployment: $50 test-sized curves on testnets, $5,000 on mainnet (enforced).
     const terms=this.dex?assertDeploymentTerms(this.net,{startFdvUsd:startFdvUsdFor(this.net),graduationGrace:GRADUATION_GRACE_SECONDS}):null;
@@ -569,7 +569,7 @@ export class TestnetWallet {
     const price=Number(formatUnits(n*10n**18n*10n**24n/(den*10n**BigInt(d)),24)),circulation=supply-await token.balanceOf('0x000000000000000000000000000000000000dead')-await token.balanceOf(item.curve)-await token.balanceOf(pool);
     const feeLocker=new Contract(locker,this.config.contracts.locker.abi,this.provider),manager=new Contract(await feeLocker.manager(),['function ownerOf(uint256) view returns(address)'],this.provider),positionId=await curve.positionId();
     const fees=new Contract(splitter,this.config.contracts.splitter.abi,this.provider),dexRewards=[];for(const asset of [a,b]){const isToken=asset.toLowerCase()===item.address.toLowerCase();dexRewards.push({asset,symbol:isToken?symbol:this.qsym(item,true),creator:formatUnits(await fees.claimable(asset,reward),isToken?18:d)});}
-    return {...item,pool,graduated:true,complete:true,liquidityLocked:await feeLocker.locked()&&(await manager.ownerOf(positionId)).toLowerCase()===locker.toLowerCase(),locker,feeSplitter:splitter,positionId:positionId.toString(),venue:'Uniswap v3',feeBps:100,dexRewards,quoteSymbol:this.qsym(item),quoteDecimals:d,spotPrice:price,circulatingSupply:formatUnits(circulation,18),saleCap:formatUnits(await curve.SALE_CAP(),18),remainingBuy:'0',name,symbol,reward,reserve:formatUnits(await new Contract(quoteAsset,this.config.contracts.quote.abi,this.provider).balanceOf(pool),d),sold:formatUnits(sold,18),supply:formatUnits(supply,18),balance:formatUnits(held,18),protocolFees:formatUnits(cp,d),creatorFees:formatUnits(cc,d)};
+    return {...item,pool,graduated:true,complete:true,liquidityLocked:await feeLocker.locked()&&(await manager.ownerOf(positionId)).toLowerCase()===locker.toLowerCase(),locker,feeSplitter:splitter,positionId:positionId.toString(),venue:this.dex?.name??'Uniswap v3',feeBps:100,dexRewards,quoteSymbol:this.qsym(item),quoteDecimals:d,spotPrice:price,circulatingSupply:formatUnits(circulation,18),saleCap:formatUnits(await curve.SALE_CAP(),18),remainingBuy:'0',name,symbol,reward,reserve:formatUnits(await new Contract(quoteAsset,this.config.contracts.quote.abi,this.provider).balanceOf(pool),d),sold:formatUnits(sold,18),supply:formatUnits(supply,18),balance:formatUnits(held,18),protocolFees:formatUnits(cp,d),creatorFees:formatUnits(cc,d)};
   }
   async dexQuote(item,side,input){const asset=this.qaddr(item),quoter=new Contract(this.dex.quoter,this.config.contracts.quoter.abi,this.provider),result=await quoter.quoteExactInputSingle.staticCall({tokenIn:side==='buy'?asset:item.address,tokenOut:side==='buy'?item.address:asset,amountIn:input,fee:10000,sqrtPriceLimitX96:0});return result[0];}
   async dexTrade(item,side,body){
@@ -731,7 +731,7 @@ export class TestnetWallet {
       const curve = await this.market(item, this.signer);
       const original = new Contract(item.curve, this.artifacts.curve.abi, this.signer);
       if (action === 'reopen') { if (this.modelOf(item) !== DEX_MODEL) throw new Error('Only model 10 curves can be reopened.'); result = await this.wait(original.reopen(), 'Confirm reopening the curve for trading…'); }
-      else if (action === 'graduate') result = await this.wait(original.graduate(), this.dex?'Confirm graduation into Uniswap v3…':'Confirm graduation into the locked test pool…');
+      else if (action === 'graduate') result = await this.wait(original.graduate(), this.dex?`Confirm graduation into ${this.dex.name??'the DEX'}…`:'Confirm graduation into the locked test pool…');
       else if (action === 'withdraw') {
         // Every step is zero-safe on-chain (withdrawFees, collectFees and claim all succeed with nothing owed), so a
         // batching wallet gets them all in ONE confirmation. Other wallets get only the steps that will move money.
@@ -745,7 +745,7 @@ export class TestnetWallet {
             // What a collect would move right now (read-only dry run); unknown counts as "something".
             let collected = null; try { const [a0, a1] = await locker.collectFees.staticCall(); collected = new Map([[(await locker.token0()).toLowerCase(), a0], [(await locker.token1()).toLowerCase(), a1]]); } catch { collected = null; }
             const willCollect = collected === null || [...collected.values()].some(v => v > 0n);
-            if (batch || willCollect) add(locker, { name: 'collectFees', args: [] }, 'Collect Uniswap position fees…');
+            if (batch || willCollect) add(locker, { name: 'collectFees', args: [] }, `Collect ${this.dex.name??'DEX'} position fees…`);
             const recipients = [...new Set([(await this.factoryOf(item).treasury()).toLowerCase(), (await original.creatorRewardVault()).toLowerCase()])];
             for (const asset of [item.address, this.qaddr(item)]) {
               const incoming = collected === null ? 1n : (collected.get(String(asset).toLowerCase()) ?? 0n);

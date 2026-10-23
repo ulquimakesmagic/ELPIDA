@@ -21,7 +21,7 @@ const metadataRequests = new Map();
 function dexName(ctx, token) {
   if (token.venue) return token.venue;
   if (token.dex) return token.dex;
-  return (ctx.mode === 'local' ? ctx.config.dex : ctx.wallet.dex) ? 'Uniswap v3' : 'test';
+  return ctx.mode === 'local' ? (ctx.config.dex ? 'Uniswap v3' : 'test') : ctx.wallet.dex?.name ?? 'test';
 }
 
 /** "3m ago" style relative age, used by the header and the trades table. */

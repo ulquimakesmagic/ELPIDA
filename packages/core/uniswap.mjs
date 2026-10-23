@@ -27,7 +27,7 @@ export function v3PoolAbi(){
 export const testnetDexes={
  'base-sepolia':{...baseSepoliaDex,enabled:true},
  'ethereum-sepolia':{name:'Uniswap v3',fee:10000,factory:'0x0227628f3F023bb0B980b67D528571c95c6DaC1c',manager:'0x1238536071E1c677A632429e3655c799b22cDA52',router:'0x3bFA4769FB09eefC5a80d6E87c3B9C650f7Ae48E',quoter:'0xEd1f6473345F45b75F8179591dd5bA1888cf2FB3',weth:'0xfFf9976782d46CC05630D1f6eBAb18b2324d6B14',routerVersion:2,enabled:true},
- 'bnb-testnet':{name:'PancakeSwap v3',fee:10000,factory:'0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',manager:'0x427bF5b37357632377eCbEC9de3626C71A5396c1',router:'0x1b81D678ffb9C0263b24A97847620C99d213eB14',quoter:'0xbC203d7f83677c7ed3F7acEc959963E7F4ECC5C2',weth:'0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd',routerVersion:1,enabled:false},
+ 'bnb-testnet':{name:'PancakeSwap v3',fee:10000,factory:'0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865',manager:'0x427bF5b37357632377eCbEC9de3626C71A5396c1',router:'0x1b81D678ffb9C0263b24A97847620C99d213eB14',quoter:'0xbC203d7f83677c7ed3F7acEc959963E7F4ECC5C2',weth:'0xae13d989daC2f0dEbFf460aC112a837C89BAa7cd',routerVersion:1,enabled:true},
 };
 export async function deployLocalV3(signer,wrappedArtifact){
  const deploy=async(art,...args)=>{const c=await new ContractFactory(art.abi,art.bytecode??art.evm.bytecode.object,signer).deploy(...args);await c.waitForDeployment();return c;};
