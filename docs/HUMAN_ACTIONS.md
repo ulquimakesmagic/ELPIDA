@@ -85,16 +85,24 @@ never paste, commit or share either:
 - `contracts/solana/keys/elpida_launchpad-keypair.json` is the program keypair. It is only needed for a brand-new
   deployment; upgrades now use the program address from the source.
 
-1. In PowerShell, from `elpida-fork`, copy the original deployer over the empty one the first attempt created:
-   `Copy-Item ..\elpida-v1\local-data\solana-deployer.json .\local-data\solana-deployer.json -Force`
-   (adjust `..\elpida-v1` to where that folder is). The empty keypair holds nothing, so overwriting it loses nothing.
-2. Check the build: `certutil -hashfile contracts\solana\build\elpida_launchpad.so SHA256` must print
+1. **Pull first** (`git pull` in `elpida-fork`). The 23 Oct second attempt still ran the old script (its error points
+   at line 64), so the fix in #74 was not on the PC yet.
+2. **Find the original deployer.** It is not at `..\elpida-v1`. Search the Desktop for every copy:
+   `Get-ChildItem $HOME\Desktop -Recurse -Filter solana-deployer.json -ErrorAction SilentlyContinue | Select-Object FullName`
+   Then print only the public address of each one (this never shows the secret):
+   `node -e "const w=require('@solana/web3.js');console.log(w.Keypair.fromSecretKey(Uint8Array.from(require(process.argv[1]))).publicKey.toBase58())" "<full path>"`
+   The one that prints `FeUWF…KaH8` is the upgrade authority. Ignore `elpida-fork\local-data\solana-deployer.json`:
+   it is the empty keypair the first attempt created.
+3. Copy it over the empty one: `Copy-Item "<full path>" .\local-data\solana-deployer.json -Force`. If none prints
+   `FeUWF…KaH8`, stop and tell Claude: the program cannot be upgraded without it (a fresh program would be deployed
+   instead, about 5.8 devnet SOL).
+4. Check the build: `certutil -hashfile contracts\solana\build\elpida_launchpad.so SHA256` must print
    `89d96d53856ba206a8a3a96b0b971d503d6fcfb0dd028587cf654fbc5f6d0b88`.
-3. Make sure `FeUWF…KaH8` holds about **5 devnet SOL** (faucet.solana.com); most of it is a temporary buffer refunded
+5. Make sure `FeUWF…KaH8` holds about **5 devnet SOL** (faucet.solana.com); most of it is a temporary buffer refunded
    after the upgrade.
-4. Run `npm.cmd run solana:deploy -- --upgrade`. It prints the deployer and program first. If the deployer is not the
+6. Run `npm.cmd run solana:deploy -- --upgrade`. It prints the deployer and program first. If the deployer is not the
    upgrade authority, it stops before uploading anything and says which address is.
-5. Send Claude the output.
+7. Send Claude the output.
 
 ## 4. Turn on `hope` mint addresses (optional)
 

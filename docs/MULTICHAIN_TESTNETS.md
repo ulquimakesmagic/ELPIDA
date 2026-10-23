@@ -30,7 +30,7 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
 |---|---|---|---|---|
 | Ethereum Sepolia | PASS 13/13, block 11965619 | On | `0xD641…6d2`, block 11972040 (22 Oct); setup txs below | **Done 22 Oct** (VEGETA, below) |
 | BNB Testnet | **PASS 13/13 (23 Oct)**, block 138477356 via publicnode (PancakeSwap v3, router v1) | On | `0x8c48…fBbE`, block 138485798 (23 Oct); setup below | **Done 23 Oct** (MIDORIYA, below) |
-| Robinhood Testnet | No DEX or feed | Off | | |
+| Robinhood Testnet | No DEX or feed on testnet. **Mainnet fork check ready** (`robinhood-mainnet`, below) | Off | | Not possible on testnet |
 
 Until a chain's team launchpad is pinned in `packages/core/networks.mjs`, its launches show only in the deploying
 browser, and token details are not staged (they would expire unindexed). After pinning, the public indexer lists them.
@@ -83,6 +83,31 @@ MIDORIYA end to end (23 Oct). Malik reported the hashes; Claude read each receip
 
 A second MIDORIYA launch (`0xf9541ad9523e4af4e03d1a861b8c2c8b9afbbd39918949de621a867bb2581bb3`, token
 `0x7c7e935069048d541433b59a0512a1bdae041559`) is still trading on its curve.
+
+### Robinhood Chain: mainnet fork check (23 Oct)
+
+Robinhood Chain's testnet cannot be tested live: Chainlink's feed list says "Robinhood Chain feeds are not available on
+testnet", and Uniswap's official v3 deployment is on mainnet (chain 4663) only. So the lifecycle runs on a **local fork
+of Robinhood mainnet** against its real Uniswap v3 and Chainlink ETH/USD feed. Mainnet state is only read; every
+transaction happens on the fork, with Hardhat's test accounts. No wallet, key or funds are involved.
+
+```
+npm.cmd run test:chain-fork -- robinhood-mainnet
+```
+
+| Item | Address | Source |
+|---|---|---|
+| Uniswap v3 factory | `0x1f7d7550B1b028f7571E69A784071F0205FD2EfA` | Uniswap docs, Robinhood Chain v3 deployments |
+| NonfungiblePositionManager | `0x73991a25C818Bf1f1128dEAaB1492D45638DE0D3` | same |
+| SwapRouter02 (router v2) | `0xCaf681a66D020601342297493863E78C959E5cb2` | same |
+| QuoterV2 | `0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7` | same |
+| WETH | `0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73` | Uniswap sdk-core `WETH9[4663]`; re-read from the manager on the fork |
+| Chainlink ETH / USD (standard proxy) | `0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9` | Chainlink price-feed addresses, Robinhood Chain Mainnet |
+
+The run uses mainnet terms ($5,000 start, 24 h grace), allows the feed a 24 h age (crypto feeds on Arbitrum-based
+chains have a 24 h heartbeat), and adds a 14th check that the feed's `description()` is `ETH / USD`. The other 13 are
+the same as BNB and Ethereum Sepolia. RPC: `https://rpc.mainnet.chain.robinhood.com`; override with
+`$env:ELPIDA_FORK_RPC_ROBINHOOD_MAINNET`.
 
 ## Order
 

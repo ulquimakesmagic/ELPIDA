@@ -2,6 +2,7 @@
 pragma solidity ^0.8.24;
 contract MockUsdFeed {
     uint8 public constant decimals=8;
+    string public constant description="ETH / USD";
     address public immutable owner=msg.sender;
     int256 public answer;
     uint256 public updatedAt;

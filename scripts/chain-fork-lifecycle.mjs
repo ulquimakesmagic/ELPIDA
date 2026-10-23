@@ -3,6 +3,7 @@
 //   npm run test:chain-fork -- ethereum-sepolia
 //   npm run test:chain-fork -- bnb-testnet
 //   npm run test:chain-fork -- base-sepolia
+//   npm run test:chain-fork -- robinhood-mainnet   (fork only: Robinhood's testnet has no DEX or price feed)
 // Optional env: ELPIDA_FORK_RPC_<NETWORK> (e.g. ELPIDA_FORK_RPC_BNB_TESTNET) to use your own RPC; ELPIDA_FORK_BLOCK.
 // Writes backups/chain-fork/<network>.json with every check, the gas each step used, and what to collect from faucets.
 import assert from 'node:assert/strict';
@@ -25,7 +26,7 @@ const eq = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
  * Runs the lifecycle. `dex` is a testnetDexes entry; `feed` the chain's native/USD Chainlink feed. `art(name)` returns a
  * compiled Elpida artifact. Throws on the first failed check; returns { checks, gas, addresses } otherwise.
  */
-export async function runChainLifecycle({ provider, signer, attacker, dex, feed, maxAge = 3900, startFdvUsd = 50, grace = 86400, art, log = () => {} }) {
+export async function runChainLifecycle({ provider, signer, attacker, dex, feed, feedDescription = null, maxAge = 3900, startFdvUsd = 50, grace = 86400, art, log = () => {} }) {
   const checks = [], gas = [];
   const check = (name, ok, detail = '') => { checks.push({ name, ok: !!ok, detail: String(detail) }); log(`${ok ? 'PASS' : 'FAIL'}  ${name}${detail ? '  ' + detail : ''}`); if (!ok) throw new Error(`Check failed: ${name}${detail ? ' (' + detail + ')' : ''}`); };
   const send = async (step, pending) => { let r; try { r = await (await pending).wait(); } catch (error) { error.step ??= step; throw error; } if (r.status !== 1) throw new Error(`${step} reverted`); gas.push({ step, gas: r.gasUsed.toString() }); return r; };
@@ -39,8 +40,12 @@ export async function runChainLifecycle({ provider, signer, attacker, dex, feed,
   const weth = await manager.WETH9();
   check('wrapped native coin matches the config (manager.WETH9())', eq(weth, dex.weth), weth);
   check(`${dex.fee / 10000}% fee tier exists with tick spacing 200`, (await v3.feeAmountTickSpacing(dex.fee)) === 200n);
+  if (feedDescription) {
+    const described = await new Contract(feed, ['function description() view returns(string)'], provider).description();
+    check(`price feed is ${feedDescription}`, described === feedDescription, described);
+  }
 
-  // 2. Our contracts, deployed exactly as the app deploys them (testnet terms: $50 start, 24 h grace).
+  // 2. Our contracts, deployed exactly as the app deploys them ($50 start on testnets, $5,000 on a mainnet fork; 24 h grace).
   const adapter = await deploy('ElpidaV3MigrationAdapter', dex.manager, weth, dex.fee);
   const factory = await deploy('ElpidaAtomicDexFactory', me, adapter.target, startFdvUsd, grace);
   const deployBlock = (await factory.deploymentTransaction().wait()).blockNumber;
@@ -124,12 +129,13 @@ async function main() {
   const [{ network }, { testnets }, { testnetDexes }, { usdOracles }, { compileContracts }, { BrowserProvider }] = await Promise.all([
     import('hardhat'), import('../packages/core/networks.mjs'), import('../packages/core/uniswap.mjs'), import('../packages/core/usd-oracles.mjs'), import('./compile.mjs'), import('ethers'),
   ]);
-  const net = testnets.find(n => n.key === key), dex = testnetDexes[key], oracle = usdOracles()[key];
-  assert.ok(net && dex && oracle?.feed, `Usage: npm run test:chain-fork -- <${Object.keys(testnetDexes).join('|')}>`);
+  const only = FORK_ONLY[key];
+  const net = only?.net ?? testnets.find(n => n.key === key), dex = only?.dex ?? testnetDexes[key], oracle = only?.oracle ?? usdOracles()[key];
+  assert.ok(net && dex && oracle?.feed, `Usage: npm run test:chain-fork -- <${[...Object.keys(testnetDexes), ...Object.keys(FORK_ONLY)].join('|')}>`);
   const override = process.env[`ELPIDA_FORK_RPC_${key.toUpperCase().replace(/-/g, '_')}`];
   const candidates = override ? [override] : [...new Set([net.rpcUrl, ...(FORK_RPC_FALLBACKS[key] ?? [])])];
   const compiled = compileContracts(), art = n => compiled[`contracts/evm/src/${n}.sol`][n];
-  const report = { scope: 'LOCAL FORK ONLY', network: key, chainId: net.chainId, dex: dex.name, routerVersion: dex.routerVersion ?? 2 };
+  const report = { scope: only ? 'LOCAL FORK ONLY: mainnet state is read, nothing is sent and no funds are used' : 'LOCAL FORK ONLY', network: key, chainId: net.chainId, dex: dex.name, routerVersion: dex.routerVersion ?? 2, feed: oracle.feed };
   let lastError = null;
   try {
     // Forking reads chain state at a past block. Pruned nodes (common on BNB, where blocks are under a second) drop that
@@ -145,12 +151,12 @@ async function main() {
         const provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 }); provider.pollingInterval = 10;
         assert.equal(Number((await provider.getNetwork()).chainId), 31337, 'writes must stay on the local fork');
         await provider.send('evm_mine', []); // run on a local block, not upstream hardfork history
-        const result = await runChainLifecycle({ provider, signer: await provider.getSigner(0), attacker: await provider.getSigner(1), dex, feed: oracle.feed, maxAge: oracle.maxAge, art, log: console.log });
+        const result = await runChainLifecycle({ provider, signer: await provider.getSigner(0), attacker: await provider.getSigner(1), dex, feed: oracle.feed, feedDescription: oracle.description ?? null, maxAge: oracle.maxAge, startFdvUsd: only?.startFdvUsd ?? 50, art, log: console.log });
         const deployGas = result.gas.filter(g => /^deploy|configure/.test(g.step)).reduce((s, g) => s + BigInt(g.gas), 0n);
         const allGas = result.gas.reduce((s, g) => s + BigInt(g.gas), 0n);
         Object.assign(report, result, { rpcHost: new URL(rpc).host, block, result: 'PASS', estimate: { gasPrice: gasPrice.toString(), gasPriceGwei: formatUnits(gasPrice, 'gwei'), deployGas: deployGas.toString(), fullRunGas: allGas.toString(), deployNative: formatEther(deployGas * gasPrice), fullRunNative: formatEther(allGas * gasPrice), suggestedFaucetNative: formatEther(allGas * gasPrice * 3n + parseEther('0.05')) } });
         const sym = net.nativeCurrency.symbol, e = report.estimate;
-        console.log(`\nResult: PASS. Gas price today ${e.gasPriceGwei} gwei. Deploying uses ${deployGas} gas (about ${e.deployNative} ${sym}); a full test run ${allGas} gas (about ${e.fullRunNative} ${sym}). Collect about ${e.suggestedFaucetNative} ${sym} (3x gas margin plus 0.05 for curve buys).`);
+        console.log(only ? `\nResult: PASS. Mainnet gas price today ${e.gasPriceGwei} gwei: a real deployment would use ${deployGas} gas (about ${e.deployNative} ${sym}). Nothing was spent; this ran on a local fork.` : `\nResult: PASS. Gas price today ${e.gasPriceGwei} gwei. Deploying uses ${deployGas} gas (about ${e.deployNative} ${sym}); a full test run ${allGas} gas (about ${e.fullRunNative} ${sym}). Collect about ${e.suggestedFaucetNative} ${sym} (3x gas margin plus 0.05 for curve buys).`);
       } catch (error) {
         lastError = error;
         if (!isPrunedState(error)) break;
@@ -172,6 +178,21 @@ async function main() {
 }
 
 const FORK_ATTEMPTS = 4, FORK_DEEP_HISTORY = 5000;
+// Chains checked only on a fork of their mainnet, because their testnet has no DEX or price feed. Read-only upstream;
+// every write happens on the local fork. Robinhood Chain (23 Oct 2026): Chainlink lists no feeds on its testnet, and
+// Uniswap's official v3 deployment is on mainnet only. Sources: Uniswap's Robinhood Chain v3 deployments page and
+// Chainlink's price-feed address list (Robinhood Chain Mainnet, ETH / USD standard proxy). The run re-checks each
+// address on-chain: the manager must belong to the factory, WETH must match, and the feed must describe ETH / USD.
+export const FORK_ONLY = Object.freeze({
+  'robinhood-mainnet': {
+    net: { key: 'robinhood-mainnet', name: 'Robinhood Chain (mainnet fork)', chainId: 4663, rpcUrl: 'https://rpc.mainnet.chain.robinhood.com', nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 } },
+    dex: { name: 'Uniswap v3', fee: 10000, factory: '0x1f7d7550B1b028f7571E69A784071F0205FD2EfA', manager: '0x73991a25C818Bf1f1128dEAaB1492D45638DE0D3', router: '0xCaf681a66D020601342297493863E78C959E5cb2', quoter: '0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7', weth: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73', routerVersion: 2 },
+    // Crypto feeds on Arbitrum-based chains update on deviation with a 24 h heartbeat, so allow a full day here.
+    oracle: { feed: '0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9', maxAge: 86400, description: 'ETH / USD' },
+    startFdvUsd: 5000, // mainnet terms
+  },
+});
+
 // Extra public RPCs tried after the network's own when the fork check needs state the first one has pruned.
 export const FORK_RPC_FALLBACKS = Object.freeze({
   'bnb-testnet': ['https://bnb-testnet.api.onfinality.io/public', 'https://bsc-testnet-rpc.publicnode.com', 'https://bsc-testnet.drpc.org', 'https://data-seed-prebsc-1-s1.bnbchain.org:8545', 'https://data-seed-prebsc-2-s1.bnbchain.org:8545', 'https://data-seed-prebsc-1-s2.bnbchain.org:8545'],
