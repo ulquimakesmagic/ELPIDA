@@ -46,18 +46,8 @@ export class PublicIndexer {
   quotes(key){const e=this.entries.get(key);if(!e)return null;const status=e.index.status();if(!e.validated||status.indexedBlock==null)return null;const factory=deploymentOf(e).factory;return {factory,chainId:e.net.chainId,indexedBlock:status.indexedBlock,assets:e.index.db.prepare("SELECT data FROM events WHERE json_extract(data,'$.name')='QuoteApproved' ORDER BY height,idx").all().map(r=>JSON.parse(r.data)).filter(r=>r.kind==='factory'&&r.address.toLowerCase()===factory.toLowerCase()).map(r=>r.args[0])};}
   /** Tokens from every deployment on the network. `extra(entry, token)` adds per-deployment fields. */
   listings(key,extra){return this.all(key).flatMap(e=>{const d=deploymentOf(e);return e.index.listings().map(t=>({...t,metadata:e.metadata.get(t.address)??{},metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})}));});}
-  metadataMessage(body){
-    const e=this.entryFor(body.network,body.token),token=e?.index.tokens().find(t=>t.address===String(body.token).toLowerCase());
-    if(!token||token.metadataURI)throw new Error('Only indexed tokens without on-chain metadata can publish this signed fallback.');
-    // Token details are final once published (D11): the signed fallback can be used once, never to edit.
-    if(e.metadata.has(token.address))throw new Error('Token details are already published and cannot be changed.');
-    if(!Number.isSafeInteger(body.expires)||body.expires<Date.now()/1000||body.expires>Date.now()/1000+300)throw new Error('Metadata signature expired. Prepare it again.');
-    const metadata=normalizeMetadata(body.metadata),digest=keccak256(toUtf8Bytes(JSON.stringify(metadata)));
-    return {e,token,metadata,message:`Elpida public token metadata\nChain: ${e.net.chainId}\nFactory: ${deploymentOf(e).factory.toLowerCase()}\nToken: ${token.address}\nMetadata hash: ${digest}\nExpires: ${body.expires}\nThis signature publishes token details to Elpida. It does not authorize a transfer.`};
-  }
-  saveMetadata(body){const {e,token,metadata,message}=this.metadataMessage(body);if(verifyMessage(message,body.signature).toLowerCase()!==token.creator.toLowerCase())throw new Error('Only the on-chain creator can publish these token details.');
-    const updated=new Map(e.metadata);updated.set(token.address,metadata);writeFileSync(e.metadataPath+'.tmp',JSON.stringify(Object.fromEntries(updated)));renameSync(e.metadataPath+'.tmp',e.metadataPath);e.metadata=updated;return {saved:true};
-  }
+  // No post-launch metadata path: details are published only in the launch transaction. Details a creator signed
+  // before this rule (22-23 Oct 2026 testnet) are still loaded from metadata.json and shown as before.
   /** Latest trades on every indexed network, each with the token's public name, symbol and image. */
   recentTrades(limit=20){const out=[];for(const key of this.entries.keys()){const tokens=new Map(this.listings(key).map(t=>[t.address.toLowerCase(),t]));for(const e of this.all(key))for(const trade of e.index.recentTrades(limit)){const t=tokens.get(String(trade.token).toLowerCase());if(t)out.push(recentTrade(key,t,trade));}}return out.sort((a,b)=>b.timestamp-a.timestamp).slice(0,limit);}
   detail(key,address,kind,interval=60){const e=this.entryFor(key,address),token=this.listings(key).find(t=>t.address===address.toLowerCase());if(!token)return null;return kind==='trades'?e.index.trades(address):kind==='candles'?e.index.candles(address,interval):kind==='holders'?e.index.holders(address):token;}

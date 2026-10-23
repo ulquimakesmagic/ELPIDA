@@ -195,6 +195,28 @@ export class SolanaWallet {
     const held = this.client.tokenAmount((await this.connection.getAccountInfo(this.client.quoteAta(this.publicKey, config)))?.data);
     return this.client.wrapSol(this.publicKey, amount > held ? amount - held : 0n);
   }
+  /**
+   * The buy that completes a curve and the PumpSwap migration go in ONE transaction: if the migration fails, the buy
+   * fails with it and the curve keeps trading, so it is never left closed waiting for someone to migrate or reopen it.
+   * For SOL pairs, wrapping (and unwrapping) move to their own transactions only if everything does not fit in one.
+   */
+  async completeAndMigrate({ config, refs, mint, wrap, buyIx }) {
+    if (BigInt(await this.connection.getBalance(this.publicKey)) < SolanaWallet.MIGRATION_RENT + SolanaWallet.SOL_HEADROOM) throw new Error(`This buy completes the curve and opens its PumpSwap pool in the same transaction, which needs about ${formatAmount(SolanaWallet.MIGRATION_RENT, 9)} SOL of pool rent (most of it comes back). Add SOL and try again. Nothing was sent.`);
+    const core = [this.client.computeBudget(MIGRATE_COMPUTE_UNITS + 200_000), buyIx, this.client.migrateToPumpswap({ payer: this.publicKey, config: refs, mint })];
+    const unwrap = config.wsol ? [this.client.unwrapSol(this.publicKey)] : [];
+    const message = 'Confirm the final buy. It completes the curve and opens the PumpSwap pool in the same transaction…';
+    let signature;
+    if (!wrap.length && !unwrap.length) signature = await this.sendInstructions(core, [], message);
+    else if (await this.fitsOneTransaction([...wrap, ...core, ...unwrap])) signature = await this.sendInstructions([...wrap, ...core, ...unwrap], [], message);
+    else {
+      if (wrap.length) await this.sendInstructions(wrap, [], 'Step 1: confirm wrapping SOL for the final buy…');
+      signature = await this.sendInstructions(core, [], 'Step 2: ' + message);
+      if (unwrap.length) await this.sendInstructions(unwrap, [], 'Step 3: confirm returning the unused wrapped SOL…').catch(() => {});
+    }
+    return { hash: signature, message: `The curve is complete and ${config.symbol ?? 'the token'} now trades on PumpSwap. The liquidity is locked for good.` };
+  }
+  /** Rent the PumpSwap migration advances (most of it is refunded in the same transaction). */
+  static MIGRATION_RENT = 60_000_000n;
   /** Rent and fees a SOL-pair transaction needs on top of the trade (new accounts, priority-free fee). */
   static SOL_HEADROOM = 30_000_000n;
   /** Public discovery: the server's indexer first (persistent, with history), else a direct read-only chain scan. */
@@ -407,6 +429,9 @@ export class SolanaWallet {
       const fresh = { virtualQuote: terms.virtualQuote, virtualToken: config.virtualToken, curveSupply: config.curveSupply, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 };
       // The creator's first buy pays only the base fee (no anti-snipe tax); a buy beyond the curve is capped.
       const q = firstBuy===0n ? {tokens:0n,gross:0n,fee:0n} : quoteBuy(fresh, firstBuy, config.baseFeeBps, config.baseFeeBps);
+      // The buy that completes a curve also opens its PumpSwap pool in the same transaction, so a curve is never left
+      // closed. That does not fit inside a launch transaction, so a creator buy cannot take the whole curve.
+      if (q.graduates) throw new Error(`A creator buy can take at most part of the curve: the buy that completes it must also open the PumpSwap pool, which does not fit in the launch transaction. Lower the first buy below ${formatAmount(q.gross, d)} ${config.symbol}. Nothing was submitted.`);
       // The SOL creation fee is paid from plain SOL; for SOL pairs the first buy is wrapped from it too.
       const solNeeded = maxFee + (config.wsol ? q.gross : 0n) + SolanaWallet.SOL_HEADROOM;
       let usdc = null;
@@ -427,6 +452,8 @@ export class SolanaWallet {
       // metadata in the launch transaction (D11), so wallets and explorers show the name and image.
       // A program not yet upgraded to metadata support keeps the earlier launch (details in this browser).
       const withMetadata = await this.supportsMetadata();
+      // Token details are always written in the launch transaction, never afterwards.
+      if (!withMetadata) throw new Error(`The ${this.net.name} program does not write token details at launch yet, and Elpida launches only with details included. The team upgrades it with the Solana deploy script. Nothing was submitted.`);
       let published = { metadata, storage: null };
       if (withMetadata) {
         this.onProgress?.('Publishing token details for the launch…');
@@ -501,7 +528,9 @@ export class SolanaWallet {
       const held = await this.quoteBalance(this.publicKey, config);
       if (held < q.gross + (config.wsol ? 5_000_000n : 0n)) throw new Error(`Not enough ${config.symbol} on ${this.net.name}.${config.test ? ' Use its test faucet in Network and funds.' : config.wsol ? ' Get devnet SOL at faucet.solana.com.' : ''}`);
       // Only what the trade actually charges is wrapped; a partial final fill leaves the rest unspent.
-      instruction = [...await this.wrapFor(config, q.gross), this.client.buy({ buyer: this.publicKey, config: refs, mint, grossIn: q.gross, minTokensOut: q.tokens * (10000n - bps) / 10000n })];
+      const wrap = await this.wrapFor(config, q.gross), buyIx = this.client.buy({ buyer: this.publicKey, config: refs, mint, grossIn: q.gross, minTokensOut: q.tokens * (10000n - bps) / 10000n });
+      if (q.graduates) return this.completeAndMigrate({ config, refs, mint, wrap, buyIx });
+      instruction = [...wrap, buyIx];
     } else if (action === 'sell') {
       const tokensIn = parseAmount(body.amount, TOKEN_DECIMALS);
       const q = quoteSell(pool, tokensIn, feeBps, config.baseFeeBps);

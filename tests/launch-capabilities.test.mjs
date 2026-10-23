@@ -22,3 +22,12 @@ test('other EVM chains stage details only on the publicly indexed team launchpad
  assert.equal(publishForLaunch({chain:'ethereum-sepolia',publicEnabled:true,metadataSupported:true,publiclyIndexed:true}),true);
  assert.equal(publishForLaunch({chain:'ethereum-sepolia',publicEnabled:true,metadataSupported:false,publiclyIndexed:true}),false);
 });
+test('details always go into the launch transaction: a launchpad that cannot include them does not launch',async()=>{
+ const {launchDetailsError}=await import('../apps/web/launch-capabilities.mjs');
+ assert.equal(launchDetailsError({chain:'base-sepolia',networkName:'Base Sepolia',metadataSupported:true}),null);
+ assert.equal(launchDetailsError({chain:'ethereum-sepolia',networkName:'Ethereum Sepolia',metadataSupported:true,publiclyIndexed:true}),null);
+ assert.match(launchDetailsError({chain:'ethereum-sepolia',networkName:'Ethereum Sepolia',metadataSupported:true,publiclyIndexed:false}),/shared launchpad.*Nothing was submitted/);
+ assert.match(launchDetailsError({chain:'bnb-testnet',networkName:'BNB Chain Testnet',metadataSupported:true}),/BNB Chain Testnet/);
+ assert.match(launchDetailsError({chain:'base-sepolia',networkName:'Base Sepolia',metadataSupported:false}),/predates token details/);
+ assert.equal(launchDetailsError({chain:'solana-devnet',networkName:'Solana Devnet',metadataSupported:true}),null);
+});

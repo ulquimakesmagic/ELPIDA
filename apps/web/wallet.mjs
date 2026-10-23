@@ -5,7 +5,7 @@ import { routerAbi, swapCalldata } from '/dex-router.mjs';
 
 import { normalizeMetadata } from './metadata.mjs';
 import { readMetadataCache, writeMetadataCache } from './metadata-cache.mjs';
-import {publishForLaunch} from './launch-capabilities.mjs';
+import {launchDetailsError} from './launch-capabilities.mjs';
 import { EVM_TEST_PAIRS } from '/pairs.mjs';
 import { DEX_MODEL, LEGACY_DEX_MODEL, BETA_MODEL, MODEL_VERSIONS, isDexModel, curveShape, startFdvUsdFor, assertDeploymentTerms, usdQuoteTemplate, GRADUATION_GRACE_SECONDS, BASE_FEE_BPS, SNIPE_START_BPS, SNIPE_WINDOW_SECONDS, SALE_CAP } from '/curve-model.mjs';
 import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
@@ -637,7 +637,10 @@ export class TestnetWallet {
       const pairToken = paired ? new Contract(asset.address, this.config.contracts.quote.abi, this.signer) : null;
       if (paired && await pairToken.balanceOf(this.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, asset.decimals)} ${asset.symbol} for the first buy.${asset.test ? ' Use its test faucet in Network and funds.' : ''}`);
       let published;
-      if(publishForLaunch({chain:this.net.key,publicEnabled:this.config.metadataPublishing?.publicEnabled,metadataSupported:!this.needsMetadataUpgrade,publiclyIndexed:!!this.deployment?.shared&&this.model===DEX_MODEL})){
+      // Token details always go into the launch transaction, never afterwards. Where they cannot, nothing launches.
+      const detailsError=launchDetailsError({chain:this.net.key,networkName:this.net.name,metadataSupported:!this.needsMetadataUpgrade,publiclyIndexed:!!this.deployment?.shared&&this.model===DEX_MODEL});
+      if(detailsError)throw new Error(detailsError);
+      {
         this.onProgress('Preparing public token details for the launch transaction…');
         const payload=JSON.stringify({network:this.net.key,name,symbol,...details}),proof=await prepareUploadProof(payload);
         const response=await fetch('/api/metadata/stage',{method:'POST',headers:{'Content-Type':'application/json','X-Elpida-Token':this.config.csrf,...proof},body:payload});
