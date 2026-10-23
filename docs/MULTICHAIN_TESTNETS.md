@@ -29,7 +29,7 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
 | Chain | Fork check | Model 10 | Team launchpad (`shared`) | A2 to A5 live |
 |---|---|---|---|---|
 | Ethereum Sepolia | PASS 13/13, block 11965619 | On | `0xD641…6d2`, block 11972040 (22 Oct); setup txs below | **Done 22 Oct** (VEGETA, below) |
-| BNB Testnet | **PASS 13/13 (23 Oct)**, block 138477356 via publicnode (PancakeSwap v3, router v1) | On | Not yet: deploy (new factory requires token details on-chain), then send the factory address and block | Open |
+| BNB Testnet | **PASS 13/13 (23 Oct)**, block 138477356 via publicnode (PancakeSwap v3, router v1) | On | `0x8c48…fBbE`, block 138485798 (23 Oct); setup below | Open |
 | Robinhood Testnet | No DEX or feed | Off | | |
 
 Until a chain's team launchpad is pinned in `packages/core/networks.mjs`, its launches show only in the deploying
@@ -57,6 +57,18 @@ VEGETA end to end (reported by Malik, 22 Oct):
 | Fee claim (A5) | `0x6cbd0da943bdd2e0ed85e68598da056d2b4f7b18463366d7c83adaab3a693faa` |
 
 It ran smoothly; the feedback was too many confirmations for sells and claims, addressed in `WALLET_CONFIRMATIONS.md`.
+
+### BNB Testnet setup (23 Oct, Trust Wallet, `0xf5B0…639D`)
+
+Zerion cannot send transactions on BNB testnet (its own service answers 404), so the setup used Trust Wallet.
+The first attempt read through `bsc-testnet-dataseed`, which Malik's network could not even resolve
+(`ERR_NAME_NOT_RESOLVED`), and stopped after step 1. The site now reads BNB through publicnode.
+
+| Step | Transaction | Result |
+|---|---|---|
+| Graduation adapter (WBNB) | `0xd0f67ea9d1d055a7c76ce66aded35b70912958e47777994e85dae69f45ed1e8f`, then `0xa5557614a0c27e0c22fc0290189b79a9860bb9fee0cca97d34fdf45de2ff7060` on retry | `0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2` in use |
+| Atomic factory (requires token details on-chain) | `0x7b0cefee34089772dbf5d698f72da1c66608e7be5a66fe08f22f1fe299d7247f` (block 138485798) | `0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE` |
+| USD pricing activated | `0xce6dc1d636a7c059aee6284ffe11744cdc56ef47461266404e504bdbbe3392f5` | confirmed ("Oracle pricing is already fixed" on retry) |
 
 ## Order
 

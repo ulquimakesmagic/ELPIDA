@@ -52,3 +52,10 @@ test('BNB tokens are labelled PancakeSwap v3 wherever the DEX is named (indexer 
   assert.equal(plain.dexName, 'Uniswap v3', 'default unchanged'); await plain.close?.();
   assert.equal(walletOn('bnb-testnet').dex.name, 'PancakeSwap v3');
 });
+
+test('BNB Testnet uses its pinned team launchpad (atomic, requires token details) through publicnode', () => {
+  const bnb = walletOn('bnb-testnet');
+  assert.equal(bnb.deployment.factory, '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE'); assert.equal(bnb.deployment.shared, true);
+  assert.equal(bnb.deployment.block, 138485798); assert.equal(bnb.deployment.model, DEX_MODEL);
+  assert.equal(bnb.net.rpcUrl, 'https://bsc-testnet-rpc.publicnode.com');
+});
