@@ -53,3 +53,20 @@ Wallet / smart wallets do; MetaMask does once the account is upgraded to a smart
 separate, labelled steps. The capability check runs once per wallet and network, and never for a single step.
 
 Not changed: the tax-market flows (`tax-wallet.mjs`, disabled on public networks) still send steps separately.
+
+## Launches paid in USDC or a paired token (23 Oct)
+
+A launch that pays its fee in USDC, or makes a creator buy in USDC or another paired token, needs an approval first
+on a wallet that cannot batch. Malik's first USDC-pair launch (ITACHI, Base Sepolia) took the approval twice and the
+launch once.
+
+- **Testnets: approve once per launchpad.** The first such launch approves the asset for that launchpad without a
+  limit; every later launch is one confirmation. This is safe because the launchpad only ever pulls from whoever calls
+  its own launch (`msg.sender`), in that caller's amounts (the 10 USDC fee and the first buy). Another wallet's launch
+  can never use your approval (`tests/one-confirmation.test.mjs`, on-chain).
+- **Mainnet: exact approvals until the contracts are audited** (decision, 23 Oct).
+- **No double approvals.** After an approval confirms, the site waits until the public RPC it estimates on can see it
+  (load-balanced nodes can lag a few blocks) before launching. Before, a launch estimated on a lagging node failed,
+  and the retry asked for the approval again.
+- Native-paid launches with a native pair, or a USDC pair with no creator buy and the fee in native, need no approval
+  and were already one confirmation. Wallets that batch get one confirmation in every case.

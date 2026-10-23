@@ -26,6 +26,7 @@ import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
 import { SOLANA_ORACLES } from '../packages/core/usd-oracles.mjs';
 import { createElpidaSolana, poolStats } from '../packages/solana/client.mjs';
+import { declaredProgramId } from '../packages/solana/program-id.mjs';
 import { deployProgram, upgradeProgram, upgradeCost, programStatus, deploymentCost, airdrop, findExistingBuffer, closeStaleBuffers, ensurePairConfigs, ensureBetaGate, rejectsTestInstructions, transferUpgradeAuthority, upgradeAuthority, ensurePricing } from '../packages/solana/deploy.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -57,19 +58,25 @@ const sol = lamports => (Number(lamports) / web3.LAMPORTS_PER_SOL).toFixed(3);
 const loadKeypair = path => web3.Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(path, 'utf8'))));
 
 mkdirSync(`${root}local-data`, { recursive: true });
+if (!existsSync(elfPath)) throw new Error(`Missing ${elfPath}. The compiled program ships with this repository; run git pull.`);
+// An upgrade must be signed by the program's upgrade authority, the deployer that first deployed it. A new keypair
+// could never upgrade it, so --upgrade never creates one.
 if (!existsSync(keypairPath)) {
+  if (args.upgrade) throw new Error(`No deployer keypair at ${keypairPath}. An upgrade must be signed by the program's upgrade authority: the deployer that first deployed it. Copy local-data/solana-deployer.json from the folder you deployed from (for example elpida-v1) into this folder's local-data, or pass --keypair <path>. Never share that file.`);
   writeFileSync(keypairPath, JSON.stringify([...web3.Keypair.generate().secretKey]), { mode: 0o600 });
   console.log(`Created a new deployer keypair at ${keypairPath} (keep it private).`);
 }
-for (const path of [elfPath, programKeyPath]) if (!existsSync(path)) throw new Error(`Missing ${path}. The compiled program and its keypair ship with this repository.`);
 const payer = loadKeypair(keypairPath);
-const programKeypair = loadKeypair(programKeyPath);
+// The program keypair (contracts/solana/keys, never committed) is needed only to deploy a new program. An upgrade
+// needs only the program's address, which is the one declared in the program source.
+const programKeypair = existsSync(programKeyPath) ? loadKeypair(programKeyPath) : null;
+const programId = programKeypair?.publicKey ?? new web3.PublicKey(declaredProgramId(readFileSync(`${root}contracts/solana/programs/elpida_launchpad/src/lib.rs`, 'utf8')));
 const elf = readFileSync(elfPath);
 const connection = new web3.Connection(rpcUrl, 'confirmed');
 const shownRpc = rpcUrl.replace(/([?&](api[-_]?key|key|token)=)[^&]+/i, '$1***');
 console.log(`Cluster:   ${args.cluster} (${shownRpc})`);
 console.log(`Deployer:  ${payer.publicKey.toBase58()}`);
-console.log(`Program:   ${programKeypair.publicKey.toBase58()}`);
+console.log(`Program:   ${programId.toBase58()}`);
 if (mainnet && !args.yes) {
   const need = await deploymentCost(connection, elf.length);
   console.log(`\nMainnet deployment spends real SOL: about ${sol(need)} SOL (program rent, most of it locked while the program exists, plus a temporary upload buffer).`);
@@ -82,7 +89,17 @@ if (mainnet && !args.yes) {
 
 const statePath = `${root}local-data/solana-${args.cluster}-deploy-state.json`;
 const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : {};
-const deployed = (await connection.getAccountInfo(programKeypair.publicKey))?.executable;
+const deployed = (await connection.getAccountInfo(programId))?.executable;
+if (!deployed && !programKeypair) throw new Error(`Missing ${programKeyPath}. Deploying a new program needs its keypair; copy contracts/solana/keys from the folder it was created in (for example elpida-v1). Never share it.`);
+// Check the authority before uploading anything, so a wrong keypair spends no SOL.
+if (deployed && args.upgrade) {
+  const authority = await upgradeAuthority(connection, programId);
+  if (authority && !authority.equals(payer.publicKey)) {
+    console.error(`\nThis deployer (${payer.publicKey.toBase58()}) is not the program's upgrade authority (${authority.toBase58()}). Nothing was uploaded.`);
+    console.error(`Use the original deployer keypair: copy local-data/solana-deployer.json from the folder you first deployed from (for example elpida-v1) over ${keypairPath}, or pass --keypair <path>.`);
+    process.exit(1);
+  }
+}
 // Buffers from an interrupted upload of an older build hold SOL; reclaim them first.
 const reclaimed = await closeStaleBuffers({ connection, payer, elfLength: elf.length, remembered: [state.buffer], onProgress: message => console.log(message) });
 if (reclaimed) console.log(`Reclaimed ${sol(reclaimed)} SOL from stale buffers.`);
@@ -107,12 +124,12 @@ if (!deployed) {
   });
   console.log(result.alreadyDeployed ? 'Program already deployed.' : 'Program deployed.');
 } else {
-  const status = await programStatus(connection, programKeypair.publicKey, elf);
+  const status = await programStatus(connection, programId, elf);
   if (status.upToDate) console.log('Program already deployed and up to date.');
   else if (!args.upgrade) console.log('Program already deployed, but contracts/solana/build has a newer version. Run with --upgrade (solana-upgrade.cmd) to upgrade it.');
   else {
     const existingBuffer = await findExistingBuffer(connection, payer.publicKey, elf.length, state.buffer);
-    const need = await upgradeCost(connection, programKeypair.publicKey, elf, { reuseBuffer: !!existingBuffer });
+    const need = await upgradeCost(connection, programId, elf, { reuseBuffer: !!existingBuffer });
     let balance = await connection.getBalance(payer.publicKey);
     if (balance < need && localnet) { await airdrop(connection, payer.publicKey, need - balance + web3.LAMPORTS_PER_SOL); balance = await connection.getBalance(payer.publicKey); }
     if (balance < need) {
@@ -121,7 +138,7 @@ if (!deployed) {
       process.exit(1);
     }
     await upgradeProgram({
-      connection, payer, programId: programKeypair.publicKey, elf, rememberedBuffer: existingBuffer?.toBase58(),
+      connection, payer, programId: programId, elf, rememberedBuffer: existingBuffer?.toBase58(),
       sendsPerSecond: Number(args.rate ?? (localnet ? 100 : 3)),
       onBuffer: buffer => writeFileSync(statePath, `${JSON.stringify({ ...state, buffer }, null, 2)}\n`),
       onProgress: message => console.log(message),
@@ -131,15 +148,15 @@ if (!deployed) {
 }
 
 // The mainnet build must refuse test instructions; stop before any configuration if it does not.
-if (mainnet && !await rejectsTestInstructions({ connection, payer, programId: programKeypair.publicKey })) {
+if (mainnet && !await rejectsTestInstructions({ connection, payer, programId: programId })) {
   throw new Error('The deployed program accepts test instructions. Mainnet must use build/elpida_launchpad-mainnet.so. Do not continue: upgrade it with the mainnet build first.');
 }
-const client = createElpidaSolana(web3, programKeypair.publicKey);
+const client = createElpidaSolana(web3, programId);
 // Repricing needs the upgrade authority; once it is a multisig, use scripts/native-pricing.mjs --export.
-const isAuthority = (await upgradeAuthority(connection, programKeypair.publicKey))?.equals(payer.publicKey) ?? false;
+const isAuthority = (await upgradeAuthority(connection, programId))?.equals(payer.publicKey) ?? false;
 if (!isAuthority) console.log('The upgrade authority is not this deployer (multisig?): existing pair configs are left as they are. Reprice with node scripts/native-pricing.mjs --export.');
 // Native SOL pair (and, on test networks, a test paired token), created or repriced to config/native-pricing.json.
-const pairs = await ensurePairConfigs({ connection, payer, programId: programKeypair.publicKey, treasury: args.treasury ?? payer.publicKey.toBase58(),
+const pairs = await ensurePairConfigs({ connection, payer, programId: programId, treasury: args.treasury ?? payer.publicKey.toBase58(),
   templates: solanaPairTemplates(pricing, { test: !mainnet && !args['no-test-pairs'], usdcMint: SOLANA_ORACLES[args.cluster]?.usdcMint, usdcStartFdv: mainnet?'5000':'50' }), saved: state.testAssets ?? {}, reprice: isAuthority, onProgress: message => console.log(message) });
 state.testAssets = Object.fromEntries(pairs.filter(p => p.test).map(p => [p.key, p.mint]));
 writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
@@ -151,9 +168,9 @@ let usdPricing = null;
 const oracle = SOLANA_ORACLES[args.cluster];
 if (oracle && isAuthority) {
   try {
-    const result = await ensurePricing({ connection, payer, programId: programKeypair.publicKey, config: native.config, oracle, onProgress: message => console.log(message) });
+    const result = await ensurePricing({ connection, payer, programId: programId, config: native.config, oracle, onProgress: message => console.log(message) });
     // Other pairs (for example TEST-MEME) pay the same $10 fee; their curves stay sized in the pair asset.
-    for (const pair of pairs.filter(p => p.kind !== 'native')) await ensurePricing({ connection, payer, programId: programKeypair.publicKey, config: pair.config, oracle: { ...oracle, startFdvUsdE6: '0' }, onProgress: message => console.log(`${pair.symbol}: ${message}`) });
+    for (const pair of pairs.filter(p => p.kind !== 'native')) await ensurePricing({ connection, payer, programId: programId, config: pair.config, oracle: { ...oracle, startFdvUsdE6: '0' }, onProgress: message => console.log(`${pair.symbol}: ${message}`) });
     usdPricing = { enabled: true, priceAccount: oracle.priceAccount, feedId: oracle.feedId, maxAgeSecs: oracle.maxAgeSecs, maxConfBps: oracle.maxConfBps, feeUsdE6: oracle.feeUsdE6, startFdvUsdE6: oracle.startFdvUsdE6, usdcMint: oracle.usdcMint };
     console.log(`USD pricing ${result.created ? 'turned on' : result.updated ? 'updated' : 'already on'}: SOL/USD ${(Number(result.price.price) * 10 ** result.price.exponent).toFixed(2)} (published ${new Date(result.price.publishTime * 1000).toISOString()}).`);
   } catch (error) {
@@ -165,12 +182,12 @@ const config = { address: native.config, ...client.decodeConfig((await connectio
 // allowlist prepared in advance; on test networks only when asked for.
 let betaGate = null;
 if (mainnet || args['beta-admin'] || args['invite-only'] || args.allow.length) {
-  betaGate = await ensureBetaGate({ connection, payer, programId: programKeypair.publicKey, gateAuthority: args['beta-admin'] ?? payer.publicKey.toBase58(), enabled: args['invite-only'], allow: args.allow, onProgress: message => console.log(message) });
+  betaGate = await ensureBetaGate({ connection, payer, programId: programId, gateAuthority: args['beta-admin'] ?? payer.publicKey.toBase58(), enabled: args['invite-only'], allow: args.allow, onProgress: message => console.log(message) });
   console.log(`Launches: ${betaGate.enabled ? 'invite-only (beta gate on)' : 'open to everyone'}; allowlist managed by ${betaGate.authority.toBase58()}.`);
 }
 const startStats = poolStats({ ...config, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 }, config.quoteDecimals);
 const record = {
-  cluster: args.cluster, rpcUrl: shownRpc, programId: programKeypair.publicKey.toBase58(), config: config.address,
+  cluster: args.cluster, rpcUrl: shownRpc, programId: programId.toBase58(), config: config.address,
   quoteMint: config.quoteMint.toBase58(), quoteDecimals: config.quoteDecimals, treasury: config.treasury.toBase58(),
   // Native pricing: the creation fee in lamports (SOL) and FDVs in SOL, from config/native-pricing.json.
   launchFee: config.launchFee.toString(), launchFeeSol: pricing.launchFee, modelVersion: config.modelVersion,
@@ -189,7 +206,7 @@ const record = {
 // Last step: hand the upgrade authority to a multisig. After this, upgrades and config changes go
 // through it (scripts/solana-beta.mjs prepares upgrade buffers and gate changes for Squads).
 if (args['transfer-authority']) {
-  await transferUpgradeAuthority({ connection, payer, programId: programKeypair.publicKey, newAuthority: args['transfer-authority'] });
+  await transferUpgradeAuthority({ connection, payer, programId: programId, newAuthority: args['transfer-authority'] });
   record.upgradeAuthority = args['transfer-authority'];
   console.log(`Upgrade authority transferred to ${args['transfer-authority']}.`);
 } else record.upgradeAuthority = payer.publicKey.toBase58();

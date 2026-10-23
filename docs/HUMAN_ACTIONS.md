@@ -76,6 +76,26 @@ Phase 2 adds the 24 h reopen escape hatch, immutable Metaplex metadata at launch
 4. Double-click `solana-upgrade.cmd` in the ELPIDA folder (or `npm.cmd run solana:deploy -- --upgrade`). The upload resumes if interrupted.
 5. Tell Claude when it finishes. The next Solana launch from the site then writes immutable metadata (visible in Phantom and Solscan), and the token page offers *Reopen curve trading* for a curve stuck 24 h after completion.
 
+## 3b. Upgrade the Solana devnet program to the 19 Oct build (checklist B1) — open
+
+The 23 Oct attempt from `elpida-fork` stopped because the program's keys live in `elpida-v1`. Two private files matter;
+never paste, commit or share either:
+
+- `local-data/solana-deployer.json` is the deployer `FeUWF…KaH8`, the program's **upgrade authority**. Only it can upgrade.
+- `contracts/solana/keys/elpida_launchpad-keypair.json` is the program keypair. It is only needed for a brand-new
+  deployment; upgrades now use the program address from the source.
+
+1. In PowerShell, from `elpida-fork`, copy the original deployer over the empty one the first attempt created:
+   `Copy-Item ..\elpida-v1\local-data\solana-deployer.json .\local-data\solana-deployer.json -Force`
+   (adjust `..\elpida-v1` to where that folder is). The empty keypair holds nothing, so overwriting it loses nothing.
+2. Check the build: `certutil -hashfile contracts\solana\build\elpida_launchpad.so SHA256` must print
+   `89d96d53856ba206a8a3a96b0b971d503d6fcfb0dd028587cf654fbc5f6d0b88`.
+3. Make sure `FeUWF…KaH8` holds about **5 devnet SOL** (faucet.solana.com); most of it is a temporary buffer refunded
+   after the upgrade.
+4. Run `npm.cmd run solana:deploy -- --upgrade`. It prints the deployer and program first. If the deployer is not the
+   upgrade authority, it stops before uploading anything and says which address is.
+5. Send Claude the output.
+
 ## 4. Turn on `hope` mint addresses (optional)
 
 Add a Railway variable `ELPIDA_VANITY_KEY` with 32 random bytes as 64 hex characters (in PowerShell: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`). Keep a copy only if you want existing pre-ground keys to survive a key change; losing it just means they are ground again. After the redeploy the server grinds about one `hope` address every 9 minutes per CPU core in the background (three are kept ready; `ELPIDA_VANITY_TARGET` and `ELPIDA_VANITY_WORKERS` change that). Until one is ready, launches use a random address and say so.
