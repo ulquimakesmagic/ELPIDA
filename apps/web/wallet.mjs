@@ -12,7 +12,7 @@ import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './u
 import {nativeFundingError} from './payment-errors.mjs';
 import {supportsAtomicLaunch,waitAtomicLaunch,waitAtomicBatch,atomicBatchRequest} from './wallet-batch.mjs';
 import { PublicRpcSigner } from './public-rpc-signer.mjs';
-import { MULTICALL3, multicallData, approvalFor } from './one-confirmation.mjs';
+import { MULTICALL3, multicallData, approvalFor, launchApproval, waitForAllowance } from './one-confirmation.mjs';
 import { readSafe, treasuryError, safeBatch } from './safe-batch.mjs';
 import { graduationSqrtPriceX96, blockedByPool, tokenCheaperInPool } from './graduation-unblock.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
@@ -690,14 +690,22 @@ export class TestnetWallet {
       const approvalCalls=[],batchKey='elpida:launch-batch:'+this.net.chainId+':'+this.address.toLowerCase();
       const batchRequest=args=>this.eth.request(args);
       const atomic=await supportsAtomicLaunch(batchRequest,this.address,this.net.chainId);
-      const approve=async(coin,amount,message)=>{if(atomic)approvalCalls.push({to:coin.target,data:coin.interface.encodeFunctionData('approve',[factory.target,amount]),value:'0x0'});else await this.approvePayment(coin,factory.target,amount,message,inUsdc);};
-      if (paired && !sharedUsdc && await pairToken.allowance(this.address, await factory.getAddress()) < firstBuy) await approve(pairToken,firstBuy,`Approve the ${asset.symbol} first buy…`);
+      // Testnets: approve once per launchpad, then every launch is one confirmation. Mainnet: exact approvals.
+      const approve=async(coin,needed,symbol,exactLabel)=>{
+        const read=()=>coin.allowance(this.address,factory.target);
+        const step=launchApproval({allowance:await read(),needed,mainnet:!!this.net.mainnet,symbol,exactLabel});
+        if(!step)return;
+        if(atomic){approvalCalls.push({to:coin.target,data:coin.interface.encodeFunctionData('approve',[factory.target,step.amount]),value:'0x0'});return;}
+        await this.approvePayment(coin,factory.target,step.amount,step.label,inUsdc);
+        await waitForAllowance(read,needed);
+      };
+      if (paired && !sharedUsdc) await approve(pairToken,firstBuy,asset.symbol,`Approve the ${asset.symbol} first buy…`);
       if(inUsdc){
         if(!this.feeUsdc||this.feeUsdc===ZeroAddress)throw new Error('USDC fee payment is unavailable on this network.');
         const coin=new Contract(this.feeUsdc,this.config.contracts.quote.abi,this.signer);
         const totalUsdc=10_000_000n+(sharedUsdc?firstBuy:0n);
         if(await coin.balanceOf(this.address)<totalUsdc)throw new Error('Add '+formatUnits(totalUsdc,6)+' USDC on this network for the launch fee'+(sharedUsdc?' and first purchase':'')+'. Native gas is separate.');
-        if(await coin.allowance(this.address,factory.target)<totalUsdc)await approve(coin,totalUsdc,'Approve exactly '+formatUnits(totalUsdc,6)+' USDC for the launch fee'+(sharedUsdc?' and first purchase':'')+'…');
+        await approve(coin,totalUsdc,'USDC','Approve exactly '+formatUnits(totalUsdc,6)+' USDC for the launch fee'+(sharedUsdc?' and first purchase':'')+'…');
       }
       await this.oraclePrice();await this.checkNetwork();
       const args=[name,symbol,asset?.address??ZeroAddress,firstBuy,cappedOut*9950n/10000n,reward,published?.uri??'',inUsdc];
@@ -712,7 +720,7 @@ export class TestnetWallet {
         const id=crypto.randomUUID(),calls=[...approvalCalls,{to:factory.target,data:factory.interface.encodeFunctionData('launchWithPayment',args),value:'0x'+value.toString(16)}];
         const record={id,chain:this.net.chainId,created:Date.now(),metadata:published?.metadata??details,uri:published?.uri,storage:metadataStorage};
         localStorage.setItem(batchKey,JSON.stringify(record));
-        this.onProgress('Confirm one atomic launch in your wallet: exact payment approval, token details, creation and first purchase. '+confirmation);
+        this.onProgress('Confirm one atomic launch in your wallet: payment approval, token details, creation and first purchase. '+confirmation);
         try{const sent=await withWalletTimeout(batchRequest({method:'wallet_sendCalls',params:[{version:'2.0.0',id,from:this.address,chainId:'0x'+BigInt(this.net.chainId).toString(16),atomicRequired:true,calls}]}),this.walletName);
           if(typeof sent?.id!=='string'||!sent.id)throw new Error('Wallet did not return a launch batch ID. Check it before retrying.');
           record.id=sent.id;localStorage.setItem(batchKey,JSON.stringify(record));

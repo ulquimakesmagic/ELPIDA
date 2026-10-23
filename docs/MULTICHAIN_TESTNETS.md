@@ -9,7 +9,7 @@ something that would fail.
 | Base Sepolia | Uniswap v3 | SwapRouter02 (v2) | Chainlink ETH/USD | Live, A2 to A5 done |
 | Ethereum Sepolia | Uniswap v3 (addresses from Uniswap sdk-core) | SwapRouter02 (v2) | Chainlink ETH/USD `0x694A…5306` | Live, A2 to A5 done |
 | BNB Chain Testnet | PancakeSwap v3 (addresses from pancake-v3-contracts) | original v3 SwapRouter (v1) | Chainlink BNB/USD `0x2514…7526` | Live, A2 to A5 done |
-| Robinhood Chain Testnet | none confirmed on testnet | — | none confirmed on testnet | Not possible yet; our contracts were checked against Robinhood **mainnet** Uniswap on a fork |
+| Robinhood Chain Testnet | none on testnet (23 Oct): Uniswap's official v3 deployment is on Robinhood **mainnet** (chain 4663) only | — | none confirmed on testnet | Not possible on testnet; our contracts were checked against Robinhood **mainnet** Uniswap on a fork. A fork check of mainnet's Uniswap and feed is the way to test it without funds |
 
 ## PancakeSwap differences found and fixed before any deployment
 
