@@ -134,11 +134,12 @@ Notes:
 | Base | **PASS 14/14** | 53001266, mainnet.base.org (deep history) | 0.004168 ETH | 9,846,059 gas, about 0.000059 ETH at 0.006 gwei |
 | Ethereum | **PASS 14/14** | 26258156, eth.drpc.org (deep history) | 0.004166 ETH | 9,848,558 gas, about 0.000497 ETH at 0.050 gwei |
 | Robinhood Chain | **PASS 14/14** | 96216786, rpc.mainnet.chain.robinhood.com | 0.004174 ETH | 9,846,287 gas, about 0.000197 ETH |
-| BNB Chain | **Not finished: RPC** | publicnode answered 403 mid-run; dataseed had pruned the state; drpc rate-limited | | |
+| BNB Chain | **PASS 14/14** (second run) | 129399881, bsc-mainnet.public.blastapi.io (deep history) | 0.013509 BNB | 9,848,536 gas, about 0.00049 BNB at 0.05 gwei |
 
-On BNB every attempt passed the DEX and feed checks (PancakeSwap manager, WBNB, 1% tier, `BNB / USD`), then the public
-node refused the fork's state reads. The fallback list now has more BNB nodes, a 403 counts as retryable, and there are
-six attempts. The sure route is a free archive key: NodeReal MegaNode, then
+The first BNB run passed the DEX and feed checks on every attempt, then public nodes refused the fork's state reads
+(publicnode 403, dataseed pruned, drpc rate-limited). With more BNB nodes, a 403 counted as retryable and six attempts,
+the second run chose blastapi (deep history) and passed, through PancakeSwap's original router layout. If public
+nodes refuse again, use a free archive key: NodeReal MegaNode, then
 `$env:ELPIDA_FORK_RPC_BNB_MAINNET="https://bsc-mainnet.nodereal.io/v1/<key>"` (keep the key in the terminal only).
 
 ### Robinhood Chain: mainnet fork check (23 Oct)
