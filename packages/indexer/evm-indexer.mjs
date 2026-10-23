@@ -16,10 +16,10 @@ export function ratio(numerator, denominator, digits = 24) {
 
 /** Durable Elpida EVM indexer. Protocol adapters currently cover curves and custom test pools only. */
 export class EvmIndexer {
-  constructor({provider, factory, contracts, path = ':memory:', chainId = 31337, fromBlock = 0, confirmations = 0, nativeSymbol = 'ETH', batchSize = 1}) {
+  constructor({provider, factory, contracts, path = ':memory:', chainId = 31337, fromBlock = 0, confirmations = 0, nativeSymbol = 'ETH', batchSize = 1, dexName = 'Uniswap v3'}) {
     if (path !== ':memory:') mkdirSync(dirname(path), {recursive:true});
     this.db = new DatabaseSync(path); this.provider = provider; this.factory = factory.toLowerCase();
-    this.chainId = chainId; this.fromBlock = fromBlock; this.confirmations = confirmations; this.nativeSymbol = nativeSymbol;
+    this.chainId = chainId; this.fromBlock = fromBlock; this.confirmations = confirmations; this.nativeSymbol = nativeSymbol; this.dexName = dexName;
     this.contracts = contracts; this.interfaces = Object.fromEntries(['factory','curve','pool','token',...(contracts.dexPool?['dexPool']:[])].map(k=>[k,new Interface(contracts[k].abi)]));
     this.batchSize = Math.max(1, Math.min(500, batchSize));
     this.db.exec(`PRAGMA journal_mode=WAL;
@@ -179,7 +179,7 @@ export class EvmIndexer {
     const locked=await locker.locked(call)&&(await manager.ownerOf(positionId,call)).toLowerCase()===lockerAddress.toLowerCase();
     const splitter=new Contract(splitterAddress,this.contracts.splitter.abi,this.provider),rewards=[];
     for(const asset of [asset0,asset1]){const tokenAsset=asset.toLowerCase()===r.address;rewards.push({asset,symbol:tokenAsset?r.symbol:r.pair==='native'?'WETH':r.quoteSymbol,decimals:tokenAsset?18:d,creator:formatUnits(await splitter.claimable(asset,r.reward,call),tokenAsset?18:d)});}
-    return {pool,graduated:true,complete,liquidityLocked:locked,locker:lockerAddress,feeSplitter:splitterAddress,positionId:positionId.toString(),venue:'Uniswap v3',feeBps:Number(fee)/100,tokenFirst,quoteAsset,liquidity:liquidity.toString(),reserve:formatUnits(reserve,d),reserveBasis:'actual DEX quote balance, including uncollected fees',sold:formatUnits(sold,18),supply:formatUnits(supply,18),circulatingSupply:formatUnits(circulating,18),deadSupply:formatUnits(deadBalance,18),saleCap:formatUnits(BigInt(r.saleCapRaw),18),spotPrice:price,fdvQuote:ratio(n*supply,den*10n**BigInt(d)),circulatingMarketCapQuote:ratio(n*circulating,den*10n**BigInt(d)),supplyPolicy:'exclude curve/pool inventory and known dead address v1',priceUsd:null,usdBasis:null,protocolFees:formatUnits(cp,d),creatorFees:formatUnits(cc,d),dexRewards:rewards,rewardsBasis:'collected fees available to claim; collect the position to settle more',remainingBuy:'0',indexedBlock:height,indexedBlockHash:block.hash,priceTimestamp:block.timestamp};
+    return {pool,graduated:true,complete,liquidityLocked:locked,locker:lockerAddress,feeSplitter:splitterAddress,positionId:positionId.toString(),venue:this.dexName,feeBps:Number(fee)/100,tokenFirst,quoteAsset,liquidity:liquidity.toString(),reserve:formatUnits(reserve,d),reserveBasis:'actual DEX quote balance, including uncollected fees',sold:formatUnits(sold,18),supply:formatUnits(supply,18),circulatingSupply:formatUnits(circulating,18),deadSupply:formatUnits(deadBalance,18),saleCap:formatUnits(BigInt(r.saleCapRaw),18),spotPrice:price,fdvQuote:ratio(n*supply,den*10n**BigInt(d)),circulatingMarketCapQuote:ratio(n*circulating,den*10n**BigInt(d)),supplyPolicy:'exclude curve/pool inventory and known dead address v1',priceUsd:null,usdBasis:null,protocolFees:formatUnits(cp,d),creatorFees:formatUnits(cc,d),dexRewards:rewards,rewardsBasis:'collected fees available to claim; collect the position to settle more',remainingBuy:'0',indexedBlock:height,indexedBlockHash:block.hash,priceTimestamp:block.timestamp};
   }
   async readV2Snapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance}){
     const call={blockTag:height},m=new Contract(pool,this.contracts.dexPool.abi,this.provider);
