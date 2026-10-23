@@ -43,7 +43,7 @@ Status as of today: testnet only. Public site live at elpida.fun.
 
 | # | Gate | Status | Evidence | Owner |
 |---|------|--------|----------|-------|
-| D1 | Per-chain DEX addresses, quote assets, price feeds and finality settings confirmed | Open per chain | Table of verified addresses with links | Other agent, Claude |
+| D1 | Per-chain DEX addresses, quote assets, price feeds and finality settings confirmed | **DEX and feeds verified (23 Oct)** for Base, BNB Chain, Robinhood Chain and Ethereum from the official pages, with heartbeats and suggested `maxAge` (`MULTICHAIN_TESTNETS.md`, Mainnet configuration). Mainnet fork checks: Robinhood PASS 14/14; Base, BNB and Ethereum ready to run. Open: USDC pair addresses per chain (BNB's USDC is 18 decimals, so its fee stays in BNB) | Table of verified addresses with links | Other agent, Claude |
 | D2 | Token tax stays disabled on public networks until a verified `taxDeployment` is registered | Enforced in code | Verified V2 deployment, then registry entry | Other agent |
 | D3 | Holder rewards, buybacks, tokenized-stock rewards, identity claims stay off | Off | UI hides them; tests confirm | Claude |
 | D4 | Pay the Railway past-due balance; confirm the plan covers production load and backups | **Paid (21 Oct)**, Pro plan restored; backups check still open | Account in good standing | Malik |

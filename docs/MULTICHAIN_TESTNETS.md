@@ -84,6 +84,49 @@ MIDORIYA end to end (23 Oct). Malik reported the hashes; Claude read each receip
 A second MIDORIYA launch (`0xf9541ad9523e4af4e03d1a861b8c2c8b9afbbd39918949de621a867bb2581bb3`, token
 `0x7c7e935069048d541433b59a0512a1bdae041559`) is still trading on its curve.
 
+### Mainnet configuration (checklist D1, 23 Oct)
+
+Malik's mainnet chains: Base, BNB Chain, Robinhood Chain and Ethereum. Each has a fork check that runs the whole
+lifecycle against the chain's real DEX and feed on a local fork, with mainnet terms ($5,000 start). Nothing is sent and
+no funds are used:
+
+```
+npm.cmd run test:chain-fork -- base-mainnet
+npm.cmd run test:chain-fork -- bnb-mainnet
+npm.cmd run test:chain-fork -- ethereum-mainnet
+npm.cmd run test:chain-fork -- robinhood-mainnet
+```
+
+| Chain (id) | DEX, router layout | Factory | Position manager | Router | QuoterV2 | Wrapped native |
+|---|---|---|---|---|---|---|
+| Base (8453) | Uniswap v3, SwapRouter02 (v2) | `0x33128a8fC17869897dcE68Ed026d694621f6FDfD` | `0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1` | `0x2626664c2603336E57B271c5C0b26F421741e481` | `0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a` | `0x4200000000000000000000000000000000000006` |
+| BNB Chain (56) | PancakeSwap v3, original layout (v1) | `0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865` | `0x46A15B0b27311cedF172AB29E4f4766fbE7F4364` | `0x1b81D678ffb9C0263b24A97847620C99d213eB14` | `0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997` | `0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c` (read from the manager) |
+| Robinhood Chain (4663) | Uniswap v3, SwapRouter02 (v2) | `0x1f7d7550B1b028f7571E69A784071F0205FD2EfA` | `0x73991a25C818Bf1f1128dEAaB1492D45638DE0D3` | `0xCaf681a66D020601342297493863E78C959E5cb2` | `0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7` | `0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73` |
+| Ethereum (1) | Uniswap v3, SwapRouter02 (v2) | `0x1F98431c8aD98523631AE4a59f267346ea31F984` | `0xC36442b4a4522E871399CD717aBDD847Ab11FE88` | `0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45` | `0x61fFE014bA17989E743c5F6cB21bF9697530B21e` | `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` |
+
+| Chain | Chainlink feed (standard proxy) | Decimals | Heartbeat / deviation | Suggested `maxAge` at deployment |
+|---|---|---|---|---|
+| Base | ETH / USD `0x50015f8b17fb2C290Dde41fDc246ed0dcEE93a8b` | 8 | 1200 s / 0.15% | 1500 s |
+| BNB Chain | BNB / USD `0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE` | 8 | 27 s / 0.1% | 120 s |
+| Robinhood Chain | ETH / USD `0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9` | 8 | 86400 s / 0.5% | 86400 s (the contract's maximum) |
+| Ethereum | ETH / USD `0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419` | 8 | 3600 s / 0.5% | 3900 s |
+
+Sources (read 23 Oct): Uniswap's v3 deployment pages for Base, Ethereum and Robinhood Chain; PancakeSwap's v3 address
+page; Chainlink's price-feed address list per network, with "More Details" for heartbeat and deviation.
+
+Notes:
+- **`maxAge` is fixed when the treasury configures pricing (once).** Use the suggested value: about one heartbeat plus a
+  margin. Too short and launches fail while the feed is healthy; too long and a stalled feed keeps pricing the fee.
+- **Standard proxies, not SVR.** Chainlink also lists SVR proxies, which recapture liquidation MEV for lending
+  protocols. Elpida only prices a $10 fee and a starting valuation, so the standard proxy is the plain choice. On BNB
+  Chain one BNB / USD proxy reports 18 decimals; the contract reads `decimals()`, but the table uses the 8-decimal one.
+- **USDC fee on BNB Chain:** USDC there is an 18-decimal bridged token, and `configureUsdPricing` accepts only a
+  6-decimal fee asset, so BNB mainnet charges the $10 fee in BNB. USDC as a trading pair is separate (the factory scales
+  to the quote's decimals) and still needs its address verified before approval.
+- **PancakeSwap v3 is also on Robinhood Chain** (same factory address as BSC, its own position manager, no v3 router
+  listed). Uniswap v3 stays the Robinhood choice because it has the router the app uses.
+- **L2 sequencer:** Base and Robinhood Chain are rollups; see audit finding F-7.
+
 ### Robinhood Chain: mainnet fork check (23 Oct)
 
 Robinhood Chain's testnet cannot be tested live: Chainlink's feed list says "Robinhood Chain feeds are not available on
