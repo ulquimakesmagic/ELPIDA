@@ -27,10 +27,12 @@ export const testnets = [
   },
   {
     key: 'bnb-testnet', name: 'BNB Chain Testnet', short: 'BNB TESTNET', kind: 'evm', enabled: true,
-    chainId: 97, rpcUrl: 'https://bsc-testnet-dataseed.bnbchain.org', explorer: 'https://testnet.bscscan.com',
+    chainId: 97, rpcUrl: 'https://bsc-testnet-rpc.publicnode.com', explorer: 'https://testnet.bscscan.com',
     nativeCurrency: { name: 'Test BNB', symbol: 'tBNB', decimals: 18 },
     gasFaucet: 'https://www.bnbchain.org/en/testnet-faucet',
-    shared: null,
+    // Atomic Model 10 factory (PancakeSwap v3), deployed 23 Oct 2026 in tx 0x7b0cefee…7247f; requires token details
+    // on-chain at launch. Its graduation adapter is 0xD641…6d2 (same address as other chains' contracts: nonce match).
+    shared: { factory: '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE', block: 138485798, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 },
   },
   {
     key: 'robinhood-testnet', name: 'Robinhood Chain Testnet', short: 'ROBINHOOD TESTNET', kind: 'evm', enabled: true,

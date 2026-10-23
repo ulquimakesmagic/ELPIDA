@@ -24,9 +24,9 @@ Two rules Malik set for every token Elpida launches, how each is enforced, and t
 |---|---|
 | Solana | **The program.** `launch` requires a valid metadata URI and writes immutable Metaplex metadata. The site also refuses to launch on a program without metadata support. |
 | EVM, mainnet factory (`ElpidaAtomicDexFactory`, from 23 Oct) | **The contract.** `requiresMetadata()` is true: `launch` and `launchPaired` (which take no URI) revert with `metadata required`, and `launchWithPayment` reverts on an empty URI and on anything that is not `ipfs://`. The URI is recorded once in the launch transaction, and there is no setter. Every new deployment (mainnet, BNB, any redeploy) gets this. |
-| EVM, everywhere | **The site.** It stages the details and passes the URI in the launch transaction. Where details cannot go in, the site refuses to launch and says why: an old launchpad without metadata support, or a chain whose shared launchpad is not set up yet (BNB Testnet until its launchpad is pinned; Robinhood Testnet). |
+| EVM, everywhere | **The site.** It stages the details and passes the URI in the launch transaction. Where details cannot go in, the site refuses to launch and says why: an old launchpad without metadata support, or a chain whose shared launchpad is not set up yet (Robinhood Testnet today). |
 | After launch | **Removed.** The signed "publish saved token details" option is gone from the token page. The server answers `410` on `/api/public/metadata/prepare` and `/save`. Details a creator signed on testnet before this rule (22–23 Oct) still display. |
 
-**Not covered:** the two atomic factories already deployed on testnet (Base Sepolia `0x98a0…7145` and Ethereum
-Sepolia `0xD641…6d2`) predate the on-chain rule, so a direct contract call there can still launch without details.
+**Not covered:** the two atomic factories deployed on testnet before 23 Oct (Base Sepolia `0x98a0…7145` and Ethereum
+Sepolia `0xD641…6d2`) predate the on-chain rule (BNB Testnet's `0x8c48…fBbE` enforces it), so a direct contract call there can still launch without details.
 The site never does. Redeploying them would enforce it on-chain too, but that is optional on testnet.
