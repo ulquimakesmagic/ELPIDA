@@ -36,3 +36,16 @@ test('testnet DEX config: Base and Ethereum Sepolia are on (fork check passed); 
   assert.equal(testnetDexes['bnb-testnet'].enabled, false); assert.equal(testnetDexes['bnb-testnet'].routerVersion, 1); assert.match(testnetDexes['bnb-testnet'].name, /PancakeSwap/);
   for (const d of Object.values(testnetDexes)) { assert.equal(d.fee, 10000); for (const k of ['factory', 'manager', 'router', 'quoter', 'weth']) assert.match(d[k], /^0x[0-9a-fA-F]{40}$/, k); }
 });
+
+test('a price-limited swap with an ETH refund encodes the limit and appends refundETH on both router layouts', async () => {
+  const { Interface } = await import('ethers');
+  const { swapCalldata, routerAbi } = await import('../packages/core/dex-router.mjs');
+  const params = { tokenIn: '0x' + '1'.repeat(40), tokenOut: '0x' + '2'.repeat(40), fee: 10000, recipient: '0x' + '3'.repeat(40), amountIn: 5n, amountOutMinimum: 0n, sqrtPriceLimitX96: 123456789n };
+  for (const version of [1, 2]) {
+    const i = new Interface(routerAbi(version)), data = swapCalldata(Interface, version, '0x' + '4'.repeat(40), params, { deadline: 99n, refundETH: true });
+    const calls = version === 1 ? i.decodeFunctionData('multicall(bytes[])', data)[0] : i.decodeFunctionData('multicall(uint256,bytes[])', data)[1];
+    assert.equal(calls.length, 2, `v${version}: swap then refundETH`);
+    assert.equal(i.decodeFunctionData('exactInputSingle', calls[0])[0].sqrtPriceLimitX96, 123456789n);
+    assert.equal(i.parseTransaction({ data: calls[1] }).name, 'refundETH');
+  }
+});

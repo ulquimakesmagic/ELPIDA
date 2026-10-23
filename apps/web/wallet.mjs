@@ -13,6 +13,7 @@ import {nativeFundingError} from './payment-errors.mjs';
 import {supportsAtomicLaunch,waitAtomicLaunch,waitAtomicBatch,atomicBatchRequest} from './wallet-batch.mjs';
 import { PublicRpcSigner } from './public-rpc-signer.mjs';
 import { MULTICALL3, multicallData, approvalFor } from './one-confirmation.mjs';
+import { graduationSqrtPriceX96, blockedByPool, tokenCheaperInPool } from './graduation-unblock.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 
 // EIP-6963: every installed EVM wallet announces itself, so Elpida can use the one the person picks
@@ -313,6 +314,34 @@ export class TestnetWallet {
    * `calls` are {to, data, value?, label}. Returns {tx:{hash}, receipt} for the last transaction.
    */
   /** True when the connected wallet advertises atomic batches on this chain (checked once per network). */
+  /**
+   * Steps that clear a pre-created pool blocking graduation (audit finding F-1), or none. Only for a buy that would
+   * complete an automatically graduating curve and that a dry run shows failing with "pool price mismatch".
+   */
+  async graduationUnblock(item, curve, input, minimum) {
+    const native = item.pair === 'native';
+    let automatic = false; try { automatic = await curve.automaticGraduation(); } catch { /* older curves graduate separately */ }
+    if (!automatic || input < await curve.completionQuote()) return [];
+    try { await curve.buy.staticCall(input, minimum, { value: native ? input : 0n }); return []; }
+    catch (error) { if (!blockedByPool(error)) return []; }   // any other problem is reported by the real buy
+    const quoteAsset = native ? this.dex.weth : this.qaddr(item), token = item.address, tokenIsToken0 = BigInt(token) < BigInt(quoteAsset), fee = this.dex.fee ?? 10000;
+    const [virtualQuote, virtualToken, saleCap, liquidityBonus] = await Promise.all([curve.virtualQuote(), curve.virtualToken(), curve.SALE_CAP(), curve.liquidityBonus()]);
+    const limit = graduationSqrtPriceX96({ virtualQuote, virtualToken, saleCap, liquidityBonus, tokenIsToken0 });
+    const pool = await new Contract(this.dex.factory, ['function getPool(address,address,uint24) view returns(address)'], this.provider).getPool(token, quoteAsset, fee);
+    const [poolSqrtPriceX96] = await new Contract(pool, this.config.contracts.dexPool.abi, this.provider).slot0();
+    const symbol = item.symbol ?? 'this token', unit = native ? this.net.nativeCurrency.symbol : this.qsym(item, true), dex = this.dex.name ?? 'DEX';
+    if (!tokenCheaperInPool({ poolSqrtPriceX96, graduationSqrtPriceX96: limit, tokenIsToken0 })) throw new Error(`Graduation is waiting on ${symbol}'s ${dex} pool, which someone priced above the curve. Holders can sell into that pool at a profit, and completion works once it is back near the curve price. Nothing was sent.`);
+    // Up to the completing buy's size again; the price limit decides how much is actually spent, and the rest stays
+    // with you (refunded in the same transaction for native coin).
+    const budget = input, router = this.dex.router, deadline = BigInt((await this.provider.getBlock('latest')).timestamp + 300);
+    if (native && await this.provider.getBalance(this.address) < budget + input) throw new Error(`Someone placed cheap ${symbol} in its ${dex} pool below the curve price, which blocks graduation. Clearing it first needs up to ${formatUnits(budget, 18)} ${unit} more than this buy; you receive those tokens, at or below the curve price. Nothing was sent.`);
+    const steps = [];
+    if (!native) { const coin = new Contract(quoteAsset, this.config.contracts.quote.abi, this.signer); if (await coin.allowance(this.address, router) < budget) steps.push({ to: quoteAsset, data: coin.interface.encodeFunctionData('approve', [router, budget]), label: `Approve the ${dex} purchase exactly…` }); }
+    steps.push({ to: router, value: native ? budget : 0n, label: `Buy the ${symbol} placed below the curve price in its ${dex} pool (never above the graduation price)…`,
+      data: swapCalldata(Interface, this.dex.routerVersion ?? 2, router, { tokenIn: quoteAsset, tokenOut: token, fee, recipient: this.address, amountIn: budget, amountOutMinimum: 0n, sqrtPriceLimitX96: limit }, { deadline, refundETH: native }) });
+    this.onProgress(`Someone placed cheap ${symbol} in its ${dex} pool, which would block graduation. This buy clears it first, then completes the curve.`);
+    return steps;
+  }
   /** Multicall3 is deployed on this chain (checked once per network). */
   async multicallAvailable() {
     const key = String(this.net?.chainId);
@@ -697,6 +726,9 @@ export class TestnetWallet {
         const payment = action === 'buy' ? new Contract(this.qaddr(item) ?? ZeroAddress, this.config.contracts.quote.abi, this.signer) : new Contract(item.address, this.config.contracts.token.abi, this.signer);
         const marketAddress = await curve.getAddress();
         const steps = [];
+        // Audit finding F-1: a completing buy can be blocked by cheap tokens placed in a pre-created pool. Buy them
+        // out first (never above the graduation price), so this one action still completes and graduates.
+        if (action === 'buy' && this.dex) steps.push(...await this.graduationUnblock(item, original, input, out * (10000n - BigInt(Math.round(percent * 100))) / 10000n));
         if (!(action === 'buy' && item.pair === 'native')) { const approval = approvalFor({ allowance: await payment.allowance(this.address, marketAddress), input, sellingLaunchedToken: action === 'sell', symbol: item.symbol }); if (approval) steps.push({ to: payment.target, data: payment.interface.encodeFunctionData('approve', [marketAddress, approval.amount]), label: approval.label }); }
         const minimum = out * (10000n - BigInt(Math.round(percent * 100))) / 10000n;
         steps.push({ to: marketAddress, data: action === 'buy' ? curve.interface.encodeFunctionData('buy', [input, minimum]) : curve.interface.encodeFunctionData('sell', [input, minimum]), value: action === 'buy' && item.pair === 'native' ? input : 0n, label: 'Confirm the trade in your wallet…' });

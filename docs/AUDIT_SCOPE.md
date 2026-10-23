@@ -124,7 +124,12 @@ Our findings:
       limit already guarantees that;
     - (c) on failure, complete without graduating and rely on retry plus `reopen`.
 
-  Options (b) and (c) change the contracts and need a redeploy on testnets. **Decision pending (Malik).**
+  Options (b) and (c) change the contracts and need a redeploy on testnets. **Decision (23 Oct, Malik): (a).** The app
+  now dry-runs a completing buy. If it fails with `pool price mismatch` and the token is cheaper in the pool than at
+  graduation, the same action first buys the pool up to the exact graduation price (a v3 price limit, so never above
+  it; unused native coin is refunded), then completes (`apps/web/graduation-unblock.mjs`, tests in
+  `graduation-griefing.test.mjs`). A pool priced above the curve clears itself, because holders profit by selling
+  into it; the app explains this instead of sending. The contracts are unchanged. Auditors may still recommend (b).
 - **F-2 (Low): order of calls in launch.** `_chargeLaunchFee` pays the treasury and refunds `msg.sender` before the
   token and curve are created. It is guarded by `entered`, and no state another call could use is pending. Moving
   the refund to the end would make the order conventional.
