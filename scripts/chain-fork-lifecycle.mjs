@@ -50,7 +50,8 @@ export async function runChainLifecycle({ provider, signer, attacker, dex, feed,
 
   const launchToken = async (name, symbol) => {
     const firstBuy = (await factory.nativeVirtualQuote()) / 100n;
-    const r = await send(`launch ${symbol}`, factory.launch(name, symbol, firstBuy, 0, me, { value: fee + firstBuy }));
+    // The mainnet factory requires token details in the launch transaction (an ipfs:// URI).
+    const r = await send(`launch ${symbol}`, factory.launchWithMetadata(name, symbol, firstBuy, 0, me, 'ipfs://bafkreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsck7e7aqa4s52zy', { value: fee + firstBuy }));
     const ev = r.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(e => e?.name === 'Launched');
     return { curve: new Contract(ev.args.curve, art('ElpidaDexCurve').abi, signer), token: new Contract(ev.args.token, art('ElpidaToken').abi, signer) };
   };
