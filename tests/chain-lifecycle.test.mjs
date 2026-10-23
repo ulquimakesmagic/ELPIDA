@@ -27,3 +27,23 @@ for (const version of [2, 1]) {
     assert.ok(result.gas.some(g => /pre-created pool/.test(g.step)), 'the rebalance path ran');
   });
 }
+
+// Robinhood Chain is checked on a fork of its mainnet (its testnet has no DEX or feed), with mainnet terms and a check
+// that the configured feed really is ETH / USD.
+test('fork-check lifecycle passes with mainnet terms ($5,000 start) and verifies the feed pair', async t => {
+  const f = await dexFixture(t), dex = { ...f.dex.config, name: 'Uniswap v3 (local)' };
+  const result = await runChainLifecycle({ provider: f.provider, signer: f.signers[0], attacker: f.signers[1], dex, feed: f.feed.target, feedDescription: 'ETH / USD', maxAge: 86400, startFdvUsd: 5000, art });
+  assert.ok(result.checks.length === 14 && result.checks.every(c => c.ok));
+  assert.ok(result.checks.some(c => c.name === 'price feed is ETH / USD'));
+  const g = await dexFixture(t);
+  await assert.rejects(runChainLifecycle({ provider: g.provider, signer: g.signers[0], attacker: g.signers[1], dex: { ...g.dex.config, name: 'Uniswap v3 (local)' }, feed: g.feed.target, feedDescription: 'BTC / USD', maxAge: 86400, art }), /price feed is BTC \/ USD/);
+});
+
+test('the Robinhood mainnet fork target uses checksummed, consistent addresses', async () => {
+  const { FORK_ONLY } = await import('../scripts/chain-fork-lifecycle.mjs');
+  const { getAddress } = await import('ethers');
+  const rh = FORK_ONLY['robinhood-mainnet'];
+  assert.equal(rh.net.chainId, 4663);
+  for (const a of [rh.dex.factory, rh.dex.manager, rh.dex.router, rh.dex.quoter, rh.dex.weth, rh.oracle.feed]) assert.equal(getAddress(a), a);
+  assert.equal(rh.dex.routerVersion, 2); assert.equal(rh.oracle.description, 'ETH / USD'); assert.equal(rh.startFdvUsd, 5000);
+});

@@ -141,6 +141,11 @@ Our findings:
   `ElpidaAtomicDexFactory.requiresMetadata()` returns true; `launch` and `launchPaired` revert with
   `metadata required`, and `launchWithPayment` reverts on an empty or non-`ipfs://` URI. The Solana program already
   required a URI. Older factories are unchanged (`launch-guarantees.test.mjs`).
+- **F-7 (Low, L2 deployments): no sequencer-uptime check.** On rollups (Base, Robinhood Chain), Chainlink recommends
+  checking the L2 sequencer uptime feed before trusting a price. `ElpidaUsdPricing` checks staleness (`maxPriceAge`)
+  but not the sequencer. Impact is limited: the price sets only the $10 launch fee and the starting valuation of new
+  curves, never trade prices or payouts. Options: accept (staleness bounds it), or add an optional uptime feed with a
+  grace period. Noted 23 Oct while adding the Robinhood mainnet fork check.
 - **F-5 (Informational, operations):** the treasury is immutable and must accept the native coin (see section 3).
 
 ## 6. Deployments for reference (testnets)
