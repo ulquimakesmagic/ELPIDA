@@ -9,6 +9,7 @@ const map = {
   '/curve-model.mjs': ${JSON.stringify(new URL('../../packages/core/curve-model.mjs', import.meta.url).href)},
   '/dex-router.mjs': ${JSON.stringify(new URL('../../packages/core/dex-router.mjs', import.meta.url).href)},
   '/elpida-solana.mjs': ${JSON.stringify(new URL('../../packages/solana/client.mjs', import.meta.url).href)},
+  '/paced-rpc.mjs': ${JSON.stringify(new URL('../../apps/web/paced-rpc.mjs', import.meta.url).href)},
   '/vendor/pumpswap.mjs': ${JSON.stringify(new URL('../../apps/web/vendor/pumpswap.mjs', import.meta.url).href)},
 };
 export async function resolve(specifier, context, next) {

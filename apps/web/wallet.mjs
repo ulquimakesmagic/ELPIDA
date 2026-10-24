@@ -1,5 +1,6 @@
 import { nowSeconds } from './clock.mjs';
 import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
+import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, ZeroAddress } from '/vendor/ethers.js';
 import { routerAbi, swapCalldata } from '/dex-router.mjs';
 
@@ -160,7 +161,9 @@ export class TestnetWallet {
     // Wallet RPCs often restrict historical logs, and some are slow or broken on testnets. Read, estimate gas and
     // wait for receipts through the registry's chain RPC; signatures and submissions always stay with the wallet.
     const rpc=new FetchRequest(net.rpcUrl);rpc.timeout=15000;
-    this.provider = new JsonRpcProvider(rpc, net.chainId, { staticNetwork:true,cacheTimeout: -1, batchMaxCount: 1 });
+    // Paced: public testnet RPCs refuse bursts (Base Sepolia allows 25 requests a second), and one refusal used to fail
+    // the whole wallet read.
+    this.provider = new PacedJsonRpcProvider(rpc, net.chainId, { staticNetwork:true,cacheTimeout: -1, batchMaxCount: 1 });
     this.signer = new PublicRpcSigner(await this.signerProvider.getSigner(), this.provider, { onSlow: message => this.onProgress?.(message) });
     this.address = await this.signer.getAddress();
     await this.checkNetwork();
@@ -341,7 +344,8 @@ export class TestnetWallet {
   async graduationUnblock(item, curve, input, minimum) {
     const native = item.pair === 'native';
     let automatic = false; try { automatic = await curve.automaticGraduation(); } catch { /* older curves graduate separately */ }
-    if (!automatic || input < await curve.completionQuote()) return [];
+    let quote; try { quote = await curve.completionQuote(); } catch { return []; }   // nothing left to buy (F-8)
+    if (!automatic || input < quote) return [];
     try { await curve.buy.staticCall(input, minimum, { value: native ? input : 0n }); return []; }
     catch (error) { if (!blockedByPool(error)) return []; }   // any other problem is reported by the real buy
     const quoteAsset = native ? this.dex.weth : this.qaddr(item), token = item.address, tokenIsToken0 = BigInt(token) < BigInt(quoteAsset), fee = this.dex.fee ?? 10000;
@@ -590,7 +594,10 @@ export class TestnetWallet {
       // Model 10: anti-snipe schedule, partial-fill final buys and the graduation escape hatch.
       let v10 = {};
       if (this.modelOf(item) === DEX_MODEL) { const [launchedAt, completedAt, grace] = await Promise.all([curve.launchedAt(), curve.completedAt(), curve.graduationGrace()]); v10 = { launchedAt: Number(launchedAt), partialFill: true, feeSchedule: { base: BASE_FEE_BPS, start: SNIPE_START_BPS, window: SNIPE_WINDOW_SECONDS }, reopenableAt: complete && !graduated && completedAt > 0n ? Number(completedAt + grace) : null }; }
-      return { ...item, ...v10, pool, graduated, complete, liquidityLocked: graduated, quoteSymbol: this.qsym(item), quoteDecimals: d, spotPrice: Number(formatUnits(priceQ,d)) / Number(formatUnits(priceT,18)), circulatingSupply:formatUnits(circulation,18),saleCap: formatUnits(await curve.SALE_CAP(),18), remainingBuy: complete ? '0' : formatUnits(await curve.completionQuote(),d), remainingBase: complete || this.modelOf(item) !== DEX_MODEL ? undefined : formatUnits(await curve.remainingAtBaseFee(),d), name, symbol, reward, reserve: formatUnits(reserve, d), sold: formatUnits(sold, 18), supply: formatUnits(supply, 18), balance: formatUnits(held, 18), protocolFees: formatUnits(protocol+p, d), creatorFees: formatUnits(creator+c, d) };
+      // A curve reopened after its graduation grace is fully sold but not complete: its completion quote reverts (audit
+      // finding F-8), so it is not called. Since AIZEN was reopened (23 Oct) that revert failed every Base Sepolia read.
+      const saleCap = await curve.SALE_CAP(), soldOut = !complete && !graduated && sold >= saleCap, noneLeft = complete || soldOut;
+      return { ...item, ...v10, pool, graduated, complete, soldOut, liquidityLocked: graduated, quoteSymbol: this.qsym(item), quoteDecimals: d, spotPrice: Number(formatUnits(priceQ,d)) / Number(formatUnits(priceT,18)), circulatingSupply:formatUnits(circulation,18),saleCap: formatUnits(saleCap,18), remainingBuy: noneLeft ? '0' : formatUnits(await curve.completionQuote(),d), remainingBase: this.modelOf(item) !== DEX_MODEL ? undefined : noneLeft ? '0' : formatUnits(await curve.remainingAtBaseFee(),d), name, symbol, reward, reserve: formatUnits(reserve, d), sold: formatUnits(sold, 18), supply: formatUnits(supply, 18), balance: formatUnits(held, 18), protocolFees: formatUnits(protocol+p, d), creatorFees: formatUnits(creator+c, d) };
     }));
     const pairBalances = {};
     for (const a of this.approvedQuotes ?? []) { try { pairBalances[a.id] = formatUnits(await new Contract(a.address, this.config.contracts.quote.abi, this.provider).balanceOf(this.address), a.decimals); } catch {} }
