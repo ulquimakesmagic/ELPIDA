@@ -30,7 +30,7 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
 |---|---|---|---|---|
 | Ethereum Sepolia | PASS 13/13, block 11965619 | On | `0xD641…6d2`, block 11972040 (22 Oct); setup txs below | **Done 22 Oct** (VEGETA, below) |
 | BNB Testnet | **PASS 13/13 (23 Oct)**, block 138477356 via publicnode (PancakeSwap v3, router v1) | On | `0x8c48…fBbE`, block 138485798 (23 Oct); setup below | **Done 23 Oct** (MIDORIYA, below) |
-| Robinhood Testnet | No Uniswap or Chainlink on testnet: test DEX and relayed price instead (above). **Mainnet fork check PASS 14/14 (23 Oct)**, block 96216786 (`robinhood-mainnet`, below) | On after registration | | Open: deploy, then A2 to A5 |
+| Robinhood Testnet | No Uniswap or Chainlink on testnet: test DEX and relayed price instead (above). **Mainnet fork check PASS 14/14 (23 Oct)**, block 96216786 (`robinhood-mainnet`, below) | On | `0x64d9…AD97`, block 141864043 (24 Oct) | Open: launch, then A2 to A5 |
 
 Until a chain's team launchpad is pinned in `packages/core/networks.mjs`, its launches show only in the deploying
 browser, and token details are not staged (they would expire unindexed). After pinning, the public indexer lists them.
@@ -251,3 +251,10 @@ server relay and its source is Base Sepolia's Chainlink ETH/USD, chain 84532):
 
 The same deployer and nonces as on other chains give some of these the same addresses as unrelated contracts there
 (for example `0xD641…6d2` is the Ethereum Sepolia launchpad); they are different contracts on different chains.
+
+**Team launchpad (24 Oct).** Malik set up the Model 10 launchpad from the site: factory
+`0x64d93212adc10d28E867Db44EBC1480AFaeaAD97` (tx `0x5933c8f8760565615bcf4c3b0d9864a70f070e012536399f6416caf57597c2e6`,
+block 141864043), graduation adapter `0xa37FAFAc5e5F08B2e89B9516F896E4a1c11B106A` (test position manager, test WETH,
+1%). Read on chain: model 10, USD feed the relay feed with a 3,600 s maximum age, treasury Malik's wallet, $50
+starting FDV, token details required, launch fee 0.004225 test ETH ($10 at the relayed $2,366.38). The relay's first
+post: `0x44b13f8a743f8b8d55d70b33426971f15afe17000f49508e8156e89c5e8d5e3c`. Pinned as `shared` in `networks.mjs`.
