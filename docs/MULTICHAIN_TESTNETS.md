@@ -9,7 +9,7 @@ something that would fail.
 | Base Sepolia | Uniswap v3 | SwapRouter02 (v2) | Chainlink ETH/USD | Live, A2 to A5 done |
 | Ethereum Sepolia | Uniswap v3 (addresses from Uniswap sdk-core) | SwapRouter02 (v2) | Chainlink ETH/USD `0x694A…5306` | Live, A2 to A5 done |
 | BNB Chain Testnet | PancakeSwap v3 (addresses from pancake-v3-contracts) | original v3 SwapRouter (v1) | Chainlink BNB/USD `0x2514…7526` | Live, A2 to A5 done |
-| Robinhood Chain Testnet | none on testnet (23 Oct): Uniswap's official v3 deployment is on Robinhood **mainnet** (chain 4663) only | — | none confirmed on testnet | Not possible on testnet; our contracts were checked against Robinhood **mainnet** Uniswap on a fork. A fork check of mainnet's Uniswap and feed is the way to test it without funds |
+| Robinhood Chain Testnet | none from Uniswap on testnet (re-checked 24 Oct: Uniswap's v3 page lists chain 4663 only, and nothing is deployed at the mainnet addresses on 46630). Uses an **Elpida test deployment** of Uniswap v3 (Uniswap's own published bytecode, test WETH), deployed from the site | SwapRouter02 (v2), same test deployment | none from Chainlink on testnet: **ElpidaRelayFeed**, Chainlink ETH/USD relayed from Base Sepolia by the server with Chainlink's timestamps | Ready to deploy (24 Oct), `HUMAN_ACTIONS.md` 3d. Mainnet uses the real Uniswap and Chainlink (fork check PASS 14/14) |
 
 ## PancakeSwap differences found and fixed before any deployment
 
@@ -30,7 +30,7 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
 |---|---|---|---|---|
 | Ethereum Sepolia | PASS 13/13, block 11965619 | On | `0xD641…6d2`, block 11972040 (22 Oct); setup txs below | **Done 22 Oct** (VEGETA, below) |
 | BNB Testnet | **PASS 13/13 (23 Oct)**, block 138477356 via publicnode (PancakeSwap v3, router v1) | On | `0x8c48…fBbE`, block 138485798 (23 Oct); setup below | **Done 23 Oct** (MIDORIYA, below) |
-| Robinhood Testnet | No DEX or feed on testnet. **Mainnet fork check PASS 14/14 (23 Oct)**, block 96216786 (`robinhood-mainnet`, below) | Off | | Not possible on testnet |
+| Robinhood Testnet | No Uniswap or Chainlink on testnet: test DEX and relayed price instead (above). **Mainnet fork check PASS 14/14 (23 Oct)**, block 96216786 (`robinhood-mainnet`, below) | On after registration | | Open: deploy, then A2 to A5 |
 
 Until a chain's team launchpad is pinned in `packages/core/networks.mjs`, its launches show only in the deploying
 browser, and token details are not staged (they would expire unindexed). After pinning, the public indexer lists them.
@@ -212,3 +212,25 @@ Tokenized-stock pairs use the labelled test asset; real stocks stay off.
 2. Use the TEST-STOCK faucet (250 per claim) and launch a token paired with TEST-STOCK.
 3. Buy until the curve completes (about 48 TEST-STOCK at test size); it graduates into a TEST-STOCK/token Uniswap pool.
 4. Buy and sell on the pool, then claim fees. Send the transaction hashes to record the evidence.
+
+### Robinhood Chain testnet: test DEX and relayed price (24 Oct)
+
+Robinhood's faucet (`faucet.testnet.chain.robinhood.com`) gives 0.01 test ETH and 5 each of five Stock Tokens (TSLA,
+AMZN, PLTR, NFLX, AMD) once a day. The chain itself (46630, 0.01 gwei) has Multicall3 and Permit2, but no Uniswap v3,
+no WETH and no Chainlink feed. So that Elpida can be tested live there, without changing a contract:
+
+- **Test DEX.** From Network and funds, the launchpad owner deploys a test WETH (`ElpidaTestWETH`, named "Wrapped Ether
+  (Elpida test deployment)") and Uniswap's own published v3 factory, NonfungiblePositionManager, SwapRouter02 and
+  QuoterV2, then the relay feed (6 confirmations, 19.2 M gas measured locally, about 0.0002 test ETH at 0.01 gwei). The same bytecode, so the same pool init code
+  hash. It is registered as "Uniswap v3 (Elpida test deployment)", never as Uniswap's own.
+- **Relayed price.** `ElpidaRelayFeed` (`contracts/evm/testnet`) is Chainlink-compatible, 8 decimals. Its only updater is
+  the server's testnet relay wallet (`ELPIDA_TESTNET_RELAY_KEY`), which copies each round of Chainlink ETH/USD on Base
+  Sepolia (`0x4aDC…7cb1`) **with that round's own timestamp**. A relayed price is never fresher than Chainlink's, so
+  if the relay or Chainlink stops, the factory's maximum price age (3,600 s) refuses launches, as it would on mainnet.
+  The relay refuses any chain that is not a known test network, a feed whose updater or source differs, and a stale
+  source round. Operations status raises `price_relay_robinhood-testnet` when the relayed price falls behind.
+- **Mainnet is unaffected.** Robinhood mainnet uses the real Uniswap v3 and Chainlink feed (fork check above).
+
+A full lifecycle at the test size ($50 starting FDV) costs about $130 of test ETH, measured on a local chain at $2,500
+per ETH: the $10 fee, an optional first buy, and about $97 for the completing buy (0.0387 ETH). That is about 4 to 5
+days of this faucet; launching and trading need far less.

@@ -130,6 +130,26 @@ program; the live devnet program (`ANkA5…`) is never touched. Devnet SOL only,
 4. Send Claude `local-data/squads-trial/state.json` (addresses and signatures only). Never send the other files in that
    folder: they are keys.
 
+## 3d. Robinhood Chain testnet: test DEX, relayed price, then a launch — open
+
+Robinhood's testnet has no Uniswap v3 and no Chainlink feed, so the site deploys labelled test copies
+(`MULTICHAIN_TESTNETS.md`, "Robinhood Chain testnet"). Test ETH only.
+
+1. **Relay key (testnet only).** In PowerShell:
+   `node -e "console.log('0x'+require('crypto').randomBytes(32).toString('hex'))"`
+   Add it on Railway as the variable `ELPIDA_TESTNET_RELAY_KEY`. Never paste it anywhere else, and never use it for
+   anything but this relay. Railway redeploys; the relay's address then shows on
+   `https://elpida.fun/api/public/status` under `relay.address` (an address, safe to share).
+2. **Test ETH.** At `faucet.testnet.chain.robinhood.com`, send 0.01 test ETH to your wallet (`0xf5B0…639D`). For the
+   relay wallet, use the faucet again the next day, or send it 0.002 test ETH from your wallet (enough for years of
+   price posts at 0.01 gwei).
+3. **Deploy the test DEX and price feed.** On elpida.fun: Network and funds → Robinhood Chain Testnet → connect your
+   wallet → **Set up test DEX and price feed** (6 confirmations). An interrupted setup resumes. Send Claude the
+   addresses it shows.
+4. Claude registers them (a PR). After it deploys: **Set up launchpad**, then launch a test token as on the other
+   testnets. Completing a curve takes about $130 of test ETH in total (about 4 to 5 days of faucet); launching and
+   trading need far less.
+
 ## 4. Turn on `hope` mint addresses (optional)
 
 Add a Railway variable `ELPIDA_VANITY_KEY` with 32 random bytes as 64 hex characters (in PowerShell: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`). Keep a copy only if you want existing pre-ground keys to survive a key change; losing it just means they are ground again. After the redeploy the server grinds about one `hope` address every 9 minutes per CPU core in the background (three are kept ready; `ELPIDA_VANITY_TARGET` and `ELPIDA_VANITY_WORKERS` change that). Until one is ready, launches use a random address and say so.

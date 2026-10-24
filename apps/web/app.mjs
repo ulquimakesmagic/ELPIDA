@@ -51,7 +51,7 @@ async function run(action, body = {}, { quiet = false, onProgress } = {}) {
   if (busy) throw new Error('Another request is still in progress.');
   busy = true; updateChrome(); document.body.dataset.busy = 'true'; progressHook = onProgress ?? null;
   try {
-    const result = action === 'deploy' ? await wallet.deploy(body) : mode === 'local' ? await api(action, body) : await wallet.transact(action, body);
+    const result = action === 'deploy' ? await wallet.deploy(body) : action === 'deploy-test-dex' ? await wallet.deployTestDex() : mode === 'local' ? await api(action, body) : await wallet.transact(action, body);
     if (!quiet) toast(result.message ?? 'Done.', { kind: 'success', link: txLink(result.hash) });
     try { await refresh(); } catch {}
     return result;
@@ -426,6 +426,12 @@ async function openTools() {
       const deployed = !!wallet.deployment;
       // The treasury is immutable: on mainnet it must be a Safe; on testnet it defaults to this wallet.
       const treasuryInput = !deployed && wallet.dex && wallet.address ? h('input.input', { placeholder: net.mainnet ? '0x… Safe address (required)' : '0x… Safe address (optional; empty = this wallet)', spellcheck: false, autocomplete: 'off', 'aria-label': 'Treasury Safe address' }) : null;
+      // A test chain with no DEX and no Chainlink feed: the owner first deploys the labelled test DEX and relay feed.
+      const savedDex = net.testDex && !wallet.dex ? wallet.savedTestDex?.() : null, dexDone = !!savedDex?.feed;
+      if (net.testDex && !wallet.dex) funds.append(h('div.tools-section', h('h4', 'Test DEX and price feed'),
+        h('p.small.muted', `${net.name} has no Uniswap v3 and no Chainlink price feed yet. Tokens here graduate into an Elpida test deployment of Uniswap v3 (Uniswap's own published contracts, with a test WETH), and launches are priced by Chainlink ETH / USD relayed from ${config.relay?.networks?.[net.key]?.source?.network ?? 'another test network'} by the Elpida server, with Chainlink's own timestamps. Testnet only: mainnet uses the real Uniswap and Chainlink.`),
+        dexDone ? h('div.stack', h('p.small', 'Deployed from this browser. Send these addresses to the team to register them, then set up the launchpad:'), h('pre.small.selectable', JSON.stringify(savedDex, null, 2))) : null,
+        !dexDone && wallet.address ? (config.relay?.address ? h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('deploy-test-dex', {}); openTools(); } catch (e) { fail(e); } } } }, savedDex ? 'Finish the test DEX setup' : 'Set up test DEX and price feed (6 confirmations)') : h('p.small.muted', 'The server price relay is not configured yet, so the price feed cannot be deployed.')) : null));
       funds.append(h('div.tools-section', h('h4', 'Launchpad on this network'),
         deployed&&wallet.dex&&wallet.feeUsdc&&state?.pricing?.owner&&pairs?.usdc?.unavailable?h('div.stack',h('p.small.muted','Approve the configured USDC asset for trading. This creates its graduation adapter and fixes the starting valuation in USDC at the launchpad\u2019s starting FDV. Existing tokens are unchanged.'),h('button.btn.btn-secondary',{type:'button',on:{click:()=>act('setup-usdc-pair',{}).then(r=>{downloadSafeBatch(r);openTools();})}},'Enable USDC trading pair')):null,
         h('p.small.muted', deployed ? `${wallet.deployment.shared ? 'Shared team' : 'Your'} launchpad: ${short(wallet.deployment.factory)}.${wallet.modelUpgradeAvailable ? ' This is the older model 9 launchpad. Model 10 adds launch protection, the 10x curve and the graduation escape hatch; existing tokens keep trading on model 9.' : wallet.needsMetadataUpgrade ? ' A newer version with shared token metadata is available.' : ''}` : 'Each public testnet needs a one-time launchpad setup from your wallet before the first token.'),

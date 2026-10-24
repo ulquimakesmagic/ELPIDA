@@ -378,6 +378,7 @@ dialog[open] { animation: dialog-in var(--base) var(--ease); }
 .message-box { white-space: pre-wrap; padding: var(--space-3); border-radius: var(--radius-sm); background: var(--surface-2); max-height: 140px; overflow: auto; }
 .tools-section { display: grid; gap: var(--space-3); padding-top: var(--space-4); border-top: 1px solid var(--line); }
 .tools-section:first-child { border-top: 0; padding-top: 0; }
+.tools-section pre.selectable { margin: 0; padding: var(--space-3); border: 1px solid var(--line); border-radius: var(--radius-sm, 8px); background: var(--surface-2, transparent); font-family: var(--font-mono, ui-monospace, monospace); white-space: pre-wrap; word-break: break-all; user-select: all; max-height: 16rem; overflow: auto; }
 
 /* ---------- Toasts ---------- */
 .toasts { position: fixed; right: var(--space-5); bottom: var(--space-5); z-index: 60; display: grid; gap: var(--space-2); width: min(400px, calc(100vw - 32px)); }
