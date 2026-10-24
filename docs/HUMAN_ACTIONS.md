@@ -111,6 +111,25 @@ never paste, commit or share either:
    upgrade authority, it stops before uploading anything and says which address is.
 7. Send Claude the output.
 
+## 3c. Squads multisig rehearsal on devnet (checklist C3) — open
+
+Proves, before mainnet, that a 2-of-2 Squads vault controls program upgrades. It uses a **throwaway copy** of the
+program; the live devnet program (`ANkA5…`) is never touched. Devnet SOL only, and all of it except fees comes back.
+
+1. Top up the devnet deployer `FeUWF…KaH8` to about **7.5 devnet SOL** at faucet.solana.com (it had 6.59 on 24 Oct).
+2. From `elpida-fork`, after `git pull`:
+   `node scripts/squads-devnet-trial.mjs --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`
+3. It installs Squads' SDK once into a temporary folder, then:
+   - deploys the throwaway program;
+   - creates a 2-of-2 multisig (the deployer plus a second key it saves in `local-data/squads-trial`);
+   - hands the upgrade authority to the vault and checks the deployer alone is refused;
+   - proposes an upgrade, checks one approval is not enough, approves with both and executes;
+   - hands authority back through Squads, then closes the throwaway program to return its rent.
+
+   An interrupted run resumes where it stopped.
+4. Send Claude `local-data/squads-trial/state.json` (addresses and signatures only). Never send the other files in that
+   folder: they are keys.
+
 ## 4. Turn on `hope` mint addresses (optional)
 
 Add a Railway variable `ELPIDA_VANITY_KEY` with 32 random bytes as 64 hex characters (in PowerShell: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`). Keep a copy only if you want existing pre-ground keys to survive a key change; losing it just means they are ground again. After the redeploy the server grinds about one `hope` address every 9 minutes per CPU core in the background (three are kept ready; `ELPIDA_VANITY_TARGET` and `ELPIDA_VANITY_WORKERS` change that). Until one is ready, launches use a random address and say so.

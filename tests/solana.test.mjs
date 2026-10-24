@@ -21,6 +21,7 @@ import {
 } from '../packages/solana/client.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
+import { vaultUpgrade, vaultHandBack, closeProgram, readProgramData } from '../scripts/squads-devnet-trial.mjs';
 import { deployProgram, upgradeProgram, ensurePairConfigs, pricingUpdates, ensurePricing, ensureBetaGate, rejectsTestInstructions, prepareUpgradeBuffer, transferUpgradeAuthority, send, airdrop } from '../packages/solana/deploy.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -892,6 +893,33 @@ test('Solana mainnet build rejects test instructions; the upgrade authority can 
   assert.equal(await rejectsTestInstructions({ connection: f.connection, payer: f.authority, programId }), false, 'back on the test build');
   // Hand authority back so the remaining tests can upgrade.
   await transferUpgradeAuthority({ connection: f.connection, payer: multisig, programId, newAuthority: f.authority.publicKey });
+});
+
+// The Squads devnet rehearsal (scripts/squads-devnet-trial.mjs) signs these loader instructions from a Squads vault. Here
+// a plain key stands in for the vault, so the upgrade, hand-back and four-account close are checked against the real
+// upgradeable loader. The Squads approval itself (2 of 2) runs against the real Squads program on devnet.
+test('Squads rehearsal: a vault upgrades a throwaway program, hands authority back, and the program closes with its rent', { skip }, async () => {
+  const { loaderV3 } = await import('../packages/solana/client.mjs');
+  const loader = loaderV3(web3), programKeypair = Keypair.generate(), vault = Keypair.generate(), elf = readFileSync(elfPath);
+  await airdrop(f.connection, vault.publicKey, web3.LAMPORTS_PER_SOL);
+  await deployProgram({ connection: f.connection, payer: f.authority, programKeypair, elf, sendsPerSecond: 200 });
+  const programId = programKeypair.publicKey, programData = createElpidaSolana(web3, programId).programDataAddress;
+  const state = async () => readProgramData((await f.connection.getAccountInfo(programData)).data);
+  await send(f.connection, f.authority, [loader.setAuthority({ account: programData, authority: f.authority.publicKey, newAuthority: vault.publicKey })]);
+  assert.deepEqual([...(await state()).authority], [...vault.publicKey.toBytes()], 'the vault holds the upgrade authority');
+  await failsWith(send(f.connection, f.authority, [loader.setAuthority({ account: programData, authority: f.authority.publicKey, newAuthority: f.authority.publicKey })], [], 1), /incorrect authority|IncorrectAuthority|0x|custom/i);
+  const { prepareUpgradeBuffer } = await import('../packages/solana/deploy.mjs');
+  const buffer = await prepareUpgradeBuffer({ connection: f.connection, payer: f.authority, elf, multisig: vault.publicKey.toBase58(), sendsPerSecond: 200 });
+  const before = (await state()).slot;
+  await send(f.connection, vault, vaultUpgrade({ loader, programId, programData, buffer, spill: f.authority.publicKey, vault: vault.publicKey }));
+  assert.ok((await state()).slot > before, 'upgraded: the last-deployed slot moved');
+  assert.equal(await f.connection.getAccountInfo(buffer), null, 'the buffer is consumed and its rent refunded');
+  await send(f.connection, vault, vaultHandBack({ loader, programData, vault: vault.publicKey, to: f.authority.publicKey }));
+  assert.deepEqual([...(await state()).authority], [...f.authority.publicKey.toBytes()], 'authority handed back');
+  const rent = (await f.connection.getAccountInfo(programData)).lamports, held = await f.connection.getBalance(f.authority.publicKey);
+  await send(f.connection, f.authority, [closeProgram({ web3, programData, recipient: f.authority.publicKey, authority: f.authority.publicKey, programId })]);
+  assert.equal(await f.connection.getAccountInfo(programData), null, 'program data closed');
+  assert.ok(await f.connection.getBalance(f.authority.publicKey) - held > rent - 100_000, 'its rent came back');
 });
 
 test('Solana compatibility: clients detect a program without metadata support and launch with the earlier layout', { skip }, async () => {
