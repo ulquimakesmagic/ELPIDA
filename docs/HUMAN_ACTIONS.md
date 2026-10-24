@@ -111,7 +111,9 @@ never paste, commit or share either:
    upgrade authority, it stops before uploading anything and says which address is.
 7. Send Claude the output.
 
-## 3c. Squads multisig rehearsal on devnet (checklist C3) — open
+## 3c. Squads multisig rehearsal on devnet (checklist C3) — done, 24 October 2026
+
+Run by Malik and read back from devnet: every step passed (transactions in the checklist, C3). Kept below for a rerun.
 
 Proves, before mainnet, that a 2-of-2 Squads vault controls program upgrades. It uses a **throwaway copy** of the
 program; the live devnet program (`ANkA5…`) is never touched. Devnet SOL only, and all of it except fees comes back.
