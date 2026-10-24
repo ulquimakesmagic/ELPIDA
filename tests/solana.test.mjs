@@ -535,6 +535,53 @@ test('Solana completing buy and PumpSwap migration in ONE transaction: the curve
   assert.equal((await pool(mint)).status, STATUS_MIGRATED, 'completed and on PumpSwap in the same transaction');
 });
 
+// After migration the token page trades through PumpSwap's official SDK, bundled for the browser
+// (apps/web/vendor/pumpswap.mjs, built with the page's own web3.js). The local validator has the real PumpSwap program
+// but not pump's fee program, so this checks everything up to the swap's fee step: the bundle loads with the page's
+// web3.js, reads an Elpida-created pool, quotes it by the constant-product formula, and builds the transaction
+// (wrap SOL / token account / swap) with the 23 accounts the swap expects. The swap itself runs on devnet.
+test('PumpSwap trading after migration: the bundled SDK quotes and builds trades for an Elpida pool', { skip: pumpSkip }, async () => {
+  globalThis.solanaWeb3 = web3;
+  const pumpswap = await import('../apps/web/vendor/pumpswap.mjs');
+  const mint = await completedCurve('PSWP');
+  await migrate(f.outsider, mint);
+  const p = f.client.pumpAccounts(mint, f.quoteMint);
+  const state = await pumpState(mint);
+  const spend = 100n * USDC;
+  const quote = await pumpswap.pumpSwapQuote({ connection: f.connection, pool: p.pool, user: f.trader.publicKey, side: 'buy', amount: spend, slippageBps: 100 });
+  // Constant product on the pool's reserves after fees (flat PumpSwap fees without the fee program: 0.25% LP + 0.05%).
+  const ideal = state.base * spend / (state.quote + spend);
+  assert.ok(quote.out > 0n && quote.out <= ideal && quote.out >= ideal * 99n / 100n, `buy quote ${quote.out} vs ${ideal}`);
+  assert.equal(quote.limit, spend * 101n / 100n, 'a buy may charge at most the amount plus 1% slippage');
+  assert.ok(quote.fee > 0n && quote.fee < spend / 100n, `fee ${quote.fee}`);
+  const tokens = 1_000_000n * 10n ** 6n;
+  const sellQuote = await pumpswap.pumpSwapQuote({ connection: f.connection, pool: p.pool, user: f.trader.publicKey, side: 'sell', amount: tokens, slippageBps: 100 });
+  const idealOut = state.quote * tokens / (state.base + tokens);
+  assert.ok(sellQuote.out > 0n && sellQuote.out <= idealOut && sellQuote.out >= idealOut * 99n / 100n, `sell quote ${sellQuote.out} vs ${idealOut}`);
+  assert.equal(sellQuote.limit, sellQuote.out * 99n / 100n, 'a sell accepts at least 99% of the quote');
+  for (const side of ['buy', 'sell']) {
+    const trade = await pumpswap.pumpSwapTrade({ connection: f.connection, pool: p.pool, user: f.trader.publicKey, side, amount: side === 'buy' ? spend : tokens, slippageBps: 100 });
+    const code = side === 'buy' ? [102, 6, 61, 18, 1, 218, 235, 234] : [51, 230, 133, 164, 1, 127, 131, 173];
+    const pumpIxs = trade.instructions.filter(ix => ix.programId.toBase58() === PUMP_AMM_PROGRAM);
+    const swap = pumpIxs.find(ix => code.every((b, i) => ix.data[i] === b));
+    assert.ok(swap, `${side}: a PumpSwap ${side} instruction`);
+    assert.ok(swap.programId instanceof PublicKey, 'the page\'s own web3.js classes, not a second copy');
+    // Pools created before PumpSwap grew its pool account (287 → 300 bytes) are extended first, by the SDK.
+    for (const other of pumpIxs.filter(ix => ix !== swap)) assert.deepEqual([...other.data.subarray(0, 8)], [234, 102, 194, 203, 150, 72, 62, 229], 'only extend_account besides the swap');
+    assert.equal(swap.keys[0].pubkey.toBase58(), p.pool.toBase58()); assert.equal(swap.keys[1].pubkey.toBase58(), f.trader.publicKey.toBase58()); assert.ok(swap.keys[1].isSigner);
+    assert.equal(swap.keys[3].pubkey.toBase58(), mint.toBase58()); assert.equal(swap.keys[4].pubkey.toBase58(), f.quoteMint.toBase58());
+    assert.equal(swap.keys[7].pubkey.toBase58(), p.poolBase.toBase58()); assert.equal(swap.keys[8].pubkey.toBase58(), p.poolQuote.toBase58());
+    assert.ok(swap.keys.length >= 21, `${side}: ${swap.keys.length} accounts`);
+    // The transaction is accepted up to the swap: PumpSwap runs and only stops at pump's fee program (absent here).
+    const { blockhash } = await f.connection.getLatestBlockhash('confirmed');
+    const tx = new web3.Transaction({ feePayer: f.trader.publicKey, recentBlockhash: blockhash }).add(f.client.computeBudget(300_000), ...trade.instructions);
+    const bytes = tx.serializeMessage().length + 1 + 64 * tx.compileMessage().header.numRequiredSignatures;
+    assert.ok(bytes <= 1232, `${side} fits one transaction (${bytes} bytes)`);
+    const sim = await f.connection.simulateTransaction(tx);
+    assert.ok((sim.value.logs ?? []).some(l => l.startsWith(`Program ${PUMP_AMM_PROGRAM} invoke`)), `${side}: PumpSwap was reached\n${(sim.value.logs ?? []).join('\n')}`);
+  }
+});
+
 test('Solana harvest withdraws only LP fee growth, splits it 50/50 and never touches the principal', { skip: pumpSkip }, async () => {
   const mint = await completedCurve('HARV');
   const p = f.client.pumpAccounts(mint, f.quoteMint);

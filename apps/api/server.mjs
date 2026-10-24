@@ -88,6 +88,8 @@ const vendorFiles = new Map([
   ['/vendor/lightweight-charts.js', fileURLToPath(new URL('../../node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js', import.meta.url))],
   ['/vendor/ethers.js', ethersFile],
   ['/vendor/solana-web3.js', fileURLToPath(new URL('../../node_modules/@solana/web3.js/lib/index.iife.min.js', import.meta.url))],
+  // PumpSwap's official SDK, bundled by scripts/build-pumpswap-vendor.mjs; loaded only to trade a migrated Solana token.
+  ['/vendor/pumpswap.mjs', fileURLToPath(new URL('../web/vendor/pumpswap.mjs', import.meta.url))],
   ['/elpida-solana.mjs', fileURLToPath(new URL('../../packages/solana/client.mjs', import.meta.url))],
   ['/pairs.mjs', fileURLToPath(new URL('../../packages/core/pairs.mjs', import.meta.url))],
   ['/dex-router.mjs', fileURLToPath(new URL('../../packages/core/dex-router.mjs', import.meta.url))],
