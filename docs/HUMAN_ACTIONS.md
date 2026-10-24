@@ -147,7 +147,8 @@ Robinhood's testnet has no Uniswap v3 and no Chainlink feed, so the site deploys
    wallet → **Set up test DEX and price feed** (6 confirmations). An interrupted setup resumes. Send Claude the
    addresses it shows.
 4. Claude registers them (a PR). After it deploys: **Set up launchpad**, then launch a test token as on the other
-   testnets. Completing a curve takes about $70 of test ETH (about 3 days of faucet).
+   testnets. Completing a curve takes about $130 of test ETH in total (about 4 to 5 days of faucet); launching and
+   trading need far less.
 
 ## 4. Turn on `hope` mint addresses (optional)
 

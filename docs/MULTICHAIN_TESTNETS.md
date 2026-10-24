@@ -231,4 +231,6 @@ no WETH and no Chainlink feed. So that Elpida can be tested live there, without 
   source round. Operations status raises `price_relay_robinhood-testnet` when the relayed price falls behind.
 - **Mainnet is unaffected.** Robinhood mainnet uses the real Uniswap v3 and Chainlink feed (fork check above).
 
-Graduation at the test size needs roughly $70 of test ETH in the completing buys, about 3 days of this faucet.
+A full lifecycle at the test size ($50 starting FDV) costs about $130 of test ETH, measured on a local chain at $2,500
+per ETH: the $10 fee, an optional first buy, and about $97 for the completing buy (0.0387 ETH). That is about 4 to 5
+days of this faucet; launching and trading need far less.
