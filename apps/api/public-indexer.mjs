@@ -66,7 +66,9 @@ export class PublicIndexer {
   }
   static FAILOVER_AFTER=3;
   start(){this.job=this.tick();this.timer=setInterval(()=>{this.job=this.tick();},15000);this.timer.unref();return this;}
-  status(key){const e=this.entries.get(key);return e?{...e.index.status(),error:e.error,errorCode:e.errorCode??null,rpc:rpcHost(this.rpcs?.get(key)),lastSuccess:e.lastSuccess,enabled:true}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}
+  status(key){const e=this.entries.get(key);return e?{...e.index.status(),error:e.error,errorCode:e.errorCode??null,rpc:rpcHost(this.rpcs?.get(key)),lastSuccess:e.lastSuccess,enabled:true,
+    // Earlier launchpads on the same network have their own index; a stuck one must be visible too.
+    legacy:(this.legacy?.get(key)??[]).map(l=>{const s=l.index.status();return {factory:deploymentOf(l).factory,indexedBlock:s.indexedBlock,lag:s.lag,error:l.error??null,errorCode:l.errorCode??null,lastSuccess:l.lastSuccess??null};})}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}
   quotes(key){const e=this.entries.get(key);if(!e)return null;const status=e.index.status();if(!e.validated||status.indexedBlock==null)return null;const factory=deploymentOf(e).factory;return {factory,chainId:e.net.chainId,indexedBlock:status.indexedBlock,assets:e.index.db.prepare("SELECT data FROM events WHERE json_extract(data,'$.name')='QuoteApproved' ORDER BY height,idx").all().map(r=>JSON.parse(r.data)).filter(r=>r.kind==='factory'&&r.address.toLowerCase()===factory.toLowerCase()).map(r=>r.args[0])};}
   /** Tokens from every deployment on the network. `extra(entry, token)` adds per-deployment fields. */
   listings(key,extra){return this.all(key).flatMap(e=>{const d=deploymentOf(e);return e.index.listings().map(t=>({...t,metadata:e.metadata.get(t.address)??{},metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})}));});}

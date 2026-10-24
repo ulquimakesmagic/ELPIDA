@@ -10,6 +10,8 @@ export function evaluateOperations({now=Date.now(),startedAt=now,storage={},netw
  }
  for(const [name,n] of Object.entries(networks))if(n.enabled){
   if(!warm&&(n.error||!Number.isFinite(Date.parse(n.lastSuccess))||now-Date.parse(n.lastSuccess)>180000||Number(n.lag)>100))add('indexer_'+name,'critical','Public indexing is behind or unavailable on '+name+'.');
+  // Earlier launchpads keep their own index (their tokens stay listed and tradable): a stuck one is a warning.
+  if(!warm&&(n.legacy??[]).some(l=>l.error||Number(l.lag)>100))add('indexer_'+name+'_legacy','warning','An earlier launchpad index on '+name+' is behind or unavailable; its tokens may show stale state.');
   const p=prices[name];if(!warm&&(!p||p.status!=='fresh'||!Number.isFinite(p.usd)||p.usd<=0||now/1000-p.updatedAt>(p.maxAge??180)))add('price_'+name,'warning','A fresh display price is unavailable on '+name+'. On-chain launch pricing is checked separately.');
  }
  if(backup.lastError)add('backup_failed','critical','The last backup attempt or configuration failed.');
