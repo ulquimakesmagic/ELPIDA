@@ -48,7 +48,8 @@ export const testnets = [
     // Elpida test deployment of Uniswap v3 and an ElpidaRelayFeed from the site; the server relay (apps/api/feed-relay.mjs)
     // copies Chainlink ETH / USD from Base Sepolia into it, keeping Chainlink's timestamps. Mainnet uses the real ones.
     testDex: true,
-    relay: { source: { network: 'base-sepolia', feed: '0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1' }, feed: null, maxAge: 3600 },
+    // ElpidaRelayFeed deployed 24 Oct 2026 (block 141826583); updater: the server relay 0x3d06…94FC.
+    relay: { source: { network: 'base-sepolia', feed: '0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1' }, feed: '0xdB7f43FFFdA626c1cc26206981C05507C75E983F', maxAge: 3600 },
     shared: null,
   },
 ];
