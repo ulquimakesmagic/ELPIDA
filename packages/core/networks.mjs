@@ -50,7 +50,9 @@ export const testnets = [
     testDex: true,
     // ElpidaRelayFeed deployed 24 Oct 2026 (block 141826583); updater: the server relay 0x3d06…94FC.
     relay: { source: { network: 'base-sepolia', feed: '0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1' }, feed: '0xdB7f43FFFdA626c1cc26206981C05507C75E983F', maxAge: 3600 },
-    shared: null,
+    // Atomic Model 10 factory (the test Uniswap v3 above), deployed by Malik 24 Oct 2026 in tx 0x5933c8f8…c2e6; graduation
+    // adapter 0xa37F…106A (WETH, 1%). Priced by the relay feed. Requires token details on-chain at launch.
+    shared: { factory: '0x64d93212adc10d28E867Db44EBC1480AFaeaAD97', block: 141864043, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 },
   },
 ];
 

@@ -31,6 +31,9 @@ test('Robinhood testnet is registered as a test chain: its labelled test DEX and
   const oracle = usdOracles({})[KEY];
   assert.equal(oracle.feed, net.relay.feed); assert.equal(oracle.maxAge, net.relay.maxAge); assert.equal(oracle.available, true);
   assert.match(oracle.source, /relayed from base-sepolia/);
+  // The team launchpad, pinned so the public indexer lists Robinhood testnet tokens for everyone.
+  assert.equal(net.shared.model, 'curve-dex-v10'); assert.equal(net.shared.launchFeaturesVersion, 1);
+  assert.ok(net.shared.block > 141826583, 'deployed after the test DEX it graduates into');
 });
 
 test('ElpidaRelayFeed: only its updater posts, rounds only move forward, never into the future', async t => {
