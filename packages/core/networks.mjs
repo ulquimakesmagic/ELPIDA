@@ -4,12 +4,15 @@
 //
 // shared: fill in after one team deployment so every tester uses the same launchpad instead of a
 // per-browser factory. Leave null to let each browser deploy its own.
+// rpcFallbacks: extra public RPCs the server's indexer moves to when the main one keeps failing (server only;
+// browsers use rpcUrl, which the CSP allows).
 // legacy: earlier team factories on the same network. They stay indexed (listings, trading, fees)
 // but take no new launches.
 export const testnets = [
   {
     key: 'base-sepolia', name: 'Base Sepolia', short: 'BASE SEPOLIA', kind: 'evm', enabled: true,
     chainId: 84532, rpcUrl: 'https://sepolia.base.org', explorer: 'https://sepolia.basescan.org',
+    rpcFallbacks: ['https://base-sepolia-rpc.publicnode.com', 'https://base-sepolia.drpc.org'],
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     gasFaucet: 'https://docs.base.org/get-started/get-funds',
     // Atomic Model 10 factory, verified 18 Oct 2026; optional creator buy and final-buy graduation.
@@ -20,6 +23,7 @@ export const testnets = [
   {
     key: 'ethereum-sepolia', name: 'Ethereum Sepolia', short: 'ETH SEPOLIA', kind: 'evm', enabled: true,
     chainId: 11155111, rpcUrl: 'https://ethereum-sepolia-rpc.publicnode.com', explorer: 'https://sepolia.etherscan.io',
+    rpcFallbacks: ['https://sepolia.drpc.org', 'https://1rpc.io/sepolia', 'https://sepolia.gateway.tenderly.co'],
     nativeCurrency: { name: 'Sepolia Ether', symbol: 'ETH', decimals: 18 },
     gasFaucet: 'https://cloud.google.com/application/web3/faucet/ethereum/sepolia',
     // Atomic Model 10 factory (Uniswap v3), deployed 22 Oct 2026 in tx 0xdad271f4…82be9; first launch VEGETA.
@@ -27,17 +31,28 @@ export const testnets = [
   },
   {
     key: 'bnb-testnet', name: 'BNB Chain Testnet', short: 'BNB TESTNET', kind: 'evm', enabled: true,
-    chainId: 97, rpcUrl: 'https://bsc-testnet-dataseed.bnbchain.org', explorer: 'https://testnet.bscscan.com',
+    chainId: 97, rpcUrl: 'https://bsc-testnet-rpc.publicnode.com', explorer: 'https://testnet.bscscan.com',
+    rpcFallbacks: ['https://bnb-testnet.api.onfinality.io/public', 'https://bsc-testnet.drpc.org'],
     nativeCurrency: { name: 'Test BNB', symbol: 'tBNB', decimals: 18 },
     gasFaucet: 'https://www.bnbchain.org/en/testnet-faucet',
-    shared: null,
+    // Atomic Model 10 factory (PancakeSwap v3), deployed 23 Oct 2026 in tx 0x7b0cefee…7247f; requires token details
+    // on-chain at launch. Its graduation adapter is 0xD641…6d2 (same address as other chains' contracts: nonce match).
+    shared: { factory: '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE', block: 138485798, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 },
   },
   {
     key: 'robinhood-testnet', name: 'Robinhood Chain Testnet', short: 'ROBINHOOD TESTNET', kind: 'evm', enabled: true,
     chainId: 46630, rpcUrl: 'https://rpc.testnet.chain.robinhood.com', explorer: 'https://explorer.testnet.chain.robinhood.com',
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     gasFaucet: 'https://faucet.testnet.chain.robinhood.com',
-    shared: null,
+    // This testnet has neither Uniswap v3 nor a Chainlink feed (24 Oct 2026). The launchpad owner deploys a labelled
+    // Elpida test deployment of Uniswap v3 and an ElpidaRelayFeed from the site; the server relay (apps/api/feed-relay.mjs)
+    // copies Chainlink ETH / USD from Base Sepolia into it, keeping Chainlink's timestamps. Mainnet uses the real ones.
+    testDex: true,
+    // ElpidaRelayFeed deployed 24 Oct 2026 (block 141826583); updater: the server relay 0x3d06…94FC.
+    relay: { source: { network: 'base-sepolia', feed: '0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1' }, feed: '0xdB7f43FFFdA626c1cc26206981C05507C75E983F', maxAge: 3600 },
+    // Atomic Model 10 factory (the test Uniswap v3 above), deployed by Malik 24 Oct 2026 in tx 0x5933c8f8…c2e6; graduation
+    // adapter 0xa37F…106A (WETH, 1%). Priced by the relay feed. Requires token details on-chain at launch.
+    shared: { factory: '0x64d93212adc10d28E867Db44EBC1480AFaeaAD97', block: 141864043, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 },
   },
 ];
 

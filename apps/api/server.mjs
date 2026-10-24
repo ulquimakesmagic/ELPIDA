@@ -3,6 +3,8 @@ import { indexedChange, indexedActivity, activityOf } from '../web/discovery.mjs
 import { protocolAnalytics } from './protocol-analytics.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
 import {configuredGraduationKeeper} from './graduation-keeper.mjs';
+import { FeedRelay } from './feed-relay.mjs';
+import { testDexArtifacts } from './test-dex-artifacts.mjs';
 import { PublicIndexer, recentTrade } from './public-indexer.mjs';
 import { SolanaIndexer } from '../../packages/indexer/solana-indexer.mjs';
 import { validateSolanaRpc } from '../../packages/solana/rpc-config.mjs';
@@ -62,6 +64,9 @@ resources.set('/metadata-cache.mjs', ['metadata-cache.mjs', 'text/javascript']);
 resources.set('/wallet-batch.mjs', ['wallet-batch.mjs', 'text/javascript']);
 resources.set('/public-rpc-signer.mjs', ['public-rpc-signer.mjs', 'text/javascript']);
 resources.set('/one-confirmation.mjs', ['one-confirmation.mjs', 'text/javascript']);
+resources.set('/paced-rpc.mjs', ['paced-rpc.mjs', 'text/javascript']);
+resources.set('/graduation-unblock.mjs', ['graduation-unblock.mjs', 'text/javascript']);
+resources.set('/safe-batch.mjs', ['safe-batch.mjs', 'text/javascript']);
 resources.set('/upload-proof.mjs', ['upload-proof.mjs', 'text/javascript']);
 resources.set('/upload-proof-worker.mjs', ['upload-proof-worker.mjs', 'text/javascript']);
 resources.set('/circle-funding.mjs', ['circle-funding.mjs', 'text/javascript']);
@@ -86,6 +91,8 @@ const vendorFiles = new Map([
   ['/vendor/lightweight-charts.js', fileURLToPath(new URL('../../node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js', import.meta.url))],
   ['/vendor/ethers.js', ethersFile],
   ['/vendor/solana-web3.js', fileURLToPath(new URL('../../node_modules/@solana/web3.js/lib/index.iife.min.js', import.meta.url))],
+  // PumpSwap's official SDK, bundled by scripts/build-pumpswap-vendor.mjs; loaded only to trade a migrated Solana token.
+  ['/vendor/pumpswap.mjs', fileURLToPath(new URL('../web/vendor/pumpswap.mjs', import.meta.url))],
   ['/elpida-solana.mjs', fileURLToPath(new URL('../../packages/solana/client.mjs', import.meta.url))],
   ['/pairs.mjs', fileURLToPath(new URL('../../packages/core/pairs.mjs', import.meta.url))],
   ['/dex-router.mjs', fileURLToPath(new URL('../../packages/core/dex-router.mjs', import.meta.url))],
@@ -152,6 +159,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // The simulation is rebuilt from its action journal on the data volume, so its index can stay in memory.
   const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:dataFile('token-metadata.json'), dex:port!==0, indexerPath:":memory:", journalPath:port===0?null:dataFile('simulation-journal-v2.jsonl'), log:console.log });
   const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore}).start();
+  // Testnet-only price relay for test chains without a Chainlink feed (Robinhood testnet). Idle without its key.
+  const feedRelay=new FeedRelay({networks:port===0?[]:evmTestnets,env:port===0?{}:process.env}).start();
   const graduationKeeper=configuredGraduationKeeper({env:port===0?{}:process.env,publicIndex,path:port===0?null:dataFile('graduation-keeper.sqlite')});
   // Solana public indexer: the deployed program's pools and trades, read-only, stored on the data volume.
   const solanaNet=solanaConfig(),solanaRpc=process.env.SOLANA_RPC_URL??(/^https?:\/\//.test(solanaNet.rpcUrl)?solanaNet.rpcUrl:null);
@@ -196,7 +205,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rpcProxy = solana.mainnet ? createRpcProxy(process.env.SOLANA_RPC_URL) : null;
   const operationsStartedAt=Date.now();
   const backupRunner=configuredBackup({env:port===0?{}:process.env,dataDir,statePath:port===0?null:dataFile('ops-backup-state.json'),workDir:process.env.ELPIDA_BACKUP_WORK_DIR??resolve(tmpdir(),'elpida-backups-'+dataPrefix.replace(/[^a-z0-9-]/gi,'')),log:console.log});
-  const operationsInput=()=>({graduation:graduationKeeper.status(),startedAt:operationsStartedAt,durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),storage:metadataStore.status().storage,networks:Object.fromEntries([...publicIndex.entries.keys()].map(key=>[key,publicIndex.status(key)])),prices:priceSnapshot(),backup:backupRunner.status()});
+  const operationsInput=()=>({relay:feedRelay.status(),graduation:graduationKeeper.status(),startedAt:operationsStartedAt,durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),storage:metadataStore.status().storage,networks:Object.fromEntries([...publicIndex.entries.keys()].map(key=>[key,publicIndex.status(key)])),prices:priceSnapshot(),backup:backupRunner.status()});
   const monitor=new OperationsMonitor({read:operationsInput});
   const operationsTimer=port===0?null:setInterval(()=>monitor.tick(),60000);operationsTimer?.unref();
   if(port!==0){backupRunner.start();monitor.tick();}
@@ -286,7 +295,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         }
         if(url.pathname==='/api/public/tokenized-equity'){const view=tokenizedEquity.describeNetwork(url.searchParams.get('network')??'');return view?send(200,{...view,live:false,note:'Tokenized stocks are disabled until each capability is verified with the provider. Nothing here is an official partnership.'}):send(404,{error:'No tokenized-stock provider is designated for this network.'});}
         if(url.pathname==='/api/graduation/status')return send(200,graduationKeeper.status());
-        if(url.pathname==='/api/public/status')return send(200,{graduation:graduationKeeper.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),simulationEphemeral:!runtime.config.simulation?.durable,simulation:runtime.config.simulation},networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,publicIndex.status(n.key)])),...(solanaIndex?{[solanaIndex.network.key]:{enabled:true,...solanaIndex.status()}}:{})}});
+        if(url.pathname==='/api/public/status')return send(200,{graduation:graduationKeeper.status(),relay:feedRelay.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),simulationEphemeral:!runtime.config.simulation?.durable,simulation:runtime.config.simulation},networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,publicIndex.status(n.key)])),...(solanaIndex?{[solanaIndex.network.key]:{enabled:true,...solanaIndex.status()}}:{})}});
         if(url.pathname==='/api/public/recent-trades'){
           // Newest trades across every public index, for the "Last sale" strip: token identity, side and time only.
           const limit=Math.max(1,Math.min(50,Number(url.searchParams.get('limit'))||20)),list=publicIndex.recentTrades(limit);
@@ -303,7 +312,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         }
         const publicMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?)?$/);
         if(publicMatch){const key=url.searchParams.get('network')??'base-sepolia';if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown public network.'});if(!publicMatch[1]){const activity=new Map();return send(200,publicIndex.listings(key,(e,t)=>{if(!activity.has(e))activity.set(e,indexedActivity(e.index.db));return {priceChange24h:indexedChange(e.index.db,t),...activityOf(activity.get(e),t.address)};}));}const data=publicIndex.detail(key,publicMatch[1],publicMatch[2],Number(url.searchParams.get('interval')??60));return data===null?send(404,{error:'Token not indexed yet. Check indexer status and retry.'}):send(200,data);}
-        if (url.pathname === '/api/config') return send(200, { ...runtime.config, serverTime: Date.now()/1000, vanity: vanity.status(), circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), csrf });
+        // Bytecode for the labelled test DEX and relay feed, fetched only when the launchpad owner deploys them.
+        if (url.pathname === '/api/test-dex-artifacts') return send(200, testDexArtifacts());
+        if (url.pathname === '/api/config') return send(200, { ...runtime.config, serverTime: Date.now()/1000, vanity: vanity.status(), circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), relay: feedRelay.publicConfig(), csrf });
         if(url.pathname==='/api/metadata/resolve')return send(200,await metadataStore.resolve(url.searchParams.get('uri')));
         if(url.pathname.startsWith('/api/content/')){const record=metadataStore.get(url.pathname.slice('/api/content/'.length));if(!record)return send(404,{error:'Content not found.'});res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}
         if (url.pathname === '/api/indexer/status') { await runtime.indexer.sync(); return send(200,runtime.indexer.status()); }
@@ -347,6 +358,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if (req.method !== 'POST' || !url.pathname.startsWith('/api/')) return send(405, { error: 'Method not allowed.' });
       if (req.headers['x-elpida-token'] !== csrf || req.headers['content-type'] !== 'application/json') return send(403, { error: 'Refresh this page before submitting.' });
       // A disabled route must not parse large bodies or spend the protected upload budget.
+      // Token details are published only inside the launch transaction (never after), on every network.
+      if(['/api/public/metadata/prepare','/api/public/metadata/save'].includes(url.pathname))return send(410,{error:'Token details are published only at launch, inside the launch transaction. They cannot be added afterwards.'});
       if(publicUrl&&url.pathname==='/api/metadata/publish')return send(410,{error:'Public metadata uploads must use the launch staging flow; retention is verified from the launch transaction.'});
       let uploadDigest;
       if(url.pathname==='/api/metadata/stage'){
@@ -355,7 +368,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       }
       const chunks = [];
       let size = 0;
-      for await (const chunk of req) { size += chunk.length; if (size > (['/api/launch','/api/metadata/stage','/api/metadata/publish','/api/public/metadata/prepare','/api/public/metadata/save'].includes(url.pathname) ? MAX_METADATA_REQUEST_BYTES : 8192)) { send(413, { error: 'Request too large.' }); return; } chunks.push(chunk); }
+      for await (const chunk of req) { size += chunk.length; if (size > (['/api/launch','/api/metadata/stage','/api/metadata/publish'].includes(url.pathname) ? MAX_METADATA_REQUEST_BYTES : 8192)) { send(413, { error: 'Request too large.' }); return; } chunks.push(chunk); }
       let body;
       const rawBody=Buffer.concat(chunks);if(uploadDigest&&keccak256(rawBody)!==uploadDigest)return send(403,{error:'Upload payload changed. Prepare it again; no launch was submitted.'});
       try { body = JSON.parse(rawBody.toString()); } catch { return send(400, { error: 'Invalid request.' }); }
@@ -364,8 +377,6 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if(['chat/report/prepare','chat/report/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat reporting is busy. Retry shortly.'});return send(200,action==='chat/report/prepare'?await chat.prepareReport(body):await chat.saveReport(body));}
       if(['chat/prepare','chat/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat publishing is busy. Retry shortly.'});return send(200,action==='chat/prepare'?await chat.prepare(body):await chat.save(body));}
       if(['theses/prepare','theses/save'].includes(action)){if(Date.now()-terminalWindow>=60000){terminalWindow=Date.now();terminalCount=0;thesisCount=0;}if(++thesisCount>30)return send(429,{error:'Thesis publishing is busy. Retry in a minute.'});return send(200,action==='theses/prepare'?await theses.prepare(body):await theses.save(body));}
-      if(action==='public/metadata/prepare')return send(200,{message:publicIndex.metadataMessage(body).message});
-      if(action==='public/metadata/save')return send(200,publicIndex.saveMetadata(body));
       if(action==='client-error'){if(Date.now()-diagnosticWindow>=60000){diagnosticWindow=Date.now();diagnosticCount=0;}if(++diagnosticCount>60)return send(429,{error:'Diagnostics request limit reached.'});const stage=String(body.stage??'unknown').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40),code=String(body.code??'UNKNOWN').replace(/[^a-zA-Z0-9_-]/g,'').slice(0,40),rpcMethod=/^eth_[a-zA-Z]{1,40}$/.test(body.rpcMethod??'')?body.rpcMethod:undefined,rpcCode=Number.isSafeInteger(body.rpcCode)?body.rpcCode:undefined;console.error(JSON.stringify({event:'client_error',requestId,stage,code,rpcMethod,rpcCode}));return send(200,{recorded:true,requestId});}
       if (action === 'circle/funding') {
         try { return send(200, await circle.execute(req.headers.authorization, body)); }
@@ -403,7 +414,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   });
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, vanity, async close() {vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, vanity, async close() {vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

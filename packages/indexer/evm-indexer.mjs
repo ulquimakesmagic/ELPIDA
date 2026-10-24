@@ -16,10 +16,10 @@ export function ratio(numerator, denominator, digits = 24) {
 
 /** Durable Elpida EVM indexer. Protocol adapters currently cover curves and custom test pools only. */
 export class EvmIndexer {
-  constructor({provider, factory, contracts, path = ':memory:', chainId = 31337, fromBlock = 0, confirmations = 0, nativeSymbol = 'ETH', batchSize = 1}) {
+  constructor({provider, factory, contracts, path = ':memory:', chainId = 31337, fromBlock = 0, confirmations = 0, nativeSymbol = 'ETH', batchSize = 1, dexName = 'Uniswap v3'}) {
     if (path !== ':memory:') mkdirSync(dirname(path), {recursive:true});
     this.db = new DatabaseSync(path); this.provider = provider; this.factory = factory.toLowerCase();
-    this.chainId = chainId; this.fromBlock = fromBlock; this.confirmations = confirmations; this.nativeSymbol = nativeSymbol;
+    this.chainId = chainId; this.fromBlock = fromBlock; this.confirmations = confirmations; this.nativeSymbol = nativeSymbol; this.dexName = dexName;
     this.contracts = contracts; this.interfaces = Object.fromEntries(['factory','curve','pool','token',...(contracts.dexPool?['dexPool']:[])].map(k=>[k,new Interface(contracts[k].abi)]));
     this.batchSize = Math.max(1, Math.min(500, batchSize));
     this.db.exec(`PRAGMA journal_mode=WAL;
@@ -157,6 +157,10 @@ export class EvmIndexer {
     if(this.contracts.tax){const [buy,sell]=await Promise.all([t.buyTaxBps(call),t.sellTaxBps(call)]);dev.tax={buyBps:Number(buy),sellBps:Number(sell),protocolBps:3000,creatorBps:7000};dev.factory=this.factory;}
     if(r.curveModel===10){const [bonus,completedAt]=await Promise.all([c.liquidityBonus(call),c.completedAt(call)]);Object.assign(dev,{liquidityBonus:formatUnits(bonus,r.quoteDecimals),completedAt:Number(completedAt),reopenableAt:complete&&pool===ZeroAddress&&completedAt>0n?Number(completedAt)+r.graduationGrace:null});}
     const graduated=pool!==ZeroAddress,m=graduated?new Contract(pool,this.contracts.pool.abi,this.provider):c;
+    // A curve reopened after its graduation grace is fully sold but no longer complete. Its completion quote then
+    // reverts (nothing is left to buy until a holder sells), so it must not be called: that would stop the index.
+    const soldOut=!complete&&!graduated&&r.saleCapRaw!=null&&sold>=BigInt(r.saleCapRaw);
+    dev.soldOut=soldOut;
     if(graduated && this.contracts.tax)return {...await this.readV2Snapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance}),...dev};
     if(graduated && this.contracts.dexPool)return {...await this.readDexSnapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance}),...dev};
     const [reserve,cp,cc] = await Promise.all([m.realReserve(call),c.protocolFees(call),c.creatorFees(call)]);
@@ -167,7 +171,7 @@ export class EvmIndexer {
     const inventory=await t.balanceOf(r.curve,call)+(graduated?await t.balanceOf(pool,call):0n),circulating=supply-deadBalance-inventory;
     const marketCap=ratio(q*circulating,base*10n**BigInt(d)),fdv=ratio(q*supply,base*10n**BigInt(d));
     const pf=graduated?await m.protocolFees(call):0n,cf=graduated?await m.creatorFees(call):0n;
-    return {pool,graduated,complete,liquidityLocked:graduated,reserve:formatUnits(reserve,d),sold:formatUnits(sold,18),supply:formatUnits(supply,18),circulatingSupply:formatUnits(circulating,18),deadSupply:formatUnits(deadBalance,18),saleCap:formatUnits(BigInt(r.saleCapRaw),18),spotPrice:price,fdvQuote:fdv,circulatingMarketCapQuote:marketCap,supplyPolicy:'exclude curve/pool inventory and known dead address v1',priceUsd:null,usdBasis:null,protocolFees:formatUnits(cp+pf,d),creatorFees:formatUnits(cc+cf,d),remainingBuy:complete?'0':formatUnits(await c.completionQuote(call),d),...(r.curveModel===10?{remainingBase:complete?'0':formatUnits(await c.remainingAtBaseFee(call),d)}:{}),indexedBlock:height,indexedBlockHash:block.hash,priceTimestamp:block.timestamp,...dev};
+    return {pool,graduated,complete,liquidityLocked:graduated,reserve:formatUnits(reserve,d),sold:formatUnits(sold,18),supply:formatUnits(supply,18),circulatingSupply:formatUnits(circulating,18),deadSupply:formatUnits(deadBalance,18),saleCap:formatUnits(BigInt(r.saleCapRaw),18),spotPrice:price,fdvQuote:fdv,circulatingMarketCapQuote:marketCap,supplyPolicy:'exclude curve/pool inventory and known dead address v1',priceUsd:null,usdBasis:null,protocolFees:formatUnits(cp+pf,d),creatorFees:formatUnits(cc+cf,d),remainingBuy:complete||soldOut?'0':formatUnits(await c.completionQuote(call),d),...(r.curveModel===10?{remainingBase:complete||soldOut?'0':formatUnits(await c.remainingAtBaseFee(call),d)}:{}),indexedBlock:height,indexedBlockHash:block.hash,priceTimestamp:block.timestamp,...dev};
   }
   async readDexSnapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance}) {
     const call={blockTag:height},m=new Contract(pool,this.contracts.dexPool.abi,this.provider),[slot,asset0,asset1,liquidity,fee,lockerAddress,splitterAddress,positionId,cp,cc]=await Promise.all([m.slot0(call),m.token0(call),m.token1(call),m.liquidity(call),m.fee(call),c.locker(call),c.feeSplitter(call),c.positionId(call),c.protocolFees(call),c.creatorFees(call)]);
@@ -179,7 +183,7 @@ export class EvmIndexer {
     const locked=await locker.locked(call)&&(await manager.ownerOf(positionId,call)).toLowerCase()===lockerAddress.toLowerCase();
     const splitter=new Contract(splitterAddress,this.contracts.splitter.abi,this.provider),rewards=[];
     for(const asset of [asset0,asset1]){const tokenAsset=asset.toLowerCase()===r.address;rewards.push({asset,symbol:tokenAsset?r.symbol:r.pair==='native'?'WETH':r.quoteSymbol,decimals:tokenAsset?18:d,creator:formatUnits(await splitter.claimable(asset,r.reward,call),tokenAsset?18:d)});}
-    return {pool,graduated:true,complete,liquidityLocked:locked,locker:lockerAddress,feeSplitter:splitterAddress,positionId:positionId.toString(),venue:'Uniswap v3',feeBps:Number(fee)/100,tokenFirst,quoteAsset,liquidity:liquidity.toString(),reserve:formatUnits(reserve,d),reserveBasis:'actual DEX quote balance, including uncollected fees',sold:formatUnits(sold,18),supply:formatUnits(supply,18),circulatingSupply:formatUnits(circulating,18),deadSupply:formatUnits(deadBalance,18),saleCap:formatUnits(BigInt(r.saleCapRaw),18),spotPrice:price,fdvQuote:ratio(n*supply,den*10n**BigInt(d)),circulatingMarketCapQuote:ratio(n*circulating,den*10n**BigInt(d)),supplyPolicy:'exclude curve/pool inventory and known dead address v1',priceUsd:null,usdBasis:null,protocolFees:formatUnits(cp,d),creatorFees:formatUnits(cc,d),dexRewards:rewards,rewardsBasis:'collected fees available to claim; collect the position to settle more',remainingBuy:'0',indexedBlock:height,indexedBlockHash:block.hash,priceTimestamp:block.timestamp};
+    return {pool,graduated:true,complete,liquidityLocked:locked,locker:lockerAddress,feeSplitter:splitterAddress,positionId:positionId.toString(),venue:this.dexName,feeBps:Number(fee)/100,tokenFirst,quoteAsset,liquidity:liquidity.toString(),reserve:formatUnits(reserve,d),reserveBasis:'actual DEX quote balance, including uncollected fees',sold:formatUnits(sold,18),supply:formatUnits(supply,18),circulatingSupply:formatUnits(circulating,18),deadSupply:formatUnits(deadBalance,18),saleCap:formatUnits(BigInt(r.saleCapRaw),18),spotPrice:price,fdvQuote:ratio(n*supply,den*10n**BigInt(d)),circulatingMarketCapQuote:ratio(n*circulating,den*10n**BigInt(d)),supplyPolicy:'exclude curve/pool inventory and known dead address v1',priceUsd:null,usdBasis:null,protocolFees:formatUnits(cp,d),creatorFees:formatUnits(cc,d),dexRewards:rewards,rewardsBasis:'collected fees available to claim; collect the position to settle more',remainingBuy:'0',indexedBlock:height,indexedBlockHash:block.hash,priceTimestamp:block.timestamp};
   }
   async readV2Snapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance}){
     const call={blockTag:height},m=new Contract(pool,this.contracts.dexPool.abi,this.provider);

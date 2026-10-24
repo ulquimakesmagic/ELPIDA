@@ -12,6 +12,8 @@ export const mined=async p=>(await p).wait();
 export const ETH_USD=2500n;
 /** $10 at $2,500 per ETH. */
 export const FEE=parseEther('0.004');
+/** A valid token-details URI for factories that require one at launch (the atomic, mainnet factory). */
+export const TEST_URI='ipfs://bafkreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsck7e7aqa4s52zy';
 
 export async function dexFixture(t,{startFdvUsd=5000,grace=GRADUATION_GRACE_SECONDS,factoryName='ElpidaDexFactory'}={}){
  const connection=await network.create('localTest'),provider=new BrowserProvider(connection.provider,undefined,{cacheTimeout:-1});provider.pollingInterval=10;t.after(async()=>{provider.destroy();await connection.close();});
@@ -40,7 +42,8 @@ export function parse(contract,receipt,name){return receipt.logs.map(l=>{try{ret
 export async function launch(f,{native=true,firstBuy,reward,signer=f.signers[0],name='Hope',symbol='HOPE'}={}){
  const buy=firstBuy??(native?parseEther('0.01'):parseUnits('100',6));
  if(!native)await mined(f.usdc.connect(signer).approve(f.factory.target,buy));
- const receipt=await mined(native?f.factory.connect(signer).launch(name,symbol,buy,0,reward??f.addresses[0],{value:FEE+buy}):f.factory.connect(signer).launchPaired(name,symbol,f.usdc.target,buy,0,reward??f.addresses[0],{value:FEE}));
+ const withUri=await f.factory.requiresMetadata().catch(()=>false),fc=f.factory.connect(signer);
+ const receipt=await mined(native?(withUri?fc.launchWithMetadata(name,symbol,buy,0,reward??f.addresses[0],TEST_URI,{value:FEE+buy}):fc.launch(name,symbol,buy,0,reward??f.addresses[0],{value:FEE+buy})):withUri?fc.launchPairedWithMetadata(name,symbol,f.usdc.target,buy,0,reward??f.addresses[0],TEST_URI,{value:FEE}):f.factory.connect(signer).launchPaired(name,symbol,f.usdc.target,buy,0,reward??f.addresses[0],{value:FEE}));
  const [ev]=parse(f.factory,receipt,'Launched');
  return {receipt,curve:new Contract(ev.args.curve,art('ElpidaDexCurve').abi,signer),token:new Contract(ev.args.token,art('ElpidaToken').abi,signer),quote:native?f.dex.weth.target:f.usdc.target,native};
 }

@@ -2,31 +2,25 @@ import {DatabaseSync} from 'node:sqlite';
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Wallet } from 'ethers';
-import { mkdtempSync, rmSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { PublicIndexer } from '../apps/api/public-indexer.mjs';
 
-test('public registry survives restart and accepts metadata only from the indexed creator',async()=>{
-  const dir=mkdtempSync(join(tmpdir(),'elpida-public-')),creator=Wallet.createRandom(),other=Wallet.createRandom();
+test('public registry survives restart; details are never added after launch, and details saved before that rule still load',async()=>{
+  const dir=mkdtempSync(join(tmpdir(),'elpida-public-')),creator=Wallet.createRandom();
   const factory='0x'+'11'.repeat(20),token='0x'+'22'.repeat(20),curve='0x'+'33'.repeat(20);
   const options={dataDir:dir,networks:[{key:'test',chainId:84532,shared:{factory,block:1,model:'curve-dex-v9'},nativeCurrency:{symbol:'ETH'},explorer:'https://example.com'}],contracts:Object.fromEntries(['dexFactory','dexCurve','factory','curve','pool','token'].map(n=>[n,{abi:[]}])),providerFactory:()=>({destroy(){}}),metadataStore:{},log(){}};
   let service=new PublicIndexer(options);
   try{
     const e=service.entries.get('test');e.index.db.prepare('INSERT INTO tokens VALUES(?,?,?)').run(token,1,JSON.stringify({address:token,creator:creator.address,curve,metadataURI:'',name:'Public token'}));
-    const body={network:'test',token,expires:Math.floor(Date.now()/1000)+200,metadata:{description:'Public creator details'}};
-    const {message}=service.metadataMessage(body);
-    assert.throws(()=>service.saveMetadata({...body,signature:other.signingKey.sign('0x'+'00'.repeat(32)).serialized}));
-    assert.throws(()=>service.saveMetadata({...body,signature:'bad'}));
-    await assert.rejects(async()=>service.saveMetadata({...body,signature:await other.signMessage(message)}),/creator/);
-    assert.throws(()=>service.metadataMessage({...body,expires:1}),/expired/);
-    service.saveMetadata({...body,signature:await creator.signMessage(message)});
-    assert.equal(service.listings('test')[0].metadataStatus,'creator-signed');
-    // D11: published details are final; the creator cannot sign a replacement.
-    assert.throws(()=>service.metadataMessage({...body,metadata:{description:'Edited'}}),/already published/);
-    await assert.rejects(async()=>service.saveMetadata({...body,signature:await creator.signMessage(message)}),/already published/);
+    assert.equal(service.metadataMessage,undefined,'there is no signed after-launch metadata path');
+    assert.equal(service.saveMetadata,undefined);
+    // A token creator-signed on testnet before the rule keeps its details across restarts.
+    writeFileSync(e.metadataPath,JSON.stringify({[token]:{description:'Public creator details'}}));
     await service.close();service=new PublicIndexer(options);
     assert.equal(service.listings('test')[0].metadata.description,'Public creator details');
+    assert.equal(service.listings('test')[0].metadataStatus,'creator-signed');
     assert.equal(service.listings('test')[0].name,'Public token');
     assert.equal(service.status('unknown').enabled,false);
   }finally{await service.close();rmSync(dir,{recursive:true,force:true});}
@@ -51,7 +45,7 @@ test('only successful validated index synchronization authorizes staged metadata
  e.index.sync=async()=>{throw new Error('Unverified chain state');};await service.tick();assert.equal(retained.length,2,'failed synchronization cannot grant retention');
 });
 
-test('a legacy team factory stays listed, tradable and signable next to the current one',async()=>{
+test('a legacy team factory stays listed and tradable next to the current one',async()=>{
   const dir=mkdtempSync(join(tmpdir(),'elpida-legacy-')),creator=Wallet.createRandom();
   const current='0x'+'aa'.repeat(20),old='0x'+'bb'.repeat(20),newToken='0x'+'01'.repeat(20),oldToken='0x'+'02'.repeat(20);
   const net={key:'test',chainId:84532,shared:{factory:current,block:10,model:'curve-dex-v10'},legacy:[{factory:old,block:1,model:'curve-dex-v9'},{factory:current,block:10,model:'curve-dex-v10'}],nativeCurrency:{symbol:'ETH'},explorer:'https://example.com'};
@@ -70,9 +64,6 @@ test('a legacy team factory stays listed, tradable and signable next to the curr
     assert.equal(service.entryFor('test',newToken),now);
     assert.equal(service.entryFor('test','0x'+'09'.repeat(20)),null);
     assert.equal(service.detail('test',oldToken).name,'Old');
-    // Signed fallback metadata names the factory that created the token.
-    const {message}=service.metadataMessage({network:'test',token:oldToken,expires:Math.floor(Date.now()/1000)+200,metadata:{description:'Old token'}});
-    assert.match(message,new RegExp('Factory: '+old));
     // Trade rows from both deployments merge in time order.
     for(const [e,ts,id] of [[now,30,'c'],[legacy,10,'a'],[legacy,20,'b']])e.index.db.prepare('INSERT INTO trades(tx,idx,address,height,timestamp,data) VALUES(?,?,?,?,?,?)').run(id,0,'t',1,ts,JSON.stringify({id}));
     assert.deepEqual([...service.tradeRows('test')].map(r=>JSON.parse(r.data).id),['a','b','c']);
@@ -85,4 +76,32 @@ test('a legacy team factory stays listed, tradable and signable next to the curr
     assert.equal(service.quotes('test'),null,'unvalidated current factory');
   }finally{await service.close();rmSync(dir,{recursive:true,force:true});}
   assert.equal(destroyed,1,'one shared provider per network is closed once');
+});
+
+test('a public RPC that keeps failing on the server is replaced by the next one; status shows only a code and a host', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'elpida-failover-')), made = [], logs = [];
+  const net = { key: 'test', chainId: 11155111, rpcUrl: 'https://main.example/rpc', rpcFallbacks: ['https://backup.example/v1/secret-key'], shared: { factory: '0x' + 'aa'.repeat(20), block: 1, model: 'curve-dex-v10' }, nativeCurrency: { symbol: 'ETH' }, explorer: 'https://example.com' };
+  const options = { dataDir: dir, networks: [net], contracts: Object.fromEntries(['dexFactory', 'dexCurve', 'factory', 'curve', 'pool', 'token'].map(n => [n, { abi: [] }])), providerFactory: url => { const p = { url, destroyed: false, destroy() { this.destroyed = true; } }; made.push(p); return p; }, metadataStore: {}, log: line => logs.push(JSON.parse(line)) };
+  const service = new PublicIndexer(options);
+  try {
+    const [e] = service.all('test');
+    e.validated = true;
+    e.index.sync = async () => { throw Object.assign(new Error('403 Forbidden from https://main.example/rpc'), { code: 'SERVER_ERROR' }); };
+    for (let i = 0; i < PublicIndexer.FAILOVER_AFTER - 1; i++) await service.tick();
+    assert.equal(e.provider.url, 'https://main.example/rpc', 'a short outage does not switch');
+    let status = service.status('test');
+    assert.equal(status.errorCode, 'SERVER_ERROR'); assert.equal(status.rpc, 'main.example');
+    assert.ok(!JSON.stringify(status).includes('403 Forbidden'), 'never the raw message');
+    await service.tick();
+    assert.equal(e.provider.url, 'https://backup.example/v1/secret-key', 'moved to the next RPC');
+    assert.equal(e.index.provider, e.provider, 'the index reads through the new RPC');
+    assert.equal(e.validated, false, 'the deployment is re-validated on the new RPC');
+    assert.ok(made[0].destroyed, 'the old provider is closed');
+    const failover = logs.find(l => l.event === 'public_indexer_rpc_failover');
+    assert.deepEqual([failover.from, failover.to], ['main.example', 'backup.example']);
+    status = service.status('test');
+    assert.equal(status.rpc, 'backup.example'); assert.ok(!JSON.stringify(status).includes('secret-key'), 'paths with keys never shown');
+    e.validated = true; e.index.sync = async () => {}; await service.tick();
+    status = service.status('test'); assert.equal(status.error, null); assert.equal(status.errorCode, null);
+  } finally { await service.close(); rmSync(dir, { recursive: true, force: true }); }
 });

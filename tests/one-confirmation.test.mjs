@@ -4,9 +4,10 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Contract, Interface } from 'ethers';
 import './helpers/browser-modules.mjs';
-import { MULTICALL3, MULTICALL3_ABI, MAX_UINT256, multicallData, approvalFor } from '../apps/web/one-confirmation.mjs';
+import { MULTICALL3, MULTICALL3_ABI, MAX_UINT256, multicallData, approvalFor, launchApproval, waitForAllowance } from '../apps/web/one-confirmation.mjs';
 import { swapCalldata } from '../packages/core/dex-router.mjs';
-import { dexFixture, launch, complete, mined, art, fixtureArt } from './helpers/dex-fixture.mjs';
+import { parseUnits } from 'ethers';
+import { dexFixture, launch, complete, mined, art, fixtureArt, FEE, TEST_URI } from './helpers/dex-fixture.mjs';
 const { TestnetWallet } = await import('../apps/web/wallet.mjs');
 
 test('approval rule: the launched token once (unlimited) for selling; payment assets exactly; nothing when covered', () => {
@@ -79,4 +80,35 @@ test('on-chain: a standing approval of the launched token cannot be used by anyo
   // The seller's next sells need no further approval.
   await mined(l.curve.connect(seller).sell(before / 4n, 0n)); await mined(l.curve.connect(seller).sell(before / 4n, 0n));
   assert.equal(await token.balanceOf(f.addresses[0]), before - before / 2n);
+});
+
+test('launch approval: once per launchpad on testnets, exact on mainnet, nothing when covered', () => {
+  assert.equal(launchApproval({ allowance: 22n, needed: 22n }), null);
+  assert.equal(launchApproval({ allowance: MAX_UINT256 - 22n, needed: 22n }), null, 'a standing approval keeps covering later launches');
+  const testnet = launchApproval({ allowance: 0n, needed: 22n, symbol: 'USDC' });
+  assert.equal(testnet.amount, MAX_UINT256); assert.match(testnet.label, /USDC for launches on this launchpad \(once; later launches need one confirmation\)/);
+  assert.deepEqual(launchApproval({ allowance: 5n, needed: 22n, mainnet: true, exactLabel: 'Approve exactly 22 USDC…' }), { amount: 22n, label: 'Approve exactly 22 USDC…' });
+});
+
+test('launch approval: waits until a lagging RPC sees the approval, and explains when it never does', async () => {
+  const sleep = async () => {};
+  let reads = 0;
+  await waitForAllowance(async () => (++reads < 3 ? 0n : MAX_UINT256), 22n, { sleep });
+  assert.equal(reads, 3, 'two stale answers, then the confirmed allowance');
+  await assert.rejects(waitForAllowance(async () => 0n, 22n, { sleep, attempts: 3 }), /not caught up yet.*not be asked to approve again/);
+});
+
+test('on-chain: a standing launch approval covers every later launch and cannot be used by anyone else', async t => {
+  const f = await dexFixture(t), creator = f.signers[0], other = f.signers[1], buy = parseUnits('22', 6);
+  const usdc = f.usdc.connect(creator), launchAs = s => f.factory.connect(s).launchWithPayment('Hope', 'HOPE', f.usdc.target, buy, 0n, f.addresses[0], TEST_URI, false, { value: FEE });
+  await mined(usdc.approve(f.factory.target, MAX_UINT256));
+  const start = await usdc.balanceOf(f.addresses[0]);
+  for (let i = 0; i < 2; i++) assert.equal((await mined(launchAs(creator))).status, 1, `launch ${i + 1} needs no new approval`);
+  assert.equal(await usdc.balanceOf(f.addresses[0]), start - 2n * buy, 'exactly the two first buys were taken');
+  assert.equal(await usdc.allowance(f.addresses[0], f.factory.target), MAX_UINT256 - 2n * buy);
+  // Another wallet launching pays from itself: the creator's standing approval is never used for it.
+  const otherStart = await f.usdc.balanceOf(f.addresses[1]);
+  await assert.rejects(launchAs(other), 'no approval of its own, so its launch fails');
+  assert.equal(await usdc.balanceOf(f.addresses[0]), start - 2n * buy, 'the creator paid nothing for it');
+  assert.equal(await f.usdc.balanceOf(f.addresses[1]), otherStart);
 });

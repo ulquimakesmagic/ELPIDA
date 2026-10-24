@@ -1,6 +1,6 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
-import "./ElpidaLockedPool.sol";
+import "./ElpidaInterfaces.sol";
 import "./ElpidaV3MigrationAdapter.sol";
 
 /// @notice Model 10 native/ERC-20 virtual curve with anti-snipe fees, failure-isolated fee payouts,

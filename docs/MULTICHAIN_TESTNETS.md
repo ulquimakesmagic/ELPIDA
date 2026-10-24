@@ -7,9 +7,9 @@ something that would fail.
 | Chain | Graduation DEX | Router layout | Price feed | Status |
 |---|---|---|---|---|
 | Base Sepolia | Uniswap v3 | SwapRouter02 (v2) | Chainlink ETH/USD | Live, A2 to A5 done |
-| Ethereum Sepolia | Uniswap v3 (addresses from Uniswap sdk-core) | SwapRouter02 (v2) | Chainlink ETH/USD `0x694A…5306` | Configured, waiting for its fork check |
-| BNB Chain Testnet | PancakeSwap v3 (addresses from pancake-v3-contracts) | original v3 SwapRouter (v1) | Chainlink BNB/USD `0x2514…7526` | Configured, waiting for its fork check |
-| Robinhood Chain Testnet | none confirmed on testnet | — | none confirmed on testnet | Not possible yet; our contracts were checked against Robinhood **mainnet** Uniswap on a fork |
+| Ethereum Sepolia | Uniswap v3 (addresses from Uniswap sdk-core) | SwapRouter02 (v2) | Chainlink ETH/USD `0x694A…5306` | Live, A2 to A5 done |
+| BNB Chain Testnet | PancakeSwap v3 (addresses from pancake-v3-contracts) | original v3 SwapRouter (v1) | Chainlink BNB/USD `0x2514…7526` | Live, A2 to A5 done |
+| Robinhood Chain Testnet | none from Uniswap on testnet (re-checked 24 Oct: Uniswap's v3 page lists chain 4663 only, and nothing is deployed at the mainnet addresses on 46630). Uses an **Elpida test deployment** of Uniswap v3 (Uniswap's own published bytecode, test WETH), deployed from the site | SwapRouter02 (v2), same test deployment | none from Chainlink on testnet: **ElpidaRelayFeed**, Chainlink ETH/USD relayed from Base Sepolia by the server with Chainlink's timestamps | Ready to deploy (24 Oct), `HUMAN_ACTIONS.md` 3d. Mainnet uses the real Uniswap and Chainlink (fork check PASS 14/14) |
 
 ## PancakeSwap differences found and fixed before any deployment
 
@@ -24,13 +24,13 @@ PancakeSwap v3 is a Uniswap v3 fork. Two differences would have broken BNB gradu
 3. PancakeSwap's periphery router uses the original layout: the deadline is inside the swap, and `multicall(bytes[])`
    has no deadline. `packages/core/dex-router.mjs` encodes both layouts; the wallet picks one per network.
 
-## Status (22 Oct)
+## Status (23 Oct)
 
 | Chain | Fork check | Model 10 | Team launchpad (`shared`) | A2 to A5 live |
 |---|---|---|---|---|
 | Ethereum Sepolia | PASS 13/13, block 11965619 | On | `0xD641…6d2`, block 11972040 (22 Oct); setup txs below | **Done 22 Oct** (VEGETA, below) |
-| BNB Testnet | Steps 1 to 4 PASS on 22 Oct; step 5 lost upstream state (`missing revert data` = the RPC failed, not a revert). Rerun with the archive-first RPC choice | Off | | |
-| Robinhood Testnet | No DEX or feed | Off | | |
+| BNB Testnet | **PASS 13/13 (23 Oct)**, block 138477356 via publicnode (PancakeSwap v3, router v1) | On | `0x8c48…fBbE`, block 138485798 (23 Oct); setup below | **Done 23 Oct** (MIDORIYA, below) |
+| Robinhood Testnet | No Uniswap or Chainlink on testnet: test DEX and relayed price instead (above). **Mainnet fork check PASS 14/14 (23 Oct)**, block 96216786 (`robinhood-mainnet`, below) | On | `0x64d9…AD97`, block 141864043 (24 Oct) | Open: launch, then A2 to A5 |
 
 Until a chain's team launchpad is pinned in `packages/core/networks.mjs`, its launches show only in the deploying
 browser, and token details are not staged (they would expire unindexed). After pinning, the public indexer lists them.
@@ -57,6 +57,127 @@ VEGETA end to end (reported by Malik, 22 Oct):
 | Fee claim (A5) | `0x6cbd0da943bdd2e0ed85e68598da056d2b4f7b18463366d7c83adaab3a693faa` |
 
 It ran smoothly; the feedback was too many confirmations for sells and claims, addressed in `WALLET_CONFIRMATIONS.md`.
+
+### BNB Testnet setup (23 Oct, Trust Wallet, `0xf5B0…639D`)
+
+Zerion cannot send transactions on BNB testnet (its own service answers 404), so the setup used Trust Wallet.
+The first attempt read through `bsc-testnet-dataseed`, which Malik's network could not even resolve
+(`ERR_NAME_NOT_RESOLVED`), and stopped after step 1. The site now reads BNB through publicnode.
+
+| Step | Transaction | Result |
+|---|---|---|
+| Graduation adapter (WBNB) | `0xd0f67ea9d1d055a7c76ce66aded35b70912958e47777994e85dae69f45ed1e8f`, then `0xa5557614a0c27e0c22fc0290189b79a9860bb9fee0cca97d34fdf45de2ff7060` on retry | `0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2` in use |
+| Atomic factory (requires token details on-chain) | `0x7b0cefee34089772dbf5d698f72da1c66608e7be5a66fe08f22f1fe299d7247f` (block 138485798) | `0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE` |
+| USD pricing activated | `0xce6dc1d636a7c059aee6284ffe11744cdc56ef47461266404e504bdbbe3392f5` | confirmed ("Oracle pricing is already fixed" on retry) |
+
+On BNB the graduation adapter has the same address as the Ethereum Sepolia factory: same deployer, same nonce.
+
+MIDORIYA end to end (23 Oct). Malik reported the hashes; Claude read each receipt from the BNB testnet RPC.
+
+| Check | Transaction | Block | What the receipt shows |
+|---|---|---|---|
+| Launch with token details on-chain | `0xa4d033c16fe988d3d4e39d526e5bc91e8d6a0cc5d0e7858df9bce9019150b26b` | 138493545 | `Launched` and `MetadataPublished` in the launch transaction; token `0xf7aa1a19ed16573f8dba8ef46a16c56703b433a4`, curve `0xb5955ca4a026f033bb062a3572324bdef72cc2a6` |
+| Final buy completed the curve and graduated it into PancakeSwap v3 in the same transaction (A2) | `0x9919cfb1a274d307ed72d3c0615eb8ec6d5adbb8116dcb1b2e8ce72d9382a8f6` | 138495097 | 0.112774 tBNB in. `CurveCompleted`, PancakeSwap pool `0x7f186f7a2b9577fc2f8f69f14637f7ca847e3179` created and initialised, full-range mint, `Migrated`, position #39190 locked in locker `0x1d26eed604b92d1364ea807692db9006b2c6fcfd`. The token page then shows trading on PancakeSwap at about $500 market cap (10× the $50 start) |
+| Fee claim in one confirmation (A5) | `0xc7abaeb1223a5e70c54e15aa66d688be9c03c5009f89b7c1094eea8c5c4baf57` | 138495267 | One Multicall3 transaction: curve `FeesWithdrawn`, pool `Burn` and `Collect`, locker `PositionFeesCollected` |
+| Sell on the pool after graduation (A3) | `0xf566d91c20b63a41b3f548d8cfb024ca9b405bca469e57cc551b7b9d180f4a63` | 138503521 | Through PancakeSwap's v1 router `multicall`: 189,936,731.66 MIDORIYA in, 0.070571 WBNB out of pool `0x7f18…3179` (PancakeSwap `Swap` event), unwrapped to tBNB in the same transaction |
+
+A second MIDORIYA launch (`0xf9541ad9523e4af4e03d1a861b8c2c8b9afbbd39918949de621a867bb2581bb3`, token
+`0x7c7e935069048d541433b59a0512a1bdae041559`) is still trading on its curve.
+
+### Mainnet configuration (checklist D1, 23 Oct)
+
+Malik's mainnet chains: Base, BNB Chain, Robinhood Chain and Ethereum. Each has a fork check that runs the whole
+lifecycle against the chain's real DEX and feed on a local fork, with mainnet terms ($5,000 start). Nothing is sent and
+no funds are used:
+
+```
+npm.cmd run test:chain-fork -- base-mainnet
+npm.cmd run test:chain-fork -- bnb-mainnet
+npm.cmd run test:chain-fork -- ethereum-mainnet
+npm.cmd run test:chain-fork -- robinhood-mainnet
+```
+
+| Chain (id) | DEX, router layout | Factory | Position manager | Router | QuoterV2 | Wrapped native |
+|---|---|---|---|---|---|---|
+| Base (8453) | Uniswap v3, SwapRouter02 (v2) | `0x33128a8fC17869897dcE68Ed026d694621f6FDfD` | `0x03a520b32C04BF3bEEf7BEb72E919cf822Ed34f1` | `0x2626664c2603336E57B271c5C0b26F421741e481` | `0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a` | `0x4200000000000000000000000000000000000006` |
+| BNB Chain (56) | PancakeSwap v3, original layout (v1) | `0x0BFbCF9fa4f9C56B0F40a671Ad40E0805A091865` | `0x46A15B0b27311cedF172AB29E4f4766fbE7F4364` | `0x1b81D678ffb9C0263b24A97847620C99d213eB14` | `0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997` | `0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c` (read from the manager) |
+| Robinhood Chain (4663) | Uniswap v3, SwapRouter02 (v2) | `0x1f7d7550B1b028f7571E69A784071F0205FD2EfA` | `0x73991a25C818Bf1f1128dEAaB1492D45638DE0D3` | `0xCaf681a66D020601342297493863E78C959E5cb2` | `0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7` | `0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73` |
+| Ethereum (1) | Uniswap v3, SwapRouter02 (v2) | `0x1F98431c8aD98523631AE4a59f267346ea31F984` | `0xC36442b4a4522E871399CD717aBDD847Ab11FE88` | `0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45` | `0x61fFE014bA17989E743c5F6cB21bF9697530B21e` | `0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2` |
+
+| Chain | Chainlink feed (standard proxy) | Decimals | Heartbeat / deviation | Suggested `maxAge` at deployment |
+|---|---|---|---|---|
+| Base | ETH / USD `0x50015f8b17fb2C290Dde41fDc246ed0dcEE93a8b` | 8 | 1200 s / 0.15% | 1500 s |
+| BNB Chain | BNB / USD `0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE` | 8 | 27 s / 0.1% | 120 s |
+| Robinhood Chain | ETH / USD `0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9` | 8 | 86400 s / 0.5% | 86400 s (the contract's maximum) |
+| Ethereum | ETH / USD `0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419` | 8 | 3600 s / 0.5% | 3900 s |
+
+Sources (read 23 Oct): Uniswap's v3 deployment pages for Base, Ethereum and Robinhood Chain; PancakeSwap's v3 address
+page; Chainlink's price-feed address list per network, with "More Details" for heartbeat and deviation.
+
+Notes:
+- **`maxAge` is fixed when the treasury configures pricing (once).** Use the suggested value: about one heartbeat plus a
+  margin. Too short and launches fail while the feed is healthy; too long and a stalled feed keeps pricing the fee.
+- **Standard proxies, not SVR.** Chainlink also lists SVR proxies, which recapture liquidation MEV for lending
+  protocols. Elpida only prices a $10 fee and a starting valuation, so the standard proxy is the plain choice. On BNB
+  Chain one BNB / USD proxy reports 18 decimals; the contract reads `decimals()`, but the table uses the 8-decimal one.
+- **USDC fee on BNB Chain:** USDC there is an 18-decimal bridged token, and `configureUsdPricing` accepts only a
+  6-decimal fee asset, so BNB mainnet charges the $10 fee in BNB. USDC as a trading pair is separate (the factory scales
+  to the quote's decimals) and still needs its address verified before approval.
+- **PancakeSwap v3 is also on Robinhood Chain** (same factory address as BSC, its own position manager, no v3 router
+  listed). Uniswap v3 stays the Robinhood choice because it has the router the app uses.
+- **L2 sequencer:** Base and Robinhood Chain are rollups; see audit finding F-7.
+
+**Results (23 Oct, Malik's PC), each 14/14 unless noted:**
+
+| Chain | Result | Block, RPC | Fee priced at | Real deployment gas |
+|---|---|---|---|---|
+| Base | **PASS 14/14** | 53001266, mainnet.base.org (deep history) | 0.004168 ETH | 9,846,059 gas, about 0.000059 ETH at 0.006 gwei |
+| Ethereum | **PASS 14/14** | 26258156, eth.drpc.org (deep history) | 0.004166 ETH | 9,848,558 gas, about 0.000497 ETH at 0.050 gwei |
+| Robinhood Chain | **PASS 14/14** | 96216786, rpc.mainnet.chain.robinhood.com | 0.004174 ETH | 9,846,287 gas, about 0.000197 ETH |
+| BNB Chain | **PASS 14/14** (second run) | 129399881, bsc-mainnet.public.blastapi.io (deep history) | 0.013509 BNB | 9,848,536 gas, about 0.00049 BNB at 0.05 gwei |
+
+The first BNB run passed the DEX and feed checks on every attempt, then public nodes refused the fork's state reads
+(publicnode 403, dataseed pruned, drpc rate-limited). With more BNB nodes, a 403 counted as retryable and six attempts,
+the second run chose blastapi (deep history) and passed, through PancakeSwap's original router layout. If public
+nodes refuse again, use a free archive key: NodeReal MegaNode, then
+`$env:ELPIDA_FORK_RPC_BNB_MAINNET="https://bsc-mainnet.nodereal.io/v1/<key>"` (keep the key in the terminal only).
+
+### Robinhood Chain: mainnet fork check (23 Oct)
+
+Robinhood Chain's testnet cannot be tested live: Chainlink's feed list says "Robinhood Chain feeds are not available on
+testnet", and Uniswap's official v3 deployment is on mainnet (chain 4663) only. So the lifecycle runs on a **local fork
+of Robinhood mainnet** against its real Uniswap v3 and Chainlink ETH/USD feed. Mainnet state is only read; every
+transaction happens on the fork, with Hardhat's test accounts. No wallet, key or funds are involved.
+
+```
+npm.cmd run test:chain-fork -- robinhood-mainnet
+```
+
+| Item | Address | Source |
+|---|---|---|
+| Uniswap v3 factory | `0x1f7d7550B1b028f7571E69A784071F0205FD2EfA` | Uniswap docs, Robinhood Chain v3 deployments |
+| NonfungiblePositionManager | `0x73991a25C818Bf1f1128dEAaB1492D45638DE0D3` | same |
+| SwapRouter02 (router v2) | `0xCaf681a66D020601342297493863E78C959E5cb2` | same |
+| QuoterV2 | `0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7` | same |
+| WETH | `0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73` | Uniswap sdk-core `WETH9[4663]`; re-read from the manager on the fork |
+| Chainlink ETH / USD (standard proxy) | `0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9` | Chainlink price-feed addresses, Robinhood Chain Mainnet |
+
+The run uses mainnet terms ($5,000 start, 24 h grace), allows the feed a 24 h age (crypto feeds on Arbitrum-based
+chains have a 24 h heartbeat), and adds a 14th check that the feed's `description()` is `ETH / USD`. The other 13 are
+the same as BNB and Ethereum Sepolia. RPC: `https://rpc.mainnet.chain.robinhood.com`; override with
+`$env:ELPIDA_FORK_RPC_ROBINHOOD_MAINNET`.
+
+**Result (23 Oct, Malik's PC): PASS 14/14** at Robinhood mainnet block 96216786, via `rpc.mainnet.chain.robinhood.com`
+(deep history):
+- Uniswap v3: the manager belongs to the factory, WETH matches, and the 1% tier has tick spacing 200.
+- The feed is `ETH / USD`. The $10 fee priced at 0.004174 ETH (about $2,396 per ETH).
+- The final buy graduated atomically into pool `0x214E…23CE`, and the position is held by the locker.
+- A DEX buy through SwapRouter02 delivered tokens; a sell unwrapped ETH to the seller.
+- Pool fees were credited from both trades; claims paid out and cleared.
+- A pre-created pool was repriced at graduation.
+- The indexer recorded both trades and both graduations.
+
+A real deployment would use 9,846,287 gas: about 0.000197 ETH at that day's 0.020 gwei. Nothing was spent.
 
 ## Order
 
@@ -91,3 +212,49 @@ Tokenized-stock pairs use the labelled test asset; real stocks stay off.
 2. Use the TEST-STOCK faucet (250 per claim) and launch a token paired with TEST-STOCK.
 3. Buy until the curve completes (about 48 TEST-STOCK at test size); it graduates into a TEST-STOCK/token Uniswap pool.
 4. Buy and sell on the pool, then claim fees. Send the transaction hashes to record the evidence.
+
+### Robinhood Chain testnet: test DEX and relayed price (24 Oct)
+
+Robinhood's faucet (`faucet.testnet.chain.robinhood.com`) gives 0.01 test ETH and 5 each of five Stock Tokens (TSLA,
+AMZN, PLTR, NFLX, AMD) once a day. The chain itself (46630, 0.01 gwei) has Multicall3 and Permit2, but no Uniswap v3,
+no WETH and no Chainlink feed. So that Elpida can be tested live there, without changing a contract:
+
+- **Test DEX.** From Network and funds, the launchpad owner deploys a test WETH (`ElpidaTestWETH`, named "Wrapped Ether
+  (Elpida test deployment)") and Uniswap's own published v3 factory, NonfungiblePositionManager, SwapRouter02 and
+  QuoterV2, then the relay feed (6 confirmations, 19.2 M gas measured locally, about 0.0002 test ETH at 0.01 gwei). The same bytecode, so the same pool init code
+  hash. It is registered as "Uniswap v3 (Elpida test deployment)", never as Uniswap's own.
+- **Relayed price.** `ElpidaRelayFeed` (`contracts/evm/testnet`) is Chainlink-compatible, 8 decimals. Its only updater is
+  the server's testnet relay wallet (`ELPIDA_TESTNET_RELAY_KEY`), which copies each round of Chainlink ETH/USD on Base
+  Sepolia (`0x4aDC…7cb1`) **with that round's own timestamp**. A relayed price is never fresher than Chainlink's, so
+  if the relay or Chainlink stops, the factory's maximum price age (3,600 s) refuses launches, as it would on mainnet.
+  The relay refuses any chain that is not a known test network, a feed whose updater or source differs, and a stale
+  source round. Operations status raises `price_relay_robinhood-testnet` when the relayed price falls behind.
+- **Mainnet is unaffected.** Robinhood mainnet uses the real Uniswap v3 and Chainlink feed (fork check above).
+
+A full lifecycle at the test size ($50 starting FDV) costs about $130 of test ETH, measured on a local chain at $2,500
+per ETH: the $10 fee, an optional first buy, and about $97 for the completing buy (0.0387 ETH). That is about 4 to 5
+days of this faucet; launching and trading need far less.
+
+**Deployed 24 Oct** by Malik from the site (`0xf5B0…639D`, from block 141826583), each read back on chain by Claude
+(the manager, router and quoter point to this factory and WETH; the 1% fee tier is enabled; the feed's updater is the
+server relay and its source is Base Sepolia's Chainlink ETH/USD, chain 84532):
+
+| Contract | Address |
+|---|---|
+| Test WETH ("Wrapped Ether (Elpida test deployment)") | `0xF3A249E1Abf044bee5324d02B99Ee0fECB34d887` |
+| Uniswap v3 factory (test deployment) | `0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2` |
+| NonfungiblePositionManager (test deployment) | `0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE` |
+| SwapRouter02 (test deployment) | `0xFAF81E4a0624d7FabF39bcbd011CF2259d01790c` |
+| QuoterV2 (test deployment) | `0xfed3BC81f0A01EDB046E79cC8239E1A0817d3e92` |
+| ElpidaRelayFeed, ETH / USD | `0xdB7f43FFFdA626c1cc26206981C05507C75E983F` |
+| Server relay (updater) | `0x3d060E857f39665D672472A8F82e18FdfAF994FC` |
+
+The same deployer and nonces as on other chains give some of these the same addresses as unrelated contracts there
+(for example `0xD641…6d2` is the Ethereum Sepolia launchpad); they are different contracts on different chains.
+
+**Team launchpad (24 Oct).** Malik set up the Model 10 launchpad from the site: factory
+`0x64d93212adc10d28E867Db44EBC1480AFaeaAD97` (tx `0x5933c8f8760565615bcf4c3b0d9864a70f070e012536399f6416caf57597c2e6`,
+block 141864043), graduation adapter `0xa37FAFAc5e5F08B2e89B9516F896E4a1c11B106A` (test position manager, test WETH,
+1%). Read on chain: model 10, USD feed the relay feed with a 3,600 s maximum age, treasury Malik's wallet, $50
+starting FDV, token details required, launch fee 0.004225 test ETH ($10 at the relayed $2,366.38). The relay's first
+post: `0x44b13f8a743f8b8d55d70b33426971f15afe17000f49508e8156e89c5e8d5e3c`. Pinned as `shared` in `networks.mjs`.

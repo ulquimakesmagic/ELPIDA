@@ -43,7 +43,8 @@ function tickTimes(root) { for (const node of root.querySelectorAll('time[data-a
 function pairIcon(token, nativeSymbol) {
   const pair = token.pair ?? 'native';
   if (pair === 'native') return assetIcon(token.quoteSymbol ?? nativeSymbol);
-  return icon(pair === 'usdc' ? 'circle-dollar-sign' : pair === 'xstock' ? 'chart-candlestick' : 'layers', 'icon-sm');
+  if (pair === 'usdc') return assetIcon('USDC');
+  return icon(pair === 'xstock' ? 'chart-candlestick' : 'layers', 'icon-sm');
 }
 function pairStack(token, nativeSymbol, networkName) {
   return h('span.pair-stack', { title: `${token.quoteSymbol ?? nativeSymbol} pair on ${networkName}` }, pairIcon(token, nativeSymbol), chainIcon(token.network ?? 'local'));
@@ -289,7 +290,7 @@ export function createExplore(source) {
     const limitFor = kind => singleChain && PAIR_LIMITS[singleChain.kind]?.[kind];
     pairChips.replaceChildren(...[['all', 'All'], ['native', 'Native'], ['usdc', 'USDC'], ['xstock', 'xStocks'], ['token', 'Tokens']].map(([key, label]) => {
       const limit = key !== 'all' && limitFor(key), count = counts.pair[key] ?? 0, active = state.pair === key;
-      const glyph = key === 'all' ? icon('layers', 'icon-sm') : key === 'native' ? icon('coins', 'icon-sm') : key === 'usdc' ? icon('circle-dollar-sign', 'icon-sm') : key === 'xstock' ? icon('chart-candlestick', 'icon-sm') : icon('layers', 'icon-sm');
+      const glyph = key === 'all' ? icon('layers', 'icon-sm') : key === 'native' ? icon('coins', 'icon-sm') : key === 'usdc' ? assetIcon('USDC') : key === 'xstock' ? icon('chart-candlestick', 'icon-sm') : icon('layers', 'icon-sm');
       return h('button.filter-chip', { type: 'button', 'aria-pressed': String(active), disabled: !active && (!!limit || (key !== 'all' && count === 0)), title: limit || (key !== 'all' && count === 0 ? `No ${{ native: 'native-coin', usdc: 'USDC', xstock: 'xStock', token: 'token-paired' }[key]} launches here yet` : undefined), on: { click: () => set({ pair: key, page: 1 }) } },
         key === 'all' ? null : glyph, h('span', label), h('span.chip-count', number(count, 0)));
     }));

@@ -51,12 +51,20 @@ async function run(action, body = {}, { quiet = false, onProgress } = {}) {
   if (busy) throw new Error('Another request is still in progress.');
   busy = true; updateChrome(); document.body.dataset.busy = 'true'; progressHook = onProgress ?? null;
   try {
-    const result = action === 'deploy' ? await wallet.deploy() : mode === 'local' ? await api(action, body) : await wallet.transact(action, body);
+    const result = action === 'deploy' ? await wallet.deploy(body) : action === 'deploy-test-dex' ? await wallet.deployTestDex() : mode === 'local' ? await api(action, body) : await wallet.transact(action, body);
     if (!quiet) toast(result.message ?? 'Done.', { kind: 'success', link: txLink(result.hash) });
     try { await refresh(); } catch {}
     return result;
   } catch(error){api('client-error',{stage:action,code:error.code??error.name??'UNKNOWN'}).catch(()=>{});throw error;
   } finally { busy = false; delete document.body.dataset.busy; progressHook = null; updateChrome(); }
+}
+/** Saves a Safe Transaction Builder file when an action returns the treasury's setup batch (multisig treasury). */
+function downloadSafeBatch(result) {
+  if (!result?.safeBatch) return result;
+  const url = URL.createObjectURL(new Blob([JSON.stringify(result.safeBatch, null, 2)], { type: 'application/json' }));
+  const link = h('a', { href: url, download: `elpida-treasury-setup-${result.safeBatch.chainId}.json` });
+  document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+  return result;
 }
 /** Same as run, but reports errors as notifications (for one-click actions). */
 async function act(action, body, opts) { try { return await run(action, body, opts); } catch (error) { toast(errorText(error), { kind: 'error' }); return null; } }
@@ -98,7 +106,7 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
     const indexed=results.flatMap(r=>r.status==='fulfilled'?r.value:[]);
     const merged=new Map(indexed.map(t=>[`${t.network}:${t.address.toLowerCase()}`,t]));
     for(const t of next.tokens??[]){const key=`${currentChain()}:${t.address.toLowerCase()}`,publicToken=merged.get(key);merged.set(key,{...publicToken,...t,priceChange24h:publicToken?.priceChange24h??t.priceChange24h,network:currentChain()});}
-    if(solWallet.deployment&&wallet!==solWallet){try{for(const t of await solWallet.publicTokens())merged.set(`${solWallet.net.key}:${t.address}`,{...t,network:solWallet.net.key});}catch{discoveryErrors.push(solWallet.net.name);}}
+    if(solWallet.deployment&&wallet!==solWallet){try{for(const t of await solWallet.publicTokens())merged.set(`${solWallet.net.key}:${t.address}`,{...t,network:solWallet.net.key,usdReference:usdReferenceFor({...t,usdReference:null},config.prices?.[solWallet.net.key],nowSeconds())});}catch{discoveryErrors.push(solWallet.net.name);}}
     allTokens=[...merged.values()];
     if(currentRoute.name==='explore')rerender('background');
     refreshLastSale();
@@ -149,9 +157,11 @@ function walletButtons(net, { onDone = () => {}, onError = () => {} } = {}) {
   const sorted = [...list].sort((a, b) => Number(b.id === chosen) - Number(a.id === chosen));
   return h('div.wallet-choices',h('p.small.muted','Connecting lets you interact—it does not give us access to your funds.'), sorted.map((w, i) => h(`button.btn.${i === 0 ? 'btn-primary' : 'btn-secondary'}`, { type: 'button', 'data-busy-disable': '', on: { click: async event => {
     const button = event.currentTarget, text = button.lastChild, label = text.textContent; button.disabled = true; text.textContent = `Waiting for ${w.name}…`;
-    try { await connect(net.key, w.id); toast(`Connected to ${net.name} with ${w.name}.`, { kind: 'success' }); onDone(); }
+    // A wallet that never shows its prompt (a queued request, a locked extension) must not leave the button stuck.
+    let timer; const quiet = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${w.name} has not answered for a minute. Open the ${w.name} extension: approve or reject any pending request (connect or switch to ${net.name}), then try again. Reloading the page also clears it.`)), 60000); });
+    try { await Promise.race([connect(net.key, w.id), quiet]); toast(`Connected to ${net.name} with ${w.name}.`, { kind: 'success' }); onDone(); }
     catch (e) { onError(e); }
-    finally { button.disabled = false; text.textContent = label; }
+    finally { clearTimeout(timer); button.disabled = false; text.textContent = label; }
   } } }, w.icon && (/^data:image\//.test(w.icon)||/^\/assets\/wallets\//.test(w.icon)) ? h('img.wallet-icon', { src: w.icon, alt: '', width: 18, height: 18 }) : icon('wallet', 'icon-sm'), h('span', list.length > 1 ? w.name : `Connect ${w.name}`))));
 }
 const ctx = {
@@ -416,12 +426,21 @@ async function openTools() {
     else funds.append(h('p.small.muted', `Connected${/^your/i.test(wallet.walletName ?? 'your') ? '' : ' with ' + wallet.walletName}: ${wallet.address}`), h('details.small', h('summary', 'Use a different wallet'), walletButtons(net, { onDone: () => openTools(), onError: fail })));
     if (net.kind !== 'solana') {
       const deployed = !!wallet.deployment;
+      // The treasury is immutable: on mainnet it must be a Safe; on testnet it defaults to this wallet.
+      const treasuryInput = !deployed && wallet.dex && wallet.address ? h('input.input', { placeholder: net.mainnet ? '0x… Safe address (required)' : '0x… Safe address (optional; empty = this wallet)', spellcheck: false, autocomplete: 'off', 'aria-label': 'Treasury Safe address' }) : null;
+      // A test chain with no DEX and no Chainlink feed: the owner first deploys the labelled test DEX and relay feed.
+      const savedDex = net.testDex && !wallet.dex ? wallet.savedTestDex?.() : null, dexDone = !!savedDex?.feed;
+      if (net.testDex && !wallet.dex) funds.append(h('div.tools-section', h('h4', 'Test DEX and price feed'),
+        h('p.small.muted', `${net.name} has no Uniswap v3 and no Chainlink price feed yet. Tokens here graduate into an Elpida test deployment of Uniswap v3 (Uniswap's own published contracts, with a test WETH), and launches are priced by Chainlink ETH / USD relayed from ${config.relay?.networks?.[net.key]?.source?.network ?? 'another test network'} by the Elpida server, with Chainlink's own timestamps. Testnet only: mainnet uses the real Uniswap and Chainlink.`),
+        dexDone ? h('div.stack', h('p.small', 'Deployed from this browser. Send these addresses to the team to register them, then set up the launchpad:'), h('pre.small.selectable', JSON.stringify(savedDex, null, 2))) : null,
+        !dexDone && wallet.address ? (config.relay?.address ? h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('deploy-test-dex', {}); openTools(); } catch (e) { fail(e); } } } }, savedDex ? 'Finish the test DEX setup' : 'Set up test DEX and price feed (6 confirmations)') : h('p.small.muted', 'The server price relay is not configured yet, so the price feed cannot be deployed.')) : null));
       funds.append(h('div.tools-section', h('h4', 'Launchpad on this network'),
-        deployed&&wallet.dex&&wallet.feeUsdc&&state?.pricing?.owner&&pairs?.usdc?.unavailable?h('div.stack',h('p.small.muted','Approve the configured USDC asset for trading. This creates its graduation adapter and fixes the starting valuation in USDC at the launchpad\u2019s starting FDV. Existing tokens are unchanged.'),h('button.btn.btn-secondary',{type:'button',on:{click:()=>act('setup-usdc-pair',{}).then(()=>openTools())}},'Enable USDC trading pair')):null,
+        deployed&&wallet.dex&&wallet.feeUsdc&&!/^0x0{40}$/i.test(wallet.feeUsdc)&&state?.pricing?.owner&&pairs?.usdc?.unavailable?h('div.stack',h('p.small.muted','Approve the configured USDC asset for trading. This creates its graduation adapter and fixes the starting valuation in USDC at the launchpad\u2019s starting FDV. Existing tokens are unchanged.'),h('button.btn.btn-secondary',{type:'button',on:{click:()=>act('setup-usdc-pair',{}).then(r=>{downloadSafeBatch(r);openTools();})}},'Enable USDC trading pair')):null,
         h('p.small.muted', deployed ? `${wallet.deployment.shared ? 'Shared team' : 'Your'} launchpad: ${short(wallet.deployment.factory)}.${wallet.modelUpgradeAvailable ? ' This is the older model 9 launchpad. Model 10 adds launch protection, the 10x curve and the graduation escape hatch; existing tokens keep trading on model 9.' : wallet.needsMetadataUpgrade ? ' A newer version with shared token metadata is available.' : ''}` : 'Each public testnet needs a one-time launchpad setup from your wallet before the first token.'),
-        (!deployed || wallet.needsMetadataUpgrade || wallet.modelUpgradeAvailable || wallet.feeFixUpgradeAvailable || wallet.launchUpgradeAvailable) && wallet.address ? h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('deploy', {}); openTools(); } catch (e) { fail(e); } } } }, wallet.launchUpgradeAvailable?'Deploy automatic-graduation launchpad':wallet.feeFixUpgradeAvailable?'Deploy corrected Base Sepolia launchpad':deployed ? 'Set up the newer launchpad' : 'Set up launchpad') : null,
+        treasuryInput ? h('label.field', h('span.small.muted', 'Treasury: receives launch fees and alone can finish the setup. It can never be changed. Use a Safe multisig for anything beyond testing.'), treasuryInput) : null,
+        (!deployed || wallet.needsMetadataUpgrade || wallet.modelUpgradeAvailable || wallet.feeFixUpgradeAvailable || wallet.launchUpgradeAvailable) && wallet.address ? h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { downloadSafeBatch(await run('deploy', { treasury: treasuryInput?.value ?? '' })); openTools(); } catch (e) { fail(e); } } } }, wallet.launchUpgradeAvailable?'Deploy automatic-graduation launchpad':wallet.feeFixUpgradeAvailable?'Deploy corrected Base Sepolia launchpad':deployed ? 'Set up the newer launchpad' : 'Set up launchpad') : null,
         wallet.feeFixUpgradeAvailable?h('p.small.muted','The current Model 10 factory predates the shared-recipient fee fix. Deploy a corrected testnet factory using test ETH for gas. Pricing stays unchanged. Existing tokens keep their original contracts. After deployment, share the factory address so it can be registered for all visitors.'):null,
-        deployed ? h('div.stack', h('p.small.muted', state?.pricing?.verified ? `$10 launch fee, converted by the on-chain price feed at execution. Starting FDV: $${Number(wallet.startFdvUsd ?? 5000).toLocaleString()} before the first purchase.` : 'USD pricing must be activated before launching.'), !state?.pricing?.verified ? h('button.btn.btn-secondary',{type:'button',on:{click:()=>act('apply-pricing',{}).then(()=>openTools())}},'Activate price feed') : null) : null,
+        deployed ? h('div.stack', h('p.small.muted', state?.pricing?.verified ? `$10 launch fee, converted by the on-chain price feed at execution. Starting FDV: $${Number(wallet.startFdvUsd ?? 5000).toLocaleString()} before the first purchase.` : 'USD pricing must be activated before launching.'), !state?.pricing?.verified ? h('button.btn.btn-secondary',{type:'button',on:{click:()=>act('apply-pricing',{}).then(r=>{downloadSafeBatch(r);openTools();})}},wallet.deployment?.treasury&&wallet.deployment.treasury.toLowerCase()!==String(wallet.address).toLowerCase()?'Download the Safe setup file':'Activate price feed') : null) : null,
         deployed && wallet.dex && wallet.address && pairs && (pairs.xstock.unavailable || pairs.token.unavailable) ? h('div.stack', h('p.small.muted', 'xStock and paired-token launches need approved assets. The launchpad owner can deploy the labelled test assets (TEST-STOCK and TEST-MEME) and approve them: six confirmations, gas only.'),
           h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('setup-pairs', {}); openTools(); } catch (e) { fail(e); } } } }, 'Add test xStock and token pairs')) : null));
     } else funds.append(h('p.small.muted', wallet.deployment ? `Solana program: ${short(wallet.deployment.programId)}.${state?.pricing ? ` Creation fee ${number(state.pricing.launchFee, 6)} SOL. New USD-priced launches are pending a verified-oracle program upgrade.` : ''}` : 'The Solana program is not deployed. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.'));
@@ -437,7 +456,11 @@ async function init() {
   const configSent = Date.now();
   config = await api('config');
   syncClock(config.serverTime, configSent);
-  setInterval(()=>{if(!busy&&document.visibilityState==='visible'&&!(currentRoute.name==='rewards'&&document.activeElement?.closest('form')))refresh({preserveInput:true}).catch(()=>{});},60000);
+  // Background refresh. Also on returning to the tab: timers do not run while it is hidden, and a dollar reference
+  // older than 3 minutes is shown as stale (values fall back to the pair's own unit) until prices are re-read.
+  const backgroundRefresh=()=>{if(!busy&&document.visibilityState==='visible'&&!(currentRoute.name==='rewards'&&document.activeElement?.closest('form')))refresh({preserveInput:true}).catch(()=>{});};
+  setInterval(backgroundRefresh,60000);
+  document.addEventListener('visibilitychange',backgroundRefresh);
   setInterval(()=>{if(document.visibilityState==='visible')refreshLastSale();},30000);
   if (config.solana?.mainnet) {
     $('#footer-note').textContent = 'Solana mainnet beta: real funds, new contracts. Other networks are test networks with no monetary value.';

@@ -21,7 +21,7 @@ const metadataRequests = new Map();
 function dexName(ctx, token) {
   if (token.venue) return token.venue;
   if (token.dex) return token.dex;
-  return (ctx.mode === 'local' ? ctx.config.dex : ctx.wallet.dex) ? 'Uniswap v3' : 'test';
+  return ctx.mode === 'local' ? (ctx.config.dex ? 'Uniswap v3' : 'test') : ctx.wallet.dex?.name ?? 'test';
 }
 
 /** "3m ago" style relative age, used by the header and the trades table. */
@@ -151,32 +151,6 @@ export function renderToken(ctx, address) {
       h('p.small.muted','Phantom may use its own data providers. Publishing here does not guarantee a logo or a verified badge. Testnet indexing can differ from mainnet.'),
       add,!ctx.wallet.address?h('p.hint','Connect an EVM wallet to request adding this token.'):null,status));
   }
-  if(ctx.mode==='testnet'&&!token.metadataURI&&token.metadataStatus!=='creator-signed'&&token.creator?.toLowerCase()===state.wallet?.toLowerCase()&&(token.metadata?.image||token.metadata?.description)){
-    const key=`${ctx.currentChain()}:${token.address.toLowerCase()}`;
-    const request=metadataRequests.get(key) ?? {pending:false,message:''};
-    metadataRequests.set(key,request);
-    const status=h('p.small', {role:'status','aria-live':'polite'});
-    const publish=h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:async()=>{
-      if(request.pending)return;
-      const update=(message,pending=true)=>{request.message=message;request.pending=pending;request.draw?.();};
-      update('Preparing token details for your signature…');
-      try{
-        await ctx.wallet.checkNetwork();
-        const body={network:ctx.currentChain(),token:token.address,metadata:token.metadata,expires:Math.floor(nowSeconds())+240};
-        const prepared=await ctx.api('public/metadata/prepare',body);
-        update(`Waiting for ${ctx.wallet.walletName}. Open its Chrome extension and sign “Elpida public token metadata”. This publishes token details only; no gas or token transfer.`);
-        const signature=await withWalletTimeout(ctx.wallet.signer.signMessage(prepared.message),ctx.wallet.walletName);
-        update('Signature received. Saving token details…');
-        await ctx.api('public/metadata/save',{...body,signature});
-        update('Token details are published for every visitor.',false);
-        await ctx.refresh();
-      }catch(e){update(walletErrorText(e,ctx.wallet.walletName)??errorText(e),false);}
-    }}},'Publish saved token details');
-    request.draw=()=>{status.textContent=request.message;publish.disabled=request.pending;publish.textContent=request.pending?'Publishing token details…':'Publish saved token details';};
-    request.draw();
-    about.append(h('p.small.muted','These token details are saved only in this browser. Publish them with a creator signature so every visitor sees them.'),publish,status);
-  }
-
   const tech = h('details.tech', h('summary', 'Technical details', icon('chevron-down', 'icon-sm')), h('dl.kv',
     h('dt', 'Token address'), h('dd', token.address),
     token.curve ? [h('dt', 'Bonding curve'), h('dd', token.curve)] : null,
@@ -241,10 +215,7 @@ function marketActivity(ctx,token,q,{addressUrl,isCreator,onCounts}){
 function tradePanel(ctx, token, { dex, solana }) {
   const q = token.quoteSymbol ?? ctx.state?.nativeSymbol ?? 'ETH';
   if(ctx.state.disconnected && !(token.complete && !token.graduated))return h('section.panel.trade-panel',h('h2','Trade'),h('p.muted',ctx.state.walletReadError?'Your wallet connection could not read this network. Reconnect to trade; indexed market data is still available.':`Connect your wallet on ${ctx.wallet.net.name} to buy or sell ${token.symbol}. Market data remains available without connecting.`),ctx.walletButtons(ctx.wallet.net,{onDone:()=>ctx.refresh(),onError:e=>toast(errorText(e),{kind:'error'})}));
-  if (token.graduated && token.venue === 'PumpSwap') {
-    return h('section.panel.trade-panel', h('h2', 'Trade'), h('p.muted', `${token.symbol} now trades on PumpSwap. Its liquidity is locked permanently, and its LP fees are harvested 50/50 to Elpida and the creator.`),
-      token.dexUrl ? h('a.btn.btn-primary.btn-block', { href: token.dexUrl, target: '_blank', rel: 'noopener noreferrer', style: undefined }, 'Open the PumpSwap pool', icon('external-link', 'icon-sm')) : null);
-  }
+  // A migrated Solana token trades here too, through its locked PumpSwap pool (solana-wallet pumpSwapTrade).
   if (token.complete && !token.graduated) {
     const error = h('p.error-text', { role: 'alert' });
     const label = token.dex === 'PumpSwap' ? 'Migrate to PumpSwap' : `Graduate to ${dex === 'test' ? 'a locked test pool' : dex}`;
@@ -331,6 +302,12 @@ function tradePanel(ctx, token, { dex, solana }) {
     const value = amount.value, rev = ++revision; clearTimeout(timer); error.textContent = '';
     quoteReady = false; updateSubmit(); useRemaining.hidden = true;
     if (!(Number(value) > 0)) { out.textContent = 'Enter an amount'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = ''; return; }
+    // A curve reopened after its graduation grace is fully sold: selling works, buying resumes once a holder sells.
+    if (side === 'buy' && token.soldOut && !token.complete && !token.graduated) {
+      out.textContent = 'Nothing left to buy'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = '';
+      error.textContent = 'Every curve token is sold. This curve was reopened after graduation did not happen, so holders can sell now; buying resumes as soon as someone sells.';
+      return;
+    }
     if (side === 'buy' && remaining && exceedsRemaining(value,token.remainingBuy) && !solana && !token.partialFill) {
       out.textContent = 'Amount exceeds the curve limit'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = '';
       error.textContent = `About ${number(token.remainingBuy,8)} ${q} remains on the bonding curve. Use the remaining-amount button to fill the exact limit, then graduate to the locked pool.`;
@@ -382,6 +359,6 @@ function tradePanel(ctx, token, { dex, solana }) {
   setSide('buy');
   tickFeeWindow();
   return h('section.panel.trade-panel.tk-trade', { 'aria-labelledby': 'trade-title' }, h('h2#trade-title.visually-hidden', 'Trade'),
-    h('p.small.muted', token.tax ? `Buy tax ${token.tax.buyBps/100}% / sell tax ${token.tax.sellBps/100}%, fixed at launch. Tax revenue: 30% Elpida / 70% creator allocations. ${token.graduated?'The V2 pool fee is additional; the curve fee has stopped. LP fees compound in locked liquidity. Creator tax claims are paid in this token.':'The 1.25% curve fee remains additional, split 50/50. First-minute protection adds locked liquidity.'}` : token.graduated ? `Trading on ${dex === 'test' ? 'the locked test pool' : dex}. Liquidity is locked permanently. The curve fee has stopped; the DEX pool fee applies.` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'),
+    h('p.small.muted', token.tax ? `Buy tax ${token.tax.buyBps/100}% / sell tax ${token.tax.sellBps/100}%, fixed at launch. Tax revenue: 30% Elpida / 70% creator allocations. ${token.graduated?'The V2 pool fee is additional; the curve fee has stopped. LP fees compound in locked liquidity. Creator tax claims are paid in this token.':'The 1.25% curve fee remains additional, split 50/50. First-minute protection adds locked liquidity.'}` : token.graduated ? `Trading on ${dex === 'test' ? 'the locked test pool' : dex}. Liquidity is locked permanently. The curve fee has stopped; the DEX pool fee applies.${token.venue === 'PumpSwap' ? ' LP fees are harvested 50/50 to Elpida and the creator.' : ''}` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'),
     form);
 }

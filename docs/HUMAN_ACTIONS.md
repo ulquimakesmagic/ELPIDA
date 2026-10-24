@@ -87,6 +87,83 @@ Phase 2 adds the 24 h reopen escape hatch, immutable Metaplex metadata at launch
 4. Double-click `solana-upgrade.cmd` in the ELPIDA folder (or `npm.cmd run solana:deploy -- --upgrade`). The upload resumes if interrupted.
 5. Tell Claude when it finishes. The next Solana launch from the site then writes immutable metadata (visible in Phantom and Solscan), and the token page offers *Reopen curve trading* for a curve stuck 24 h after completion.
 
+## 3b. Upgrade the Solana devnet program to the 19 Oct build (checklist B1) — done, 23 October 2026
+
+Done from `elpida-fork` with the original deployer passed directly:
+`npm.cmd run solana:deploy -- --upgrade --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`.
+The program printed `Program upgraded.` Then run `git checkout -- deployments/solana-devnet.json` so the record keeps the
+published TEST-MEME mint (that run created a duplicate test mint; scripts now reuse the published ones). The steps below
+are kept for the next upgrade.
+
+
+The 23 Oct attempt from `elpida-fork` stopped because the program's keys live in `elpida-v1`. Two private files matter;
+never paste, commit or share either:
+
+- `local-data/solana-deployer.json` is the deployer `FeUWF…KaH8`, the program's **upgrade authority**. Only it can upgrade.
+- `contracts/solana/keys/elpida_launchpad-keypair.json` is the program keypair. It is only needed for a brand-new
+  deployment; upgrades now use the program address from the source.
+
+1. **Pull first** (`git pull` in `elpida-fork`). The 23 Oct second attempt still ran the old script (its error points
+   at line 64), so the fix in #74 was not on the PC yet.
+2. **Find the original deployer.** It is not at `..\elpida-v1`. Search the Desktop for every copy:
+   `Get-ChildItem $HOME\Desktop -Recurse -Filter solana-deployer.json -ErrorAction SilentlyContinue | Select-Object FullName`
+   Then print only the public address of each one (this never shows the secret):
+   `node -e "const w=require('@solana/web3.js');console.log(w.Keypair.fromSecretKey(Uint8Array.from(require(process.argv[1]))).publicKey.toBase58())" "<full path>"`
+   The one that prints `FeUWF…KaH8` is the upgrade authority. Ignore `elpida-fork\local-data\solana-deployer.json`:
+   it is the empty keypair the first attempt created.
+3. Copy it over the empty one: `Copy-Item "<full path>" .\local-data\solana-deployer.json -Force`. If none prints
+   `FeUWF…KaH8`, stop and tell Claude: the program cannot be upgraded without it (a fresh program would be deployed
+   instead, about 5.8 devnet SOL).
+4. Check the build: `certutil -hashfile contracts\solana\build\elpida_launchpad.so SHA256` must print
+   `89d96d53856ba206a8a3a96b0b971d503d6fcfb0dd028587cf654fbc5f6d0b88`.
+5. Make sure `FeUWF…KaH8` holds about **5 devnet SOL** (faucet.solana.com); most of it is a temporary buffer refunded
+   after the upgrade.
+6. Run `npm.cmd run solana:deploy -- --upgrade`. It prints the deployer and program first. If the deployer is not the
+   upgrade authority, it stops before uploading anything and says which address is.
+7. Send Claude the output.
+
+## 3c. Squads multisig rehearsal on devnet (checklist C3) — done, 24 October 2026
+
+Run by Malik and read back from devnet: every step passed (transactions in the checklist, C3). Kept below for a rerun.
+
+Proves, before mainnet, that a 2-of-2 Squads vault controls program upgrades. It uses a **throwaway copy** of the
+program; the live devnet program (`ANkA5…`) is never touched. Devnet SOL only, and all of it except fees comes back.
+
+1. Top up the devnet deployer `FeUWF…KaH8` to about **7.5 devnet SOL** at faucet.solana.com (it had 6.59 on 24 Oct).
+2. From `elpida-fork`, after `git pull`:
+   `node scripts/squads-devnet-trial.mjs --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`
+3. It installs Squads' SDK once into a temporary folder, then:
+   - deploys the throwaway program;
+   - creates a 2-of-2 multisig (the deployer plus a second key it saves in `local-data/squads-trial`);
+   - hands the upgrade authority to the vault and checks the deployer alone is refused;
+   - proposes an upgrade, checks one approval is not enough, approves with both and executes;
+   - hands authority back through Squads, then closes the throwaway program to return its rent.
+
+   An interrupted run resumes where it stopped.
+4. Send Claude `local-data/squads-trial/state.json` (addresses and signatures only). Never send the other files in that
+   folder: they are keys.
+
+## 3d. Robinhood Chain testnet: test DEX, relayed price, then a launch — open
+
+Robinhood's testnet has no Uniswap v3 and no Chainlink feed, so the site deploys labelled test copies
+(`MULTICHAIN_TESTNETS.md`, "Robinhood Chain testnet"). Test ETH only.
+
+1. **Relay key (testnet only).** In PowerShell:
+   `node -e "console.log('0x'+require('crypto').randomBytes(32).toString('hex'))"`
+   Add it on Railway as the variable `ELPIDA_TESTNET_RELAY_KEY`. Never paste it anywhere else, and never use it for
+   anything but this relay. Railway redeploys; the relay's address then shows on
+   `https://elpida.fun/api/public/status` under `relay.address` (an address, safe to share).
+2. **Test ETH.** At `faucet.testnet.chain.robinhood.com`, send 0.01 test ETH to your wallet (`0xf5B0…639D`). For the
+   relay wallet, use the faucet again the next day, or send it 0.002 test ETH from your wallet (enough for years of
+   price posts at 0.01 gwei).
+3. **Deploy the test DEX and price feed.** On elpida.fun: Network and funds → Robinhood Chain Testnet → connect your
+   wallet → **Set up test DEX and price feed** (6 confirmations). An interrupted setup resumes. Send Claude the
+   addresses it shows. **Done 24 Oct**; registered (addresses in `MULTICHAIN_TESTNETS.md`). Fund the relay
+   `0x3d060E857f39665D672472A8F82e18FdfAF994FC` with about 0.002 test ETH so it can post prices.
+4. Claude registers them (a PR). After it deploys: **Set up launchpad**, then launch a test token as on the other
+   testnets. Completing a curve takes about $130 of test ETH in total (about 4 to 5 days of faucet); launching and
+   trading need far less.
+
 ## 4. Turn on `hope` mint addresses (optional)
 
 Add a Railway variable `ELPIDA_VANITY_KEY` with 32 random bytes as 64 hex characters (in PowerShell: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`). Keep a copy only if you want existing pre-ground keys to survive a key change; losing it just means they are ground again. After the redeploy the server grinds about one `hope` address every 9 minutes per CPU core in the background (three are kept ready; `ELPIDA_VANITY_TARGET` and `ELPIDA_VANITY_WORKERS` change that). Until one is ready, launches use a random address and say so.

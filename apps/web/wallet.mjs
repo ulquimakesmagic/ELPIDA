@@ -1,18 +1,21 @@
 import { nowSeconds } from './clock.mjs';
 import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
-import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, ZeroAddress } from '/vendor/ethers.js';
+import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
+import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, ZeroAddress } from '/vendor/ethers.js';
 import { routerAbi, swapCalldata } from '/dex-router.mjs';
 
 import { normalizeMetadata } from './metadata.mjs';
 import { readMetadataCache, writeMetadataCache } from './metadata-cache.mjs';
-import {publishForLaunch} from './launch-capabilities.mjs';
+import {launchDetailsError} from './launch-capabilities.mjs';
 import { EVM_TEST_PAIRS } from '/pairs.mjs';
 import { DEX_MODEL, LEGACY_DEX_MODEL, BETA_MODEL, MODEL_VERSIONS, isDexModel, curveShape, startFdvUsdFor, assertDeploymentTerms, usdQuoteTemplate, GRADUATION_GRACE_SECONDS, BASE_FEE_BPS, SNIPE_START_BPS, SNIPE_WINDOW_SECONDS, SALE_CAP } from '/curve-model.mjs';
 import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
 import {nativeFundingError} from './payment-errors.mjs';
 import {supportsAtomicLaunch,waitAtomicLaunch,waitAtomicBatch,atomicBatchRequest} from './wallet-batch.mjs';
 import { PublicRpcSigner } from './public-rpc-signer.mjs';
-import { MULTICALL3, multicallData, approvalFor } from './one-confirmation.mjs';
+import { MULTICALL3, multicallData, approvalFor, launchApproval, waitForAllowance } from './one-confirmation.mjs';
+import { readSafe, treasuryError, safeBatch } from './safe-batch.mjs';
+import { graduationSqrtPriceX96, blockedByPool, tokenCheaperInPool } from './graduation-unblock.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 
 // EIP-6963: every installed EVM wallet announces itself, so Elpida can use the one the person picks
@@ -158,7 +161,9 @@ export class TestnetWallet {
     // Wallet RPCs often restrict historical logs, and some are slow or broken on testnets. Read, estimate gas and
     // wait for receipts through the registry's chain RPC; signatures and submissions always stay with the wallet.
     const rpc=new FetchRequest(net.rpcUrl);rpc.timeout=15000;
-    this.provider = new JsonRpcProvider(rpc, net.chainId, { staticNetwork:true,cacheTimeout: -1, batchMaxCount: 1 });
+    // Paced: public testnet RPCs refuse bursts (Base Sepolia allows 25 requests a second), and one refusal used to fail
+    // the whole wallet read.
+    this.provider = new PacedJsonRpcProvider(rpc, net.chainId, { staticNetwork:true,cacheTimeout: -1, batchMaxCount: 1 });
     this.signer = new PublicRpcSigner(await this.signerProvider.getSigner(), this.provider, { onSlow: message => this.onProgress?.(message) });
     this.address = await this.signer.getAddress();
     await this.checkNetwork();
@@ -205,17 +210,36 @@ export class TestnetWallet {
     return { vq: Number(formatUnits(this.nativeVirtualQuote, 18)), vt: shape.virtualTokens, cap: shape.saleCap, feeBps: BASE_FEE_BPS };
   }
   /** Reads the DEX factory's approved quotes (QuoteApproved events) and labels each by `pairKind()`. */
+  /** The USDC graduation adapter for this launchpad: reused from this browser if valid, else deployed (gas only, no powers). */
+  async usdcAdapter(factory, usdc = this.feeUsdc) {
+    const adapterKey=`elpida:usdc-adapter:${this.net.chainId}:${factory.target.toLowerCase()}`;
+    let adapterAddress=localStorage.getItem(adapterKey);
+    if(adapterAddress){const a=new Contract(adapterAddress,['function manager() view returns(address)','function usdc() view returns(address)','function fee() view returns(uint24)'],this.provider);if((await a.manager()).toLowerCase()!==this.dex.manager.toLowerCase()||(await a.usdc()).toLowerCase()!==usdc.toLowerCase()||await a.fee()!==10000n)throw new Error('Saved USDC adapter does not match this launchpad.');}
+    else {const a=this.config.contracts.adapter;this.onProgress('Confirm the USDC graduation adapter deployment…');const adapter=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,usdc,10000);await adapter.waitForDeployment();adapterAddress=adapter.target;localStorage.setItem(adapterKey,adapterAddress);}
+    return adapterAddress;
+  }
+  /**
+   * The treasury-only setup steps still open on this launchpad (activate USD pricing; approve USDC trading), as a
+   * Safe Transaction Builder batch, or null when nothing is left. Used when the treasury is a Safe.
+   */
+  async treasuryBatch(factory = this.factoryContract().connect(this.signer)) {
+    const steps = [], usdc = this.oracle?.usdc;
+    if (await factory.usdFeed() === ZeroAddress) steps.push({ to: factory.target, data: factory.interface.encodeFunctionData('configureUsdPricing', [this.oracle.feed, this.oracle.maxAge, usdc ?? ZeroAddress]) });
+    if (this.dex && usdc && usdc !== ZeroAddress && (await factory.approvedQuotes(usdc)).adapter === ZeroAddress) {
+      const adapter = await this.usdcAdapter(factory, usdc);
+      steps.push({ to: factory.target, data: factory.interface.encodeFunctionData('approveQuote', [usdc, usdQuoteTemplate(await factory.startFdvUsd(), 6), adapter]) });
+    }
+    if (!steps.length) return null;
+    return safeBatch({ chainId: this.net.chainId, safe: await factory.treasury(), name: `Elpida ${this.net.name} launchpad setup`, description: `Treasury-only setup for launchpad ${factory.target}: ${steps.length} step(s), activating USD pricing and approving USDC trading.`, transactions: steps });
+  }
   async setupUsdcPair(configuredFactory=null) {
     await this.checkNetwork(); const factory=(configuredFactory??await this.verifyFactory()).connect(this.signer);
     this.feeUsdc=await factory.feeUsdc();
     if(!this.dex||!this.feeUsdc||this.feeUsdc===ZeroAddress)throw new Error('A configured USDC asset and DEX adapter are required on this network.');
-    if((await factory.treasury()).toLowerCase()!==this.address.toLowerCase())throw new Error('Only the launchpad treasury can approve the USDC trading pair.');
+    if((await factory.treasury()).toLowerCase()!==this.address.toLowerCase()){const batch=await this.treasuryBatch(factory);return batch?{safeBatch:batch,message:'The treasury is a Safe: the setup file is downloading. Import it in the Safe Transaction Builder for its signers to approve.'}:{message:'Nothing left for the treasury to sign.'};}
     if((await factory.approvedQuotes(this.feeUsdc)).adapter!==ZeroAddress)return {message:'USDC trading pair is already approved.'};
     if(Number(await new Contract(this.feeUsdc,['function decimals() view returns(uint8)'],this.provider).decimals())!==6)throw new Error('The configured USDC asset must use six decimals.');
-    const adapterKey=`elpida:usdc-adapter:${this.net.chainId}:${factory.target.toLowerCase()}`;
-    let adapterAddress=localStorage.getItem(adapterKey);
-    if(adapterAddress){const a=new Contract(adapterAddress,['function manager() view returns(address)','function usdc() view returns(address)','function fee() view returns(uint24)'],this.provider);if((await a.manager()).toLowerCase()!==this.dex.manager.toLowerCase()||(await a.usdc()).toLowerCase()!==this.feeUsdc.toLowerCase()||await a.fee()!==10000n)throw new Error('Saved USDC adapter does not match this launchpad.');}
-    else {const a=this.config.contracts.adapter;this.onProgress('Confirm the USDC graduation adapter deployment…');const adapter=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,this.feeUsdc,10000);await adapter.waitForDeployment();adapterAddress=adapter.target;localStorage.setItem(adapterKey,adapterAddress);}
+    const adapterAddress=await this.usdcAdapter(factory);
     // Model 10: start FDV x 10/9 in USDC units. Legacy model 9: $5,000 x 16/15.
     const legacy=this.model===LEGACY_DEX_MODEL,start=legacy?5000n:await factory.startFdvUsd();
     const vq=legacy?5_000_000_000n*await factory.VIRTUAL_TOKEN()/await factory.TOKEN_SUPPLY():usdQuoteTemplate(start,6);
@@ -285,7 +309,7 @@ export class TestnetWallet {
       const art = this.config.contracts.testAsset, adapterArt = this.config.contracts.adapter;
       this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm the ${t.symbol} test asset deployment…`);
       const asset = await new ContractFactory(art.abi, art.bytecode, this.signer).deploy(t.name, t.symbol, t.kind, t.decimals, BigInt(t.faucet)); await asset.waitForDeployment();
-      this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm its Uniswap migration adapter…`);
+      this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm its ${this.dex?.name??'DEX'} migration adapter…`);
       const adapter = await new ContractFactory(adapterArt.abi, adapterArt.bytecode, this.signer).deploy(this.dex.manager, asset.target, 10000); await adapter.waitForDeployment();
       const virtualQuote = parseUnits(t.startFdv, t.decimals) * vt / supply;
       last = await this.wait(factory.approveQuote(asset.target, virtualQuote, adapter.target), `Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: approve ${t.symbol} as a trading pair…`);
@@ -313,6 +337,35 @@ export class TestnetWallet {
    * `calls` are {to, data, value?, label}. Returns {tx:{hash}, receipt} for the last transaction.
    */
   /** True when the connected wallet advertises atomic batches on this chain (checked once per network). */
+  /**
+   * Steps that clear a pre-created pool blocking graduation (audit finding F-1), or none. Only for a buy that would
+   * complete an automatically graduating curve and that a dry run shows failing with "pool price mismatch".
+   */
+  async graduationUnblock(item, curve, input, minimum) {
+    const native = item.pair === 'native';
+    let automatic = false; try { automatic = await curve.automaticGraduation(); } catch { /* older curves graduate separately */ }
+    let quote; try { quote = await curve.completionQuote(); } catch { return []; }   // nothing left to buy (F-8)
+    if (!automatic || input < quote) return [];
+    try { await curve.buy.staticCall(input, minimum, { value: native ? input : 0n }); return []; }
+    catch (error) { if (!blockedByPool(error)) return []; }   // any other problem is reported by the real buy
+    const quoteAsset = native ? this.dex.weth : this.qaddr(item), token = item.address, tokenIsToken0 = BigInt(token) < BigInt(quoteAsset), fee = this.dex.fee ?? 10000;
+    const [virtualQuote, virtualToken, saleCap, liquidityBonus] = await Promise.all([curve.virtualQuote(), curve.virtualToken(), curve.SALE_CAP(), curve.liquidityBonus()]);
+    const limit = graduationSqrtPriceX96({ virtualQuote, virtualToken, saleCap, liquidityBonus, tokenIsToken0 });
+    const pool = await new Contract(this.dex.factory, ['function getPool(address,address,uint24) view returns(address)'], this.provider).getPool(token, quoteAsset, fee);
+    const [poolSqrtPriceX96] = await new Contract(pool, this.config.contracts.dexPool.abi, this.provider).slot0();
+    const symbol = item.symbol ?? 'this token', unit = native ? this.net.nativeCurrency.symbol : this.qsym(item, true), dex = this.dex.name ?? 'DEX';
+    if (!tokenCheaperInPool({ poolSqrtPriceX96, graduationSqrtPriceX96: limit, tokenIsToken0 })) throw new Error(`Graduation is waiting on ${symbol}'s ${dex} pool, which someone priced above the curve. Holders can sell into that pool at a profit, and completion works once it is back near the curve price. Nothing was sent.`);
+    // Up to the completing buy's size again; the price limit decides how much is actually spent, and the rest stays
+    // with you (refunded in the same transaction for native coin).
+    const budget = input, router = this.dex.router, deadline = BigInt((await this.provider.getBlock('latest')).timestamp + 300);
+    if (native && await this.provider.getBalance(this.address) < budget + input) throw new Error(`Someone placed cheap ${symbol} in its ${dex} pool below the curve price, which blocks graduation. Clearing it first needs up to ${formatUnits(budget, 18)} ${unit} more than this buy; you receive those tokens, at or below the curve price. Nothing was sent.`);
+    const steps = [];
+    if (!native) { const coin = new Contract(quoteAsset, this.config.contracts.quote.abi, this.signer); if (await coin.allowance(this.address, router) < budget) steps.push({ to: quoteAsset, data: coin.interface.encodeFunctionData('approve', [router, budget]), label: `Approve the ${dex} purchase exactly…` }); }
+    steps.push({ to: router, value: native ? budget : 0n, label: `Buy the ${symbol} placed below the curve price in its ${dex} pool (never above the graduation price)…`,
+      data: swapCalldata(Interface, this.dex.routerVersion ?? 2, router, { tokenIn: quoteAsset, tokenOut: token, fee, recipient: this.address, amountIn: budget, amountOutMinimum: 0n, sqrtPriceLimitX96: limit }, { deadline, refundETH: native }) });
+    this.onProgress(`Someone placed cheap ${symbol} in its ${dex} pool, which would block graduation. This buy clears it first, then completes the curve.`);
+    return steps;
+  }
   /** Multicall3 is deployed on this chain (checked once per network). */
   async multicallAvailable() {
     const key = String(this.net?.chainId);
@@ -373,8 +426,59 @@ export class TestnetWallet {
       localStorage.removeItem(key);return {tx:{hash:receipt.transactionHash},receipt:{...actual,logs}};
     }catch(error){if(error.batchFailed)localStorage.removeItem(key);throw error;}
   }
-  async deploy() {
+  /** The test DEX and relay feed this browser deployed on the current network, if any (to send to the team). */
+  savedTestDex(){return this.net?.testDex?read('elpida:test-dex:'+this.net.chainId):null;}
+  /**
+   * Test chains with no DEX and no Chainlink feed (Robinhood testnet): deploys, from this wallet, a labelled Elpida test
+   * deployment of Uniswap v3 (Uniswap's own published bytecode) with a test WETH, and an ElpidaRelayFeed whose only
+   * updater is the server's testnet price relay. Six confirmations, gas only; an interrupted setup resumes. The
+   * addresses are then registered by the team (networks.mjs, uniswap.mjs) before the launchpad is set up.
+   */
+  async deployTestDex(){
     await this.checkNetwork();
+    if(this.net.mainnet||!this.net.testDex)throw new Error('A test DEX is only for test networks that have none. Nothing was deployed.');
+    if(this.dex)throw new Error(`${this.net.name} already has ${this.dex.name}. Nothing was deployed.`);
+    const relay=this.config.relay,target=relay?.networks?.[this.net.key],source=target?.source;
+    if(!relay?.address)throw new Error('The server price relay is not configured yet (ELPIDA_TESTNET_RELAY_KEY on Railway). Nothing was deployed.');
+    if(!source?.feed||!source.chainId)throw new Error('No relay source feed is configured for this network. Nothing was deployed.');
+    if(await this.provider.getBalance(this.address)===0n)throw new Error(`Get ${this.net.nativeCurrency.symbol} on ${this.net.name} from its faucet to pay deployment gas.`);
+    const response=await fetch('/api/test-dex-artifacts');if(!response.ok)throw new Error('Test DEX bytecode is unavailable. Nothing was deployed.');
+    const a=await response.json(),key='elpida:test-dex:'+this.net.chainId,saved={...(read(key)??{}),network:this.net.key,chainId:this.net.chainId};
+    const description=`ETH / USD (Chainlink, relayed from ${source.network}; testnet only)`;
+    const steps=[
+      ['weth','test WETH',()=>[a.weth]],
+      ['factory','Uniswap v3 factory',()=>[a.factory]],
+      ['manager','Uniswap v3 position manager',()=>[a.manager,saved.factory,saved.weth,ZeroAddress]],
+      ['router','Uniswap SwapRouter02',()=>[a.router,ZeroAddress,saved.factory,saved.manager,saved.weth]],
+      ['quoter','Uniswap QuoterV2',()=>[a.quoter,saved.factory,saved.weth]],
+      ['feed','ETH / USD relay feed',()=>[a.relayFeed,description,source.feed,source.chainId,relay.address]],
+    ];
+    for(const [i,[name,label,args]] of steps.entries()){
+      if(saved[name]&&isAddress(saved[name])&&await this.provider.getCode(saved[name])!=='0x')continue;
+      const [art,...params]=args();
+      this.onProgress(`Step ${i+1} of ${steps.length}: confirm the ${label} deployment (Elpida test deployment)…`);
+      const c=await new ContractFactory(art.abi,art.bytecode,this.signer).deploy(...params);await c.waitForDeployment();
+      saved[name]=getAddress(c.target);saved.block??=(await c.deploymentTransaction().wait()).blockNumber;
+      if(!write(key,saved))throw new Error(`Deployed the ${label} at ${saved[name]}, but this browser blocks storage. Note it down before continuing.`);
+    }
+    const manager=new Contract(saved.manager,['function factory() view returns(address)','function WETH9() view returns(address)'],this.provider),feed=new Contract(saved.feed,['function updater() view returns(address)'],this.provider);
+    if((await manager.factory()).toLowerCase()!==saved.factory.toLowerCase()||(await manager.WETH9()).toLowerCase()!==saved.weth.toLowerCase()||(await feed.updater()).toLowerCase()!==relay.address.toLowerCase())throw new Error('The deployed test DEX does not match its configuration. Send the saved addresses to the team.');
+    saved.deployer=this.address;write(key,saved);
+    return {testDex:saved,message:`The ${this.net.name} test DEX and price relay feed are deployed. Send the addresses shown under "Launchpad on this network" to the team to register them; the launchpad is set up after that.`};
+  }
+  /**
+   * `body.treasury`: optional Safe address that becomes the factory's immutable treasury (required on mainnet). The
+   * connected wallet then only deploys and pays gas; the treasury-only setup comes back as a Safe batch to sign.
+   */
+  async deploy(body = {}) {
+    await this.checkNetwork();
+    const entered = String(body.treasury ?? '').trim();
+    if (entered && !isAddress(entered)) throw new Error('Enter a valid treasury address (a Safe), or leave it empty to use this wallet on testnet. Nothing was deployed.');
+    const treasury = entered ? getAddress(entered) : this.address, external = treasury.toLowerCase() !== this.address.toLowerCase();
+    const safe = external || this.net.mainnet ? await readSafe(Contract, this.provider, treasury) : null;
+    const treasuryProblem = treasuryError({ mainnet: !!this.net.mainnet, treasury, connected: this.address, safe });
+    if (treasuryProblem) throw new Error(treasuryProblem);
+    if (external && !this.dex) throw new Error('A multisig treasury needs the DEX launchpad on this network. Nothing was deployed.');
     if (this.deployment && !this.needsMetadataUpgrade && !this.modelUpgradeAvailable && !this.feeFixUpgradeAvailable && !this.launchUpgradeAvailable) throw new Error(`This ${this.net.name} launchpad is already set up. Use it for your launches.`);
     const previousDeployment=this.deployment;
     await this.oraclePrice();
@@ -383,25 +487,30 @@ export class TestnetWallet {
     let migrationAdapter;
     if(this.dex){
       const manager=new Contract(this.dex.manager,['function factory() view returns(address)','function WETH9() view returns(address)'],this.provider);
-      if((await manager.factory()).toLowerCase()!==this.dex.factory.toLowerCase()||(await manager.WETH9()).toLowerCase()!==this.dex.weth.toLowerCase())throw new Error('Unexpected Uniswap manager configuration.');
+      if((await manager.factory()).toLowerCase()!==this.dex.factory.toLowerCase()||(await manager.WETH9()).toLowerCase()!==this.dex.weth.toLowerCase())throw new Error(`Unexpected ${this.dex.name??'DEX'} position manager configuration.`);
       // Native pairs graduate through an adapter whose ERC-20 side is WETH.
       const key='elpida:dex-adapter:'+this.net.chainId+':native',saved=read(key);
       if(saved&&isAddress(saved)&&await this.provider.getCode(saved)!=='0x'){
         const existing=new Contract(saved,this.config.contracts.adapter.abi,this.provider);
         if((await existing.manager()).toLowerCase()!==this.dex.manager.toLowerCase()||(await existing.usdc()).toLowerCase()!==this.dex.weth.toLowerCase()||await existing.fee()!==10000n)throw new Error('Saved adapter configuration mismatch.');migrationAdapter=saved;
-      }else{this.onProgress('Step 1 of 2: confirm the Uniswap migration adapter deployment…');const a=this.config.contracts.adapter,c=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,this.dex.weth,10000);await c.waitForDeployment();migrationAdapter=c.target;write(key,migrationAdapter);}
+      }else{this.onProgress(`Step 1 of 2: confirm the ${this.dex.name??'DEX'} migration adapter deployment…`);const a=this.config.contracts.adapter,c=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,this.dex.weth,10000);await c.waitForDeployment();migrationAdapter=c.target;write(key,migrationAdapter);}
     }
     // Model 10 terms are fixed at deployment: $50 test-sized curves on testnets, $5,000 on mainnet (enforced).
     const terms=this.dex?assertDeploymentTerms(this.net,{startFdvUsd:startFdvUsdFor(this.net),graduationGrace:GRADUATION_GRACE_SECONDS}):null;
     this.onProgress(`Confirm the launchpad deployment. Oracle pricing will enforce the $10 launch fee and $${(terms?.startFdvUsd??5000).toLocaleString()} starting FDV…`);
-    const contract = await new ContractFactory(artifact.abi, artifact.bytecode, this.signer).deploy(this.address, ...(this.dex?[migrationAdapter,terms.startFdvUsd,terms.graduationGrace]:[0n,1n]));
+    const contract = await new ContractFactory(artifact.abi, artifact.bytecode, this.signer).deploy(treasury, ...(this.dex?[migrationAdapter,terms.startFdvUsd,terms.graduationGrace]:[0n,1n]));
     this.onProgress('Deployment submitted. Waiting for confirmation…');
     await contract.waitForDeployment();
     const receipt = await contract.deploymentTransaction().wait();
-    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, migrationAdapter, model: modelOf(this.net.chainId, !!this.dex), metadataVersion:this.dex?1:undefined,feeAccountingVersion:this.dex?Number(await contract.FEE_ACCOUNTING_VERSION()):undefined,launchFeaturesVersion:this.dex&&this.config.contracts.atomicFactory?1:undefined };
+    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, treasury, migrationAdapter, model: modelOf(this.net.chainId, !!this.dex), metadataVersion:this.dex?1:undefined,feeAccountingVersion:this.dex?Number(await contract.FEE_ACCOUNTING_VERSION()):undefined,launchFeaturesVersion:this.dex&&this.config.contracts.atomicFactory?1:undefined };
     if(previousDeployment && !write('elpida:previous-factory:'+this.net.chainId+':'+previousDeployment.factory,previousDeployment))throw new Error('Factory deployed, but previous deployment could not be archived. Save the new factory '+record.factory+' manually.');
     this.launches.clear(); this.scannedBlock = undefined; this.factoryStartFdvUsd = undefined;this.pairsScanned=undefined;this.approvedQuotes=[];this.nativeVirtualQuote=undefined;this.launchFee=undefined;
     if (!write(deploymentKey(this.net.chainId, !!this.dex), record)) throw new Error(`Deployed, but this browser blocks storage. Save factory ${record.factory} (block ${record.block}) in packages/core/networks.mjs.`);
+    if(external){
+      this.needsMetadataUpgrade=false;this.feeAccountingVersion=record.feeAccountingVersion;
+      const batch=await this.treasuryBatch(contract.connect(this.signer));
+      return { hash: receipt.hash, safeBatch: batch, message: `Your ${this.net.name} launchpad is deployed with the Safe ${treasury} as its treasury (${safe.threshold} of ${safe.owners.length} signatures). The treasury setup file is downloading: import it in the Safe's Transaction Builder, then the signers approve it. Launches open once it executes.` };
+    }
     await this.wait(contract.configureUsdPricing(this.oracle.feed,this.oracle.maxAge,this.oracle.usdc??ZeroAddress),'Activate verified USD pricing. This fixes the oracle and enables launches…');
     if(this.dex&&this.oracle.usdc&&this.oracle.usdc!==ZeroAddress)await this.setupUsdcPair(contract);
     this.needsMetadataUpgrade=false;this.feeAccountingVersion=record.feeAccountingVersion;
@@ -430,6 +539,7 @@ export class TestnetWallet {
     await this.checkNetwork();await this.oraclePrice();
     const factory=this.factoryContract().connect(this.signer);
     if(await factory.usdFeed()!==ZeroAddress)throw new Error('Oracle pricing is already fixed. Manual pricing is disabled.');
+    if((await factory.treasury()).toLowerCase()!==this.address.toLowerCase()){const batch=await this.treasuryBatch(factory);return {safeBatch:batch,message:'The treasury is a Safe: the setup file is downloading. Import it in the Safe Transaction Builder for its signers to approve; launches open once it executes.'};}
     const result=await this.wait(factory.configureUsdPricing(this.oracle.feed,this.oracle.maxAge,this.oracle.usdc??ZeroAddress),'Activate verified USD pricing…');
     if(this.dex&&this.oracle.usdc&&this.oracle.usdc!==ZeroAddress)await this.setupUsdcPair(factory);
     return result;
@@ -484,7 +594,10 @@ export class TestnetWallet {
       // Model 10: anti-snipe schedule, partial-fill final buys and the graduation escape hatch.
       let v10 = {};
       if (this.modelOf(item) === DEX_MODEL) { const [launchedAt, completedAt, grace] = await Promise.all([curve.launchedAt(), curve.completedAt(), curve.graduationGrace()]); v10 = { launchedAt: Number(launchedAt), partialFill: true, feeSchedule: { base: BASE_FEE_BPS, start: SNIPE_START_BPS, window: SNIPE_WINDOW_SECONDS }, reopenableAt: complete && !graduated && completedAt > 0n ? Number(completedAt + grace) : null }; }
-      return { ...item, ...v10, pool, graduated, complete, liquidityLocked: graduated, quoteSymbol: this.qsym(item), quoteDecimals: d, spotPrice: Number(formatUnits(priceQ,d)) / Number(formatUnits(priceT,18)), circulatingSupply:formatUnits(circulation,18),saleCap: formatUnits(await curve.SALE_CAP(),18), remainingBuy: complete ? '0' : formatUnits(await curve.completionQuote(),d), remainingBase: complete || this.modelOf(item) !== DEX_MODEL ? undefined : formatUnits(await curve.remainingAtBaseFee(),d), name, symbol, reward, reserve: formatUnits(reserve, d), sold: formatUnits(sold, 18), supply: formatUnits(supply, 18), balance: formatUnits(held, 18), protocolFees: formatUnits(protocol+p, d), creatorFees: formatUnits(creator+c, d) };
+      // A curve reopened after its graduation grace is fully sold but not complete: its completion quote reverts (audit
+      // finding F-8), so it is not called. Since AIZEN was reopened (23 Oct) that revert failed every Base Sepolia read.
+      const saleCap = await curve.SALE_CAP(), soldOut = !complete && !graduated && sold >= saleCap, noneLeft = complete || soldOut;
+      return { ...item, ...v10, pool, graduated, complete, soldOut, liquidityLocked: graduated, quoteSymbol: this.qsym(item), quoteDecimals: d, spotPrice: Number(formatUnits(priceQ,d)) / Number(formatUnits(priceT,18)), circulatingSupply:formatUnits(circulation,18),saleCap: formatUnits(saleCap,18), remainingBuy: noneLeft ? '0' : formatUnits(await curve.completionQuote(),d), remainingBase: this.modelOf(item) !== DEX_MODEL ? undefined : noneLeft ? '0' : formatUnits(await curve.remainingAtBaseFee(),d), name, symbol, reward, reserve: formatUnits(reserve, d), sold: formatUnits(sold, 18), supply: formatUnits(supply, 18), balance: formatUnits(held, 18), protocolFees: formatUnits(protocol+p, d), creatorFees: formatUnits(creator+c, d) };
     }));
     const pairBalances = {};
     for (const a of this.approvedQuotes ?? []) { try { pairBalances[a.id] = formatUnits(await new Contract(a.address, this.config.contracts.quote.abi, this.provider).balanceOf(this.address), a.decimals); } catch {} }
@@ -503,7 +616,7 @@ export class TestnetWallet {
     const price=Number(formatUnits(n*10n**18n*10n**24n/(den*10n**BigInt(d)),24)),circulation=supply-await token.balanceOf('0x000000000000000000000000000000000000dead')-await token.balanceOf(item.curve)-await token.balanceOf(pool);
     const feeLocker=new Contract(locker,this.config.contracts.locker.abi,this.provider),manager=new Contract(await feeLocker.manager(),['function ownerOf(uint256) view returns(address)'],this.provider),positionId=await curve.positionId();
     const fees=new Contract(splitter,this.config.contracts.splitter.abi,this.provider),dexRewards=[];for(const asset of [a,b]){const isToken=asset.toLowerCase()===item.address.toLowerCase();dexRewards.push({asset,symbol:isToken?symbol:this.qsym(item,true),creator:formatUnits(await fees.claimable(asset,reward),isToken?18:d)});}
-    return {...item,pool,graduated:true,complete:true,liquidityLocked:await feeLocker.locked()&&(await manager.ownerOf(positionId)).toLowerCase()===locker.toLowerCase(),locker,feeSplitter:splitter,positionId:positionId.toString(),venue:'Uniswap v3',feeBps:100,dexRewards,quoteSymbol:this.qsym(item),quoteDecimals:d,spotPrice:price,circulatingSupply:formatUnits(circulation,18),saleCap:formatUnits(await curve.SALE_CAP(),18),remainingBuy:'0',name,symbol,reward,reserve:formatUnits(await new Contract(quoteAsset,this.config.contracts.quote.abi,this.provider).balanceOf(pool),d),sold:formatUnits(sold,18),supply:formatUnits(supply,18),balance:formatUnits(held,18),protocolFees:formatUnits(cp,d),creatorFees:formatUnits(cc,d)};
+    return {...item,pool,graduated:true,complete:true,liquidityLocked:await feeLocker.locked()&&(await manager.ownerOf(positionId)).toLowerCase()===locker.toLowerCase(),locker,feeSplitter:splitter,positionId:positionId.toString(),venue:this.dex?.name??'Uniswap v3',feeBps:100,dexRewards,quoteSymbol:this.qsym(item),quoteDecimals:d,spotPrice:price,circulatingSupply:formatUnits(circulation,18),saleCap:formatUnits(await curve.SALE_CAP(),18),remainingBuy:'0',name,symbol,reward,reserve:formatUnits(await new Contract(quoteAsset,this.config.contracts.quote.abi,this.provider).balanceOf(pool),d),sold:formatUnits(sold,18),supply:formatUnits(supply,18),balance:formatUnits(held,18),protocolFees:formatUnits(cp,d),creatorFees:formatUnits(cc,d)};
   }
   async dexQuote(item,side,input){const asset=this.qaddr(item),quoter=new Contract(this.dex.quoter,this.config.contracts.quoter.abi,this.provider),result=await quoter.quoteExactInputSingle.staticCall({tokenIn:side==='buy'?asset:item.address,tokenOut:side==='buy'?item.address:asset,amountIn:input,fee:10000,sqrtPriceLimitX96:0});return result[0];}
   async dexTrade(item,side,body){
@@ -608,7 +721,10 @@ export class TestnetWallet {
       const pairToken = paired ? new Contract(asset.address, this.config.contracts.quote.abi, this.signer) : null;
       if (paired && await pairToken.balanceOf(this.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, asset.decimals)} ${asset.symbol} for the first buy.${asset.test ? ' Use its test faucet in Network and funds.' : ''}`);
       let published;
-      if(publishForLaunch({chain:this.net.key,publicEnabled:this.config.metadataPublishing?.publicEnabled,metadataSupported:!this.needsMetadataUpgrade,publiclyIndexed:!!this.deployment?.shared&&this.model===DEX_MODEL})){
+      // Token details always go into the launch transaction, never afterwards. Where they cannot, nothing launches.
+      const detailsError=launchDetailsError({chain:this.net.key,networkName:this.net.name,metadataSupported:!this.needsMetadataUpgrade,publiclyIndexed:!!this.deployment?.shared&&this.model===DEX_MODEL});
+      if(detailsError)throw new Error(detailsError);
+      {
         this.onProgress('Preparing public token details for the launch transaction…');
         const payload=JSON.stringify({network:this.net.key,name,symbol,...details}),proof=await prepareUploadProof(payload);
         const response=await fetch('/api/metadata/stage',{method:'POST',headers:{'Content-Type':'application/json','X-Elpida-Token':this.config.csrf,...proof},body:payload});
@@ -621,14 +737,22 @@ export class TestnetWallet {
       const approvalCalls=[],batchKey='elpida:launch-batch:'+this.net.chainId+':'+this.address.toLowerCase();
       const batchRequest=args=>this.eth.request(args);
       const atomic=await supportsAtomicLaunch(batchRequest,this.address,this.net.chainId);
-      const approve=async(coin,amount,message)=>{if(atomic)approvalCalls.push({to:coin.target,data:coin.interface.encodeFunctionData('approve',[factory.target,amount]),value:'0x0'});else await this.approvePayment(coin,factory.target,amount,message,inUsdc);};
-      if (paired && !sharedUsdc && await pairToken.allowance(this.address, await factory.getAddress()) < firstBuy) await approve(pairToken,firstBuy,`Approve the ${asset.symbol} first buy…`);
+      // Testnets: approve once per launchpad, then every launch is one confirmation. Mainnet: exact approvals.
+      const approve=async(coin,needed,symbol,exactLabel)=>{
+        const read=()=>coin.allowance(this.address,factory.target);
+        const step=launchApproval({allowance:await read(),needed,mainnet:!!this.net.mainnet,symbol,exactLabel});
+        if(!step)return;
+        if(atomic){approvalCalls.push({to:coin.target,data:coin.interface.encodeFunctionData('approve',[factory.target,step.amount]),value:'0x0'});return;}
+        await this.approvePayment(coin,factory.target,step.amount,step.label,inUsdc);
+        await waitForAllowance(read,needed);
+      };
+      if (paired && !sharedUsdc) await approve(pairToken,firstBuy,asset.symbol,`Approve the ${asset.symbol} first buy…`);
       if(inUsdc){
         if(!this.feeUsdc||this.feeUsdc===ZeroAddress)throw new Error('USDC fee payment is unavailable on this network.');
         const coin=new Contract(this.feeUsdc,this.config.contracts.quote.abi,this.signer);
         const totalUsdc=10_000_000n+(sharedUsdc?firstBuy:0n);
         if(await coin.balanceOf(this.address)<totalUsdc)throw new Error('Add '+formatUnits(totalUsdc,6)+' USDC on this network for the launch fee'+(sharedUsdc?' and first purchase':'')+'. Native gas is separate.');
-        if(await coin.allowance(this.address,factory.target)<totalUsdc)await approve(coin,totalUsdc,'Approve exactly '+formatUnits(totalUsdc,6)+' USDC for the launch fee'+(sharedUsdc?' and first purchase':'')+'…');
+        await approve(coin,totalUsdc,'USDC','Approve exactly '+formatUnits(totalUsdc,6)+' USDC for the launch fee'+(sharedUsdc?' and first purchase':'')+'…');
       }
       await this.oraclePrice();await this.checkNetwork();
       const args=[name,symbol,asset?.address??ZeroAddress,firstBuy,cappedOut*9950n/10000n,reward,published?.uri??'',inUsdc];
@@ -643,7 +767,7 @@ export class TestnetWallet {
         const id=crypto.randomUUID(),calls=[...approvalCalls,{to:factory.target,data:factory.interface.encodeFunctionData('launchWithPayment',args),value:'0x'+value.toString(16)}];
         const record={id,chain:this.net.chainId,created:Date.now(),metadata:published?.metadata??details,uri:published?.uri,storage:metadataStorage};
         localStorage.setItem(batchKey,JSON.stringify(record));
-        this.onProgress('Confirm one atomic launch in your wallet: exact payment approval, token details, creation and first purchase. '+confirmation);
+        this.onProgress('Confirm one atomic launch in your wallet: payment approval, token details, creation and first purchase. '+confirmation);
         try{const sent=await withWalletTimeout(batchRequest({method:'wallet_sendCalls',params:[{version:'2.0.0',id,from:this.address,chainId:'0x'+BigInt(this.net.chainId).toString(16),atomicRequired:true,calls}]}),this.walletName);
           if(typeof sent?.id!=='string'||!sent.id)throw new Error('Wallet did not return a launch batch ID. Check it before retrying.');
           record.id=sent.id;localStorage.setItem(batchKey,JSON.stringify(record));
@@ -662,7 +786,7 @@ export class TestnetWallet {
       const curve = await this.market(item, this.signer);
       const original = new Contract(item.curve, this.artifacts.curve.abi, this.signer);
       if (action === 'reopen') { if (this.modelOf(item) !== DEX_MODEL) throw new Error('Only model 10 curves can be reopened.'); result = await this.wait(original.reopen(), 'Confirm reopening the curve for trading…'); }
-      else if (action === 'graduate') result = await this.wait(original.graduate(), this.dex?'Confirm graduation into Uniswap v3…':'Confirm graduation into the locked test pool…');
+      else if (action === 'graduate') result = await this.wait(original.graduate(), this.dex?`Confirm graduation into ${this.dex.name??'the DEX'}…`:'Confirm graduation into the locked test pool…');
       else if (action === 'withdraw') {
         // Every step is zero-safe on-chain (withdrawFees, collectFees and claim all succeed with nothing owed), so a
         // batching wallet gets them all in ONE confirmation. Other wallets get only the steps that will move money.
@@ -676,7 +800,7 @@ export class TestnetWallet {
             // What a collect would move right now (read-only dry run); unknown counts as "something".
             let collected = null; try { const [a0, a1] = await locker.collectFees.staticCall(); collected = new Map([[(await locker.token0()).toLowerCase(), a0], [(await locker.token1()).toLowerCase(), a1]]); } catch { collected = null; }
             const willCollect = collected === null || [...collected.values()].some(v => v > 0n);
-            if (batch || willCollect) add(locker, { name: 'collectFees', args: [] }, 'Collect Uniswap position fees…');
+            if (batch || willCollect) add(locker, { name: 'collectFees', args: [] }, `Collect ${this.dex.name??'DEX'} position fees…`);
             const recipients = [...new Set([(await this.factoryOf(item).treasury()).toLowerCase(), (await original.creatorRewardVault()).toLowerCase()])];
             for (const asset of [item.address, this.qaddr(item)]) {
               const incoming = collected === null ? 1n : (collected.get(String(asset).toLowerCase()) ?? 0n);
@@ -697,6 +821,9 @@ export class TestnetWallet {
         const payment = action === 'buy' ? new Contract(this.qaddr(item) ?? ZeroAddress, this.config.contracts.quote.abi, this.signer) : new Contract(item.address, this.config.contracts.token.abi, this.signer);
         const marketAddress = await curve.getAddress();
         const steps = [];
+        // Audit finding F-1: a completing buy can be blocked by cheap tokens placed in a pre-created pool. Buy them
+        // out first (never above the graduation price), so this one action still completes and graduates.
+        if (action === 'buy' && this.dex) steps.push(...await this.graduationUnblock(item, original, input, out * (10000n - BigInt(Math.round(percent * 100))) / 10000n));
         if (!(action === 'buy' && item.pair === 'native')) { const approval = approvalFor({ allowance: await payment.allowance(this.address, marketAddress), input, sellingLaunchedToken: action === 'sell', symbol: item.symbol }); if (approval) steps.push({ to: payment.target, data: payment.interface.encodeFunctionData('approve', [marketAddress, approval.amount]), label: approval.label }); }
         const minimum = out * (10000n - BigInt(Math.round(percent * 100))) / 10000n;
         steps.push({ to: marketAddress, data: action === 'buy' ? curve.interface.encodeFunctionData('buy', [input, minimum]) : curve.interface.encodeFunctionData('sell', [input, minimum]), value: action === 'buy' && item.pair === 'native' ? input : 0n, label: 'Confirm the trade in your wallet…' });

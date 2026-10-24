@@ -21,6 +21,7 @@ import {
 } from '../packages/solana/client.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
+import { vaultUpgrade, vaultHandBack, closeProgram, readProgramData } from '../scripts/squads-devnet-trial.mjs';
 import { deployProgram, upgradeProgram, ensurePairConfigs, pricingUpdates, ensurePricing, ensureBetaGate, rejectsTestInstructions, prepareUpgradeBuffer, transferUpgradeAuthority, send, airdrop } from '../packages/solana/deploy.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -515,6 +516,73 @@ test('Solana migration to PumpSwap moves all liquidity into a pool whose LP stay
   assert.equal(await balance(f.client.ata(f.client.poolPda(mint), f.quoteMint)), 0n);
 });
 
+test('Solana completing buy and PumpSwap migration in ONE transaction: the curve is never left closed', { skip: pumpSkip }, async () => {
+  const { mint } = await launch({ symbol: 'ATOM' });
+  await buy(f.trader, mint, 1_000n * USDC, 1n);
+  await afterSnipeWindow(mint);
+  const finalBuy = (units) => [f.client.computeBudget(units), f.client.buy({ buyer: f.trader.publicKey, config: f.config, mint, grossIn: 20_000n * USDC, minTokensOut: 1n }), f.client.migrateToPumpswap({ payer: f.trader.publicKey, config: f.config, mint })];
+  // Size: one legacy transaction must fit Solana's 1,232-byte limit.
+  const { blockhash } = await f.connection.getLatestBlockhash('confirmed');
+  const tx = new web3.Transaction({ feePayer: f.trader.publicKey, recentBlockhash: blockhash }).add(...finalBuy(MIGRATE_COMPUTE_UNITS + 200_000));
+  const bytes = tx.serializeMessage().length + 1 + 64 * tx.compileMessage().header.numRequiredSignatures;
+  assert.ok(bytes <= 1232, `fits one transaction (${bytes} bytes)`);
+  // If anything in the migration fails, the buy fails with it and the curve keeps trading.
+  const before = await pool(mint);
+  await failsWith(send(f.connection, f.trader, finalBuy(150_000), [], 1), /exceeded|compute|ComputationalBudgetExceeded|0x/i);
+  const unchanged = await pool(mint);
+  assert.equal(unchanged.status, before.status, 'still trading'); assert.equal(unchanged.sold, before.sold, 'the buy was rolled back too');
+  // With enough compute: complete and migrate together.
+  await send(f.connection, f.trader, finalBuy(MIGRATE_COMPUTE_UNITS + 200_000), [], 1);
+  assert.equal((await pool(mint)).status, STATUS_MIGRATED, 'completed and on PumpSwap in the same transaction');
+});
+
+// After migration the token page trades through PumpSwap's official SDK, bundled for the browser
+// (apps/web/vendor/pumpswap.mjs, built with the page's own web3.js). The local validator has the real PumpSwap program
+// but not pump's fee program, so this checks everything up to the swap's fee step: the bundle loads with the page's
+// web3.js, reads an Elpida-created pool, quotes it by the constant-product formula, and builds the transaction
+// (wrap SOL / token account / swap) with the 23 accounts the swap expects. The swap itself runs on devnet.
+test('PumpSwap trading after migration: the bundled SDK quotes and builds trades for an Elpida pool', { skip: pumpSkip }, async () => {
+  globalThis.solanaWeb3 = web3;
+  const pumpswap = await import('../apps/web/vendor/pumpswap.mjs');
+  const mint = await completedCurve('PSWP');
+  await migrate(f.outsider, mint);
+  const p = f.client.pumpAccounts(mint, f.quoteMint);
+  const state = await pumpState(mint);
+  const spend = 100n * USDC;
+  const quote = await pumpswap.pumpSwapQuote({ connection: f.connection, pool: p.pool, user: f.trader.publicKey, side: 'buy', amount: spend, slippageBps: 100 });
+  // Constant product on the pool's reserves after fees (flat PumpSwap fees without the fee program: 0.25% LP + 0.05%).
+  const ideal = state.base * spend / (state.quote + spend);
+  assert.ok(quote.out > 0n && quote.out <= ideal && quote.out >= ideal * 99n / 100n, `buy quote ${quote.out} vs ${ideal}`);
+  assert.equal(quote.limit, spend * 101n / 100n, 'a buy may charge at most the amount plus 1% slippage');
+  assert.ok(quote.fee > 0n && quote.fee < spend / 100n, `fee ${quote.fee}`);
+  const tokens = 1_000_000n * 10n ** 6n;
+  const sellQuote = await pumpswap.pumpSwapQuote({ connection: f.connection, pool: p.pool, user: f.trader.publicKey, side: 'sell', amount: tokens, slippageBps: 100 });
+  const idealOut = state.quote * tokens / (state.base + tokens);
+  assert.ok(sellQuote.out > 0n && sellQuote.out <= idealOut && sellQuote.out >= idealOut * 99n / 100n, `sell quote ${sellQuote.out} vs ${idealOut}`);
+  assert.equal(sellQuote.limit, sellQuote.out * 99n / 100n, 'a sell accepts at least 99% of the quote');
+  for (const side of ['buy', 'sell']) {
+    const trade = await pumpswap.pumpSwapTrade({ connection: f.connection, pool: p.pool, user: f.trader.publicKey, side, amount: side === 'buy' ? spend : tokens, slippageBps: 100 });
+    const code = side === 'buy' ? [102, 6, 61, 18, 1, 218, 235, 234] : [51, 230, 133, 164, 1, 127, 131, 173];
+    const pumpIxs = trade.instructions.filter(ix => ix.programId.toBase58() === PUMP_AMM_PROGRAM);
+    const swap = pumpIxs.find(ix => code.every((b, i) => ix.data[i] === b));
+    assert.ok(swap, `${side}: a PumpSwap ${side} instruction`);
+    assert.ok(swap.programId instanceof PublicKey, 'the page\'s own web3.js classes, not a second copy');
+    // Pools created before PumpSwap grew its pool account (287 → 300 bytes) are extended first, by the SDK.
+    for (const other of pumpIxs.filter(ix => ix !== swap)) assert.deepEqual([...other.data.subarray(0, 8)], [234, 102, 194, 203, 150, 72, 62, 229], 'only extend_account besides the swap');
+    assert.equal(swap.keys[0].pubkey.toBase58(), p.pool.toBase58()); assert.equal(swap.keys[1].pubkey.toBase58(), f.trader.publicKey.toBase58()); assert.ok(swap.keys[1].isSigner);
+    assert.equal(swap.keys[3].pubkey.toBase58(), mint.toBase58()); assert.equal(swap.keys[4].pubkey.toBase58(), f.quoteMint.toBase58());
+    assert.equal(swap.keys[7].pubkey.toBase58(), p.poolBase.toBase58()); assert.equal(swap.keys[8].pubkey.toBase58(), p.poolQuote.toBase58());
+    assert.ok(swap.keys.length >= 21, `${side}: ${swap.keys.length} accounts`);
+    // The transaction is accepted up to the swap: PumpSwap runs and only stops at pump's fee program (absent here).
+    const { blockhash } = await f.connection.getLatestBlockhash('confirmed');
+    const tx = new web3.Transaction({ feePayer: f.trader.publicKey, recentBlockhash: blockhash }).add(f.client.computeBudget(300_000), ...trade.instructions);
+    const bytes = tx.serializeMessage().length + 1 + 64 * tx.compileMessage().header.numRequiredSignatures;
+    assert.ok(bytes <= 1232, `${side} fits one transaction (${bytes} bytes)`);
+    const sim = await f.connection.simulateTransaction(tx);
+    assert.ok((sim.value.logs ?? []).some(l => l.startsWith(`Program ${PUMP_AMM_PROGRAM} invoke`)), `${side}: PumpSwap was reached\n${(sim.value.logs ?? []).join('\n')}`);
+  }
+});
+
 test('Solana harvest withdraws only LP fee growth, splits it 50/50 and never touches the principal', { skip: pumpSkip }, async () => {
   const mint = await completedCurve('HARV');
   const p = f.client.pumpAccounts(mint, f.quoteMint);
@@ -825,6 +893,33 @@ test('Solana mainnet build rejects test instructions; the upgrade authority can 
   assert.equal(await rejectsTestInstructions({ connection: f.connection, payer: f.authority, programId }), false, 'back on the test build');
   // Hand authority back so the remaining tests can upgrade.
   await transferUpgradeAuthority({ connection: f.connection, payer: multisig, programId, newAuthority: f.authority.publicKey });
+});
+
+// The Squads devnet rehearsal (scripts/squads-devnet-trial.mjs) signs these loader instructions from a Squads vault. Here
+// a plain key stands in for the vault, so the upgrade, hand-back and four-account close are checked against the real
+// upgradeable loader. The Squads approval itself (2 of 2) runs against the real Squads program on devnet.
+test('Squads rehearsal: a vault upgrades a throwaway program, hands authority back, and the program closes with its rent', { skip }, async () => {
+  const { loaderV3 } = await import('../packages/solana/client.mjs');
+  const loader = loaderV3(web3), programKeypair = Keypair.generate(), vault = Keypair.generate(), elf = readFileSync(elfPath);
+  await airdrop(f.connection, vault.publicKey, web3.LAMPORTS_PER_SOL);
+  await deployProgram({ connection: f.connection, payer: f.authority, programKeypair, elf, sendsPerSecond: 200 });
+  const programId = programKeypair.publicKey, programData = createElpidaSolana(web3, programId).programDataAddress;
+  const state = async () => readProgramData((await f.connection.getAccountInfo(programData)).data);
+  await send(f.connection, f.authority, [loader.setAuthority({ account: programData, authority: f.authority.publicKey, newAuthority: vault.publicKey })]);
+  assert.deepEqual([...(await state()).authority], [...vault.publicKey.toBytes()], 'the vault holds the upgrade authority');
+  await failsWith(send(f.connection, f.authority, [loader.setAuthority({ account: programData, authority: f.authority.publicKey, newAuthority: f.authority.publicKey })], [], 1), /incorrect authority|IncorrectAuthority|0x|custom/i);
+  const { prepareUpgradeBuffer } = await import('../packages/solana/deploy.mjs');
+  const buffer = await prepareUpgradeBuffer({ connection: f.connection, payer: f.authority, elf, multisig: vault.publicKey.toBase58(), sendsPerSecond: 200 });
+  const before = (await state()).slot;
+  await send(f.connection, vault, vaultUpgrade({ loader, programId, programData, buffer, spill: f.authority.publicKey, vault: vault.publicKey }));
+  assert.ok((await state()).slot > before, 'upgraded: the last-deployed slot moved');
+  assert.equal(await f.connection.getAccountInfo(buffer), null, 'the buffer is consumed and its rent refunded');
+  await send(f.connection, vault, vaultHandBack({ loader, programData, vault: vault.publicKey, to: f.authority.publicKey }));
+  assert.deepEqual([...(await state()).authority], [...f.authority.publicKey.toBytes()], 'authority handed back');
+  const rent = (await f.connection.getAccountInfo(programData)).lamports, held = await f.connection.getBalance(f.authority.publicKey);
+  await send(f.connection, f.authority, [closeProgram({ web3, programData, recipient: f.authority.publicKey, authority: f.authority.publicKey, programId })]);
+  assert.equal(await f.connection.getAccountInfo(programData), null, 'program data closed');
+  assert.ok(await f.connection.getBalance(f.authority.publicKey) - held > rent - 100_000, 'its rent came back');
 });
 
 test('Solana compatibility: clients detect a program without metadata support and launch with the earlier layout', { skip }, async () => {

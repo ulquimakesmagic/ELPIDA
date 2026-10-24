@@ -16,14 +16,16 @@ function walletOn(key, netPatch = {}) {
   return w;
 }
 
-test('Ethereum Sepolia now uses Uniswap v3 and Model 10; BNB and Robinhood keep the beta curve until enabled', () => {
+test('Ethereum Sepolia (Uniswap v3), BNB Testnet (PancakeSwap v3) and Robinhood testnet (Elpida test deployment of Uniswap v3) use Model 10', () => {
   const eth = walletOn('ethereum-sepolia');
   assert.equal(eth.dex.name, 'Uniswap v3'); assert.equal(eth.dex.routerVersion, 2);
   assert.equal(eth.model, DEX_MODEL); assert.equal(eth.artifacts.factory.name, 'atomic'); assert.equal(eth.artifacts.curve.name, 'dexCurve');
-  for (const key of ['bnb-testnet', 'robinhood-testnet']) {
-    const w = walletOn(key);
-    assert.equal(w.dex, null, key); assert.equal(w.model, BETA_MODEL, key); assert.equal(w.artifacts.factory.name, 'legacy', key);
-  }
+  const bnb = walletOn('bnb-testnet');
+  assert.equal(bnb.dex.name, 'PancakeSwap v3'); assert.equal(bnb.dex.routerVersion, 1, 'PancakeSwap periphery router layout');
+  assert.equal(bnb.model, DEX_MODEL); assert.equal(bnb.artifacts.factory.name, 'atomic');
+  const rh = walletOn('robinhood-testnet');
+  assert.equal(rh.dex.name, 'Uniswap v3 (Elpida test deployment)'); assert.equal(rh.dex.routerVersion, 2);
+  assert.equal(rh.model, DEX_MODEL); assert.equal(rh.artifacts.factory.name, 'atomic');
   assert.equal(walletOn('base-sepolia').model, DEX_MODEL);
 });
 
@@ -40,4 +42,21 @@ test('Ethereum Sepolia uses the pinned team launchpad, which takes precedence ov
   localStorage.setItem(`elpida:${DEX_MODEL}:deployment:11155111`, JSON.stringify({ factory: '0x' + '3'.repeat(40), model: DEX_MODEL, launchFeaturesVersion: 1 }));
   const d = eth.deployment;
   assert.equal(d.factory, '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2'); assert.equal(d.shared, true); assert.equal(d.block, 11972040); assert.equal(d.model, DEX_MODEL);
+});
+
+test('BNB tokens are labelled PancakeSwap v3 wherever the DEX is named (indexer and wallet)', async () => {
+  const { EvmIndexer } = await import('../packages/indexer/evm-indexer.mjs');
+  const contracts = Object.fromEntries(['factory', 'curve', 'pool', 'token', 'dexPool'].map(n => [n, { abi: [] }]));
+  const index = new EvmIndexer({ provider: {}, factory: '0x' + '1'.repeat(40), contracts, dexName: testnetDexes['bnb-testnet'].name });
+  assert.equal(index.dexName, 'PancakeSwap v3'); await index.close?.();
+  const plain = new EvmIndexer({ provider: {}, factory: '0x' + '1'.repeat(40), contracts });
+  assert.equal(plain.dexName, 'Uniswap v3', 'default unchanged'); await plain.close?.();
+  assert.equal(walletOn('bnb-testnet').dex.name, 'PancakeSwap v3');
+});
+
+test('BNB Testnet uses its pinned team launchpad (atomic, requires token details) through publicnode', () => {
+  const bnb = walletOn('bnb-testnet');
+  assert.equal(bnb.deployment.factory, '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE'); assert.equal(bnb.deployment.shared, true);
+  assert.equal(bnb.deployment.block, 138485798); assert.equal(bnb.deployment.model, DEX_MODEL);
+  assert.equal(bnb.net.rpcUrl, 'https://bsc-testnet-rpc.publicnode.com');
 });

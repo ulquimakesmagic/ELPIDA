@@ -27,3 +27,28 @@ export function approvalFor({ allowance, input, sellingLaunchedToken, symbol = '
     ? { amount: MAX_UINT256, label: `Approve ${symbol} for selling here (once; later sells need one confirmation)…` }
     : { amount: input, label: 'Approve exactly this trade amount…' };
 }
+
+// Launches (23 Oct 2026). A wallet without batching (EIP-5792) needs an approval before a launch that pays in USDC or
+// a paired token. The launchpad only ever pulls from the caller of its own launch (msg.sender), in the amounts that
+// caller passes: the 10 USDC fee and the creator's first buy. So on testnets the asset is approved once for that
+// launchpad and every later launch is one confirmation. Mainnet keeps exact approvals until the contracts are audited.
+
+/** The approval to request before a launch, or null if the allowance already covers it. */
+export function launchApproval({ allowance, needed, mainnet = false, symbol = 'USDC', exactLabel }) {
+  if (allowance >= needed) return null;
+  return mainnet
+    ? { amount: needed, label: exactLabel ?? `Approve exactly this ${symbol} amount…` }
+    : { amount: MAX_UINT256, label: `Approve ${symbol} for launches on this launchpad (once; later launches need one confirmation)…` };
+}
+
+/**
+ * Waits until a confirmed approval is visible to the RPC the launch is estimated on. Load-balanced public RPCs can
+ * answer from a node a few blocks behind; launching then fails, and a retry would read no allowance and ask again.
+ */
+export async function waitForAllowance(read, needed, { attempts = 12, sleep = ms => new Promise(r => setTimeout(r, ms)) } = {}) {
+  for (let i = 0; i < attempts; i++) {
+    if (await read() >= needed) return;
+    await sleep(1500);
+  }
+  throw new Error('The approval is confirmed, but the network has not caught up yet. Wait a few seconds and launch again; you will not be asked to approve again.');
+}

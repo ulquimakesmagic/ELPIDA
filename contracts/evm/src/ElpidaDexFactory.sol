@@ -56,6 +56,8 @@ contract ElpidaDexFactory is ElpidaUsdPricing {
     }
     function pricingOwner() internal view override returns(address){return treasury;}
     function automaticGraduation() public pure virtual returns(bool){return false;}
+    /// True when every launch must publish its token details (an ipfs:// URI) in the launch transaction itself.
+    function requiresMetadata() public pure virtual returns(bool){return false;}
     function OPTIONAL_CREATOR_BUY_VERSION() external pure returns(uint256){return 1;}
     /// Deprecated compatibility endpoint. Manual repricing is disabled.
     function setPricing(uint256,uint256) external view {
@@ -76,6 +78,7 @@ contract ElpidaDexFactory is ElpidaUsdPricing {
     }
     /// Native pair: msg.value = creation fee + first buy.
     function launch(string calldata name_,string calldata symbol_,uint256 firstBuy,uint256 minOut,address reward) external payable returns (address,address) {
+        require(!requiresMetadata(),"metadata required");
         return _launch(name_,symbol_,firstBuy,minOut,reward,false);
     }
     function launchWithMetadata(string calldata name_,string calldata symbol_,uint256 firstBuy,uint256 minOut,address reward,string calldata uri) external payable returns (address token,address curve) {
@@ -83,13 +86,14 @@ contract ElpidaDexFactory is ElpidaUsdPricing {
     }
     /// Paired launch: msg.value = creation fee; the first buy is pulled in the approved asset.
     function launchPaired(string calldata name_,string calldata symbol_,address asset,uint256 firstBuy,uint256 minOut,address reward) external payable returns(address token,address curve){
+        require(!requiresMetadata(),"metadata required");
         return _launchPaired(name_,symbol_,asset,firstBuy,minOut,reward,false);
     }
     function launchPairedWithMetadata(string calldata name_,string calldata symbol_,address asset,uint256 firstBuy,uint256 minOut,address reward,string calldata uri) external payable returns(address token,address curve){
         _uri(uri);(token,curve)=_launchPaired(name_,symbol_,asset,firstBuy,minOut,reward,false);_publish(token,uri);
     }
     function launchWithPayment(string calldata name_,string calldata symbol_,address asset,uint256 firstBuy,uint256 minOut,address reward,string calldata uri,bool inUsdc) external payable returns(address token,address curve){
-        if(bytes(uri).length>0)_uri(uri);
+        if(bytes(uri).length>0)_uri(uri);else require(!requiresMetadata(),"metadata required");
         (token,curve)=asset==address(0)?_launch(name_,symbol_,firstBuy,minOut,reward,inUsdc):_launchPaired(name_,symbol_,asset,firstBuy,minOut,reward,inUsdc);
         if(bytes(uri).length>0)_publish(token,uri);
     }

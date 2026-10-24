@@ -1,5 +1,5 @@
 import { nowSeconds } from './clock.mjs';
-import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut } from '/elpida-solana.mjs';
+import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut } from '/elpida-solana.mjs';
 import {normalizeMetadata} from './metadata.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 import { PAIR_LIMITS, usdReferenceFor } from '/pairs.mjs';
@@ -195,6 +195,29 @@ export class SolanaWallet {
     const held = this.client.tokenAmount((await this.connection.getAccountInfo(this.client.quoteAta(this.publicKey, config)))?.data);
     return this.client.wrapSol(this.publicKey, amount > held ? amount - held : 0n);
   }
+  /**
+   * The buy that completes a curve and the PumpSwap migration go in ONE transaction: if the migration fails, the buy
+   * fails with it and the curve keeps trading, so it is never left closed waiting for someone to migrate or reopen it.
+   * For SOL pairs, wrapping (and unwrapping) move to their own transactions only if everything does not fit in one.
+   */
+  async completeAndMigrate({ config, refs, mint, wrap, buyIx, symbol = null }) {
+    if (BigInt(await this.connection.getBalance(this.publicKey)) < SolanaWallet.MIGRATION_RENT + SolanaWallet.SOL_HEADROOM) throw new Error(`This buy completes the curve and opens its PumpSwap pool in the same transaction, which needs about ${formatAmount(SolanaWallet.MIGRATION_RENT, 9)} SOL of pool rent (most of it comes back). Add SOL and try again. Nothing was sent.`);
+    const core = [this.client.computeBudget(MIGRATE_COMPUTE_UNITS + 200_000), buyIx, this.client.migrateToPumpswap({ payer: this.publicKey, config: refs, mint })];
+    const unwrap = config.wsol ? [this.client.unwrapSol(this.publicKey)] : [];
+    const message = 'Confirm the final buy. It completes the curve and opens the PumpSwap pool in the same transaction…';
+    let signature;
+    if (!wrap.length && !unwrap.length) signature = await this.sendInstructions(core, [], message);
+    else if (await this.fitsOneTransaction([...wrap, ...core, ...unwrap])) signature = await this.sendInstructions([...wrap, ...core, ...unwrap], [], message);
+    else {
+      if (wrap.length) await this.sendInstructions(wrap, [], 'Step 1: confirm wrapping SOL for the final buy…');
+      signature = await this.sendInstructions(core, [], 'Step 2: ' + message);
+      if (unwrap.length) await this.sendInstructions(unwrap, [], 'Step 3: confirm returning the unused wrapped SOL…').catch(() => {});
+    }
+    // Name the launched token, not the pair asset (`config.symbol` is SOL or USDC).
+    return { hash: signature, message: `The curve is complete and ${symbol ?? 'the token'} now trades on PumpSwap. The liquidity is locked for good.` };
+  }
+  /** Rent the PumpSwap migration advances (most of it is refunded in the same transaction). */
+  static MIGRATION_RENT = 60_000_000n;
   /** Rent and fees a SOL-pair transaction needs on top of the trade (new accounts, priority-free fee). */
   static SOL_HEADROOM = 30_000_000n;
   /** Public discovery: the server's indexer first (persistent, with history), else a direct read-only chain scan. */
@@ -286,12 +309,61 @@ export class SolanaWallet {
     if (!info) throw new Error('Token not found. Refresh the launchpad.');
     return { mint, pool: this.client.decodePool(info.data) };
   }
+  /** PumpSwap's official SDK (bundled vendor module), loaded only when a migrated token is traded. Injectable in tests. */
+  async pumpSwap() {
+    this.pumpSwapModule ??= await import('/vendor/pumpswap.mjs');
+    return this.pumpSwapModule;
+  }
+  /** The migrated token's PumpSwap pool address, from its Elpida migration record. */
+  async pumpPoolOf(pool) {
+    const [state] = (await this.pumpStates([pool])).values();
+    if (!state?.pumpPool) throw new Error('The PumpSwap pool for this token could not be read. Try again in a moment.');
+    return new web3.PublicKey(state.pumpPool);
+  }
+  /** Amount, side and slippage checks shared by the PumpSwap quote and trade. */
+  pumpSwapInput({ config, side, amount, slippage = '1' }) {
+    if (side !== 'buy' && side !== 'sell') throw new Error('Unknown action.');
+    const raw = parseAmount(amount, side === 'buy' ? config.quoteDecimals : TOKEN_DECIMALS);
+    if (raw <= 0n) throw new Error('Enter an amount greater than zero.');
+    const percent = Number(slippage);
+    if (!Number.isFinite(percent) || percent < 0.1 || percent > 5) throw new Error('Slippage must be between 0.1% and 5%.');
+    return { raw, slippageBps: Math.round(percent * 100) };
+  }
+  /**
+   * After migration the token trades on its locked PumpSwap pool, from this page like any other trade. The wallet
+   * still signs once: SOL is wrapped and unwrapped inside the same transaction, and it is simulated before signing.
+   */
+  async pumpSwapTrade({ pool, config, action, body }) {
+    const { raw, slippageBps } = this.pumpSwapInput({ config, side: action, amount: body.amount, slippage: body.slippage });
+    if (action === 'sell') {
+      const held = this.client.tokenAmount((await this.connection.getAccountInfo(this.client.ata(this.publicKey, pool.mint)))?.data);
+      if (held < raw) throw new Error(`You hold ${formatAmount(held, TOKEN_DECIMALS)} ${pool.symbol}.`);
+    }
+    const { pumpSwapTrade } = await this.pumpSwap();
+    const trade = await pumpSwapTrade({ connection: this.connection, pool: await this.pumpPoolOf(pool), user: this.publicKey, side: action, amount: raw, slippageBps });
+    // A PumpSwap buy takes an exact token amount and may charge up to the slippage limit, so that is what must be held.
+    if (action === 'buy') {
+      const held = await this.quoteBalance(this.publicKey, config);
+      if (held < trade.limit + (config.wsol ? SolanaWallet.SOL_HEADROOM : 0n)) throw new Error(`Not enough ${config.symbol} on ${this.net.name}: this buy may charge up to ${formatAmount(trade.limit, config.quoteDecimals)} ${config.symbol} with your slippage setting.${config.wsol ? ' Keep a little SOL for network fees and new accounts.' : ''}`);
+    }
+    const signature = await this.sendInstructions([this.client.computeBudget(PUMPSWAP_COMPUTE_UNITS), ...trade.instructions], [], `Confirm the ${action} on PumpSwap in your wallet…`);
+    return { hash: signature, message: `${action === 'buy' ? 'Bought' : 'Sold'} ${pool.symbol} on PumpSwap.` };
+  }
   async getQuote({ token, side, amount }) {
     await this.loadConfig();
     const { pool } = await this.freshPool(token);
     const config = this.configOf(pool);
     if (!config) throw new Error('This token uses an unknown configuration.');
     const d = config.quoteDecimals;
+    if (pool.status === STATUS_MIGRATED) {
+      const { raw, slippageBps } = this.pumpSwapInput({ config, side, amount });
+      const { pumpSwapQuote } = await this.pumpSwap();
+      const q = await pumpSwapQuote({ connection: this.connection, pool: await this.pumpPoolOf(pool), user: this.publicKey ?? web3.PublicKey.default, side, amount: raw, slippageBps });
+      // Fees come from PumpSwap's own fee schedule, as its SDK computes them for this pool now.
+      return side === 'buy'
+        ? { out: formatAmount(q.out, TOKEN_DECIMALS), fee: formatAmount(q.fee, d), spend: formatAmount(raw, d), maxSpend: formatAmount(q.limit, d), venue: 'PumpSwap' }
+        : { out: formatAmount(q.out, d), fee: formatAmount(q.fee, d), venue: 'PumpSwap' };
+    }
     const feeBps = currentFeeBps(config, pool.createdAt, chainNow());
     const extra = { feeBps: Number(feeBps), antiSnipeActive: feeBps > BigInt(config.baseFeeBps) };
     if (side === 'buy') {
@@ -407,6 +479,9 @@ export class SolanaWallet {
       const fresh = { virtualQuote: terms.virtualQuote, virtualToken: config.virtualToken, curveSupply: config.curveSupply, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 };
       // The creator's first buy pays only the base fee (no anti-snipe tax); a buy beyond the curve is capped.
       const q = firstBuy===0n ? {tokens:0n,gross:0n,fee:0n} : quoteBuy(fresh, firstBuy, config.baseFeeBps, config.baseFeeBps);
+      // The buy that completes a curve also opens its PumpSwap pool in the same transaction, so a curve is never left
+      // closed. That does not fit inside a launch transaction, so a creator buy cannot take the whole curve.
+      if (q.graduates) throw new Error(`A creator buy can take at most part of the curve: the buy that completes it must also open the PumpSwap pool, which does not fit in the launch transaction. Lower the first buy below ${formatAmount(q.gross, d)} ${config.symbol}. Nothing was submitted.`);
       // The SOL creation fee is paid from plain SOL; for SOL pairs the first buy is wrapped from it too.
       const solNeeded = maxFee + (config.wsol ? q.gross : 0n) + SolanaWallet.SOL_HEADROOM;
       let usdc = null;
@@ -427,6 +502,8 @@ export class SolanaWallet {
       // metadata in the launch transaction (D11), so wallets and explorers show the name and image.
       // A program not yet upgraded to metadata support keeps the earlier launch (details in this browser).
       const withMetadata = await this.supportsMetadata();
+      // Token details are always written in the launch transaction, never afterwards.
+      if (!withMetadata) throw new Error(`The ${this.net.name} program does not write token details at launch yet, and Elpida launches only with details included. The team upgrades it with the Solana deploy script. Nothing was submitted.`);
       let published = { metadata, storage: null };
       if (withMetadata) {
         this.onProgress?.('Publishing token details for the launch…');
@@ -485,10 +562,7 @@ export class SolanaWallet {
       if (!hashes.length) throw new Error('Nothing to distribute yet. LP fees become harvestable once PumpSwap trading has earned at least 0.01% of the locked position.');
       return { hash: hashes.at(-1), message: 'Fees distributed 50/50 to the treasury and the creator reward wallet.' };
     }
-    if (pool.status === STATUS_MIGRATED) {
-      const [state] = (await this.pumpStates([pool])).values();
-      throw new Error(`This token trades on PumpSwap now (pool ${state?.pumpPool ?? 'unknown'}).`);
-    }
+    if (pool.status === STATUS_MIGRATED) return this.pumpSwapTrade({ pool, config, action, body });
     const percent = Number(body.slippage);
     if (!Number.isFinite(percent) || percent < 0.1 || percent > 5) throw new Error('Slippage must be between 0.1% and 5%.');
     const bps = BigInt(Math.round(percent * 100));
@@ -501,7 +575,9 @@ export class SolanaWallet {
       const held = await this.quoteBalance(this.publicKey, config);
       if (held < q.gross + (config.wsol ? 5_000_000n : 0n)) throw new Error(`Not enough ${config.symbol} on ${this.net.name}.${config.test ? ' Use its test faucet in Network and funds.' : config.wsol ? ' Get devnet SOL at faucet.solana.com.' : ''}`);
       // Only what the trade actually charges is wrapped; a partial final fill leaves the rest unspent.
-      instruction = [...await this.wrapFor(config, q.gross), this.client.buy({ buyer: this.publicKey, config: refs, mint, grossIn: q.gross, minTokensOut: q.tokens * (10000n - bps) / 10000n })];
+      const wrap = await this.wrapFor(config, q.gross), buyIx = this.client.buy({ buyer: this.publicKey, config: refs, mint, grossIn: q.gross, minTokensOut: q.tokens * (10000n - bps) / 10000n });
+      if (q.graduates) return this.completeAndMigrate({ config, refs, mint, wrap, buyIx, symbol: pool.symbol });
+      instruction = [...wrap, buyIx];
     } else if (action === 'sell') {
       const tokensIn = parseAmount(body.amount, TOKEN_DECIMALS);
       const q = quoteSell(pool, tokensIn, feeBps, config.baseFeeBps);

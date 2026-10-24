@@ -1,4 +1,4 @@
-export function evaluateOperations({now=Date.now(),startedAt=now,storage={},networks={},prices={},backup={},graduation,durable=false}={}){
+export function evaluateOperations({now=Date.now(),startedAt=now,storage={},networks={},prices={},backup={},graduation,relay,durable=false}={}){
  const incidents=[],add=(code,severity,message)=>incidents.push({code,severity,message});
  if(!durable)add('storage_ephemeral','warning','Persistent storage is not configured.');
  for(const [field,cap,code] of [['bytes','maxBytes','storage_capacity'],['pendingBytes','maxPendingBytes','pending_capacity']])if(storage[cap]>0&&storage[field]/storage[cap]>=0.8)add(code,storage[field]>=storage[cap]?'critical':'warning','Metadata storage is approaching its limit.');
@@ -8,8 +8,18 @@ export function evaluateOperations({now=Date.now(),startedAt=now,storage={},netw
   if(!graduation.enabled)add('graduation_disabled','warning','Automatic Base Sepolia graduation needs an operator gas wallet.');
   else if(graduation.state==='retrying'||graduation.reason)add('graduation_delayed','critical','Automatic graduation needs operator attention: '+(graduation.reason??'transaction reverted')+'.');
  }
+ // Testnet price relay: a relayed price older than the factory's maximum age blocks launches on that test chain.
+ if(relay?.misconfigured)add('price_relay_key','critical','The testnet price relay key is malformed; nothing is relayed.');
+ for(const [name,r] of Object.entries(relay?.networks??{}))if(r.feed&&!warm){
+  const age=r.relayedUpdatedAt?now/1000-r.relayedUpdatedAt:Infinity;
+  if(!relay.enabled||age>(r.maxAge??3600))add('price_relay_'+name,'critical','The testnet price relay on '+name+' is stopped or stale; launches there are refused until it posts.');
+  else if(r.error||age>(r.maxAge??3600)/2)add('price_relay_'+name,'warning','The testnet price relay on '+name+' is falling behind.');
+  if(r.balance!=null&&Number(r.balance)<0.001)add('price_relay_'+name+'_gas','warning','The testnet price relay wallet on '+name+' is low on gas.');
+ }
  for(const [name,n] of Object.entries(networks))if(n.enabled){
   if(!warm&&(n.error||!Number.isFinite(Date.parse(n.lastSuccess))||now-Date.parse(n.lastSuccess)>180000||Number(n.lag)>100))add('indexer_'+name,'critical','Public indexing is behind or unavailable on '+name+'.');
+  // Earlier launchpads keep their own index (their tokens stay listed and tradable): a stuck one is a warning.
+  if(!warm&&(n.legacy??[]).some(l=>l.error||Number(l.lag)>100))add('indexer_'+name+'_legacy','warning','An earlier launchpad index on '+name+' is behind or unavailable; its tokens may show stale state.');
   const p=prices[name];if(!warm&&(!p||p.status!=='fresh'||!Number.isFinite(p.usd)||p.usd<=0||now/1000-p.updatedAt>(p.maxAge??180)))add('price_'+name,'warning','A fresh display price is unavailable on '+name+'. On-chain launch pricing is checked separately.');
  }
  if(backup.lastError)add('backup_failed','critical','The last backup attempt or configuration failed.');
