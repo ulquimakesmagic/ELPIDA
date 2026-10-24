@@ -35,6 +35,8 @@ export const PRICE_UPDATE_SIZE = 134;
 export const USD_PRICING = { feeUsdE6: 10_000_000n, startFdvUsdE6: 5_000_000_000n, maxAgeSecs: 120, maxConfBps: 200 };
 export const MIGRATE_COMPUTE_UNITS = 600_000;
 export const HARVEST_COMPUTE_UNITS = 400_000;
+/** A PumpSwap buy or sell with SOL wrapping, token-account creation and fee-program calls. */
+export const PUMPSWAP_COMPUTE_UNITS = 300_000;
 
 // PumpSwap (pump AMM), same addresses on mainnet and devnet.
 export const PUMP_AMM_PROGRAM = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
