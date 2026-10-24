@@ -1,4 +1,4 @@
-import {h,icon,number,usdRate} from './ui.mjs';
+import {h,icon,number,compact,usdRate} from './ui.mjs';
 // Executed-trade chart for the token page. Lightweight Charts draws it; every colour is read from the
 // active theme at draw time. Data is executed trades only: no quotes, no simulated history.
 const preferences=new Map();
@@ -36,7 +36,7 @@ export function terminalChart(ctx,token,q){
   if(!bar){legend.replaceChildren();return;}
   const up=bar.close>=bar.open,chg=pctText(bar.open,bar.close);
   const cell=(k,v)=>h('span.cr-cell',h('em',k),v);
-  legend.replaceChildren(h('span.cr-basis',pref.basis==='cap'?'Market cap':'Price'),cell('O',formatter(bar.open)),cell('H',formatter(bar.high)),cell('L',formatter(bar.low)),cell('C',formatter(bar.close)),chg?h('span.cr-chg',{'data-dir':up?'up':'down'},chg):null,volume!==undefined?cell('Vol',number(volume,0)):null,h('span.cr-unit',unit));
+  legend.replaceChildren(h('span.cr-basis',pref.basis==='cap'?'Market cap':'Price'),cell('O',formatter(bar.open)),cell('H',formatter(bar.high)),cell('L',formatter(bar.low)),cell('C',formatter(bar.close)),chg?h('span.cr-chg',{'data-dir':up?'up':'down'},chg):null,h('span.cr-unit',unit),volume!==undefined?cell('Vol',`${compact(volume)} ${token.metadata?.symbol??token.symbol??''}`.trim()):null);
  }
  function empty(message,sub){overlay.replaceChildren(h('div.chart-empty',icon('chart-candlestick','icon-lg'),h('strong',message),sub?h('span',sub):null));overlay.hidden=false;}
  function paint(points,data){

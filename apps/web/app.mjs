@@ -106,7 +106,7 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
     const indexed=results.flatMap(r=>r.status==='fulfilled'?r.value:[]);
     const merged=new Map(indexed.map(t=>[`${t.network}:${t.address.toLowerCase()}`,t]));
     for(const t of next.tokens??[]){const key=`${currentChain()}:${t.address.toLowerCase()}`,publicToken=merged.get(key);merged.set(key,{...publicToken,...t,priceChange24h:publicToken?.priceChange24h??t.priceChange24h,network:currentChain()});}
-    if(solWallet.deployment&&wallet!==solWallet){try{for(const t of await solWallet.publicTokens())merged.set(`${solWallet.net.key}:${t.address}`,{...t,network:solWallet.net.key});}catch{discoveryErrors.push(solWallet.net.name);}}
+    if(solWallet.deployment&&wallet!==solWallet){try{for(const t of await solWallet.publicTokens())merged.set(`${solWallet.net.key}:${t.address}`,{...t,network:solWallet.net.key,usdReference:usdReferenceFor({...t,usdReference:null},config.prices?.[solWallet.net.key],nowSeconds())});}catch{discoveryErrors.push(solWallet.net.name);}}
     allTokens=[...merged.values()];
     if(currentRoute.name==='explore')rerender('background');
     refreshLastSale();
@@ -157,9 +157,11 @@ function walletButtons(net, { onDone = () => {}, onError = () => {} } = {}) {
   const sorted = [...list].sort((a, b) => Number(b.id === chosen) - Number(a.id === chosen));
   return h('div.wallet-choices',h('p.small.muted','Connecting lets you interact—it does not give us access to your funds.'), sorted.map((w, i) => h(`button.btn.${i === 0 ? 'btn-primary' : 'btn-secondary'}`, { type: 'button', 'data-busy-disable': '', on: { click: async event => {
     const button = event.currentTarget, text = button.lastChild, label = text.textContent; button.disabled = true; text.textContent = `Waiting for ${w.name}…`;
-    try { await connect(net.key, w.id); toast(`Connected to ${net.name} with ${w.name}.`, { kind: 'success' }); onDone(); }
+    // A wallet that never shows its prompt (a queued request, a locked extension) must not leave the button stuck.
+    let timer; const quiet = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${w.name} has not answered for a minute. Open the ${w.name} extension: approve or reject any pending request (connect or switch to ${net.name}), then try again. Reloading the page also clears it.`)), 60000); });
+    try { await Promise.race([connect(net.key, w.id), quiet]); toast(`Connected to ${net.name} with ${w.name}.`, { kind: 'success' }); onDone(); }
     catch (e) { onError(e); }
-    finally { button.disabled = false; text.textContent = label; }
+    finally { clearTimeout(timer); button.disabled = false; text.textContent = label; }
   } } }, w.icon && (/^data:image\//.test(w.icon)||/^\/assets\/wallets\//.test(w.icon)) ? h('img.wallet-icon', { src: w.icon, alt: '', width: 18, height: 18 }) : icon('wallet', 'icon-sm'), h('span', list.length > 1 ? w.name : `Connect ${w.name}`))));
 }
 const ctx = {
@@ -454,7 +456,11 @@ async function init() {
   const configSent = Date.now();
   config = await api('config');
   syncClock(config.serverTime, configSent);
-  setInterval(()=>{if(!busy&&document.visibilityState==='visible'&&!(currentRoute.name==='rewards'&&document.activeElement?.closest('form')))refresh({preserveInput:true}).catch(()=>{});},60000);
+  // Background refresh. Also on returning to the tab: timers do not run while it is hidden, and a dollar reference
+  // older than 3 minutes is shown as stale (values fall back to the pair's own unit) until prices are re-read.
+  const backgroundRefresh=()=>{if(!busy&&document.visibilityState==='visible'&&!(currentRoute.name==='rewards'&&document.activeElement?.closest('form')))refresh({preserveInput:true}).catch(()=>{});};
+  setInterval(backgroundRefresh,60000);
+  document.addEventListener('visibilitychange',backgroundRefresh);
   setInterval(()=>{if(document.visibilityState==='visible')refreshLastSale();},30000);
   if (config.solana?.mainnet) {
     $('#footer-note').textContent = 'Solana mainnet beta: real funds, new contracts. Other networks are test networks with no monetary value.';
