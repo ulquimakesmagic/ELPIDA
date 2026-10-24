@@ -157,9 +157,11 @@ function walletButtons(net, { onDone = () => {}, onError = () => {} } = {}) {
   const sorted = [...list].sort((a, b) => Number(b.id === chosen) - Number(a.id === chosen));
   return h('div.wallet-choices',h('p.small.muted','Connecting lets you interact—it does not give us access to your funds.'), sorted.map((w, i) => h(`button.btn.${i === 0 ? 'btn-primary' : 'btn-secondary'}`, { type: 'button', 'data-busy-disable': '', on: { click: async event => {
     const button = event.currentTarget, text = button.lastChild, label = text.textContent; button.disabled = true; text.textContent = `Waiting for ${w.name}…`;
-    try { await connect(net.key, w.id); toast(`Connected to ${net.name} with ${w.name}.`, { kind: 'success' }); onDone(); }
+    // A wallet that never shows its prompt (a queued request, a locked extension) must not leave the button stuck.
+    let timer; const quiet = new Promise((_, reject) => { timer = setTimeout(() => reject(new Error(`${w.name} has not answered for a minute. Open the ${w.name} extension: approve or reject any pending request (connect or switch to ${net.name}), then try again. Reloading the page also clears it.`)), 60000); });
+    try { await Promise.race([connect(net.key, w.id), quiet]); toast(`Connected to ${net.name} with ${w.name}.`, { kind: 'success' }); onDone(); }
     catch (e) { onError(e); }
-    finally { button.disabled = false; text.textContent = label; }
+    finally { clearTimeout(timer); button.disabled = false; text.textContent = label; }
   } } }, w.icon && (/^data:image\//.test(w.icon)||/^\/assets\/wallets\//.test(w.icon)) ? h('img.wallet-icon', { src: w.icon, alt: '', width: 18, height: 18 }) : icon('wallet', 'icon-sm'), h('span', list.length > 1 ? w.name : `Connect ${w.name}`))));
 }
 const ctx = {
