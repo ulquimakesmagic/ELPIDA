@@ -10,8 +10,12 @@ import { testnetDexes } from '../../packages/core/uniswap.mjs';
 export class PublicIndexer {
   constructor({networks,contracts,dataDir,metadataStore,providerFactory=rpc=>new JsonRpcProvider(rpc,undefined,{cacheTimeout:-1,batchMaxCount:1}),log=console.log}){
     this.entries=new Map();this.legacy=new Map();this.metadataStore=metadataStore;this.log=log;this.stopping=false;
+    this.providerFactory=providerFactory;this.rpcs=new Map();
     for(const net of networks.filter(n=>n.shared?.factory)){
-      const provider=providerFactory(process.env['ELPIDA_RPC_'+net.chainId]??net.rpcUrl);
+      // An operator override is used alone; otherwise the network's RPC, then its server-side fallbacks.
+      const override=process.env['ELPIDA_RPC_'+net.chainId],list=override?[override]:[net.rpcUrl,...(net.rpcFallbacks??[])];
+      this.rpcs.set(net.key,{list,index:0,failures:0});
+      const provider=providerFactory(list[0]);
       this.entries.set(net.key,openEntry({net,deployment:net.shared,provider,contracts,dataDir}));
       // Earlier team factories on the same network stay indexed, so their tokens remain listed and tradable.
       const older=(net.legacy??[]).filter(d=>d?.factory&&d.factory.toLowerCase()!==net.shared.factory.toLowerCase());
@@ -33,17 +37,38 @@ export class PublicIndexer {
     try{for(const e of [...this.entries.keys()].flatMap(key=>this.all(key))){
       try{
         if(!e.validated){const d=deploymentOf(e),chain=Number((await e.provider.getNetwork()).chainId),v=Number(await new Contract(d.factory,['function MODEL_VERSION() view returns(uint256)'],e.provider).MODEL_VERSION());if(chain!==e.net.chainId||v!==MODEL_VERSIONS[d.model])throw new Error('Deployment identity mismatch');e.validated=true;}
-        await e.index.sync();e.error=null;e.lastSuccess=new Date().toISOString();
+        await e.index.sync();e.error=null;e.errorCode=null;e.lastSuccess=new Date().toISOString();
+        if(!e.legacy){const r=this.rpcs?.get(e.net.key);if(r)r.failures=0;}
         for(const t of e.index.tokens())if(t.metadataURI){
           // Only factory events synchronized by the validated chain index authorize retention.
           try{this.metadataStore.retainPublished(t.metadataURI);if(!e.metadata.has(t.address))e.metadata.set(t.address,normalizeMetadata(await this.metadataStore.resolve(t.metadataURI)));}catch{/* IPFS outage does not discard chain history. */}
         }
         this.log(JSON.stringify({event:'public_indexer_synced',network:e.net.key,...(e.legacy?{factory:deploymentOf(e).factory}:{}),...e.index.status(),error:null}));
-      }catch(error){e.error='Indexing unavailable; retrying.';this.log(JSON.stringify({event:'public_indexer_error',network:e.net.key,...(e.legacy?{factory:deploymentOf(e).factory}:{}),code:String(error.code??error.name??'INDEX_ERROR').replace(/[^a-zA-Z0-9_]/g,'').slice(0,64),message:e.error}));}
+      }catch(error){
+        e.error='Indexing unavailable; retrying.';e.errorCode=errorCode(error);
+        this.log(JSON.stringify({event:'public_indexer_error',network:e.net.key,...(e.legacy?{factory:deploymentOf(e).factory}:{}),code:e.errorCode,rpc:rpcHost(this.rpcs?.get(e.net.key)),message:e.error}));
+        if(!e.legacy)this.failover(e.net.key);
+      }
     }}finally{this.running=false;}
   }
+  /**
+   * After repeated failures on one public RPC (a node that refuses the server's address, rate-limits it or has pruned
+   * the state), move every deployment on that network to the next configured RPC. Reads only; nothing is signed.
+   */
+  failover(key){
+    const r=this.rpcs?.get(key);if(!r)return;r.failures++;
+    if(r.failures<PublicIndexer.FAILOVER_AFTER||r.list.length<2)return;
+    const from=rpcHost(r);r.index=(r.index+1)%r.list.length;r.failures=0;
+    const provider=this.providerFactory(r.list[r.index]),old=new Set();
+    for(const e of this.all(key)){old.add(e.provider);e.provider=provider;e.index.provider=provider;e.validated=false;}
+    for(const p of old)p.destroy?.();
+    this.log(JSON.stringify({event:'public_indexer_rpc_failover',network:key,from,to:rpcHost(r)}));
+  }
+  static FAILOVER_AFTER=3;
   start(){this.job=this.tick();this.timer=setInterval(()=>{this.job=this.tick();},15000);this.timer.unref();return this;}
-  status(key){const e=this.entries.get(key);return e?{...e.index.status(),error:e.error,lastSuccess:e.lastSuccess,enabled:true}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}
+  status(key){const e=this.entries.get(key);return e?{...e.index.status(),error:e.error,errorCode:e.errorCode??null,rpc:rpcHost(this.rpcs?.get(key)),lastSuccess:e.lastSuccess,enabled:true,
+    // Earlier launchpads on the same network have their own index; a stuck one must be visible too.
+    legacy:(this.legacy?.get(key)??[]).map(l=>{const s=l.index.status();return {factory:deploymentOf(l).factory,indexedBlock:s.indexedBlock,lag:s.lag,error:l.error??null,errorCode:l.errorCode??null,lastSuccess:l.lastSuccess??null};})}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}
   quotes(key){const e=this.entries.get(key);if(!e)return null;const status=e.index.status();if(!e.validated||status.indexedBlock==null)return null;const factory=deploymentOf(e).factory;return {factory,chainId:e.net.chainId,indexedBlock:status.indexedBlock,assets:e.index.db.prepare("SELECT data FROM events WHERE json_extract(data,'$.name')='QuoteApproved' ORDER BY height,idx").all().map(r=>JSON.parse(r.data)).filter(r=>r.kind==='factory'&&r.address.toLowerCase()===factory.toLowerCase()).map(r=>r.args[0])};}
   /** Tokens from every deployment on the network. `extra(entry, token)` adds per-deployment fields. */
   listings(key,extra){return this.all(key).flatMap(e=>{const d=deploymentOf(e);return e.index.listings().map(t=>({...t,metadata:e.metadata.get(t.address)??{},metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})}));});}
@@ -56,6 +81,10 @@ export class PublicIndexer {
 }
 
 const deploymentOf=e=>e.deployment??e.net.shared;
+/** A short, safe error code for logs and the public status (letters, digits and _ only; never a message or URL). */
+const errorCode=error=>String(error?.code??error?.name??'INDEX_ERROR').replace(/[^a-zA-Z0-9_]/g,'').slice(0,64)||'INDEX_ERROR';
+/** The RPC host in use, without path or query, so keys in operator-supplied URLs never leak. */
+const rpcHost=r=>{try{return new URL(r.list[r.index]).host;}catch{return null;}};
 /** A trade for public display: no amounts or accounts, only what the "Last sale" strip shows. */
 export const recentTrade=(network,token,trade)=>({network,address:token.address,name:token.metadata?.name??token.name,symbol:token.metadata?.symbol??token.symbol,image:token.metadata?.image??null,side:trade.side,timestamp:Number(trade.timestamp)});
 function openEntry({net,deployment,provider,contracts,dataDir,legacy=false}){

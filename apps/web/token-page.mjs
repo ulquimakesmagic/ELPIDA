@@ -302,6 +302,12 @@ function tradePanel(ctx, token, { dex, solana }) {
     const value = amount.value, rev = ++revision; clearTimeout(timer); error.textContent = '';
     quoteReady = false; updateSubmit(); useRemaining.hidden = true;
     if (!(Number(value) > 0)) { out.textContent = 'Enter an amount'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = ''; return; }
+    // A curve reopened after its graduation grace is fully sold: selling works, buying resumes once a holder sells.
+    if (side === 'buy' && token.soldOut && !token.complete && !token.graduated) {
+      out.textContent = 'Nothing left to buy'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = '';
+      error.textContent = 'Every curve token is sold. This curve was reopened after graduation did not happen, so holders can sell now; buying resumes as soon as someone sells.';
+      return;
+    }
     if (side === 'buy' && remaining && exceedsRemaining(value,token.remainingBuy) && !solana && !token.partialFill) {
       out.textContent = 'Amount exceeds the curve limit'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = '';
       error.textContent = `About ${number(token.remainingBuy,8)} ${q} remains on the bonding curve. Use the remaining-amount button to fill the exact limit, then graduate to the locked pool.`;

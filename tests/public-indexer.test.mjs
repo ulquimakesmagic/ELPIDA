@@ -77,3 +77,31 @@ test('a legacy team factory stays listed and tradable next to the current one',a
   }finally{await service.close();rmSync(dir,{recursive:true,force:true});}
   assert.equal(destroyed,1,'one shared provider per network is closed once');
 });
+
+test('a public RPC that keeps failing on the server is replaced by the next one; status shows only a code and a host', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'elpida-failover-')), made = [], logs = [];
+  const net = { key: 'test', chainId: 11155111, rpcUrl: 'https://main.example/rpc', rpcFallbacks: ['https://backup.example/v1/secret-key'], shared: { factory: '0x' + 'aa'.repeat(20), block: 1, model: 'curve-dex-v10' }, nativeCurrency: { symbol: 'ETH' }, explorer: 'https://example.com' };
+  const options = { dataDir: dir, networks: [net], contracts: Object.fromEntries(['dexFactory', 'dexCurve', 'factory', 'curve', 'pool', 'token'].map(n => [n, { abi: [] }])), providerFactory: url => { const p = { url, destroyed: false, destroy() { this.destroyed = true; } }; made.push(p); return p; }, metadataStore: {}, log: line => logs.push(JSON.parse(line)) };
+  const service = new PublicIndexer(options);
+  try {
+    const [e] = service.all('test');
+    e.validated = true;
+    e.index.sync = async () => { throw Object.assign(new Error('403 Forbidden from https://main.example/rpc'), { code: 'SERVER_ERROR' }); };
+    for (let i = 0; i < PublicIndexer.FAILOVER_AFTER - 1; i++) await service.tick();
+    assert.equal(e.provider.url, 'https://main.example/rpc', 'a short outage does not switch');
+    let status = service.status('test');
+    assert.equal(status.errorCode, 'SERVER_ERROR'); assert.equal(status.rpc, 'main.example');
+    assert.ok(!JSON.stringify(status).includes('403 Forbidden'), 'never the raw message');
+    await service.tick();
+    assert.equal(e.provider.url, 'https://backup.example/v1/secret-key', 'moved to the next RPC');
+    assert.equal(e.index.provider, e.provider, 'the index reads through the new RPC');
+    assert.equal(e.validated, false, 'the deployment is re-validated on the new RPC');
+    assert.ok(made[0].destroyed, 'the old provider is closed');
+    const failover = logs.find(l => l.event === 'public_indexer_rpc_failover');
+    assert.deepEqual([failover.from, failover.to], ['main.example', 'backup.example']);
+    status = service.status('test');
+    assert.equal(status.rpc, 'backup.example'); assert.ok(!JSON.stringify(status).includes('secret-key'), 'paths with keys never shown');
+    e.validated = true; e.index.sync = async () => {}; await service.tick();
+    status = service.status('test'); assert.equal(status.error, null); assert.equal(status.errorCode, null);
+  } finally { await service.close(); rmSync(dir, { recursive: true, force: true }); }
+});
