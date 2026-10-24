@@ -45,7 +45,8 @@ async function lifecycle(t, { native, seed }) {
       const held = await token.balanceOf(who[k]); if (held === 0n) continue;
       const amount = rand() < 0.2 ? held : rand() < 0.1 ? 1n : frac(rand, held);
       await mined(token.connect(s).approve(curve.target, amount));
-      const [out] = await curve.quoteSell(amount);
+      // The sell quote refuses a dust sale the same way the sale does.
+      const out = await curve.quoteSell(amount).then(([o]) => o, e => { assert.match(String(e.message), /sell dust/, `${label}: only dust is refused`); return 0n; });
       // A sale worth nothing after fees is refused rather than taking the tokens for zero.
       if (out === 0n) { await assert.rejects(curve.connect(s).sell(amount, 0), /sell dust/, `${label}: a worthless sale is refused`); continue; }
       await mined(curve.connect(s).sell(amount, 0));
