@@ -145,7 +145,8 @@ Robinhood's testnet has no Uniswap v3 and no Chainlink feed, so the site deploys
    price posts at 0.01 gwei).
 3. **Deploy the test DEX and price feed.** On elpida.fun: Network and funds → Robinhood Chain Testnet → connect your
    wallet → **Set up test DEX and price feed** (6 confirmations). An interrupted setup resumes. Send Claude the
-   addresses it shows.
+   addresses it shows. **Done 24 Oct**; registered (addresses in `MULTICHAIN_TESTNETS.md`). Fund the relay
+   `0x3d060E857f39665D672472A8F82e18FdfAF994FC` with about 0.002 test ETH so it can post prices.
 4. Claude registers them (a PR). After it deploys: **Set up launchpad**, then launch a test token as on the other
    testnets. Completing a curve takes about $130 of test ETH in total (about 4 to 5 days of faucet); launching and
    trading need far less.

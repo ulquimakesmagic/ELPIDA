@@ -234,3 +234,20 @@ no WETH and no Chainlink feed. So that Elpida can be tested live there, without 
 A full lifecycle at the test size ($50 starting FDV) costs about $130 of test ETH, measured on a local chain at $2,500
 per ETH: the $10 fee, an optional first buy, and about $97 for the completing buy (0.0387 ETH). That is about 4 to 5
 days of this faucet; launching and trading need far less.
+
+**Deployed 24 Oct** by Malik from the site (`0xf5B0…639D`, from block 141826583), each read back on chain by Claude
+(the manager, router and quoter point to this factory and WETH; the 1% fee tier is enabled; the feed's updater is the
+server relay and its source is Base Sepolia's Chainlink ETH/USD, chain 84532):
+
+| Contract | Address |
+|---|---|
+| Test WETH ("Wrapped Ether (Elpida test deployment)") | `0xF3A249E1Abf044bee5324d02B99Ee0fECB34d887` |
+| Uniswap v3 factory (test deployment) | `0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2` |
+| NonfungiblePositionManager (test deployment) | `0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE` |
+| SwapRouter02 (test deployment) | `0xFAF81E4a0624d7FabF39bcbd011CF2259d01790c` |
+| QuoterV2 (test deployment) | `0xfed3BC81f0A01EDB046E79cC8239E1A0817d3e92` |
+| ElpidaRelayFeed, ETH / USD | `0xdB7f43FFFdA626c1cc26206981C05507C75E983F` |
+| Server relay (updater) | `0x3d060E857f39665D672472A8F82e18FdfAF994FC` |
+
+The same deployer and nonces as on other chains give some of these the same addresses as unrelated contracts there
+(for example `0xD641…6d2` is the Ethereum Sepolia launchpad); they are different contracts on different chains.

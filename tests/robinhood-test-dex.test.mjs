@@ -12,6 +12,7 @@ import { FeedRelay } from '../apps/api/feed-relay.mjs';
 import { evaluateOperations } from '../apps/api/operations-health.mjs';
 import { testnets } from '../packages/core/networks.mjs';
 import { usdOracles } from '../packages/core/usd-oracles.mjs';
+import { testnetDexes } from '../packages/core/uniswap.mjs';
 const { TestnetWallet } = await import('../apps/web/wallet.mjs');
 const { PublicRpcSigner } = await import('../apps/web/public-rpc-signer.mjs');
 
@@ -19,12 +20,17 @@ const KEY = 'robinhood-testnet', SOURCE_CHAIN = 84532, ETH = 2500n * 10n ** 8n;
 const relayArt = () => testDexArtifacts().relayFeed;
 const deployRelayFeed = async (signer, updater, source) => { const a = relayArt(), c = await new ContractFactory(a.abi, a.bytecode, signer).deploy('ETH / USD (test)', source, SOURCE_CHAIN, updater); await c.waitForDeployment(); return c; };
 
-test('Robinhood testnet is registered as a test chain with a relay source and no DEX yet', () => {
+test('Robinhood testnet is registered as a test chain: its labelled test DEX and its relay feed as the launch oracle', () => {
   const net = testnets.find(n => n.key === KEY);
   assert.equal(net.chainId, 46630); assert.equal(net.testDex, true); assert.ok(!net.mainnet);
   assert.equal(net.relay.source.network, 'base-sepolia');
   assert.equal(net.relay.source.feed, usdOracles({})['base-sepolia'].feed, 'relays the Chainlink feed Base Sepolia launches already use');
   assert.ok(net.relay.maxAge > 0 && net.relay.maxAge <= 86400);
+  const dex = testnetDexes[KEY];
+  assert.equal(dex.enabled, true); assert.equal(dex.testDeployment, true); assert.match(dex.name, /Elpida test deployment/, 'never shown as Uniswap\'s own');
+  const oracle = usdOracles({})[KEY];
+  assert.equal(oracle.feed, net.relay.feed); assert.equal(oracle.maxAge, net.relay.maxAge); assert.equal(oracle.available, true);
+  assert.match(oracle.source, /relayed from base-sepolia/);
 });
 
 test('ElpidaRelayFeed: only its updater posts, rounds only move forward, never into the future', async t => {

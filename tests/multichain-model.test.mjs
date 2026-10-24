@@ -16,7 +16,7 @@ function walletOn(key, netPatch = {}) {
   return w;
 }
 
-test('Ethereum Sepolia (Uniswap v3) and BNB Testnet (PancakeSwap v3) use Model 10; Robinhood keeps the beta curve', () => {
+test('Ethereum Sepolia (Uniswap v3), BNB Testnet (PancakeSwap v3) and Robinhood testnet (Elpida test deployment of Uniswap v3) use Model 10', () => {
   const eth = walletOn('ethereum-sepolia');
   assert.equal(eth.dex.name, 'Uniswap v3'); assert.equal(eth.dex.routerVersion, 2);
   assert.equal(eth.model, DEX_MODEL); assert.equal(eth.artifacts.factory.name, 'atomic'); assert.equal(eth.artifacts.curve.name, 'dexCurve');
@@ -24,7 +24,8 @@ test('Ethereum Sepolia (Uniswap v3) and BNB Testnet (PancakeSwap v3) use Model 1
   assert.equal(bnb.dex.name, 'PancakeSwap v3'); assert.equal(bnb.dex.routerVersion, 1, 'PancakeSwap periphery router layout');
   assert.equal(bnb.model, DEX_MODEL); assert.equal(bnb.artifacts.factory.name, 'atomic');
   const rh = walletOn('robinhood-testnet');
-  assert.equal(rh.dex, null); assert.equal(rh.model, BETA_MODEL); assert.equal(rh.artifacts.factory.name, 'legacy');
+  assert.equal(rh.dex.name, 'Uniswap v3 (Elpida test deployment)'); assert.equal(rh.dex.routerVersion, 2);
+  assert.equal(rh.model, DEX_MODEL); assert.equal(rh.artifacts.factory.name, 'atomic');
   assert.equal(walletOn('base-sepolia').model, DEX_MODEL);
 });
 
