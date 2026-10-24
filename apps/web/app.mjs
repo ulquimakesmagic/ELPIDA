@@ -106,7 +106,7 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
     const indexed=results.flatMap(r=>r.status==='fulfilled'?r.value:[]);
     const merged=new Map(indexed.map(t=>[`${t.network}:${t.address.toLowerCase()}`,t]));
     for(const t of next.tokens??[]){const key=`${currentChain()}:${t.address.toLowerCase()}`,publicToken=merged.get(key);merged.set(key,{...publicToken,...t,priceChange24h:publicToken?.priceChange24h??t.priceChange24h,network:currentChain()});}
-    if(solWallet.deployment&&wallet!==solWallet){try{for(const t of await solWallet.publicTokens())merged.set(`${solWallet.net.key}:${t.address}`,{...t,network:solWallet.net.key});}catch{discoveryErrors.push(solWallet.net.name);}}
+    if(solWallet.deployment&&wallet!==solWallet){try{for(const t of await solWallet.publicTokens())merged.set(`${solWallet.net.key}:${t.address}`,{...t,network:solWallet.net.key,usdReference:usdReferenceFor({...t,usdReference:null},config.prices?.[solWallet.net.key],nowSeconds())});}catch{discoveryErrors.push(solWallet.net.name);}}
     allTokens=[...merged.values()];
     if(currentRoute.name==='explore')rerender('background');
     refreshLastSale();
@@ -454,7 +454,11 @@ async function init() {
   const configSent = Date.now();
   config = await api('config');
   syncClock(config.serverTime, configSent);
-  setInterval(()=>{if(!busy&&document.visibilityState==='visible'&&!(currentRoute.name==='rewards'&&document.activeElement?.closest('form')))refresh({preserveInput:true}).catch(()=>{});},60000);
+  // Background refresh. Also on returning to the tab: timers do not run while it is hidden, and a dollar reference
+  // older than 3 minutes is shown as stale (values fall back to the pair's own unit) until prices are re-read.
+  const backgroundRefresh=()=>{if(!busy&&document.visibilityState==='visible'&&!(currentRoute.name==='rewards'&&document.activeElement?.closest('form')))refresh({preserveInput:true}).catch(()=>{});};
+  setInterval(backgroundRefresh,60000);
+  document.addEventListener('visibilitychange',backgroundRefresh);
   setInterval(()=>{if(document.visibilityState==='visible')refreshLastSale();},30000);
   if (config.solana?.mainnet) {
     $('#footer-note').textContent = 'Solana mainnet beta: real funds, new contracts. Other networks are test networks with no monetary value.';
