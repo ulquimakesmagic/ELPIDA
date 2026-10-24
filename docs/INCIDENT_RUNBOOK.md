@@ -92,6 +92,16 @@ manually from the token page, and after 24 hours anyone can reopen a stuck curve
   `backup_mirror_behind`) and never stops the main backup.
   - **Backblaze B2:** 10 GB free. Create a private bucket and an application key limited to it.
   - **Cloudflare R2:** 10 GB free, but it needs a payment method on file.
+  - **Tigris** (`console.storage.dev`): 5 GB free, no card. Endpoint `https://t3.storage.dev`, region `auto`. Railway's
+    own buckets run on Tigris, so this survives a Railway outage or account problem but not a Tigris outage. In use
+    from 24 Oct 2026 (bucket `elpida-backup-mirror-malik`) because Backblaze lets a new account create API keys only
+    after its first billing cycle (it needs a verified phone number first).
+
+  Within a minute of each start, the server writes a small random object (`elpida-mirror-check.bin`, outside the
+  snapshot prefix) and reads it back: `backup_mirror_reachable` means the endpoint, bucket and key work, and
+  `backup_mirror_unreachable` gives the error code (for example `InvalidAccessKeyId`, `AccessDenied`). The local copy
+  of the latest snapshot does not survive a redeploy, so after one the status shows `waitingForNextBackup` and the
+  next daily backup goes to both buckets.
 
   Set the following Railway variables, then confirm `backup_mirror_verified` in the logs after the next backup:
 
