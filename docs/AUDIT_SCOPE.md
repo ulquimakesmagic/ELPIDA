@@ -143,6 +143,12 @@ Our findings:
   `ElpidaAtomicDexFactory.requiresMetadata()` returns true; `launch` and `launchPaired` revert with
   `metadata required`, and `launchWithPayment` reverts on an empty or non-`ipfs://` URI. The Solana program already
   required a URI. Older factories are unchanged (`launch-guarantees.test.mjs`).
+- **F-8 (Low, older factories only): a reopened curve's completion quote reverts.** `reopen()` clears `complete` but a
+  completed curve has `sold == SALE_CAP`, so `_completionQuote` computes `remaining = 0`, `net = 0` and underflows on
+  `net - 1` (panic 0x11). `completionQuote()`, `remainingAtBaseFee()` and every buy revert until a holder sells; selling
+  works. Seen live on Base Sepolia (AIZEN, reopened 23 Oct), where it also stopped our indexer, which is now guarded
+  (`tests/reopened-curve.test.mjs`). Unreachable with `ElpidaAtomicDexFactory`: the completing buy graduates in the same
+  transaction or reverts, so no curve is ever complete without a pool. Fix if kept: return 0 when `remaining == 0`.
 - **F-7 (Low, L2 deployments): no sequencer-uptime check.** On rollups (Base, Robinhood Chain), Chainlink recommends
   checking the L2 sequencer uptime feed before trusting a price. `ElpidaUsdPricing` checks staleness (`maxPriceAge`)
   but not the sequencer. Impact is limited: the price sets only the $10 launch fee and the starting valuation of new
