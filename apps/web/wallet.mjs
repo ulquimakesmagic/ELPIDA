@@ -422,6 +422,46 @@ export class TestnetWallet {
       localStorage.removeItem(key);return {tx:{hash:receipt.transactionHash},receipt:{...actual,logs}};
     }catch(error){if(error.batchFailed)localStorage.removeItem(key);throw error;}
   }
+  /** The test DEX and relay feed this browser deployed on the current network, if any (to send to the team). */
+  savedTestDex(){return this.net?.testDex?read('elpida:test-dex:'+this.net.chainId):null;}
+  /**
+   * Test chains with no DEX and no Chainlink feed (Robinhood testnet): deploys, from this wallet, a labelled Elpida test
+   * deployment of Uniswap v3 (Uniswap's own published bytecode) with a test WETH, and an ElpidaRelayFeed whose only
+   * updater is the server's testnet price relay. Six confirmations, gas only; an interrupted setup resumes. The
+   * addresses are then registered by the team (networks.mjs, uniswap.mjs) before the launchpad is set up.
+   */
+  async deployTestDex(){
+    await this.checkNetwork();
+    if(this.net.mainnet||!this.net.testDex)throw new Error('A test DEX is only for test networks that have none. Nothing was deployed.');
+    if(this.dex)throw new Error(`${this.net.name} already has ${this.dex.name}. Nothing was deployed.`);
+    const relay=this.config.relay,target=relay?.networks?.[this.net.key],source=target?.source;
+    if(!relay?.address)throw new Error('The server price relay is not configured yet (ELPIDA_TESTNET_RELAY_KEY on Railway). Nothing was deployed.');
+    if(!source?.feed||!source.chainId)throw new Error('No relay source feed is configured for this network. Nothing was deployed.');
+    if(await this.provider.getBalance(this.address)===0n)throw new Error(`Get ${this.net.nativeCurrency.symbol} on ${this.net.name} from its faucet to pay deployment gas.`);
+    const response=await fetch('/api/test-dex-artifacts');if(!response.ok)throw new Error('Test DEX bytecode is unavailable. Nothing was deployed.');
+    const a=await response.json(),key='elpida:test-dex:'+this.net.chainId,saved={...(read(key)??{}),network:this.net.key,chainId:this.net.chainId};
+    const description=`ETH / USD (Chainlink, relayed from ${source.network}; testnet only)`;
+    const steps=[
+      ['weth','test WETH',()=>[a.weth]],
+      ['factory','Uniswap v3 factory',()=>[a.factory]],
+      ['manager','Uniswap v3 position manager',()=>[a.manager,saved.factory,saved.weth,ZeroAddress]],
+      ['router','Uniswap SwapRouter02',()=>[a.router,ZeroAddress,saved.factory,saved.manager,saved.weth]],
+      ['quoter','Uniswap QuoterV2',()=>[a.quoter,saved.factory,saved.weth]],
+      ['feed','ETH / USD relay feed',()=>[a.relayFeed,description,source.feed,source.chainId,relay.address]],
+    ];
+    for(const [i,[name,label,args]] of steps.entries()){
+      if(saved[name]&&isAddress(saved[name])&&await this.provider.getCode(saved[name])!=='0x')continue;
+      const [art,...params]=args();
+      this.onProgress(`Step ${i+1} of ${steps.length}: confirm the ${label} deployment (Elpida test deployment)…`);
+      const c=await new ContractFactory(art.abi,art.bytecode,this.signer).deploy(...params);await c.waitForDeployment();
+      saved[name]=getAddress(c.target);saved.block??=(await c.deploymentTransaction().wait()).blockNumber;
+      if(!write(key,saved))throw new Error(`Deployed the ${label} at ${saved[name]}, but this browser blocks storage. Note it down before continuing.`);
+    }
+    const manager=new Contract(saved.manager,['function factory() view returns(address)','function WETH9() view returns(address)'],this.provider),feed=new Contract(saved.feed,['function updater() view returns(address)'],this.provider);
+    if((await manager.factory()).toLowerCase()!==saved.factory.toLowerCase()||(await manager.WETH9()).toLowerCase()!==saved.weth.toLowerCase()||(await feed.updater()).toLowerCase()!==relay.address.toLowerCase())throw new Error('The deployed test DEX does not match its configuration. Send the saved addresses to the team.');
+    saved.deployer=this.address;write(key,saved);
+    return {testDex:saved,message:`The ${this.net.name} test DEX and price relay feed are deployed. Send the addresses shown under "Launchpad on this network" to the team to register them; the launchpad is set up after that.`};
+  }
   /**
    * `body.treasury`: optional Safe address that becomes the factory's immutable treasury (required on mainnet). The
    * connected wallet then only deploys and pays gas; the treasury-only setup comes back as a Safe batch to sign.

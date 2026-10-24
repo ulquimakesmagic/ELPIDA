@@ -44,6 +44,11 @@ export const testnets = [
     chainId: 46630, rpcUrl: 'https://rpc.testnet.chain.robinhood.com', explorer: 'https://explorer.testnet.chain.robinhood.com',
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     gasFaucet: 'https://faucet.testnet.chain.robinhood.com',
+    // This testnet has neither Uniswap v3 nor a Chainlink feed (24 Oct 2026). The launchpad owner deploys a labelled
+    // Elpida test deployment of Uniswap v3 and an ElpidaRelayFeed from the site; the server relay (apps/api/feed-relay.mjs)
+    // copies Chainlink ETH / USD from Base Sepolia into it, keeping Chainlink's timestamps. Mainnet uses the real ones.
+    testDex: true,
+    relay: { source: { network: 'base-sepolia', feed: '0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1' }, feed: null, maxAge: 3600 },
     shared: null,
   },
 ];
