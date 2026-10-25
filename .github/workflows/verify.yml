@@ -92,6 +92,12 @@ jobs:
           cargo-build-sbf --manifest-path contracts/solana/programs/elpida_launchpad/Cargo.toml --sbf-out-dir /tmp/sbf-mainnet
           cp /tmp/sbf-mainnet/elpida_launchpad.so contracts/solana/build/elpida_launchpad-mainnet.so
           sha256sum contracts/solana/build/*.so
+      # The binaries this job tested, so a source change can commit the matching .so instead of a stale one.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: sbf-binaries
+          path: contracts/solana/build/*.so
+          if-no-files-found: error
       - run: solana --version
       - run: solana-test-validator --version
 

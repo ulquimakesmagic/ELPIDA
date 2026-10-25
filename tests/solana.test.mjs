@@ -384,6 +384,35 @@ test('Solana fee payout is permissionless, fixed-destination and never touches l
   assert.equal(await balance(f.client.ata(f.rewardWallet.publicKey, f.quoteMint)), rewardBefore + p.creatorFees);
 });
 
+// C7: one destination that cannot receive must not block the other side. Before the fix both ledgers were zeroed and
+// the first failed transfer reverted the instruction, so a closed reward account froze the protocol's fees too.
+test('Solana: a closed reward account cannot block the protocol fee withdrawal', { skip }, async () => {
+  const { mint } = await launch({ firstBuy: 100n * USDC + 80n, symbol: 'STUCK' });
+  await buy(f.trader, mint, 40n * USDC, 1n);
+  const owed = await pool(mint);
+  assert.ok(owed.protocolFees > 0n && owed.creatorFees > 0n, 'both sides owe fees');
+
+  // Close the creator's reward account so that side cannot receive.
+  const rewardAta = f.client.ata(f.rewardWallet.publicKey, f.quoteMint);
+  const tokenProgram = (await f.connection.getAccountInfo(rewardAta, 'confirmed')).owner;
+  await send(f.connection, f.outsider, [new web3.TransactionInstruction({
+    programId: tokenProgram,
+    keys: [
+      { pubkey: rewardAta, isSigner: false, isWritable: true },
+      { pubkey: f.rewardWallet.publicKey, isSigner: false, isWritable: true },
+      { pubkey: f.rewardWallet.publicKey, isSigner: true, isWritable: false },
+    ],
+    data: Buffer.from([9]), // CloseAccount
+  })], [f.rewardWallet]);
+
+  const treasuryBefore = await balance(f.client.ata(f.treasury, f.quoteMint));
+  await withdraw(mint); // must not throw
+  const after = await invariant(mint);
+  assert.equal(after.protocolFees, 0n, 'the protocol side settled');
+  assert.equal(after.creatorFees, owed.creatorFees, 'the creator side is still owed, not lost');
+  assert.equal(await balance(f.client.ata(f.treasury, f.quoteMint)), treasuryBefore + owed.protocolFees);
+});
+
 test('Solana curve graduates exactly at the curve supply ($50k FDV) and then stops trading', { skip }, async () => {
   const { mint } = await launch({ symbol: 'GRAD' });
   await afterSnipeWindow(mint);

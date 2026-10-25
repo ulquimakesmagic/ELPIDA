@@ -409,20 +409,30 @@ pub mod elpida_launchpad {
 
     /// Permissionless: pays accrued base fees to the fixed treasury and creator-reward accounts.
     /// `real_quote` and `liquidity_bonus` are never touched.
+    ///
+    /// Each side is paid independently. Before this, both ledgers were zeroed and then paid with `?`, so one
+    /// destination that could not receive (a closed or frozen token account) reverted the whole instruction and
+    /// blocked the other side - the same bug the EVM curve fixed in `claimFees`. A side that fails keeps its
+    /// balance owed and emits `FeePayoutFailed`; the other side still settles.
     pub fn withdraw_fees(ctx: Context<WithdrawFees>) -> Result<()> {
-        let pool = &mut ctx.accounts.pool;
-        let (protocol, creator) = (pool.protocol_fees, pool.creator_fees);
-        pool.protocol_fees = 0;
-        pool.creator_fees = 0;
-        let (mint_key, bump, pool_key) = (pool.mint, pool.bump, pool.key());
+        let (protocol, creator) = (ctx.accounts.pool.protocol_fees, ctx.accounts.pool.creator_fees);
+        let (mint_key, bump, pool_key) = (ctx.accounts.pool.mint, ctx.accounts.pool.bump, ctx.accounts.pool.key());
         let a = &ctx.accounts;
         let seeds: &[&[u8]] = &[b"curve", mint_key.as_ref(), &[bump]];
-        for (to, amount) in [(a.treasury_quote.to_account_info(), protocol), (a.reward_quote.to_account_info(), creator)] {
-            if amount > 0 {
-                quote_transfer(&a.quote_token_program, &a.quote_mint, a.quote_vault.to_account_info(), to.clone(), a.pool.to_account_info(), amount, a.quote_mint.decimals, &[seeds])?;
-                emit!(FeesWithdrawn { pool: pool_key, recipient: to.key(), amount });
-            }
+        // Attempt each side first; only a side that settled has its ledger cleared, after the borrow ends.
+        let protocol_paid = protocol == 0 || quote_transfer(&a.quote_token_program, &a.quote_mint, a.quote_vault.to_account_info(), a.treasury_quote.to_account_info(), a.pool.to_account_info(), protocol, a.quote_mint.decimals, &[seeds]).is_ok();
+        if protocol > 0 {
+            if protocol_paid { emit!(FeesWithdrawn { pool: pool_key, recipient: a.treasury_quote.key(), amount: protocol }); }
+            else { emit!(FeePayoutFailed { pool: pool_key, recipient: a.treasury_quote.key(), amount: protocol }); }
         }
+        let creator_paid = creator == 0 || quote_transfer(&a.quote_token_program, &a.quote_mint, a.quote_vault.to_account_info(), a.reward_quote.to_account_info(), a.pool.to_account_info(), creator, a.quote_mint.decimals, &[seeds]).is_ok();
+        if creator > 0 {
+            if creator_paid { emit!(FeesWithdrawn { pool: pool_key, recipient: a.reward_quote.key(), amount: creator }); }
+            else { emit!(FeePayoutFailed { pool: pool_key, recipient: a.reward_quote.key(), amount: creator }); }
+        }
+        let pool = &mut ctx.accounts.pool;
+        if protocol_paid { pool.protocol_fees = 0; }
+        if creator_paid { pool.creator_fees = 0; }
         Ok(())
     }
 
@@ -1437,6 +1447,9 @@ pub struct CurveSold { pub pool: Pubkey, pub seller: Pubkey, pub tokens_in: u64,
 pub struct CurveGraduated { pub pool: Pubkey, pub mint: Pubkey, pub real_quote: u64, pub liquidity_bonus: u64, pub lp_tokens: u64 }
 #[event]
 pub struct FeesWithdrawn { pub pool: Pubkey, pub recipient: Pubkey, pub amount: u64 }
+/// A fee side that could not be paid keeps its balance owed; the other side is unaffected.
+#[event]
+pub struct FeePayoutFailed { pub pool: Pubkey, pub recipient: Pubkey, pub amount: u64 }
 #[event]
 pub struct CurveMigrated { pub pool: Pubkey, pub mint: Pubkey, pub pump_pool: Pubkey, pub lp_mint: Pubkey, pub base_amount: u64, pub quote_amount: u64, pub lp_locked: u64 }
 #[event]
