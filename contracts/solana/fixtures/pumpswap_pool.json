@@ -1,0 +1,30 @@
+{
+  "source": "https://api.mainnet-beta.solana.com",
+  "program": "pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA",
+  "address": "6WbyDqoTJohmTk8X6HJFSZaqL1sVeTrUzu6GQGz8FTZs",
+  "slot": 461335326,
+  "fetchedAt": "2026-10-25T17:04:31.291Z",
+  "discriminator": "account:Pool",
+  "note": "A live PumpSwap pool account. tests/pumpswap-layout.test.mjs decodes it at the offsets the program hard-codes.",
+  "data": "8ZptBBGxbbz5AAB+aR9Scacs3Vt+BTGzrbn7umsM1O9VCn5esy2T4wEkUQabiFf+q4GE+2h/Y0YYwDXaxDncGus7VZig8AAAAAABw+ja7iUMGqQAABin9qJFhVTqwoTZG0HtoRgvkHrQrt0qorujkubg3YK/aZoiB23lGhDHlxKUhtVa9jfU/hXMqZoq9xyBXcVepMrBkGCw8nJhaZZ3KrUHjsB0aLQ6TEKm79TF765q73Hy7A3IV8Y7Wqbi3tCjovY8iZZUOYL+ILkorCmTewgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACPeTL1////////////////AAAAAAAAAAAAAHGGzQoAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+  "length": 301,
+  "decoded": {
+    "baseVault": "BNonUw74WDhdu8vSpkURQ3uEURT7t5EaDXSCG864JeUV",
+    "quoteVault": "H9Ccp7C8AWdSBEowTZzYjwGVK28vpAAMZ9b6BfU7Lp2k",
+    "lpSupply": "9326842981416",
+    "protocolFees": "181241457",
+    "creatorFees": "0"
+  },
+  "vaults": {
+    "base": {
+      "owner": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+      "mint": "So11111111111111111111111111111111111111112",
+      "amount": "96093793142"
+    },
+    "quote": {
+      "owner": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "mint": "EBkSV5DA6ivLpVBo8GBAe29qA7dRxHK46pVeu4msczJg",
+      "amount": "901598478853141"
+    }
+  }
+}

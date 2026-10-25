@@ -96,6 +96,10 @@ Rust toolchain, then runs `tests/solana.test.mjs` with `--strict` (zero skips al
 
 ## 5. What is still manual
 
+- **PumpSwap's pool layout is pinned to a real account**: `tests/pumpswap-layout.test.mjs` decodes
+  `contracts/solana/fixtures/pumpswap_pool.json` - a live mainnet pool (301 bytes) whose vaults resolved to real token
+  accounts, one legacy SPL and one Token-2022 - at the offsets `lib.rs` hard-codes, read out of `lib.rs` itself.
+  `npm run refresh:pumpswap-layout` re-fetches it; a refreshed fixture that no longer decodes is a red build.
 - **Checklist hashes are checkable**: `npm run verify:checklist` looks every full transaction hash in
   `MAINNET_CHECKLIST_2026-10-19.md` up with `eth_getTransactionReceipt` across the configured testnets and writes a dated
   report such as `docs/evidence/checklist-verification-2026-10-25.json`. That run verified 8 of 8 on Base Sepolia; the

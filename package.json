@@ -10,6 +10,7 @@
     "test:gate:strict": "node scripts/test-gate.mjs --strict",
     "test:coverage": "node scripts/test-gate.mjs tests --coverage",
     "verify:checklist": "node scripts/verify-checklist.mjs",
+    "refresh:pumpswap-layout": "node scripts/pumpswap-fixture.mjs",
     "test:claims": "node --test tests/claims.test.mjs",
     "rehearse:holders": "node scripts/holder-rehearsal.mjs",
     "test:math": "node --test tests/economics.test.mjs",
