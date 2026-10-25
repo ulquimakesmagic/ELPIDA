@@ -18,6 +18,9 @@ export function h(spec, attrs, ...children) {
     if (key === 'on') for (const [event, handler] of Object.entries(value)) node.addEventListener(event, handler);
     else if (key === 'class') node.className += ` ${value}`;
     else if (key === 'text') node.textContent = value;
+    // `element.style` is read-only, so assigning it throws and the catch below falls back to a style
+    // attribute, which `style-src 'self'` blocks. Write through CSSOM instead: allowed by CSP.
+    else if (key === 'style') { if (typeof value === 'string') node.style.cssText = value; else Object.assign(node.style, value); }
     else if (key in node && !key.startsWith('aria') && !key.startsWith('data') && key !== 'list' && key !== 'for') { try { node[key] = value; } catch { node.setAttribute(key, value); } }
     else node.setAttribute(key, value === true ? '' : value);
   }
