@@ -25,7 +25,7 @@ export function terminalChart(ctx,token,q){
  function group(label,values,current,update){return h('div.chart-options',{role:'group','aria-label':label},values.map(([v,t])=>h('button.btn.btn-secondary.btn-sm',{type:'button','aria-pressed':String(v===current),on:{click:()=>{update(v);pref.range=null;draw();load();}}},t)));}
  function draw(){controls.replaceChildren(
   group('Chart interval',INTERVALS,pref.interval,v=>pref.interval=v),
-  h('div.chart-controls-end',group('Chart value',[['cap','Market cap'],['price','Price']],pref.basis,v=>pref.basis=v),group('Chart style',[['candles','Candles'],['area','Area']],pref.style==='line'?'area':pref.style,v=>pref.style=v),
+  h('div.chart-controls-end',group('Chart value',[['cap','Market cap'],['price','Price']],pref.basis,v=>pref.basis=v),...(panel.sparse?[]:[group('Chart style',[['candles','Candles'],['area','Area']],pref.style==='line'?'area':pref.style,v=>pref.style=v)]),
    markerToggle('dev','Dev trades','Mark the creator\'s buys and sells on the chart'),markerToggle('mine','My trades','Mark your own buys and sells on the chart'),
    h('button.btn.btn-secondary.btn-sm.chart-fit',{type:'button','aria-label':'Fit chart to all data',title:'Fit to data',on:{click:()=>{pref.range=null;chart?.timeScale().fitContent();}}},'Fit')));}
  function markerToggle(kind,label,title){return h('button.btn.btn-secondary.btn-sm.chart-marker-toggle',{type:'button',title,'aria-pressed':String(pref[kind]!==false),on:{click:event=>{pref[kind]=pref[kind]===false;event.currentTarget.setAttribute('aria-pressed',String(pref[kind]));applyMarkers();}}},h('i',{class:`marker-dot marker-${kind}`,'aria-hidden':'true'}),label);}
@@ -39,7 +39,7 @@ export function terminalChart(ctx,token,q){
   const dev=tone('--accent','#adff45'),up=tone('--up','#76ed9a'),down=tone('--down','#ffa1a1');
   // Pinned to the candle's own low (buys) or high (sells). The relative belowBar/aboveBar positions lose their
   // anchor with autoScale off and a flat candle, and drew the marker at the top edge of the chart.
-  const markers=list.map(m=>{const bar=bars.get(m.time),line=pref.style!=='candles';return {time:m.time,position:m.side==='buy'?'atPriceBottom':'atPriceTop',price:line?bar.close:m.side==='buy'?bar.low:bar.high,shape:'circle',size:1,text:m.text,color:m.owner==='dev'?dev:m.side==='buy'?up:down};});
+  const markers=list.map(m=>{const bar=bars.get(m.time),line=panel.sparse||pref.style!=='candles';return {time:m.time,position:m.side==='buy'?'atPriceBottom':'atPriceTop',price:line?bar.close:m.side==='buy'?bar.low:bar.high,shape:m.side==='buy'?'arrowUp':'arrowDown',size:1,color:m.owner==='dev'?dev:m.side==='buy'?up:down};});
   try{if(!markerApi&&lib?.createSeriesMarkers)markerApi=lib.createSeriesMarkers(main,markers,{autoScale:false});else markerApi?.setMarkers(markers);}catch{}
  }
  panel.refreshMarkers=applyMarkers;
@@ -53,12 +53,19 @@ export function terminalChart(ctx,token,q){
   if(!bar){legend.replaceChildren();return;}
   const up=bar.close>=bar.open,chg=pctText(bar.open,bar.close);
   const cell=(k,v)=>h('span.cr-cell',h('em',k),v);
-  legend.replaceChildren(h('span.cr-basis',pref.basis==='cap'?'Market cap':'Price'),cell('O',formatter(bar.open)),cell('H',formatter(bar.high)),cell('L',formatter(bar.low)),cell('C',formatter(bar.close)),chg?h('span.cr-chg',{'data-dir':up?'up':'down'},chg):null,h('span.cr-unit',unit),volume!==undefined?cell('Vol',`${compact(volume)} ${token.metadata?.symbol??token.symbol??''}`.trim()):null);
+  legend.replaceChildren(h('span.cr-basis',pref.basis==='cap'?'Market cap':'Price'),cell('O',formatter(bar.open)),cell('H',formatter(bar.high)),cell('L',formatter(bar.low)),cell('C',formatter(bar.close)),chg?h('span.cr-chg',{'data-dir':up?'up':'down'},chg):null,h('span.cr-unit',unit),volume!==undefined&&volumeUnit!==null?cell('Vol',volumeUnit==='$'?'$'+compact(volume):`${compact(volume)} ${volumeUnit}`.trim()):null);
  }
  function empty(message,sub){overlay.replaceChildren(h('div.chart-empty',icon('chart-candlestick','icon-lg'),h('strong',message),sub?h('span',sub):null));overlay.hidden=false;}
+ // The EVM feed carries quote volume; the Solana one does not, so fall back to token volume and label it.
+ let volumeUnit='';
+ const quoteVolume=p=>{if(p.quoteVolumeRaw==null)return Number(p.tokenVolumeRaw??0)/10**Number(token.decimals??decimals);const value=Number(p.quoteVolumeRaw)/10**Number(token.quoteDecimals??6);return rate===null?value:value*(rate??1);};
  function paint(points,data){
+  const style=panel.sparse?'area':pref.style;
+  const hasQuote=points.some(p=>p.quoteVolumeRaw!=null),hasToken=points.some(p=>p.tokenVolumeRaw!=null);
+  volumeUnit=hasQuote?(rate===null?(token.quoteSymbol??''):'$'):hasToken?(token.symbol??''):null;
   const up=tone('--up','#76ed9a'),down=tone('--down','#ffa1a1');
   const priceFormat={type:'custom',formatter,minMove:pref.basis==='cap'?0.01:Math.max(1e-12,Number(token.spotPrice??0)*scale/1000)};
+  if(main&&panel.seriesStyle!==style){cleanup();plot.replaceChildren();}
   if(!main){
    const lib=window.LightweightCharts;
    chart=lib.createChart(plot,{width:plot.clientWidth,height:plot.clientHeight||380,
@@ -67,18 +74,18 @@ export function terminalChart(ctx,token,q){
     timeScale:{timeVisible:true,secondsVisible:false,borderVisible:false,rightOffset:4,barSpacing:9,minBarSpacing:2},
     rightPriceScale:{borderVisible:false,scaleMargins:{top:.1,bottom:.26}},
     crosshair:{mode:lib.CrosshairMode.Normal,vertLine:{color:tone('--line-strong','rgba(255,255,255,.3)'),style:lib.LineStyle.Dashed,labelBackgroundColor:tone('--panel-3','#2a2a30')},horzLine:{color:tone('--line-strong','rgba(255,255,255,.3)'),style:lib.LineStyle.Dashed,labelBackgroundColor:tone('--panel-3','#2a2a30')}}});
-   main=chart.addSeries(pref.style==='candles'?lib.CandlestickSeries:lib.AreaSeries,pref.style==='candles'
+   panel.seriesStyle=style;main=chart.addSeries(style==='candles'?lib.CandlestickSeries:lib.AreaSeries,style==='candles'
     ?{upColor:up,downColor:down,borderVisible:false,wickUpColor:up,wickDownColor:down,priceFormat}
     :{lineColor:up,topColor:withAlpha(up,.28),bottomColor:withAlpha(up,0),lineWidth:2,crosshairMarkerRadius:4,priceFormat});
    vol=chart.addSeries(lib.HistogramSeries,{priceScaleId:'volume',priceFormat:{type:'volume'},lastValueVisible:false,priceLineVisible:false});
    vol.priceScale().applyOptions({scaleMargins:{top:.84,bottom:0}});
    chart.subscribeCrosshairMove(p=>{const bar=p.seriesData?.get(main);if(!bar){showLegend(current.data.at(-1),current.vol.at(-1));return;}
-    const full=pref.style==='candles'?bar:current.data.find(d=>d.time===p.time);const v=current.points.find(d=>d.timestamp===p.time);showLegend(full??current.data.at(-1),v?Number(v.tokenVolumeRaw??0)/10**decimals:undefined);});
+    const full=style==='candles'?bar:current.data.find(d=>d.time===p.time);const v=current.points.find(d=>d.timestamp===p.time);showLegend(full??current.data.at(-1),v?quoteVolume(v):undefined);});
    observer=new ResizeObserver(()=>chart?.applyOptions({width:plot.clientWidth,height:plot.clientHeight}));observer.observe(plot);lifecycle.observe(document.body,{childList:true,subtree:true});
   }
-  const volumes=points.map(p=>Number(p.tokenVolumeRaw??0)/10**decimals);
+  const volumes=points.map(quoteVolume);
   current={points,data,vol:volumes};
-  main.setData(pref.style==='candles'?data:data.map(p=>({time:p.time,value:p.close})));
+  main.setData(style==='candles'?data:data.map(p=>({time:p.time,value:p.close})));
   vol.setData(points.map((p,i)=>({time:p.timestamp,value:volumes[i],color:withAlpha(data[i].close>=data[i].open?up:down,.4)})));
   showLegend(data.at(-1),volumes.at(-1));
   applyMarkers();
@@ -88,6 +95,9 @@ export function terminalChart(ctx,token,q){
   try{const net=ctx.mode==='local'?'':`&network=${encodeURIComponent(ctx.currentChain())}`,base=ctx.mode==='local'?'tokens':'public/tokens',rows=await ctx.api(`${base}/${token.address}/candles?interval=${pref.interval}${net}`);if(request!==revision||!panel.isConnected)return;
    const sig=JSON.stringify(rows.slice(-3))+rows.length+pref.basis+pref.style+pref.interval;if(quiet&&sig===lastRows&&chart)return;lastRows=sig;
    plot.classList.remove('is-loading');const {points,data}=shape(rows);
+   const flat=points.filter(p=>Number(p.open)===Number(p.high)&&Number(p.high)===Number(p.low)&&Number(p.low)===Number(p.close)).length;
+   const sparse=flat/Math.max(1,points.length)>=.6;
+   if(sparse!==panel.sparse){panel.sparse=sparse;draw();}
    if(!points.length){cleanup();plot.replaceChildren();legend.replaceChildren();empty('No trades yet','The chart starts with the first buy or sell.');status.textContent='Executed trades only. Nothing is shown until someone trades.';return;}
    if(!window.LightweightCharts)throw new Error('Chart library could not load.');
    overlay.hidden=true;
@@ -95,7 +105,7 @@ export function terminalChart(ctx,token,q){
    if(!quiet||!chart){cleanup();plot.replaceChildren();}
    paint(points,data);
    if(!quiet){if(pref.range)chart.timeScale().setVisibleRange(pref.range);else chart.timeScale().fitContent();}
-   status.textContent=`Executed trades only · ${unit}${points.length===1?' · one bucket so far; the chart builds as trades arrive':''}. ${rate===null?'USD reference unavailable.':'USD uses the current reference rate, not historical rates.'} Scroll to zoom, drag to pan.`;
+   status.textContent=`Executed trades only · ${unit}${points.length===1?' · one bucket so far; the chart builds as trades arrive':''}${panel.sparse?' · line mode: most bars hold a single trade':''}. ${rate===null?'USD reference unavailable.':'USD uses the current reference rate, not historical rates.'} Scroll to zoom, drag to pan.`;
   }catch(e){if(request===revision){plot.classList.remove('is-loading');if(!quiet||!chart){cleanup();status.replaceChildren(document.createTextNode('Chart unavailable. '),h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:()=>load()}},'Retry'));}}}
  }
  draw();overlay.hidden=true;load();
