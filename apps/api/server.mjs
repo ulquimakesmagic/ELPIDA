@@ -48,6 +48,7 @@ resources.set('/holder-terminal.mjs',['holder-terminal.mjs','text/javascript']);
 resources.set('/chat-signature.mjs',['chat-signature.mjs','text/javascript']);
 resources.set('/holder-chat.mjs',['holder-chat.mjs','text/javascript']);
 resources.set('/trade-filter.mjs',['trade-filter.mjs','text/javascript']);
+resources.set('/token-insights.mjs',['token-insights.mjs','text/javascript']);
 resources.set('/tax-policy.mjs',['tax-policy.mjs','text/javascript']);
 resources.set('/tax-wallet.mjs',['tax-wallet.mjs','text/javascript']);
 resources.set('/tax-allocation.mjs',['tax-allocation.mjs','text/javascript']);

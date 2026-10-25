@@ -472,7 +472,8 @@ main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; 
 .app-shell:not([data-dock="open"]) .dock-env > .asset-icon[src*="solana"] { background: #0c0d12; }
 
 /* ---------- Phase 6b: route enter, light-theme polish ---------- */
-.view-enter { animation: view-in 240ms var(--ease, ease) both; }
+/* backwards, not both: a kept end-state transform would turn #view into the containing block of position: fixed children. */
+.view-enter { animation: view-in 240ms var(--ease, ease) backwards; }
 @keyframes view-in { from { opacity: 0; transform: translateY(8px); } }
 @media (prefers-reduced-motion: reduce) { .view-enter { animation: none; } }
 [data-theme="light"] .skeleton { background-image: linear-gradient(90deg, var(--panel-2), var(--panel-3), var(--panel-2)); animation: shimmer 1.4s linear infinite; }
