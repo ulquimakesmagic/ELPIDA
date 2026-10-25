@@ -253,8 +253,11 @@
    (style-src 'self') blocks. Unstyled, the logo's SVG grew to the full pane height and, as a second child of the
    vertically centred pane cell, pushed the drawing canvas up by half its height: candles, volume bars and markers
    were drawn out of line with the price axis. These are the library's own rules, served from our stylesheet. */
-a#tv-attr-logo { --fill: #131722; --stroke: #fff; position: absolute; left: 10px; bottom: 10px; height: 19px; width: 35px; margin: 0; padding: 0; border: 0; z-index: 3; }
+/* The app is dark by default; the library only sets [data-dark] for its own dark background, and ours is
+   transparent, so it painted the light variant: a white plate on a black page. Dark values are the default here. */
+a#tv-attr-logo { --fill: #D1D4DC; --stroke: #131722; position: absolute; left: 10px; bottom: 10px; height: 19px; width: 35px; margin: 0; padding: 0; border: 0; z-index: 3; }
 a#tv-attr-logo[data-dark] { --fill: #D1D4DC; --stroke: #131722; }
+[data-theme="light"] a#tv-attr-logo { --fill: #131722; --stroke: #fff; }
 a#tv-attr-logo svg { display: block; width: 100%; height: 100%; }
 .tk-mobilebar[data-hidden="true"] { opacity: 0; pointer-events: none; transform: translate(-50%, 12px); }
 @media (max-width: 780px) { .tk-mobilebar { transition: opacity .18s, transform .18s; } }
