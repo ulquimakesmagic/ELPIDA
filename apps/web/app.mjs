@@ -166,7 +166,7 @@ function walletButtons(net, { onDone = () => {}, onError = () => {} } = {}) {
 }
 const ctx = {
   get config() { return config; }, get state() { return state; }, get mode() { return mode; }, get wallet() { return wallet; }, get account() { return account; },
-  get busy() { return busy; }, get solWallet() { return solWallet; }, api, run, act, refresh, connect, useLocal, currentChain, networks, networkByKey, txLink, walletButtons,
+  get busy() { return busy; }, get solWallet() { return solWallet; }, api, run, act, refresh, connect, useLocal, chooseChain, currentChain, networks, networkByKey, txLink, walletButtons,
   /** The EVM provider for signatures outside a launch (ownership verification): the chosen wallet. */
   evmProvider: () => evmWallet.eth,
   navigate: hash => { if (location.hash === hash) route(); else location.hash = hash; },

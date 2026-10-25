@@ -1,0 +1,102 @@
+{
+  "kind": "imported-local-fork",
+  "scope": "LOCAL FORK ONLY — public token unchanged",
+  "upstreamChain": 84532,
+  "block": 48075531,
+  "token": "0xacaf8a75eefed9d824b1de809305feb5af8b149a",
+  "curve": "0x9dc75d4cdf6871520706658a052262bbe37c78c6",
+  "transactions": [
+    {
+      "action": "local minter setup",
+      "hash": "0x3b7939c9c48d291c750bcb6270d9aa03e1737befaa15abf66085ab8987ee4435",
+      "gas": "79257"
+    },
+    {
+      "action": "local USDC funding",
+      "hash": "0xfc82b7b2b84768d0f07870900370e6a025ec80490aaf7cf9aab146397d22d788",
+      "gas": "48715"
+    },
+    {
+      "action": "bounded curve approval",
+      "hash": "0xc9ed3e701a9d43f2a6f23de9103b5e28089f0cd76f7d7301a3e66ed422a1153a",
+      "gas": "55461"
+    },
+    {
+      "action": "complete curve",
+      "hash": "0xecbd7024d017cf74eb9a87b830f4d3b0e2e2768c9c2daff3f64abbff1f5ee266",
+      "gas": "172204"
+    },
+    {
+      "action": "graduate to public DEX copy",
+      "hash": "0x26df9ab84e173b424bd500039a6c863c6a72c8b9f43bbcb3b1ec40a12105a3e8",
+      "gas": "6939714"
+    },
+    {
+      "action": "bounded DEX buy approval",
+      "hash": "0x93eac84d8b0faa537218a98ac188b4d031a085344bdbdeda177f3587dc90ff30",
+      "gas": "55437"
+    },
+    {
+      "action": "post graduation buy",
+      "hash": "0x88ff095f1c1709e38fa9ac41af83b600e47b34a81e78710d360ad003cf3d6a45",
+      "gas": "136898"
+    },
+    {
+      "action": "bounded DEX sell approval",
+      "hash": "0x20e37aa5c2f31cce6a6fc8c47526c9c88e232f2d381ab612ff73a66e76c76846",
+      "gas": "46141"
+    },
+    {
+      "action": "post graduation sell",
+      "hash": "0x487dc5cbab7532cb0c21b4fb6e15f0b8b63c1326e38c087771c00f71897d6afc",
+      "gas": "132340"
+    },
+    {
+      "action": "collect locked position fees",
+      "hash": "0x45395c5f616fe41b317b81d82d16b81391499302ff64be115b3f476a2e4ab737",
+      "gas": "442300"
+    },
+    {
+      "action": "claim position fees",
+      "hash": "0xa05313708a851660f38f69face72189625983098e32f7e196441e590165b63b5",
+      "gas": "67799"
+    },
+    {
+      "action": "claim position fees",
+      "hash": "0xdd592962866fbcb35f08a1c4f2f776d05f3f7e873089e71e5e69559f2519c71c",
+      "gas": "54156"
+    },
+    {
+      "action": "claim position fees",
+      "hash": "0x62c779a56ee7e883b788beeb8cd3a33d038f8485cc580d1428f9a62a81927078",
+      "gas": "62604"
+    },
+    {
+      "action": "claim position fees",
+      "hash": "0x9777b1098daefc6a69ce889e05a60377f6d01cd9361155fb8ec8c4303b10ca97",
+      "gas": "62642"
+    },
+    {
+      "action": "claim curve fees",
+      "hash": "0x27ca4197edd7131c41864afd34fea200593c8b0f938474ce9657a80587bfbcc8",
+      "gas": "61636"
+    }
+  ],
+  "checks": [
+    "terminal price continuity",
+    "position permanently locked",
+    "both DEX trade directions",
+    "creator and protocol fee payouts",
+    "principal unchanged after collection",
+    "unauthorized liquidity withdrawal rejected"
+  ],
+  "completionUsdc": "16197283346",
+  "pool": "0x865174927fd7F17e77c858a73d48EE5ceCf13E19",
+  "locker": "0xE71AA68eb2a42f84831C23a9FE924Fe6127a5a6c",
+  "positionId": "82953",
+  "result": "PASS",
+  "source": "backups/base-fork/lifecycle-report.json",
+  "recordedAt": "2026-10-13T19:28:06.949Z",
+  "network": "base-sepolia",
+  "chainId": 84532
+}

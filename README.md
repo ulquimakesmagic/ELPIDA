@@ -34,6 +34,8 @@ npm ci --ignore-scripts
 npm run compile
 npm test
 ```
+`npm run test:gate` is the result a reviewer can trust: it reads the TAP stream and fails on any skip that is not a missing toolchain, so a run where the Solana validator is absent cannot report success. Compilation is cached in `cache/solc` (content-addressed; `ELPIDA_SOLC_CACHE=0` forces a clean build), and `tests/claims.test.mjs` asserts the documented line counts, curve constants, registry entries and the CSP promise. See [assurance gates](docs/ASSURANCE_GATES.md).
+
 `npm run compile` uses pinned Solidity 0.8.24 with optimization and the Shanghai EVM target, writing ABI and bytecode artifacts under `artifacts/`.
 The compiler's `tmp` helper is overridden to version 0.2.7 to address temporary-file path vulnerabilities without changing the compiler version.
 

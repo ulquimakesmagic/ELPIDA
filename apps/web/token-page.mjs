@@ -1,5 +1,5 @@
 import { nowSeconds } from './clock.mjs';
-import { snipeLabel, devLabel } from '/curve-model.mjs';
+import { snipeLabel } from '/curve-model.mjs';
 import { assetIcon, chainIcon } from './chain-ui.mjs';
 import { usdcFunding } from './usdc-funding.mjs';
 // Token detail page: market figures with plain definitions, bonding-curve progress, trade panel,
@@ -13,6 +13,7 @@ import {tokenWalletImage,watchEvmToken} from './wallet-token.mjs';
 import {holderChat} from './holder-chat.mjs';
 import {filterTrades} from './trade-filter.mjs';
 import {odometer} from './odometer.mjs';
+import {filterByWho,topTraders,safetyChecks,quickAmounts,walletHolders} from './token-insights.mjs';
 export { exceedsRemaining };
 
 const metadataRequests = new Map();
@@ -74,8 +75,7 @@ export function renderToken(ctx, address) {
     bar(raisedPct, token.complete || token.graduated, 'Bonding curve progress'),
     !token.graduated ? h('p.small.muted', token.complete ? `Anyone can graduate it: the ${number(reserve, 4)} ${q} reserve and the remaining tokens open a ${dex} pool with permanently locked liquidity.` : `Virtual bonding curve: purchases build the reserve. About ${number(remainingDisplay, 4)} ${q} more completes it, then the liquidity moves into a locked ${dex} pool.`) : null);
 
-  const stat = (label, value, cls = '') => h(`div.tk-stat${cls}`, h('span', label), value);
-  const holdersValue = h('strong', '—'), tradesValue = h('strong', token.trades24h != null ? number(token.trades24h, 0) : '—'),volumeValue=h('strong',token.volume24h!=null?fmtValue(token.volume24h,token):'—');
+  const holdersValue = h('strong', '—'),volumeValue=h('strong',token.volume24h!=null?fmtValue(token.volume24h,token):'—');
   const creatorFeesTotal=h('strong','Loading…');
   const creatorFeesStat=h('section.tk-card.tk-fees',{'aria-label':'Creator fees',title:'Lifetime creator fees, including claimed amounts. LP fees include collected and currently collectible fees. Assets are shown separately.'},h('h2.tk-h','Creator fees'),creatorFeesTotal,h('p.hint','Lifetime total, including amounts already claimed.'),h('a.btn.btn-secondary.btn-sm',{href:'#/rewards'},'Claim fees',icon('arrow-right','icon-sm')));
   const tile=(label,value,title)=>h('div.tk-tile',{title:title??null},h('span',label),h('strong',value));
@@ -84,35 +84,30 @@ export function renderToken(ctx, address) {
     tile('Supply', compact(token.supply || 1e9)),
     tile('Trading pair', q),
     tile('Venue', token.graduated ? (dex === 'test' ? 'Locked test pool' : dex) : 'Bonding curve')));
-  const miniBar = (label, value) => h('div.tk-dev-row', h('span', label), h('strong', value == null ? '—' : `${number(value, 2)}%`), h('span.tk-minibar', { 'aria-hidden': 'true' }, h('i')));
-  const devCard = token.devBoughtPct != null ? h('section.tk-card.tk-dev', { 'aria-label': 'Dev transparency', title: devLabel(token.devBoughtPct, token.devHoldingPct) }, h('h2.tk-h', 'Dev transparency'), miniBar('Dev bought', token.devBoughtPct), miniBar('Dev holds now', token.devHoldingPct)) : null;
-  if (devCard) devCard.querySelectorAll('.tk-minibar i').forEach((fill, i) => { const v = Number([token.devBoughtPct, token.devHoldingPct][i]); fill.style.width = `${Math.min(100, Math.max(0, Number.isFinite(v) ? v : 0))}%`; });
 
   const change = token.priceChange24h, hasChange = change && Number.isFinite(change.percent), up = hasChange && change.percent >= 0;
   const usdOn = usdRate(token) !== null;
   const buys = token.buys24h, sells = token.sells24h;
-  const priceBlock = h('div.tk-price',
-    h('span.tk-label', usdOn ? 'PRICE / USD' : `PRICE / ${q}`),
-    odometer(fmtPrice(token), 'tk-price-value'),
-    h('div.tk-price-meta',
-      hasChange ? h(`span.pct-pill.${up ? 'pct-up' : 'pct-down'}`, { title: change.basis ?? '24h change' }, `${up ? '+' : ''}${number(change.percent, 2)}%`) : h('span.pct-pill.pct-flat', { title: 'Needs confirmed prices near both comparison times' }, 'No 24h change'),
-      hasChange ? h('span.hint', '24h') : null,
-      buys != null && sells != null ? h('span.hint', { title: 'Indexed trades in the last 24 hours' }, `${number(buys, 0)} buys / ${number(sells, 0)} sells`) : null));
-  const statGrid = h('div.tk-stats', { 'aria-label': 'Token statistics', role: 'group' },
-    stat('Market cap', h('strong.tk-accent', fmtValue(p.marketCap, token))),
-    stat('24h volume', volumeValue),
-    stat('Holders', holdersValue),
-    stat('24h trades', tradesValue));
-
+  const tile2 = (label, value, cls = '', title = null) => h(`div.tk-strip-tile${cls}`, { title }, h('span', label), value);
+  const changePill = hasChange ? h(`span.pct-pill.${up ? 'pct-up' : 'pct-down'}`, { title: change.basis ?? '24h change' }, `${up ? '+' : ''}${number(change.percent, 2)}%`) : null;
+  const txValue = h('strong', buys != null && sells != null ? [String(number(Number(buys) + Number(sells), 0)), ' ', h('small', h('span.up', `${number(buys, 0)} ${Number(buys) === 1 ? 'buy' : 'buys'}`), ' · ', h('span.down', `${number(sells, 0)} ${Number(sells) === 1 ? 'sell' : 'sells'}`))] : (token.trades24h != null ? number(token.trades24h, 0) : '—'));
+  const strip = h('section.tk-strip', { 'aria-label': 'Market numbers' },
+    tile2(usdOn ? 'Price' : `Price in ${q}`, h('div.tk-strip-price', odometer(fmtPrice(token), 'tk-price-value'), changePill)),
+    tile2('Market cap', h('strong.tk-accent', fmtValue(p.marketCap, token)), '.tk-strip-cap', 'Price × total supply (1B)'),
+    tile2('Liquidity', h('strong', fmtValue(Number(token.reserve ?? 0), token)), '', 'Actual quote assets in the curve or pool; virtual reserves are excluded.'),
+    tile2('24h volume', volumeValue),
+    tile2('Holders', holdersValue),
+    tile2('24h trades', txValue, '', 'Indexed trades in the last 24 hours'));
   const head = h('header.tk-head',
     h('nav.tk-crumb', { 'aria-label': 'Breadcrumb' }, h('a', { href: '#/' }, icon('arrow-left', 'icon-sm'), 'Explore'), h('span', { 'aria-hidden': 'true' }, '/'), h('span.tk-crumb-now', token.symbol),
       h('span.tk-chain', { title: ctx.envLabel() }, chainIcon(token.network ?? ctx.wallet.net.key), h('span', ctx.envLabel()))),
-    h('div.tk-id', avatar(token, 'avatar-lg'),
+    h('div.tk-id', h('span.tk-avatar', avatar(token, 'avatar-lg'), h('span.tk-avatar-chain', { title: ctx.envLabel() }, chainIcon(token.network ?? ctx.wallet.net.key))),
       h('div.tk-id-copy', h('h1', { title: token.name }, token.name),
         h('div.tk-tags',
           h('span.tk-tag.tk-tag-strong', '$' + token.symbol),
           h('span.tk-tag', { title: `Trading pair: ${q}` }, assetIcon(q), q),
           created ? h('span.tk-tag', { title: new Date(created * 1000).toLocaleString() }, `Launched ${ago(created)} ago`) : null,
+          token.creator ? h('a.tk-tag.tk-creator', { href: addressUrl(token.creator) ?? '#', target: '_blank', rel: 'noopener noreferrer', title: `Creator: ${token.creator}` }, 'by ', h('span.mono', short(token.creator)), h('span.badge-dev', 'Dev')) : null,
           h('span.tk-tag.tk-addr', { title: token.address }, short(token.address), copyButton(token.address, '')),
           h('span.tk-tag', { title: 'Copy a link that shows a preview card on X, Telegram and Discord' }, 'Share', copyButton(`${location.origin}/token/${encodeURIComponent(token.network ?? ctx.wallet.net.key)}/${token.address}`, '')),
           token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null),
@@ -120,8 +115,7 @@ export function renderToken(ctx, address) {
     h('div.tk-about', descText, descMore),
     token.metadataURI ? h('p.tk-lock', icon('lock', 'icon-xs'), 'Details are recorded at launch and cannot be edited.') : null);
   const chart = terminalChart(ctx, token, q);
-  const priceCard = h('section.tk-card.tk-pricecard', { 'aria-label': 'Price and chart' },
-    h('div.tk-pricetop', priceBlock, statGrid), chart, h('p.tk-foot', priceSource));
+  const priceCard = h('section.tk-card.tk-pricecard', { 'aria-label': 'Chart' }, chart, h('p.tk-foot', priceSource));
 
   const addresses = h('section.address-row', { 'aria-label': 'Contract addresses and dates' },
     h('div', h('span', 'Token'), h('a', { href: addressUrl(token.address) ?? '#', target: '_blank', rel: 'noopener noreferrer' }, short(token.address))),
@@ -163,52 +157,92 @@ export function renderToken(ctx, address) {
     h('dt','Market cap convention'),h('dd','Market cap = price × total supply (1,000,000,000). The whole supply is minted at launch into the curve, so circulating supply equals total supply.'),
     token.metadataURI ? [h('dt', 'Metadata URI'), h('dd', token.metadataURI)] : null));
 
-  const activity = marketActivity(ctx, token, q, { addressUrl, isCreator, onCounts: ({ holders, trades }) => { holdersValue.textContent = holders ?? '—'; tradesValue.textContent = trades ?? '—'; } });
+  // Safety: facts the contracts guarantee, plus dev and top-10 holdings once the holder list arrives.
+  const safetyList = h('ul.tk-safety-list');
+  const drawSafety = holders => safetyList.replaceChildren(...safetyChecks(token, { holders, dex }).map(c => h(`li.${c.ok ? 'is-ok' : 'is-warn'}`, h('span.tk-safety-mark', { 'aria-hidden': 'true' }, c.ok ? '✓' : '!'), h('span', c.text))));
+  drawSafety(null);
+  const safety = h('section.tk-card.tk-safety', { 'aria-label': 'Safety' }, h('h2.tk-h', 'Safety'), safetyList, h('p.hint', 'Checks come from the contracts and indexed holders. A warning is worth a look, not a verdict.'));
+  const me = ctx.mode === 'testnet' ? ctx.wallet?.address : ctx.state.wallet;
+  const info = h('div.tk-info.stack', details, addresses, about, tech);
+  let markerRows = null;
+  const activity = marketActivity(ctx, token, q, { addressUrl, isCreator, me, info,
+    onCounts: ({ holders }) => { holdersValue.textContent = holders ?? '—'; },
+    onHolders: rows => drawSafety(rows),
+    onTrades: rows => { markerRows = rows; chart.refreshMarkers?.(); } });
+  chart.markerSource = { rows: () => markerRows, creator: token.creator, me };
   const desk=holderTerminal(ctx,token,{onVolume:v=>volumeValue.textContent=fmtValue(v,token)});
-  const page=h('div.tk-page', head,
+  const trade = tradePanel(ctx, token, { dex, solana });
+  const sideButton = s => h(`button.btn.btn-lg.${s === 'buy' ? 'btn-buy' : 'btn-sell'}`, { type: 'button', on: { click: () => { trade.selectSide?.(s); trade.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' }); } } }, s === 'buy' ? `Buy ${token.symbol}` : 'Sell');
+  const mobileBar = trade.selectSide ? h('div.tk-mobilebar', { role: 'group', 'aria-label': 'Quick trade' }, sideButton('buy'), sideButton('sell')) : null;
+  // Hidden while the trade panel itself is on screen, so the bar never covers the panel's own button.
+  if (mobileBar && typeof IntersectionObserver === 'function') {
+    const seen = new IntersectionObserver(([entry]) => { if (!mobileBar.isConnected && !trade.isConnected) { seen.disconnect(); return; } mobileBar.dataset.hidden = String(entry.isIntersecting); }, { threshold: 0.15 });
+    seen.observe(trade);
+  }
+  const page=h('div.tk-page', head, strip,
     h('div.tk-layout',
       h('div.tk-top', priceCard),
-      h('aside.tk-rail.stack', tradePanel(ctx, token, { dex, solana }), desk.position, curve, creatorFeesStat, devCard),
-      h('div.tk-rest.stack', activity, details, addresses, about, tech)));
+      h('aside.tk-rail.stack', trade, desk.position, curve, safety, creatorFeesStat),
+      h('div.tk-rest.stack', activity)), mobileBar);
   async function loadCreatorFees(){if(!page.isConnected)return;try{const result=await ctx.api(`creator-fees?network=${encodeURIComponent(token.network??ctx.currentChain())}&token=${encodeURIComponent(token.address)}`);if(!page.isConnected)return;if(result.status==='ready'){creatorFeesTotal.textContent=result.assets.filter(a=>Number(a.amount)>0).map(a=>`${number(a.amount,6)} ${a.symbol}`).join(' + ')||`0 ${q}`;creatorFeesStat.title=`Lifetime creator fees through indexed block ${result.indexedBlock}, including claimed amounts. Token and quote assets are shown separately.`;}else{creatorFeesTotal.textContent=result.status==='loading'?'Loading…':'Unavailable';}}catch{creatorFeesTotal.textContent='Unavailable';}if(page.isConnected)setTimeout(loadCreatorFees,15000);}
   queueMicrotask(loadCreatorFees);
   return page;
 }
 
-function marketActivity(ctx,token,q,{addressUrl,isCreator,onCounts}){
+const WHO_LABELS={all:'All',dev:'Dev',mine:'Mine',large:'Large'};
+const WHO_TITLES={all:'Every indexed trade',dev:"The creator's trades",mine:'Trades from your connected wallet',large:'The largest tenth of the indexed trades by size'};
+const TAB_LABELS={trades:'Trades',holders:'Holders',traders:'Top traders',info:'Info',chat:'Holder chat'};
+function marketActivity(ctx,token,q,{addressUrl,isCreator,me,info,onCounts,onHolders,onTrades}){
   const content=h('div',h('p.muted.small','Loading trades…')),total=h('span.meta'),tabs=h('div.tk-tabs',{role:'tablist','aria-label':'Token activity'});
-  let selected='trades',revision=0,side='all',chatView=null,shown=20,counts={trades:null,holders:null};
-  const sideFilter=h('label.trade-side-filter',h('span','Show'),h('select.select',{'aria-label':'Filter trades by side',on:{change:event=>{side=event.target.value;shown=20;load();}}},...['all','buy','sell'].map(value=>h('option',{value},value==='all'?'All trades':value==='buy'?'Buys':'Sells'))));
-  const panel=h('section.tk-card.tk-records',h('div.tk-records-head',tabs,h('div.activity-controls',sideFilter,total)),content);
+  let selected='trades',revision=0,side='all',who='all',chatView=null,shown=20,counts={trades:null,holders:null};
+  const sideFilter=h('label.trade-side-filter',h('span.visually-hidden','Side'),h('select.select',{'aria-label':'Filter trades by side',on:{change:event=>{side=event.target.value;shown=20;load();}}},...['all','buy','sell'].map(value=>h('option',{value},value==='all'?'Buys and sells':value==='buy'?'Buys':'Sells'))));
+  const whoGroup=h('div.tk-who',{role:'group','aria-label':'Show trades from'});
+  const drawWho=()=>whoGroup.replaceChildren(...Object.keys(WHO_LABELS).map(key=>h('button',{type:'button',title:WHO_TITLES[key],'aria-pressed':String(who===key),disabled:key==='mine'&&!me,on:{click:()=>{who=key;shown=20;load();}}},WHO_LABELS[key])));
+  const controls=h('div.activity-controls',whoGroup,sideFilter,total);
+  const panel=h('section.tk-card.tk-records',h('div.tk-records-head',tabs,controls),content);
   const base=ctx.mode==='local'?`tokens/${token.address}`:`public/tokens/${token.address}`,net=ctx.mode==='local'?'':`?network=${encodeURIComponent(ctx.currentChain())}`;
   const fetchKind=kind=>ctx.api(`${base}/${kind}${net}`);
   const usd=usdRate(token);
   const priceCell=row=>{const price=Number(row.quoteAmount)/Number(row.tokenAmount);return Number.isFinite(price)&&price>0?(usd!==null?formatPrice(price*usd):`${formatPrice(price,'')} ${q}`):'—';};
-  const amountCell=row=>{const v=Number(row.quoteAmount);if(!Number.isFinite(v))return '—';if(usd===null)return `${number(v,v<0.001?6:3)} ${q}`;const d=v*usd;return d>0&&d<0.01?'<$0.01':'$'+number(d,2);};
-  const trader=a=>h('span.trader',h('a.tk-trader',{href:addressUrl(a)??'#',target:'_blank',rel:'noopener noreferrer'},short(a),icon('arrow-up-right','icon-xs')),isCreator(a)?h('span.badge-dev',{title:'The creator of this token'},'Dev'):null);
+  const money=v=>{v=Number(v);if(!Number.isFinite(v))return '—';if(usd===null)return `${number(v,Math.abs(v)<0.001?6:3)} ${q}`;const d=v*usd;return d!==0&&Math.abs(d)<0.01?(d<0?'-<$0.01':'<$0.01'):(d<0?'-$':'$')+number(Math.abs(d),2);};
+  const amountCell=row=>money(row.quoteAmount);
+  const isMe=a=>me&&a&&String(a).toLowerCase()===String(me).toLowerCase();
+  const trader=a=>h('span.trader',h('a.tk-trader',{href:addressUrl(a)??'#',target:'_blank',rel:'noopener noreferrer'},short(a),icon('arrow-up-right','icon-xs')),isCreator(a)?h('span.badge-dev',{title:'The creator of this token'},'Dev'):null,isMe(a)?h('span.badge-you',{title:'Your connected wallet'},'You'):null);
   const role=a=>{const x=String(a??'').toLowerCase();if(isCreator(a))return 'Creator';if(token.curve&&x===token.curve.toLowerCase())return 'Curve';if(token.pool&&x===String(token.pool).toLowerCase())return 'Liquidity pool';if(/^0x0{40}$|^0x0{36}dead$/.test(x))return 'Burn';return null;};
-  const label=kind=>kind==='trades'?'Activity':kind==='holders'?'Holders':'Chat';
-  function drawTabs(){tabs.replaceChildren(...['trades','holders','chat'].map(kind=>h('button',{type:'button',role:'tab','aria-selected':String(selected===kind),on:{click:()=>{selected=kind;shown=20;load();}}},label(kind),counts[kind]!=null&&kind!=='chat'?h('span.tk-count',String(counts[kind])):null)));}
+  const kinds=['trades','holders','traders','info','chat'];
+  function drawTabs(){tabs.replaceChildren(...kinds.map(kind=>h('button',{type:'button',role:'tab','aria-selected':String(selected===kind),on:{click:()=>{selected=kind;shown=20;load();}}},TAB_LABELS[kind],counts[kind]!=null?h('span.tk-count',String(counts[kind])):null)));}
+  const txLink=row=>row.hash&&addressUrl(row.account)?addressUrl(row.account).replace(/\/address\/[^?]+/,'/tx/'+row.hash):null;
   async function load(){const current=++revision;
-    chatView?.dispose();chatView=null;drawTabs();
-    sideFilter.hidden=selected!=='trades';total.textContent='';
+    chatView?.dispose();chatView=null;drawTabs();drawWho();
+    controls.hidden=!['trades','holders','traders'].includes(selected);whoGroup.hidden=sideFilter.hidden=selected!=='trades';total.textContent='';
     if(selected==='chat'){chatView=holderChat(ctx,token);content.replaceChildren(chatView.element);return;}
-    try{const fetched=await fetchKind(selected);if(current!==revision||!panel.isConnected)return;
-      const all=selected==='trades'?filterTrades(fetched,side):fetched,rows=all.slice(0,shown);
-      total.textContent=selected==='trades'?`${all.length} of ${fetched.length}${fetched.length>=100?'+':''} recent trades`:`${all.length}${all.length>=50?'+':''} holders`;
-      const sym=token.symbol;
-      const table=selected==='trades'
-        ?h('table.market-table.tk-table',h('thead',h('tr',...['Time','Type',sym,'Amount','Trader','Price'].map((l,i)=>h('th',{scope:'col',class:i===0||i===1||i===4?'':'num'},l)))),h('tbody',rows.map(row=>h('tr',{class:'tk-row'},
-            h('td.tk-time',row.hash&&addressUrl(row.account)?h('a',{href:addressUrl(row.account).replace(/\/address\/[^?]+/,'/tx/'+row.hash),target:'_blank',rel:'noopener noreferrer',title:new Date(row.timestamp*1000).toLocaleString()},ago(row.timestamp)+' ago'):ago(row.timestamp)+' ago'),
+    if(selected==='info'){content.replaceChildren(info);return;}
+    try{const fetched=await fetchKind(selected==='traders'?'trades':selected);if(current!==revision||!panel.isConnected)return;
+      if(selected==='trades'){onTrades?.(fetched);
+        const all=filterTrades(filterByWho(fetched,who,{creator:token.creator,me}),side),rows=all.slice(0,shown);
+        total.textContent=`${all.length} of ${fetched.length}${fetched.length>=100?'+':''} recent trades`;
+        const table=h('table.market-table.tk-table',h('thead',h('tr',...['Time','Type',token.symbol,'Amount','Trader','Price'].map((l,i)=>h('th',{scope:'col',class:i===0||i===1||i===4?'':'num'},l)))),h('tbody',rows.map(row=>h('tr',{class:`tk-row tk-row-${row.side==='buy'?'buy':'sell'}`},
+            h('td.tk-time',txLink(row)?h('a',{href:txLink(row),target:'_blank',rel:'noopener noreferrer',title:new Date(row.timestamp*1000).toLocaleString()},ago(row.timestamp)+' ago'):ago(row.timestamp)+' ago'),
             h('td',h(`span.tk-badge.tk-${row.side==='buy'?'buy':'sell'}`,row.side==='buy'?'Buy':'Sell')),
-            h('td.num',compact(row.tokenAmount)),h('td.num',amountCell(row)),h('td',trader(row.account)),h('td.num',priceCell(row))))))
-        :h('table.market-table.tk-table',h('thead',h('tr',...['#','Holder','Balance','Share'].map((l,i)=>h('th',{scope:'col',class:i>1?'num':''},l)))),h('tbody',rows.map((row,i)=>{const share=Number(row.supplyShare)*100,r=role(row.address);return h('tr',{class:'tk-row'},h('td',String(i+1)),h('td',trader(row.address),r?h('span.tk-role',r):null),h('td.num',compact(row.balance)),h('td.num.tk-share',h('span',number(share,2)+'%'),h('span.tk-minibar',{'aria-hidden':'true'},h('i'))));})));
-      if(selected==='holders')rows.forEach((row,i)=>{const fill=table.querySelectorAll('.tk-minibar i')[i];if(fill)fill.style.width=`${Math.min(100,Math.max(1,Number(row.supplyShare)*400))}%`;});
-      const more=all.length>rows.length?h('button.btn.btn-secondary.btn-sm.tk-more',{type:'button',on:{click:()=>{shown+=20;load();}}},selected==='trades'?'Show more trades':'Show more holders'):null;
-      content.replaceChildren(...[rows.length?h('div.table-scroll',table):h('p.muted.small',selected==='trades'?(side==='all'?'No trades yet.':`No ${side==='buy'?'buys':'sells'} in the recent indexed trades.`):'No holders yet.'),more,...(selected==='holders'?[h('p.meta','Wallets only: the curve, the DEX pool and the burn address are not counted. Shares use the full 1B supply.')]:[])].filter(Boolean));
+            h('td.num',compact(row.tokenAmount)),h('td.num',amountCell(row)),h('td',trader(row.account)),h('td.num',priceCell(row))))));
+        const empty=who==='mine'?'No trades from your wallet in the recent indexed trades.':who==='dev'?'The creator has no trades in the recent indexed trades.':side==='all'?'No trades yet.':`No ${side==='buy'?'buys':'sells'} in the recent indexed trades.`;
+        const more=all.length>rows.length?h('button.btn.btn-secondary.btn-sm.tk-more',{type:'button',on:{click:()=>{shown+=20;load();}}},'Show more trades'):null;
+        content.replaceChildren(...[rows.length?h('div.table-scroll',table):h('p.muted.small.tk-empty',empty),more].filter(Boolean));
+      }else if(selected==='traders'){onTrades?.(fetched);
+        const rows=topTraders(fetched,20);
+        total.textContent=`From the ${fetched.length}${fetched.length>=100?'+':''} most recent trades`;
+        const table=h('table.market-table.tk-table',h('thead',h('tr',...['#','Trader','Bought','Sold','Net','Trades'].map((l,i)=>h('th',{scope:'col',class:i>1?'num':''},l)))),h('tbody',rows.map((row,i)=>h('tr',{class:'tk-row'},h('td',String(i+1)),h('td',trader(row.account)),h('td.num',money(row.bought)),h('td.num',money(row.sold)),h('td.num',{class:row.net>0?'up':row.net<0?'down':''},money(row.net)),h('td.num',h('span.up',String(row.buys)),' / ',h('span.down',String(row.sells)))))));
+        content.replaceChildren(rows.length?h('div.table-scroll',table):h('p.muted.small.tk-empty','No trades yet.'),h('p.meta','Net is what a wallet took out minus what it put in. Tokens still held are not counted.'));
+      }else{onHolders?.(fetched);
+        const rows=fetched.slice(0,shown);
+        total.textContent=`${walletHolders(fetched,token).length}${fetched.length>=50?'+':''} holders`;
+        const table=h('table.market-table.tk-table',h('thead',h('tr',...['#','Holder','Balance','Share'].map((l,i)=>h('th',{scope:'col',class:i>1?'num':''},l)))),h('tbody',rows.map((row,i)=>{const share=Number(row.supplyShare)*100,r=role(row.address);return h('tr',{class:'tk-row'},h('td',String(i+1)),h('td',trader(row.address),r?h('span.tk-role',r):null),h('td.num',compact(row.balance)),h('td.num.tk-share',h('span',number(share,2)+'%'),h('span.tk-minibar',{'aria-hidden':'true'},h('i',{style:{width:`${Math.min(100,Math.max(1,Number(row.supplyShare)*400))}%`}}))));})));
+        const more=fetched.length>rows.length?h('button.btn.btn-secondary.btn-sm.tk-more',{type:'button',on:{click:()=>{shown+=20;load();}}},'Show more holders'):null;
+        content.replaceChildren(...[rows.length?h('div.table-scroll',table):h('p.muted.small.tk-empty','No holders yet.'),more,h('p.meta','Wallets only: the curve, the DEX pool and the burn address are not counted. Shares use the full 1B supply.')].filter(Boolean));
+      }
     }catch{if(current===revision)content.replaceChildren(h('p.muted.small','Trades are still indexing or temporarily unavailable.'),h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:load}},'Retry'));}
   }
-  Promise.allSettled([fetchKind('trades'),fetchKind('holders')]).then(([t,hd])=>{const f=r=>r.status==='fulfilled'?r.value:null,tr=f(t),ho=f(hd);counts={trades:tr?`${tr.length}${tr.length>=100?'+':''}`:null,holders:ho?`${ho.length}${ho.length>=50?'+':''}`:null};onCounts({trades:counts.trades,holders:counts.holders});if(panel.isConnected)drawTabs();});
+  Promise.allSettled([fetchKind('trades'),fetchKind('holders')]).then(([t,hd])=>{const f=r=>r.status==='fulfilled'?r.value:null,tr=f(t),ho=f(hd);if(tr)onTrades?.(tr);if(ho)onHolders?.(ho);const wallets=ho?walletHolders(ho,token).length:null;counts={trades:tr?`${tr.length}${tr.length>=100?'+':''}`:null,holders:ho?`${wallets}${ho.length>=50?'+':''}`:null};onCounts({trades:counts.trades,holders:counts.holders});if(panel.isConnected)drawTabs();});
   load();return panel;
 }
 
@@ -286,9 +320,16 @@ function tradePanel(ctx, token, { dex, solana }) {
     const gasReserve = side === 'buy' && token.pair === 'native' ? (solana ? 0.02 : 0.0005) : 0;
     const toUnits = text => { const [w, f = ''] = String(text ?? '0').split('.'); return BigInt(w || '0') * 10n ** BigInt(decimals) + BigInt((f.slice(0, decimals) || '0').padEnd(decimals, '0')); };
     const fromUnits = n => `${n / 10n ** BigInt(decimals)}.${(n % 10n ** BigInt(decimals)).toString().padStart(decimals, '0')}`.replace(/\.?0+$/, '') || '0';
-    const presets = [...(available != null && Number(available) > gasReserve ? [25, 50, 75, 100] : []), ...(side === 'buy' && !token.complete && token.remainingBuy ? ['curve'] : [])];
-    shortcuts.replaceChildren(...presets.map(value => h('button.chip-btn', { type: 'button', 'aria-label': value === 'curve' ? 'Fill the amount that completes the curve' : `${value === 100 ? 'Maximum' : value + '%'} of your balance`, on: { click: () => {
+    // Buys: one-tap sizes in the pair asset, then Max. Sells: a share of the tokens held.
+    const funded = available != null && Number(available) > gasReserve;
+    const quick = side === 'buy' ? quickAmounts(q).map(v => `quick:${v}`) : [];
+    const presets = [...quick, ...(funded ? (side === 'buy' ? [100] : [25, 50, 75, 100]) : []), ...(side === 'buy' && !token.complete && token.remainingBuy ? ['curve'] : [])];
+    shortcuts.replaceChildren(...presets.map(value => h('button.chip-btn', { type: 'button', 'data-preset': String(value), 'aria-label': value === 'curve' ? 'Fill the amount that completes the curve' : String(value).startsWith('quick:') ? `Buy with ${String(value).slice(6)} ${q}` : `${value === 100 ? 'Maximum' : value + '%'} of your balance`, on: { click: () => {
       if (value === 'curve') amount.value = token.remainingBuy;
+      else if (String(value).startsWith('quick:')) {
+        amount.value = String(value).slice(6);
+        if (remaining && exceedsRemaining(amount.value, token.remainingBuy) && !solana && !token.partialFill) amount.value = token.remainingBuy;
+      }
       else {
         // Integer arithmetic so Max never exceeds the actual balance.
         const spendable = toUnits(available) - toUnits(String(gasReserve));
@@ -296,7 +337,7 @@ function tradePanel(ctx, token, { dex, solana }) {
         if (side === 'buy' && remaining && exceedsRemaining(amount.value, token.remainingBuy)) amount.value = token.remainingBuy;
       }
       quote();
-    } } }, value === 'curve' ? 'Complete curve' : value === 100 ? 'Max' : `${value}%`)));
+    } } }, value === 'curve' ? 'Complete curve' : String(value).startsWith('quick:') ? String(value).slice(6) : value === 100 ? 'Max' : `${value}%`)));
   }
   function quote() {
     const value = amount.value, rev = ++revision; clearTimeout(timer); error.textContent = '';
@@ -358,7 +399,10 @@ function tradePanel(ctx, token, { dex, solana }) {
   });
   setSide('buy');
   tickFeeWindow();
-  return h('section.panel.trade-panel.tk-trade', { 'aria-labelledby': 'trade-title' }, h('h2#trade-title.visually-hidden', 'Trade'),
+  const section = h('section.panel.trade-panel.tk-trade', { 'aria-labelledby': 'trade-title' }, h('h2#trade-title.visually-hidden', 'Trade'),
     h('p.small.muted', token.tax ? `Buy tax ${token.tax.buyBps/100}% / sell tax ${token.tax.sellBps/100}%, fixed at launch. Tax revenue: 30% Elpida / 70% creator allocations. ${token.graduated?'The V2 pool fee is additional; the curve fee has stopped. LP fees compound in locked liquidity. Creator tax claims are paid in this token.':'The 1.25% curve fee remains additional, split 50/50. First-minute protection adds locked liquidity.'}` : token.graduated ? `Trading on ${dex === 'test' ? 'the locked test pool' : dex}. Liquidity is locked permanently. The curve fee has stopped; the DEX pool fee applies.${token.venue === 'PumpSwap' ? ' LP fees are harvested 50/50 to Elpida and the creator.' : ''}` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'),
     form);
+  // Lets the phone buy bar open the panel on the right side.
+  section.selectSide = next => { if (next !== side) setSide(next); amount.focus({ preventScroll: true }); };
+  return section;
 }

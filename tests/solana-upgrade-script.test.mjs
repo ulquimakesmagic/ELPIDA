@@ -5,10 +5,11 @@ import assert from 'node:assert/strict';
 import { readFileSync, existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { declaredProgramId } from '../packages/solana/program-id.mjs';
 
-const root = new URL('../', import.meta.url).pathname;
+const root = fileURLToPath(new URL('../', import.meta.url));
 
 test('the program address comes from declare_id! in the program source', () => {
   const source = readFileSync(join(root, 'contracts/solana/programs/elpida_launchpad/src/lib.rs'), 'utf8');

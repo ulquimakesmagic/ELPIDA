@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import {mkdirSync,writeFileSync} from 'node:fs';
+import {writeEvidence} from './evidence.mjs';
 import {network} from 'hardhat';
 import {BrowserProvider,JsonRpcSigner,Contract,parseUnits,toBeHex,ZeroAddress} from 'ethers';
 import {compileContracts} from './compile.mjs';
@@ -67,4 +68,5 @@ try{
  await assert.rejects(manager.decreaseLiquidity.staticCall({tokenId:id,liquidity,amount0Min:0,amount1Min:0,deadline:Math.floor(Date.now()/1000)+3600}));
  report.checks.push('both DEX trade directions','creator and protocol fee payouts','principal unchanged after collection','unauthorized liquidity withdrawal rejected');report.result='PASS';
 }catch(error){report.result='FAIL';report.error=error.shortMessage??error.message;throw error;}
-finally{mkdirSync('backups/base-fork',{recursive:true});writeFileSync('backups/base-fork/lifecycle-report.json',JSON.stringify(report,null,2));provider.destroy();await connection.close();console.log(JSON.stringify({stage:'report',result:report.result,path:'backups/base-fork/lifecycle-report.json'}));}
+finally{mkdirSync('backups/base-fork',{recursive:true});writeFileSync('backups/base-fork/lifecycle-report.json',JSON.stringify(report,null,2));
+try{const evidence=writeEvidence(report,{network:'base-sepolia',chainId:84532});console.log(JSON.stringify({stage:'evidence',path:evidence}));}catch(error){console.log(JSON.stringify({stage:'evidence',error:error.message}));}provider.destroy();await connection.close();console.log(JSON.stringify({stage:'report',result:report.result,path:'backups/base-fork/lifecycle-report.json'}));}

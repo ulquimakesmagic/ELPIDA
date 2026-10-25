@@ -16,7 +16,7 @@ Only one application replica should serve a shared admission database and metada
 
 `node scripts/storage-operations.mjs backup DATA_DIR NEW_SNAPSHOT_DIR`
 
-Copies only metadata blobs/retention and recognized public EVM/Solana index files. SQLite uses its online backup API so committed WAL data is included. The operation excludes Circle wallets, entity-secret recovery, .env, simulation journals, admission state and private keys. Provisional metadata drafts are included, so keep the snapshot private. Metadata blobs are immutable; if the retention ledger changes during the copy, the snapshot is rejected as incomplete and must be retried into a fresh destination.
+Copies only metadata blobs/retention, recognized public EVM/Solana index files, and the local simulation journal (`simulation-journal-v2.jsonl`) with its `token-metadata.json` sidecar. SQLite uses its online backup API so committed WAL data is included. The operation excludes Circle wallets, entity-secret recovery, .env, admission state and private keys. Provisional metadata drafts are included, so keep the snapshot private. Metadata blobs are immutable; if the retention ledger changes during the copy, the snapshot is rejected as incomplete and must be retried into a fresh destination. The simulation journal used to be excluded: it holds the demo economy's public trade history, and without it a lost volume resets every local launch even though the rest of the snapshot restores, so it is included now.
 
 `node scripts/storage-operations.mjs restore SNAPSHOT_DIR NEW_DATA_DIR`
 

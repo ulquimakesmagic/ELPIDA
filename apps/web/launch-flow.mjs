@@ -15,7 +15,7 @@ import { curveShape, DEX_MODEL, BETA_MODEL, BASE_FEE_BPS, LOCAL_START_FDV_USD } 
 const DRAFT_KEY = 'elpida:launch-draft';
 const STEPS = [
   { key: 'details', title: 'Token details', lead: 'How your token appears everywhere on Elpida. Name and symbol cannot be changed after launch.' },
-  { key: 'network', title: 'Trading pair', lead: 'Choose the asset buyers pay with. Change the chain using the selector at the top.' },
+  { key: 'network', title: 'Trading pair', lead: 'Pick the network, then the asset buyers pay with.' },
   { key: 'rewards', title: 'Creator rewards', lead: 'Decide where the creator share of trading fees goes. Your choice is fixed at launch.' },
   { key: 'purchase', title: 'Creator purchase (optional)', lead: 'Launch without buying, or make a creator purchase in the launch transaction.' },
   { key: 'review', title: 'Review and create', lead: 'Check everything before you create your token. Items marked as fixed cannot be changed later.' },
@@ -218,6 +218,23 @@ export function renderLaunch(ctx) {
             h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { networkError = ''; error.textContent = ''; try { await ctx.run('deploy', {}); } catch (e) { networkError = errorText(e); } draw(); } } }, 'Set up launchpad')));
       }
     }
+    // Network cards with each chain's icon. Choosing one switches the app's chain, exactly like the header menu.
+    function networkPicker() {
+      const choices = [...(ctx.networks?.() ?? []), { key: 'local', name: 'Simulation' }];
+      const label = n => n.key === 'local' ? 'Test funds' : n.mainnet ? 'Mainnet' : n.kind === 'solana' ? 'Devnet' : 'Testnet';
+      const pick = async key => { if (key === draft.chain) return; networkError = ''; try { await ctx.chooseChain(key); draft.chain = ctx.currentChain(); save(); } catch (e) { networkError = errorText(e); } draw(); };
+      const cards = choices.map(n => h('button.network-card', { type: 'button', role: 'radio', 'aria-checked': String(n.key === draft.chain), tabIndex: n.key === draft.chain ? 0 : -1, 'data-busy-disable': '', disabled: ctx.busy, on: { click: () => pick(n.key) } }, chainIcon(n.key), h('span.network-name', n.name), h('small', label(n))));
+      const group = h('div.network-grid', { role: 'radiogroup', 'aria-label': 'Network' }, cards);
+      // Arrow keys move between cards, as in any radio group.
+      group.addEventListener('keydown', e => { if (!['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(e.key)) return; e.preventDefault(); const at = cards.indexOf(document.activeElement), next = cards[(at + (['ArrowRight', 'ArrowDown'].includes(e.key) ? 1 : -1) + cards.length) % cards.length]; next?.focus(); });
+      return h('div.stack', h('h3', 'Network'), group);
+    }
+    // The pair's own icon: the network's coin for native pairs, USDC for USDC, the asset's icon when it has one.
+    function pairIcon(kind, group) {
+      if (kind === 'usdc') return assetIcon('USDC');
+      if (kind === 'native') return assetIcon(group?.assets?.[0]?.symbol ?? nativeSymbol());
+      return group?.assets?.length === 1 ? assetIcon(group.assets[0].symbol) : icon(PAIR_INFO[kind].glyph);
+    }
     const pairs = pairOptions();
     const pairGrid = h('div.choice-grid', { class: 'pair-grid', role: 'radiogroup', 'aria-label': 'Trading pair' }, PAIR_KINDS.map(kind => {
       const info = PAIR_INFO[kind], group = pairs?.[kind];
@@ -226,7 +243,7 @@ export function renderLaunch(ctx) {
       const ownerSetup=kind==='usdc'&&!!reason&&draft.chain!=='local'&&!solana()&&connected()&&ctx.state?.pricing?.owner&&ctx.wallet.dex&&ctx.wallet.feeUsdc;
       const finish=ownerSetup?h('button.btn.btn-secondary.btn-sm',{type:'button','data-busy-disable':'',on:{click:async e=>{e.preventDefault();networkError='';try{await ctx.run('setup-usdc-pair',{});const asset=ctx.wallet.pairOptions().usdc.assets[0];if(asset){draft.pair='usdc';draft.quoteAsset=asset.id;draft.firstBuy=defaultBuy('usdc',asset);save();}}catch(err){networkError=errorText(err);}draw();}}},'Finish USDC setup'):null;
       return h('div.choice', { 'data-unavailable': reason ? 'true' : undefined }, h('label',h('input', { type: 'radio', name: 'pair', value: kind, checked: draft.pair === kind, disabled: !!reason, on: { change: () => { draft.pair = kind; draft.quoteAsset = group.assets[0].id; draft.firstBuy = defaultBuy(kind, group.assets[0]); save(); draw(); } } }),
-        h('span.choice-title', kind === 'usdc' ? assetIcon('USDC') : icon(info.glyph), info.title, symbols ? h('span.chip', symbols) : null), h('p', ownerSetup?'Finish this existing deployment’s one-time USDC setup. Your wallet confirms the adapter and registration; creators do not repeat this.':reason ?? info.note(kind === 'native' ? group.assets[0].symbol : ''))),finish);
+        h('span.choice-title', pairIcon(kind, group), info.title, symbols ? h('span.chip', symbols) : null), h('p', ownerSetup?'Finish this existing deployment’s one-time USDC setup. Your wallet confirms the adapter and registration; creators do not repeat this.':reason ?? info.note(kind === 'native' ? group.assets[0].symbol : ''))),finish);
     }));
     const asset = selectedAsset(), group = pairs?.[draft.pair];
     const balanceOf = a => ctx.state?.pairBalances?.[a.id] ?? (draft.pair === 'native' ? ctx.state?.nativeBalance : null);
@@ -239,7 +256,7 @@ export function renderLaunch(ctx) {
       !asset.test && draft.pair === 'xstock' ? callout('warn', 'triangle-alert', issuerNotice(EQUITY_PROVIDERS[draft.chain])) : null,
       asset.wsol ? callout('', 'info', 'You pay and receive plain SOL. Elpida wraps it for each trade and unwraps what is left in the same transaction.') : null) : null;
     return { body: [
-      h('p.chain-context',chainIcon(draft.chain),`Launching on ${net()?.name??'Simulation'}. Change the chain in the header.`), connection,
+      networkPicker(), connection,
       h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'Choose native currency, USDC, an xStock or another approved token. Buyers pay in this asset, and the graduated pool keeps the same pair. Pay the $10 launch fee separately in native currency or USDC. Network gas is always paid in the native coin.'), pairGrid, assetBox),
       draft.chain!=='local'&&(solana()?!solanaPriced():!ctx.config.oracles?.[draft.chain]?.available)?callout('warn','info',solana()?'USD pricing is not active on this Solana cluster yet. It turns on when the team upgrades the program and runs the deploy (solana-upgrade.cmd). Existing tokens can still be browsed and traded.':'Verified launch pricing is pending configuration on this network. Use simulation to test creation.') : null,
       error,

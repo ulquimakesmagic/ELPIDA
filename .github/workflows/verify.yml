@@ -1,0 +1,103 @@
+name: verify
+
+# Nothing in this repository was bound to a commit before this workflow existed: a green suite meant
+# "it passed on someone's machine that day". Every job below fails closed.
+#
+#   contracts-and-unit  compile, claims, secret scan, EVM suite, then the whole test suite through
+#                       scripts/test-gate.mjs, which fails on any skip that is not a missing toolchain.
+#   solana              the Anchor program and the Rust property tests, with the validator installed,
+#                       run through the same gate in --strict mode so a skip is a failure.
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: verify-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  contracts-and-unit:
+    name: contracts, unit and full suite
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      - run: npm ci
+
+      # The compile cache is content-addressed (compiler version, settings, every source and the
+      # OpenZeppelin tree), so restoring it across runs can never serve a stale artifact.
+      - name: restore the solc compile cache
+        uses: actions/cache@v4
+        with:
+          path: cache/solc
+          key: solc-${{ runner.os }}-${{ hashFiles('contracts/evm/**/*.sol', 'tests/fixtures/**/*.sol', 'package-lock.json') }}
+
+      - name: compile
+        run: npm run compile
+
+      - name: documentation and registry claims
+        run: npm run test:claims
+
+      - name: secret scan
+        run: npm run security:scan
+
+      - name: EVM economics and graduation
+        run: npm run test:evm
+
+      # The whole suite, with skips treated as findings rather than silence, and a coverage floor a few
+      # points under the measured baseline (25 Oct 2026: 80.73% lines, 81.25% branches, 83.53% functions).
+      - name: full suite (no silent skips) with coverage floors
+        run: npm run test:gate -- --coverage --min-lines=78 --min-branches=79 --min-funcs=81
+
+  solana:
+    name: solana program
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+          cache: npm
+
+      # Pin the CLI the 19 October binaries were built with. Bump both together.
+      - name: install the Solana CLI
+        run: |
+          sh -c "$(curl -sSfL https://release.anza.xyz/v2.3.13/install)"
+          echo "$HOME/.local/share/solana/install/active_release/bin" >> "$GITHUB_PATH"
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - run: npm ci
+
+      # The committed .so files were built on another machine. Building from source here means the validator
+      # suite exercises the code in this commit, and a source change that does not compile fails the job.
+      - name: build the program from source
+        run: |
+          cargo-build-sbf --manifest-path contracts/solana/programs/elpida_launchpad/Cargo.toml --features testnet --sbf-out-dir /tmp/sbf-test
+          cp /tmp/sbf-test/elpida_launchpad.so contracts/solana/build/elpida_launchpad.so
+          cargo-build-sbf --manifest-path contracts/solana/programs/elpida_launchpad/Cargo.toml --sbf-out-dir /tmp/sbf-mainnet
+          cp /tmp/sbf-mainnet/elpida_launchpad.so contracts/solana/build/elpida_launchpad-mainnet.so
+          sha256sum contracts/solana/build/*.so
+      - run: solana --version
+      - run: solana-test-validator --version
+
+      # --strict: 28 of these 29 tests skip when the validator is absent. Here it must not be.
+      - name: Solana validator suite, zero skips allowed
+        run: node scripts/test-gate.mjs tests/solana.test.mjs --strict
+
+      - name: Rust property tests
+        run: npm run test:solana-host

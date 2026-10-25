@@ -19,11 +19,17 @@ import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from '../
 // price, so the simulated chain survives restarts and redeploys.
 export const JOURNALED_ACTIONS = ['launch','buy','sell','withdraw','graduate','reopen','reward-stock-faucet','reward-claim','convert-usdc'];
 function readJournal(path){
-  if(!path||!existsSync(path))return [];
-  return readFileSync(path,'utf8').split('\n').filter(Boolean).flatMap(line=>{try{const e=JSON.parse(line);return JOURNALED_ACTIONS.includes(e.action)&&Number.isFinite(e.at)?[e]:[];}catch{return [];}});
+  if(!path||!existsSync(path))return {entries:[],malformed:0};
+  const entries=[];let malformed=0;
+  // A torn write at the end of the file, or a line whose action is no longer journaled, is counted rather than lost.
+  for(const line of readFileSync(path,'utf8').split('\n')){
+    if(!line)continue;
+    try{const e=JSON.parse(line);if(JOURNALED_ACTIONS.includes(e.action)&&Number.isFinite(e.at))entries.push(e);else malformed++;}catch{malformed++;}
+  }
+  return {entries,malformed};
 }
 export async function createRuntime({seed = true, dex = false, metadataStore = null, metadataPath = null, indexerPath = ":memory:", journalPath = null, log = () => {}} = {}) {
-  const journal = readJournal(journalPath);
+  const {entries:journal,malformed:journalMalformed} = readJournal(journalPath);
   const compiled = compileContracts({includeMocks:true});
   const artifact = name => compiled[`contracts/evm/src/${name}.sol`][name];
   // Replays start the chain shortly before the first recorded action so timestamps can be restored.
@@ -237,25 +243,36 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
     if(['launch','buy','sell','withdraw','graduate','reopen'].includes(action))await rewards.tick();
     return result;
   }
-  let replayed=0,skipped=0;
+  let replayed=0,skipped=0;const failures=[];
   if(journal.length){
-    for(const entry of journal){
+    for(const [index,entry] of journal.entries()){
       try{
         // The oracle refresh takes the block just before the action's original time.
         const latest=(await provider.getBlock('latest')).timestamp,at=Math.max(latest+1,Math.floor(entry.at/1000)-1);
         await provider.send('evm_setNextBlockTimestamp',[at]);
         await updatePrice(Number(entry.usd)>0?Number(entry.usd):config.local.price?.usd??2500);
         await apply(entry.action,entry.body);replayed++;
-      }catch(error){skipped++;log(JSON.stringify({event:'simulation_replay_skipped',action:entry.action,code:String(error.code??error.name??'REPLAY').slice(0,40)}));}
+      }catch(error){
+        skipped++;
+        const failure={index,action:entry.action,at:entry.at,code:String(error.code??error.name??'REPLAY').slice(0,40),reason:String(error.shortMessage??error.message??error).slice(0,160)};
+        if(failures.length<20)failures.push(failure);
+        log(JSON.stringify({event:'simulation_replay_skipped',...failure}));
+      }
     }
     const latest=(await provider.getBlock('latest')).timestamp,now=Math.floor(Date.now()/1000);
     if(now>latest)await provider.send('evm_mine',[now]);
     await updatePrice(config.local.price?.usd??2500);
   }
   const record=(action,body,at)=>{if(!journalPath||!JOURNALED_ACTIONS.includes(action))return;mkdirSync(dirname(journalPath),{recursive:true});appendFileSync(journalPath,JSON.stringify({action,body,at,usd:config.local.price?.usd??null})+'\n');};
+  const lost=skipped+journalMalformed;
+  if(process.env.ELPIDA_REPLAY_STRICT==='1'&&lost>0){
+    // Refuse to serve a partial economy rather than quietly dropping entries from the demo chain.
+    try{provider.destroy();await connection.close();}catch{}
+    throw new Error(`Simulation journal replay lost ${lost} entr${lost===1?'y':'ies'} (${skipped} failed, ${journalMalformed} malformed). ELPIDA_REPLAY_STRICT=1 refuses to start with a partial economy.`);
+  }
   // Demo launches on a fresh simulation are journaled like any other action, so replays keep every address.
   if(!journal.length&&seed)for (const [name,symbol,firstBuy,pair,account] of [['Orbit Club','ORBIT','0.1','native','0'],['Pixel Party','PIXEL','0.05','native','1'],['Lucky Sprout','LUCK','0.03','native','0']]){const at=((await provider.getBlock('latest')).timestamp+1)*1000,body={name,symbol,firstBuy,pair,account};await apply('launch',body);record('launch',body,at);}
-  config.simulation={durable:Boolean(journalPath),replayed,skipped};
+  config.simulation={durable:Boolean(journalPath),replayed,skipped,malformed:journalMalformed,failures};
   await indexer.sync();
   return {updatePrice,config,state,getQuote,getConversionQuote,indexer:combinedIndex,listings,provider,rewards,transact(action,body) { const result = queue.then(async () => { const started=((await provider.getBlock('latest')).timestamp+1)*1000; const result=action==='reward-x-finish'?await rewards.finishX(body):action==='reward-x-start'?await rewards.startX(body):action==='reward-verify'?await rewards.verify(body):action==='reward-challenge'?await rewards.challenge(body):action==='reward-process'?(await rewards.tick(),{message:'Reward treasuries processed.'}):await apply(action,body); record(action,body,started); try {await indexer.sync();} catch {result.message += " Indexing pending; refresh to retry.";} return result;}); queue = result.catch(() => {}); return result; },async close() {await queue; await taxRuntime?.close(); await indexer.close(); provider.destroy(); await connection.close();}};
 }

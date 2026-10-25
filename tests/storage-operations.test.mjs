@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtempSync,mkdirSync,rmSync,writeFileSync,copyFileSync,existsSync,utimesSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,rmSync,readFileSync,writeFileSync,copyFileSync,existsSync,utimesSync} from 'node:fs';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
 import {DatabaseSync} from 'node:sqlite';
@@ -22,4 +22,18 @@ test('cleanup only removes old identical temporary duplicates and preserves unce
  const dir=mkdtempSync(join(tmpdir(),'elpida-cleanup-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));const store=new MetadataStore({path:dir,jwt:null});const p=await store.publish({name:'Keep',symbol:'KEEP'}),file=store.file(p.uri.slice(7));copyFileSync(file,file+'.tmp');utimesSync(file+'.tmp',new Date(0),new Date(0));
  const other=store.file('b'+'a'.repeat(40))+'.tmp';writeFileSync(other,'uncertain');utimesSync(other,new Date(0),new Date(0));
  assert.equal(cleanupDuplicateTemps(dir).length,1);assert.equal(existsSync(file+'.tmp'),true);assert.equal(cleanupDuplicateTemps(dir,{apply:true}).length,1);assert.equal(existsSync(file),true);assert.equal(existsSync(other),true);assert.equal((await store.resolve(p.uri)).symbol,'KEEP');
+});
+test('the simulation journal and token metadata are backed up, and wallet records are not',async t=>{
+ const dir=mkdtempSync(join(tmpdir(),'elpida-journal-'));t.after(()=>rmSync(dir,{recursive:true,force:true}));
+ const source=join(dir,'data');mkdirSync(source);
+ const journal='{"action":"launch"}\n{"action":"buy","amount":"1"}\n';
+ writeFileSync(join(source,'simulation-journal-v2.jsonl'),journal);
+ writeFileSync(join(source,'token-metadata.json'),'{"0xabc":{"name":"Hope"}}');
+ writeFileSync(join(source,'circle-test-wallets.json'),'DO NOT EXPORT');
+ const snapshot=join(dir,'snapshot'),manifest=await createPublicBackup(source,snapshot);
+ assert.ok(manifest.files.some(f=>f.path==='simulation-journal-v2.jsonl'),'the journal must be in the backup');
+ assert.ok(manifest.files.some(f=>f.path==='token-metadata.json'));
+ assert.ok(!manifest.files.some(f=>f.path==='circle-test-wallets.json'),'wallet records stay out');
+ const restored=join(dir,'restored');restorePublicBackup(snapshot,restored);
+ assert.equal(readFileSync(join(restored,'simulation-journal-v2.jsonl'),'utf8'),journal,'the demo economy survives a restore');
 });
