@@ -13,6 +13,7 @@ import {tokenWalletImage,watchEvmToken} from './wallet-token.mjs';
 import {holderChat} from './holder-chat.mjs';
 import {filterTrades} from './trade-filter.mjs';
 import {odometer} from './odometer.mjs';
+import {filterByWho,topTraders,safetyChecks,quickAmounts,walletHolders} from './token-insights.mjs';
 export { exceedsRemaining };
 
 const metadataRequests = new Map();
@@ -91,28 +92,26 @@ export function renderToken(ctx, address) {
   const change = token.priceChange24h, hasChange = change && Number.isFinite(change.percent), up = hasChange && change.percent >= 0;
   const usdOn = usdRate(token) !== null;
   const buys = token.buys24h, sells = token.sells24h;
-  const priceBlock = h('div.tk-price',
-    h('span.tk-label', usdOn ? 'PRICE / USD' : `PRICE / ${q}`),
-    odometer(fmtPrice(token), 'tk-price-value'),
-    h('div.tk-price-meta',
-      hasChange ? h(`span.pct-pill.${up ? 'pct-up' : 'pct-down'}`, { title: change.basis ?? '24h change' }, `${up ? '+' : ''}${number(change.percent, 2)}%`) : h('span.pct-pill.pct-flat', { title: 'Needs confirmed prices near both comparison times' }, 'No 24h change'),
-      hasChange ? h('span.hint', '24h') : null,
-      buys != null && sells != null ? h('span.hint', { title: 'Indexed trades in the last 24 hours' }, `${number(buys, 0)} buys / ${number(sells, 0)} sells`) : null));
-  const statGrid = h('div.tk-stats', { 'aria-label': 'Token statistics', role: 'group' },
-    stat('Market cap', h('strong.tk-accent', fmtValue(p.marketCap, token))),
-    stat('24h volume', volumeValue),
-    stat('Holders', holdersValue),
-    stat('24h trades', tradesValue));
-
+  const tile2 = (label, value, cls = '', title = null) => h(`div.tk-strip-tile${cls}`, { title }, h('span', label), value);
+  const changePill = hasChange ? h(`span.pct-pill.${up ? 'pct-up' : 'pct-down'}`, { title: change.basis ?? '24h change' }, `${up ? '+' : ''}${number(change.percent, 2)}%`) : null;
+  const txValue = h('strong', buys != null && sells != null ? [String(number(Number(buys) + Number(sells), 0)), ' ', h('small', h('span.up', `${number(buys, 0)} buys`), ' · ', h('span.down', `${number(sells, 0)} sells`))] : (token.trades24h != null ? number(token.trades24h, 0) : '—'));
+  const strip = h('section.tk-strip', { 'aria-label': 'Market numbers' },
+    tile2(usdOn ? 'Price' : `Price in ${q}`, h('div.tk-strip-price', odometer(fmtPrice(token), 'tk-price-value'), changePill)),
+    tile2('Market cap', h('strong.tk-accent', fmtValue(p.marketCap, token)), '.tk-strip-cap', 'Price × total supply (1B)'),
+    tile2('Liquidity', h('strong', fmtValue(Number(token.reserve ?? 0), token)), '', 'Actual quote assets in the curve or pool; virtual reserves are excluded.'),
+    tile2('24h volume', volumeValue),
+    tile2('Holders', holdersValue),
+    tile2('24h trades', txValue, '', 'Indexed trades in the last 24 hours'));
   const head = h('header.tk-head',
     h('nav.tk-crumb', { 'aria-label': 'Breadcrumb' }, h('a', { href: '#/' }, icon('arrow-left', 'icon-sm'), 'Explore'), h('span', { 'aria-hidden': 'true' }, '/'), h('span.tk-crumb-now', token.symbol),
       h('span.tk-chain', { title: ctx.envLabel() }, chainIcon(token.network ?? ctx.wallet.net.key), h('span', ctx.envLabel()))),
-    h('div.tk-id', avatar(token, 'avatar-lg'),
+    h('div.tk-id', h('span.tk-avatar', avatar(token, 'avatar-lg'), h('span.tk-avatar-chain', { title: ctx.envLabel() }, chainIcon(token.network ?? ctx.wallet.net.key))),
       h('div.tk-id-copy', h('h1', { title: token.name }, token.name),
         h('div.tk-tags',
           h('span.tk-tag.tk-tag-strong', '$' + token.symbol),
           h('span.tk-tag', { title: `Trading pair: ${q}` }, assetIcon(q), q),
           created ? h('span.tk-tag', { title: new Date(created * 1000).toLocaleString() }, `Launched ${ago(created)} ago`) : null,
+          token.creator ? h('a.tk-tag.tk-creator', { href: addressUrl(token.creator) ?? '#', target: '_blank', rel: 'noopener noreferrer', title: `Creator: ${token.creator}` }, 'by ', h('span.mono', short(token.creator)), h('span.badge-dev', 'Dev')) : null,
           h('span.tk-tag.tk-addr', { title: token.address }, short(token.address), copyButton(token.address, '')),
           h('span.tk-tag', { title: 'Copy a link that shows a preview card on X, Telegram and Discord' }, 'Share', copyButton(`${location.origin}/token/${encodeURIComponent(token.network ?? ctx.wallet.net.key)}/${token.address}`, '')),
           token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null),
@@ -120,8 +119,7 @@ export function renderToken(ctx, address) {
     h('div.tk-about', descText, descMore),
     token.metadataURI ? h('p.tk-lock', icon('lock', 'icon-xs'), 'Details are recorded at launch and cannot be edited.') : null);
   const chart = terminalChart(ctx, token, q);
-  const priceCard = h('section.tk-card.tk-pricecard', { 'aria-label': 'Price and chart' },
-    h('div.tk-pricetop', priceBlock, statGrid), chart, h('p.tk-foot', priceSource));
+  const priceCard = h('section.tk-card.tk-pricecard', { 'aria-label': 'Chart' }, chart, h('p.tk-foot', priceSource));
 
   const addresses = h('section.address-row', { 'aria-label': 'Contract addresses and dates' },
     h('div', h('span', 'Token'), h('a', { href: addressUrl(token.address) ?? '#', target: '_blank', rel: 'noopener noreferrer' }, short(token.address))),
