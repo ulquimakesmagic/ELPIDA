@@ -83,6 +83,15 @@ jobs:
 
       - run: npm ci
 
+      # The committed .so files were built on another machine. Building from source here means the validator
+      # suite exercises the code in this commit, and a source change that does not compile fails the job.
+      - name: build the program from source
+        run: |
+          cargo-build-sbf --manifest-path contracts/solana/programs/elpida_launchpad/Cargo.toml --features testnet --sbf-out-dir /tmp/sbf-test
+          cp /tmp/sbf-test/elpida_launchpad.so contracts/solana/build/elpida_launchpad.so
+          cargo-build-sbf --manifest-path contracts/solana/programs/elpida_launchpad/Cargo.toml --sbf-out-dir /tmp/sbf-mainnet
+          cp /tmp/sbf-mainnet/elpida_launchpad.so contracts/solana/build/elpida_launchpad-mainnet.so
+          sha256sum contracts/solana/build/*.so
       - run: solana --version
       - run: solana-test-validator --version
 
