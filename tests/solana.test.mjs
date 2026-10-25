@@ -394,8 +394,10 @@ test('Solana: a closed reward account cannot block the protocol fee withdrawal',
 
   // Close the creator's reward account so that side cannot receive. It still holds fees paid by earlier tests in
   // this file, and the token program refuses to close a non-empty account, so drain it first.
-  const rewardAta = f.client.ata(f.rewardWallet.publicKey, f.quoteMint);
-  const treasuryAta = f.client.ata(f.treasury, f.quoteMint);
+  // quoteAta derives with the quote mint's own token program; ata() assumes the legacy one, which is a different
+  // account when the pair is Token-2022.
+  const rewardAta = f.client.quoteAta(f.rewardWallet.publicKey, f.config);
+  const treasuryAta = f.client.quoteAta(f.treasury, f.config);
   const tokenProgram = (await f.connection.getAccountInfo(rewardAta, 'confirmed')).owner;
   const held = await balance(rewardAta);
   const u64 = value => { const bytes = Buffer.alloc(8); bytes.writeBigUInt64LE(BigInt(value)); return bytes; };
