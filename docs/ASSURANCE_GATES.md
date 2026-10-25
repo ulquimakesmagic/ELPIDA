@@ -1,0 +1,89 @@
+# Assurance gates: compile cache, test gate and claims
+
+Three additions make the difference between "we ran the tests" and "this commit was verified".
+
+## 1. Compile cache (`scripts/compile.mjs`)
+
+Every test file that touches Solidity calls `compileContracts()` in its own process. Each call used to recompile all
+36 contracts: about 48 seconds on the development PC, twelve times per suite run, with no cache.
+
+The cache is content-addressed in `cache/solc/<sha256>.json` (already gitignored). The key covers:
+
+- `solc.version()` (which includes the platform),
+- the compiler settings (optimizer, `evmVersion`, output selection),
+- every `.sol` file in `contracts/evm/src`, `contracts/evm/testnet` and — when requested — `tests/fixtures`,
+- a hash of every `.sol` file under `node_modules/@openzeppelin/contracts`, so a dependency bump cannot reuse a
+  stale artifact.
+
+Writes are atomic (temporary file plus rename), the directory keeps the twelve newest entries, and a read-only or
+full disk falls back to compiling. Compiler warnings are stored with the entry and replayed, so a cached run is
+indistinguishable from a clean one. The EIP-170 size check runs on cache hits too.
+
+`cache/solc` is restored between CI runs by `actions/cache`; because the key is content-addressed, a restored entry
+can never be stale.
+
+Set `ELPIDA_SOLC_CACHE=0` to force a clean compile. Release and audit builds should use it and record the result.
+
+Measured on the development PC: cold 53 s, warm 1.9 s; `npm run test:evm` 167 s → 107 s.
+
+## 2. Test gate (`scripts/test-gate.mjs`)
+
+`node --test` exits 0 when everything it could run passed, even if most of it was skipped. On a machine without the
+Solana CLI that is 28 of 29 Solana tests, silently.
+
+`npm run test:gate` reads the TAP stream instead of the exit code:
+
+| Situation | Exit |
+|---|---|
+| every test ran and passed | 0 |
+| any failing test | 1 |
+| a skip that is **not** a known missing toolchain | 2 |
+| the same, when a skip is environmental, under `--strict` | 2 |
+| no TAP summary (crash, hang, kill) | 4 |
+
+Environmental skips are recognised by reason (`solana-test-validator not found`, `cargo not found`, …). They are
+listed with the file that owns the test, never summarised away, and become fatal under `--strict`.
+
+```
+npm run test:gate                      # the whole suite
+npm run test:gate:strict               # the whole suite, no environmental skips allowed
+node scripts/test-gate.mjs tests/solana.test.mjs --strict
+```
+
+## 3. Claims harness (`tests/claims.test.mjs`)
+
+This repository's assurance rests on documents being true, so the load-bearing claims are asserted:
+
+| Claim | Assertion |
+|---|---|
+| Audit scope | `docs/AUDIT_SCOPE.md` lists 9 files, each at its real non-blank, non-comment line count; the headline total matches the table (631 today) |
+| One curve shape | `SALE_CAP`, `VIRTUAL_TOKEN`, `TOKEN_SUPPLY`, `FEE_BPS`, `SNIPE_START_BPS`, `SNIPE_WINDOW` are identical in Solidity and `packages/core/curve-model.mjs` |
+| Registry honesty | unique `chainId` per network; well-formed factory addresses; `shared.block` after every legacy block; no factory listed twice; known model names |
+| CSP | no executable inline `<script>` in `index.html`; the server still sends `script-src 'self'` and `style-src 'self'` |
+| Docs | every `docs/…` link in `README.md` resolves |
+| Test hygiene | no `.only`, no `assert.ok(true)`, every test file declares a test |
+| CI wiring | every `npm run <script>` in `.github/workflows` exists in `package.json` |
+
+Each was mutation-tested: editing a line count in the audit brief, or `BASE_FEE_BPS` in the shared model, turns the
+suite red, and the file is restored byte-identically.
+
+## 4. Continuous integration (`.github/workflows/verify.yml`)
+
+**`contracts-and-unit`** — checkout, Node 24, `npm ci`, restore the compile cache, `npm run compile`,
+`test:claims`, `security:scan`, `test:evm`, then the whole suite through `test:gate`.
+
+**`solana`** — installs the pinned Solana CLI (v2.3.13, the version the 19 October binaries were built with) and the
+Rust toolchain, then runs `tests/solana.test.mjs` with `--strict` (zero skips allowed) and the Rust property tests
+(`npm run test:solana-host`).
+
+## 5. What is still manual
+
+- **Fork lifecycle runs** (`npm run test:chain-fork`, `test:base-fork`, `test:equity-*`) need archive-capable public
+  RPC endpoints and minutes per network. They are not in CI, and their reports still land in the gitignored
+  `backups/` directory. Move them to `docs/evidence/` and link them from the checklist.
+- **Coverage** is not measured. Node 24 can do it: add `--experimental-test-coverage --test-coverage-lines=<n>` to a
+  CI step once a baseline is recorded.
+- **Static analysis** (Slither) is triaged in prose in `AUDIT_SCOPE.md`; no report is committed and the tool is not in
+  the toolchain.
+- **The full suite runtime** is still minutes, not seconds. The cache removes the repeated compiles; the remaining
+  cost is real Uniswap v3 deployments in the EVM tests, which is the point of those tests.

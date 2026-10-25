@@ -6,6 +6,9 @@
   "scripts": {
     "start": "node --env-file-if-exists=.env apps/api/server.mjs",
     "test": "node --test tests/*.test.mjs",
+    "test:gate": "node scripts/test-gate.mjs",
+    "test:gate:strict": "node scripts/test-gate.mjs --strict",
+    "test:claims": "node --test tests/claims.test.mjs",
     "rehearse:holders": "node scripts/holder-rehearsal.mjs",
     "test:math": "node --test tests/economics.test.mjs",
     "test:evm": "node --test tests/evm.test.mjs tests/locked-pool.test.mjs tests/curve-pairs.test.mjs tests/beta-curve.test.mjs tests/post-migration-fees.test.mjs",
