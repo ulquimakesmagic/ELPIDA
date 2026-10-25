@@ -150,6 +150,25 @@ test('every published fork report is complete, referenced and free of credential
 
   assert.deepEqual(problems, [], problems.join('\n'));
 });
+test('the committed Slither report matches the counts the audit brief states', () => {
+  const path = 'docs/security/slither-2026-10-25.json';
+  if (!existsSync(join(root, path))) return;
+  const text = read(path);
+  const report = JSON.parse(text);
+  const brief = read('docs/AUDIT_SCOPE.md');
+
+  const claim = brief.match(/(\d+)\s+High,\s*(\d+)\s+Medium and\s*(\d+)\s+Low/);
+  assert.ok(claim, 'the audit brief no longer states the finding counts');
+  assert.deepEqual(
+    [report.counts.High, report.counts.Medium, report.counts.Low],
+    [Number(claim[1]), Number(claim[2]), Number(claim[3])],
+    'the committed report and the audit brief disagree; rerun Slither or update the brief',
+  );
+  assert.equal(report.counts.total, report.results.length, 'the count summary disagrees with the listed findings');
+  assert.match(report.compiler, /0\.8\.24/, 'the report must record the compiler that produced it');
+  assert.ok(!/[A-Za-z]:\\/.test(text), 'the report leaks an absolute path');
+});
+
 test('every npm script the CI workflow calls exists', () => {
   const workflowDir = join(root, '.github', 'workflows');
   if (!existsSync(workflowDir)) return;

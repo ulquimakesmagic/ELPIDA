@@ -1,0 +1,3401 @@
+{
+  "tool": "slither",
+  "toolVersion": "0.11.6",
+  "compiler": "solc 0.8.24",
+  "target": "contracts/evm/src/ElpidaAtomicDexFactory.sol",
+  "settings": "optimizer on, runs 1, evm-version shanghai",
+  "command": "slither contracts/evm/src/ElpidaAtomicDexFactory.sol --solc solc --solc-remaps \"@openzeppelin/=node_modules/@openzeppelin/\" --solc-args \"--optimize --optimize-runs 1 --evm-version shanghai\" --filter-paths node_modules --exclude-informational",
+  "generatedAt": "2026-10-25",
+  "counts": {
+    "High": 17,
+    "Medium": 23,
+    "Low": 42,
+    "total": 82
+  },
+  "byDetector": {
+    "timestamp": 15,
+    "reentrancy-benign": 14,
+    "reentrancy-events": 13,
+    "incorrect-equality": 9,
+    "reentrancy-eth": 8,
+    "unused-return": 7,
+    "reentrancy-balance": 5,
+    "arbitrary-send-eth": 4,
+    "reentrancy-no-eth": 4,
+    "divide-before-multiply": 2,
+    "uninitialized-local": 1
+  },
+  "results": [
+    {
+      "check": "arbitrary-send-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "ElpidaFeeSplitter.claim(address,address) (contracts/evm/src/ElpidaFeeSplitter.sol#39-46) sends eth to arbitrary user Dangerous calls: - (ok,None) = recipient.call{value: amount}() (contracts/evm/src/ElpidaFeeSplitter.sol#43)",
+      "elements": [
+        {
+          "name": "claim",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46
+          ]
+        },
+        {
+          "name": "(ok,None) = recipient.call{value: amount}()",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            43
+          ]
+        }
+      ]
+    },
+    {
+      "check": "arbitrary-send-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve._trySend(address,uint256) (contracts/evm/src/ElpidaDexCurve.sol#216-221) sends eth to arbitrary user Dangerous calls: - (ok,None) = recipient.call{value: value}() (contracts/evm/src/ElpidaDexCurve.sol#217)",
+      "elements": [
+        {
+          "name": "_trySend",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            216,
+            217,
+            218,
+            219,
+            220,
+            221
+          ]
+        },
+        {
+          "name": "(ok,None) = recipient.call{value: value}()",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            217
+          ]
+        }
+      ]
+    },
+    {
+      "check": "arbitrary-send-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve._pay(address,uint256) (contracts/evm/src/ElpidaDexCurve.sol#212-215) sends eth to arbitrary user Dangerous calls: - (ok,None) = recipient.call{value: value}() (contracts/evm/src/ElpidaDexCurve.sol#213)",
+      "elements": [
+        {
+          "name": "_pay",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            212,
+            213,
+            214,
+            215
+          ]
+        },
+        {
+          "name": "(ok,None) = recipient.call{value: value}()",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            213
+          ]
+        }
+      ]
+    },
+    {
+      "check": "arbitrary-send-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "ElpidaDexFactory._launch(string,string,uint256,uint256,address,bool) (contracts/evm/src/ElpidaDexFactory.sol#112-121) sends eth to arbitrary user Dangerous calls: - ElpidaDexCurve(curve).initialBuy{value: firstBuy}(msg.sender,firstBuy,minOut) (contracts/evm/src/ElpidaDexFactory.sol#118)",
+      "elements": [
+        {
+          "name": "_launch",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121
+          ]
+        },
+        {
+          "name": "ElpidaDexCurve(curve).initialBuy{value: firstBuy}(msg.sender,firstBuy,minOut)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            118
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-balance",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve._buy(address,address,uint256,uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#113-127): External call allowing reentrancy: - require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer) (contracts/evm/src/ElpidaDexCurve.sol#118) Balance read before the call: - balance = quote.balanceOf(address(this)) (contracts/evm/src/ElpidaDexCurve.sol#117",
+      "elements": [
+        {
+          "name": "_buy",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            118
+          ]
+        },
+        {
+          "name": "balance = quote.balanceOf(address(this))",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            117
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.balanceOf(address(this)) - balance == spent,unsupported quote)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            119
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-balance",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaUsdPricing._chargeLaunchFee(uint256,bool) (contracts/evm/src/ElpidaUsdPricing.sol#48-66): External call allowing reentrancy: - ! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000)) (contracts/evm/src/ElpidaUsdPricing.sol#57) Balance read before the call: - beforeBalance = coin.balanceOf(pricingOwner()) (contracts/evm/src/ElpidaUsdPricing.sol#56) Possible stale balance use",
+      "elements": [
+        {
+          "name": "_chargeLaunchFee",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66
+          ]
+        },
+        {
+          "name": "! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000))",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            57
+          ]
+        },
+        {
+          "name": "beforeBalance = coin.balanceOf(pricingOwner())",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            56
+          ]
+        },
+        {
+          "name": "! (coin.balanceOf(pricingOwner()) == beforeBalance + 10_000_000)",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            58
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-balance",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaV3MigrationAdapter._pull(address,uint256) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#140): External call allowing reentrancy: - require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#140) Balance read before the call: - beforeBalance = IFeeToken(asset).balanceOf(address(this)) (contracts/",
+      "elements": [
+        {
+          "name": "_pull",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            140
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            140
+          ]
+        },
+        {
+          "name": "beforeBalance = IFeeToken(asset).balanceOf(address(this))",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            140
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).balanceOf(address(this)) - beforeBalance == amount,unsupported token)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            140
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-balance",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaFeeSplitter.depositToken(address,uint256) (contracts/evm/src/ElpidaFeeSplitter.sol#25-31): External call allowing reentrancy: - require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding failed) (contracts/evm/src/ElpidaFeeSplitter.sol#28) Balance read before the call: - beforeBalance = IFeeToken(asset).balanceOf(address(this)) (contracts/evm/sr",
+      "elements": [
+        {
+          "name": "depositToken",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding failed)",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            28
+          ]
+        },
+        {
+          "name": "beforeBalance = IFeeToken(asset).balanceOf(address(this))",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            27
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).balanceOf(address(this)) - beforeBalance == amount,unsupported token)",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            29
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-balance",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexFactory._launchPaired(string,string,address,uint256,uint256,address,bool) (contracts/evm/src/ElpidaDexFactory.sol#102-111): External call allowing reentrancy: - require(bool,string)(q.transferFrom(msg.sender,address(this),firstBuy),pair funding) (contracts/evm/src/ElpidaDexFactory.sol#105) Balance read before the call: - beforeBalance = q.balanceOf(address(this)) (contracts/",
+      "elements": [
+        {
+          "name": "_launchPaired",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111
+          ]
+        },
+        {
+          "name": "require(bool,string)(q.transferFrom(msg.sender,address(this),firstBuy),pair funding)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            105
+          ]
+        },
+        {
+          "name": "beforeBalance = q.balanceOf(address(this))",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            105
+          ]
+        },
+        {
+          "name": "require(bool,string)(q.balanceOf(address(this)) - beforeBalance == firstBuy,unsupported quote)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            105
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaV3MigrationAdapter.migrate(ElpidaV3MigrationAdapter.Request) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#53-74): External calls: - _pull(r.token,r.tokenAmount) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#59) - require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#140) - IWrappedMigrat",
+      "elements": [
+        {
+          "name": "migrate",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74
+          ]
+        },
+        {
+          "name": "_pull(r.token,r.tokenAmount)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            59
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            140
+          ]
+        },
+        {
+          "name": "IWrappedMigrationAsset(weth).deposit{value: msg.value}()",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            60
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexFactory._launchPaired(string,string,address,uint256,uint256,address,bool) (contracts/evm/src/ElpidaDexFactory.sol#102-111): External calls: - _chargeLaunchFee(0,inUsdc) (contracts/evm/src/ElpidaDexFactory.sol#104) - ! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000)) (contracts/evm/src/ElpidaUsdPricing.sol#57) - (ok,None) = pricingOwner().call{value: fee}() (contract",
+      "elements": [
+        {
+          "name": "_launchPaired",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111
+          ]
+        },
+        {
+          "name": "_chargeLaunchFee(0,inUsdc)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            104
+          ]
+        },
+        {
+          "name": "! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000))",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            57
+          ]
+        },
+        {
+          "name": "(ok,None) = pricingOwner().call{value: fee}()",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            61
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexFactory._launch(string,string,uint256,uint256,address,bool) (contracts/evm/src/ElpidaDexFactory.sol#112-121): External calls: - _chargeLaunchFee(firstBuy,inUsdc) (contracts/evm/src/ElpidaDexFactory.sol#115) - ! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000)) (contracts/evm/src/ElpidaUsdPricing.sol#57) - (ok,None) = pricingOwner().call{value: fee}() (contracts/evm/s",
+      "elements": [
+        {
+          "name": "_launch",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121
+          ]
+        },
+        {
+          "name": "_chargeLaunchFee(firstBuy,inUsdc)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            115
+          ]
+        },
+        {
+          "name": "! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000))",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            57
+          ]
+        },
+        {
+          "name": "(ok,None) = pricingOwner().call{value: fee}()",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            61
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve._buy(address,address,uint256,uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#113-127): External calls: - require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer) (contracts/evm/src/ElpidaDexCurve.sol#118) - require(bool,string)(token.transfer(recipient,out),token transfer) (contracts/evm/src/ElpidaDexCurve.sol#122) - _pay(recipient,gros",
+      "elements": [
+        {
+          "name": "_buy",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            118
+          ]
+        },
+        {
+          "name": "require(bool,string)(token.transfer(recipient,out),token transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            122
+          ]
+        },
+        {
+          "name": "_pay(recipient,gross - spent)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            125
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve._graduate() (contracts/evm/src/ElpidaDexCurve.sol#186-211): External calls: - require(bool,string)(token.approve(address(migrationAdapter),lpTokens),adapter approval) (contracts/evm/src/ElpidaDexCurve.sol#200) - require(bool,string)(quote.approve(address(migrationAdapter),total),quote approval) (contracts/evm/src/ElpidaDexCurve.sol#201) - require(bool,string)(token.app",
+      "elements": [
+        {
+          "name": "_graduate",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            186,
+            187,
+            188,
+            189,
+            190,
+            191,
+            192,
+            193,
+            194,
+            195,
+            196,
+            197,
+            198,
+            199,
+            200,
+            201,
+            202,
+            203,
+            204,
+            205,
+            206,
+            207,
+            208,
+            209,
+            210,
+            211
+          ]
+        },
+        {
+          "name": "require(bool,string)(token.approve(address(migrationAdapter),lpTokens),adapter approval)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            200
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.approve(address(migrationAdapter),total),quote approval)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            201
+          ]
+        },
+        {
+          "name": "require(bool,string)(token.approve(address(migrationAdapter),0),approval cleanup)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            203
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve._claim(address) (contracts/evm/src/ElpidaDexCurve.sol#151-177): External calls: - paid = _trySend(recipient,combined) (contracts/evm/src/ElpidaDexCurve.sol#162) - (ok,None) = recipient.call{value: value}() (contracts/evm/src/ElpidaDexCurve.sol#217) - (ok,data) = address(quote).call(abi.encodeWithSelector(IERC20Minimal.transfer.selector,recipient,value)) (contracts/evm/",
+      "elements": [
+        {
+          "name": "_claim",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            151,
+            152,
+            153,
+            154,
+            155,
+            156,
+            157,
+            158,
+            159,
+            160,
+            161,
+            162,
+            163,
+            164,
+            165,
+            166,
+            167,
+            168,
+            169,
+            170,
+            171,
+            172,
+            173,
+            174,
+            175,
+            176,
+            177
+          ]
+        },
+        {
+          "name": "paid = _trySend(recipient,combined)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            162
+          ]
+        },
+        {
+          "name": "(ok,None) = recipient.call{value: value}()",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            217
+          ]
+        },
+        {
+          "name": "(ok,data) = address(quote).call(abi.encodeWithSelector(IERC20Minimal.transfer.selector,recipient,value))",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            219
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve._claim(address) (contracts/evm/src/ElpidaDexCurve.sol#151-177): External calls: - paid = _trySend(recipient,amount) (contracts/evm/src/ElpidaDexCurve.sol#174) - (ok,None) = recipient.call{value: value}() (contracts/evm/src/ElpidaDexCurve.sol#217) - (ok,data) = address(quote).call(abi.encodeWithSelector(IERC20Minimal.transfer.selector,recipient,value)) (contracts/evm/sr",
+      "elements": [
+        {
+          "name": "_claim",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            151,
+            152,
+            153,
+            154,
+            155,
+            156,
+            157,
+            158,
+            159,
+            160,
+            161,
+            162,
+            163,
+            164,
+            165,
+            166,
+            167,
+            168,
+            169,
+            170,
+            171,
+            172,
+            173,
+            174,
+            175,
+            176,
+            177
+          ]
+        },
+        {
+          "name": "paid = _trySend(recipient,amount)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            174
+          ]
+        },
+        {
+          "name": "(ok,None) = recipient.call{value: value}()",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            217
+          ]
+        },
+        {
+          "name": "(ok,data) = address(quote).call(abi.encodeWithSelector(IERC20Minimal.transfer.selector,recipient,value))",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            219
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-eth",
+      "impact": "High",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve.withdrawFees() (contracts/evm/src/ElpidaDexCurve.sol#150): External calls: - _claim(protocolTreasury) (contracts/evm/src/ElpidaDexCurve.sol#150) - (ok,None) = recipient.call{value: value}() (contracts/evm/src/ElpidaDexCurve.sol#217) - (ok,data) = address(quote).call(abi.encodeWithSelector(IERC20Minimal.transfer.selector,recipient,value)) (contracts/evm/src/ElpidaDexCur",
+      "elements": [
+        {
+          "name": "withdrawFees",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            150
+          ]
+        },
+        {
+          "name": "_claim(protocolTreasury)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            150
+          ]
+        },
+        {
+          "name": "(ok,None) = recipient.call{value: value}()",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            217
+          ]
+        },
+        {
+          "name": "(ok,data) = address(quote).call(abi.encodeWithSelector(IERC20Minimal.transfer.selector,recipient,value))",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            219
+          ]
+        }
+      ]
+    },
+    {
+      "check": "divide-before-multiply",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "ElpidaV3FeeLocker.constructor(address,address,address,address,uint24,int24,address,address) (contracts/evm/src/ElpidaV3FeeLocker.sol#29-36) performs a multiplication on the result of a division: - upper = (887272 / spacing_) * spacing_ (contracts/evm/src/ElpidaV3FeeLocker.sol#34)",
+      "elements": [
+        {
+          "name": "constructor",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36
+          ]
+        },
+        {
+          "name": "upper = (887272 / spacing_) * spacing_",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            34
+          ]
+        }
+      ]
+    },
+    {
+      "check": "divide-before-multiply",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "ElpidaV3FeeLocker.constructor(address,address,address,address,uint24,int24,address,address) (contracts/evm/src/ElpidaV3FeeLocker.sol#29-36) performs a multiplication on the result of a division: - lower = (- 887272 / spacing_) * spacing_ (contracts/evm/src/ElpidaV3FeeLocker.sol#34)",
+      "elements": [
+        {
+          "name": "constructor",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36
+          ]
+        },
+        {
+          "name": "lower = (- 887272 / spacing_) * spacing_",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            34
+          ]
+        }
+      ]
+    },
+    {
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "confidence": "High",
+      "description": "ElpidaDexCurve._claim(address) (contracts/evm/src/ElpidaDexCurve.sol#151-177) uses a dangerous strict equality: - combined == 0 (contracts/evm/src/ElpidaDexCurve.sol#159)",
+      "elements": [
+        {
+          "name": "_claim",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            151,
+            152,
+            153,
+            154,
+            155,
+            156,
+            157,
+            158,
+            159,
+            160,
+            161,
+            162,
+            163,
+            164,
+            165,
+            166,
+            167,
+            168,
+            169,
+            170,
+            171,
+            172,
+            173,
+            174,
+            175,
+            176,
+            177
+          ]
+        },
+        {
+          "name": "combined == 0",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            159
+          ]
+        }
+      ]
+    },
+    {
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "confidence": "High",
+      "description": "ElpidaUsdPricing._chargeLaunchFee(uint256,bool) (contracts/evm/src/ElpidaUsdPricing.sol#48-66) uses a dangerous strict equality: - ! (coin.balanceOf(pricingOwner()) == beforeBalance + 10_000_000) (contracts/evm/src/ElpidaUsdPricing.sol#58)",
+      "elements": [
+        {
+          "name": "_chargeLaunchFee",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66
+          ]
+        },
+        {
+          "name": "! (coin.balanceOf(pricingOwner()) == beforeBalance + 10_000_000)",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            58
+          ]
+        }
+      ]
+    },
+    {
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "confidence": "High",
+      "description": "ElpidaFeeSplitter.depositToken(address,uint256) (contracts/evm/src/ElpidaFeeSplitter.sol#25-31) uses a dangerous strict equality: - require(bool,string)(IFeeToken(asset).balanceOf(address(this)) - beforeBalance == amount,unsupported token) (contracts/evm/src/ElpidaFeeSplitter.sol#29)",
+      "elements": [
+        {
+          "name": "depositToken",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).balanceOf(address(this)) - beforeBalance == amount,unsupported token)",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            29
+          ]
+        }
+      ]
+    },
+    {
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "confidence": "High",
+      "description": "ElpidaV3MigrationAdapter._pull(address,uint256) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#140) uses a dangerous strict equality: - require(bool,string)(IFeeToken(asset).balanceOf(address(this)) - beforeBalance == amount,unsupported token) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#140)",
+      "elements": [
+        {
+          "name": "_pull",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            140
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).balanceOf(address(this)) - beforeBalance == amount,unsupported token)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            140
+          ]
+        }
+      ]
+    },
+    {
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "confidence": "High",
+      "description": "ElpidaDexCurve._trySend(address,uint256) (contracts/evm/src/ElpidaDexCurve.sol#216-221) uses a dangerous strict equality: - ok = ok && (data.length == 0 || abi.decode(data,(bool))) (contracts/evm/src/ElpidaDexCurve.sol#220)",
+      "elements": [
+        {
+          "name": "_trySend",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            216,
+            217,
+            218,
+            219,
+            220,
+            221
+          ]
+        },
+        {
+          "name": "ok = ok && (data.length == 0 || abi.decode(data,(bool)))",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            220
+          ]
+        }
+      ]
+    },
+    {
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "confidence": "High",
+      "description": "ElpidaDexCurve._buy(address,address,uint256,uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#113-127) uses a dangerous strict equality: - require(bool,string)(quote.balanceOf(address(this)) - balance == spent,unsupported quote) (contracts/evm/src/ElpidaDexCurve.sol#119)",
+      "elements": [
+        {
+          "name": "_buy",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.balanceOf(address(this)) - balance == spent,unsupported quote)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            119
+          ]
+        }
+      ]
+    },
+    {
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "confidence": "High",
+      "description": "ElpidaDexFactory._launchPaired(string,string,address,uint256,uint256,address,bool) (contracts/evm/src/ElpidaDexFactory.sol#102-111) uses a dangerous strict equality: - require(bool,string)(q.balanceOf(address(this)) - beforeBalance == firstBuy,unsupported quote) (contracts/evm/src/ElpidaDexFactory.sol#105)",
+      "elements": [
+        {
+          "name": "_launchPaired",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111
+          ]
+        },
+        {
+          "name": "require(bool,string)(q.balanceOf(address(this)) - beforeBalance == firstBuy,unsupported quote)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            105
+          ]
+        }
+      ]
+    },
+    {
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "confidence": "High",
+      "description": "ElpidaDexCurve._quoteBuy(uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#90-99) uses a dangerous strict equality: - spent == cap || out > SALE_CAP - sold (contracts/evm/src/ElpidaDexCurve.sol#97)",
+      "elements": [
+        {
+          "name": "_quoteBuy",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            90,
+            91,
+            92,
+            93,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99
+          ]
+        },
+        {
+          "name": "spent == cap || out > SALE_CAP - sold",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            97
+          ]
+        }
+      ]
+    },
+    {
+      "check": "incorrect-equality",
+      "impact": "Medium",
+      "confidence": "High",
+      "description": "ElpidaDexCurve._claim(address) (contracts/evm/src/ElpidaDexCurve.sol#151-177) uses a dangerous strict equality: - amount == 0 (contracts/evm/src/ElpidaDexCurve.sol#172)",
+      "elements": [
+        {
+          "name": "_claim",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            151,
+            152,
+            153,
+            154,
+            155,
+            156,
+            157,
+            158,
+            159,
+            160,
+            161,
+            162,
+            163,
+            164,
+            165,
+            166,
+            167,
+            168,
+            169,
+            170,
+            171,
+            172,
+            173,
+            174,
+            175,
+            176,
+            177
+          ]
+        },
+        {
+          "name": "amount == 0",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            172
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-no-eth",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve._buy(address,address,uint256,uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#113-127): External calls: - require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer) (contracts/evm/src/ElpidaDexCurve.sol#118) State variables written after the call(s): - realReserve += spent - fee (contracts/evm/src/ElpidaDexCurve.sol#121) ElpidaDexCurve.rea",
+      "elements": [
+        {
+          "name": "_buy",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            118
+          ]
+        },
+        {
+          "name": "realReserve += spent - fee",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            121
+          ]
+        },
+        {
+          "name": "sold += out",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            121
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-no-eth",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaV3FeeLocker.collectFees() (contracts/evm/src/ElpidaV3FeeLocker.sol#45-51): External calls: - (amount0,amount1) = manager.collect(IV3FeePositionManager.CollectParams(tokenId,address(this),type()(uint128).max,type()(uint128).max)) (contracts/evm/src/ElpidaV3FeeLocker.sol#48) - _fund(token0,amount0) (contracts/evm/src/ElpidaV3FeeLocker.sol#49) - require(bool,string)(IFeeToken(asse",
+      "elements": [
+        {
+          "name": "collectFees",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51
+          ]
+        },
+        {
+          "name": "(amount0,amount1) = manager.collect(IV3FeePositionManager.CollectParams(tokenId,address(this),type()(uint128).max,type()(uint128).max))",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            48
+          ]
+        },
+        {
+          "name": "_fund(token0,amount0)",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            49
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).approve(address(splitter),0),clear approval)",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            54
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-no-eth",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve._buy(address,address,uint256,uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#113-127): External calls: - require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer) (contracts/evm/src/ElpidaDexCurve.sol#118) - require(bool,string)(token.transfer(recipient,out),token transfer) (contracts/evm/src/ElpidaDexCurve.sol#122) State variables writt",
+      "elements": [
+        {
+          "name": "_buy",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            118
+          ]
+        },
+        {
+          "name": "require(bool,string)(token.transfer(recipient,out),token transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            122
+          ]
+        },
+        {
+          "name": "complete = true",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            123
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-no-eth",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve.sell(uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#141-146): External calls: - require(bool,string)(token.transferFrom(msg.sender,address(this),input),token transfer) (contracts/evm/src/ElpidaDexCurve.sol#143) State variables written after the call(s): - realReserve -= out + fee (contracts/evm/src/ElpidaDexCurve.sol#144) ElpidaDexCurve.realReserve (contracts/e",
+      "elements": [
+        {
+          "name": "sell",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            141,
+            142,
+            143,
+            144,
+            145,
+            146
+          ]
+        },
+        {
+          "name": "require(bool,string)(token.transferFrom(msg.sender,address(this),input),token transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            143
+          ]
+        },
+        {
+          "name": "realReserve -= out + fee",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            144
+          ]
+        },
+        {
+          "name": "sold -= input",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            144
+          ]
+        }
+      ]
+    },
+    {
+      "check": "uninitialized-local",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "ElpidaUsdPricing._chargeLaunchFee(uint256,bool).timestamp (contracts/evm/src/ElpidaUsdPricing.sol#52) is a local variable never initialized",
+      "elements": [
+        {
+          "name": "timestamp",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            52
+          ]
+        }
+      ]
+    },
+    {
+      "check": "unused-return",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "ElpidaV3MigrationAdapter._rebalance(address,address,address,uint256,uint256,uint160) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#90-108) ignores return value by (actual,None,None,None,None,None,None) = IV3MigrationPool(pool).slot0() (contracts/evm/src/ElpidaV3MigrationAdapter.sol#91)",
+      "elements": [
+        {
+          "name": "_rebalance",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            90,
+            91,
+            92,
+            93,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99,
+            100,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108
+          ]
+        },
+        {
+          "name": "(actual,None,None,None,None,None,None) = IV3MigrationPool(pool).slot0()",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            91
+          ]
+        }
+      ]
+    },
+    {
+      "check": "unused-return",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "ElpidaV3MigrationAdapter._mint(ElpidaV3MigrationAdapter.Request,ElpidaV3MigrationAdapter.Result,address,address,uint256,uint256) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#109-122) ignores return value by (result.positionId,None,used0,used1) = manager.mint(IV3MigrationManager.MintParams(a,b,fee,locker.lower(),locker.upper(),x,y,0,0,address(this),block.timestamp)) (contracts/evm/src/ElpidaV3Mi",
+      "elements": [
+        {
+          "name": "_mint",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            109,
+            110,
+            111,
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122
+          ]
+        },
+        {
+          "name": "(result.positionId,None,used0,used1) = manager.mint(IV3MigrationManager.MintParams(a,b,fee,locker.lower(),locker.upper(),x,y,0,0,address(this),block.timestamp))",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            116
+          ]
+        }
+      ]
+    },
+    {
+      "check": "unused-return",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "ElpidaV3MigrationAdapter._rebalance(address,address,address,uint256,uint256,uint160) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#90-108) ignores return value by (actual,None,None,None,None,None,None) = IV3MigrationPool(pool).slot0() (contracts/evm/src/ElpidaV3MigrationAdapter.sol#104)",
+      "elements": [
+        {
+          "name": "_rebalance",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            90,
+            91,
+            92,
+            93,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99,
+            100,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108
+          ]
+        },
+        {
+          "name": "(actual,None,None,None,None,None,None) = IV3MigrationPool(pool).slot0()",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            104
+          ]
+        }
+      ]
+    },
+    {
+      "check": "unused-return",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "ElpidaDexFactory._launchPaired(string,string,address,uint256,uint256,address,bool) (contracts/evm/src/ElpidaDexFactory.sol#102-111) ignores return value by ElpidaDexCurve(curve).initialBuy(msg.sender,firstBuy,minOut) (contracts/evm/src/ElpidaDexFactory.sol#107)",
+      "elements": [
+        {
+          "name": "_launchPaired",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111
+          ]
+        },
+        {
+          "name": "ElpidaDexCurve(curve).initialBuy(msg.sender,firstBuy,minOut)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            107
+          ]
+        }
+      ]
+    },
+    {
+      "check": "unused-return",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "ElpidaUsdPricing.price() (contracts/evm/src/ElpidaUsdPricing.sol#34-40) ignores return value by (round,value,None,timestamp,answered) = usdFeed.latestRoundData() (contracts/evm/src/ElpidaUsdPricing.sol#36)",
+      "elements": [
+        {
+          "name": "price",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40
+          ]
+        },
+        {
+          "name": "(round,value,None,timestamp,answered) = usdFeed.latestRoundData()",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            36
+          ]
+        }
+      ]
+    },
+    {
+      "check": "unused-return",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "ElpidaV3FeeLocker.onERC721Received(address,address,uint256,bytes) (contracts/evm/src/ElpidaV3FeeLocker.sol#37-44) ignores return value by (None,approved,a,b,f,lo,hi,liquidity,None,None,owed0,owed1) = manager.positions(id) (contracts/evm/src/ElpidaV3FeeLocker.sol#40)",
+      "elements": [
+        {
+          "name": "onERC721Received",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            37,
+            38,
+            39,
+            40,
+            41,
+            42,
+            43,
+            44
+          ]
+        },
+        {
+          "name": "(None,approved,a,b,f,lo,hi,liquidity,None,None,owed0,owed1) = manager.positions(id)",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            40
+          ]
+        }
+      ]
+    },
+    {
+      "check": "unused-return",
+      "impact": "Medium",
+      "confidence": "Medium",
+      "description": "ElpidaDexFactory._launch(string,string,uint256,uint256,address,bool) (contracts/evm/src/ElpidaDexFactory.sol#112-121) ignores return value by ElpidaDexCurve(curve).initialBuy{value: firstBuy}(msg.sender,firstBuy,minOut) (contracts/evm/src/ElpidaDexFactory.sol#118)",
+      "elements": [
+        {
+          "name": "_launch",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121
+          ]
+        },
+        {
+          "name": "ElpidaDexCurve(curve).initialBuy{value: firstBuy}(msg.sender,firstBuy,minOut)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            118
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexFactory._launchPaired(string,string,address,uint256,uint256,address,bool) (contracts/evm/src/ElpidaDexFactory.sol#102-111): External calls: - _chargeLaunchFee(0,inUsdc) (contracts/evm/src/ElpidaDexFactory.sol#104) - ! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000)) (contracts/evm/src/ElpidaUsdPricing.sol#57) - (ok,None) = pricingOwner().call{value: fee}() (contract",
+      "elements": [
+        {
+          "name": "_launchPaired",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111
+          ]
+        },
+        {
+          "name": "_chargeLaunchFee(0,inUsdc)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            104
+          ]
+        },
+        {
+          "name": "! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000))",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            57
+          ]
+        },
+        {
+          "name": "(ok,None) = pricingOwner().call{value: fee}()",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            61
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve._graduate() (contracts/evm/src/ElpidaDexCurve.sol#186-211): External calls: - require(bool,string)(token.approve(address(migrationAdapter),lpTokens),adapter approval) (contracts/evm/src/ElpidaDexCurve.sol#200) - require(bool,string)(quote.approve(address(migrationAdapter),total),quote approval) (contracts/evm/src/ElpidaDexCurve.sol#201) - require(bool,string)(token.app",
+      "elements": [
+        {
+          "name": "_graduate",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            186,
+            187,
+            188,
+            189,
+            190,
+            191,
+            192,
+            193,
+            194,
+            195,
+            196,
+            197,
+            198,
+            199,
+            200,
+            201,
+            202,
+            203,
+            204,
+            205,
+            206,
+            207,
+            208,
+            209,
+            210,
+            211
+          ]
+        },
+        {
+          "name": "require(bool,string)(token.approve(address(migrationAdapter),lpTokens),adapter approval)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            200
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.approve(address(migrationAdapter),total),quote approval)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            201
+          ]
+        },
+        {
+          "name": "require(bool,string)(token.approve(address(migrationAdapter),0),approval cleanup)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            203
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve._buy(address,address,uint256,uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#113-127): External calls: - require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer) (contracts/evm/src/ElpidaDexCurve.sol#118) - require(bool,string)(token.transfer(recipient,out),token transfer) (contracts/evm/src/ElpidaDexCurve.sol#122) - _pay(recipient,gros",
+      "elements": [
+        {
+          "name": "_buy",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            118
+          ]
+        },
+        {
+          "name": "require(bool,string)(token.transfer(recipient,out),token transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            122
+          ]
+        },
+        {
+          "name": "_pay(recipient,gross - spent)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            125
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve._buy(address,address,uint256,uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#113-127): External calls: - require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer) (contracts/evm/src/ElpidaDexCurve.sol#118) State variables written after the call(s): - _accrue(fee,base,recipient,feeBps) (contracts/evm/src/ElpidaDexCurve.sol#121) - creatorF",
+      "elements": [
+        {
+          "name": "_buy",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            118
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            118
+          ]
+        },
+        {
+          "name": "_accrue(fee,base,recipient,feeBps)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            121
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexFactory.launchPairedWithMetadata(string,string,address,uint256,uint256,address,string) (contracts/evm/src/ElpidaDexFactory.sol#92-94): External calls: - (token,curve) = _launchPaired(name_,symbol_,asset,firstBuy,minOut,reward,false) (contracts/evm/src/ElpidaDexFactory.sol#93) - require(bool,string)(q.transferFrom(msg.sender,address(this),firstBuy),pair funding) (contracts/ev",
+      "elements": [
+        {
+          "name": "launchPairedWithMetadata",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            92,
+            93,
+            94
+          ]
+        },
+        {
+          "name": "(token,curve) = _launchPaired(name_,symbol_,asset,firstBuy,minOut,reward,false)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            93
+          ]
+        },
+        {
+          "name": "require(bool,string)(q.transferFrom(msg.sender,address(this),firstBuy),pair funding)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            105
+          ]
+        },
+        {
+          "name": "(token,curve) = deployer.create(name_,symbol_,asset,treasury,reward,template.virtualQuote,VIRTUAL_TOKEN,template.adapter,graduationGrace)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            106
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaV3MigrationAdapter.migrate(ElpidaV3MigrationAdapter.Request) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#53-74): External calls: - _pull(r.token,r.tokenAmount) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#59) - require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#140) - IWrappedMigrat",
+      "elements": [
+        {
+          "name": "migrate",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74
+          ]
+        },
+        {
+          "name": "_pull(r.token,r.tokenAmount)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            59
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            140
+          ]
+        },
+        {
+          "name": "IWrappedMigrationAsset(weth).deposit{value: msg.value}()",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            60
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaV3MigrationAdapter._rebalance(address,address,address,uint256,uint256,uint160) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#90-108): External calls: - (d0,d1) = IV3MigrationPool(pool).swap(address(this),zeroForOne,int256(budget),expected,) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#99) State variables written after the call(s): - repriceAsset = address(0) (contracts/evm",
+      "elements": [
+        {
+          "name": "_rebalance",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            90,
+            91,
+            92,
+            93,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99,
+            100,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108
+          ]
+        },
+        {
+          "name": "(d0,d1) = IV3MigrationPool(pool).swap(address(this),zeroForOne,int256(budget),expected,)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            99
+          ]
+        },
+        {
+          "name": "(d0,d1) = IV3MigrationPool(pool).swap(address(this),zeroForOne,int256(budget),expected,)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            99
+          ]
+        },
+        {
+          "name": "repriceAsset = address(0)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            100
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexFactory.launchWithMetadata(string,string,uint256,uint256,address,string) (contracts/evm/src/ElpidaDexFactory.sol#84-86): External calls: - (token,curve) = _launch(name_,symbol_,firstBuy,minOut,reward,false) (contracts/evm/src/ElpidaDexFactory.sol#85) - (token,curve) = deployer.create(name_,symbol_,address(0),treasury,reward,nativeVirtualQuote(),VIRTUAL_TOKEN,migrationAdapter",
+      "elements": [
+        {
+          "name": "launchWithMetadata",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            84,
+            85,
+            86
+          ]
+        },
+        {
+          "name": "(token,curve) = _launch(name_,symbol_,firstBuy,minOut,reward,false)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            85
+          ]
+        },
+        {
+          "name": "(token,curve) = deployer.create(name_,symbol_,address(0),treasury,reward,nativeVirtualQuote(),VIRTUAL_TOKEN,migrationAdapter,graduationGrace)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            116
+          ]
+        },
+        {
+          "name": "require(bool,string)(IERC20Minimal(token).transfer(curve,TOKEN_SUPPLY),token seed)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            117
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexFactory._launch(string,string,uint256,uint256,address,bool) (contracts/evm/src/ElpidaDexFactory.sol#112-121): External calls: - _chargeLaunchFee(firstBuy,inUsdc) (contracts/evm/src/ElpidaDexFactory.sol#115) - ! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000)) (contracts/evm/src/ElpidaUsdPricing.sol#57) - (ok,None) = pricingOwner().call{value: fee}() (contracts/evm/s",
+      "elements": [
+        {
+          "name": "_launch",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121
+          ]
+        },
+        {
+          "name": "_chargeLaunchFee(firstBuy,inUsdc)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            115
+          ]
+        },
+        {
+          "name": "! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000))",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            57
+          ]
+        },
+        {
+          "name": "(ok,None) = pricingOwner().call{value: fee}()",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            61
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexFactory.launchWithPayment(string,string,address,uint256,uint256,address,string,bool) (contracts/evm/src/ElpidaDexFactory.sol#95-99): External calls: - (token,curve) = _launch(name_,symbol_,firstBuy,minOut,reward,inUsdc) (contracts/evm/src/ElpidaDexFactory.sol#97) - (token,curve) = deployer.create(name_,symbol_,address(0),treasury,reward,nativeVirtualQuote(),VIRTUAL_TOKEN,mig",
+      "elements": [
+        {
+          "name": "launchWithPayment",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            95,
+            96,
+            97,
+            98,
+            99
+          ]
+        },
+        {
+          "name": "(token,curve) = _launch(name_,symbol_,firstBuy,minOut,reward,inUsdc)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            97
+          ]
+        },
+        {
+          "name": "(token,curve) = deployer.create(name_,symbol_,address(0),treasury,reward,nativeVirtualQuote(),VIRTUAL_TOKEN,migrationAdapter,graduationGrace)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            116
+          ]
+        },
+        {
+          "name": "require(bool,string)(IERC20Minimal(token).transfer(curve,TOKEN_SUPPLY),token seed)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            117
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve._buy(address,address,uint256,uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#113-127): External calls: - require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer) (contracts/evm/src/ElpidaDexCurve.sol#118) - require(bool,string)(token.transfer(recipient,out),token transfer) (contracts/evm/src/ElpidaDexCurve.sol#122) State variables writt",
+      "elements": [
+        {
+          "name": "_buy",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            118
+          ]
+        },
+        {
+          "name": "require(bool,string)(token.transfer(recipient,out),token transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            122
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            118
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve.sell(uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#141-146): External calls: - require(bool,string)(token.transferFrom(msg.sender,address(this),input),token transfer) (contracts/evm/src/ElpidaDexCurve.sol#143) State variables written after the call(s): - _accrue(fee,base,msg.sender,feeBps) (contracts/evm/src/ElpidaDexCurve.sol#144) - creatorFees += base - base",
+      "elements": [
+        {
+          "name": "sell",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            141,
+            142,
+            143,
+            144,
+            145,
+            146
+          ]
+        },
+        {
+          "name": "require(bool,string)(token.transferFrom(msg.sender,address(this),input),token transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            143
+          ]
+        },
+        {
+          "name": "require(bool,string)(token.transferFrom(msg.sender,address(this),input),token transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            143
+          ]
+        },
+        {
+          "name": "_accrue(fee,base,msg.sender,feeBps)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            144
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaFeeSplitter.depositToken(address,uint256) (contracts/evm/src/ElpidaFeeSplitter.sol#25-31): External calls: - require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding failed) (contracts/evm/src/ElpidaFeeSplitter.sol#28) State variables written after the call(s): - _credit(asset,amount) (contracts/evm/src/ElpidaFeeSplitter.sol#30) - claimable[as",
+      "elements": [
+        {
+          "name": "depositToken",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding failed)",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            28
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding failed)",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            28
+          ]
+        },
+        {
+          "name": "_credit(asset,amount)",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            30
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-benign",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexCurve._graduate() (contracts/evm/src/ElpidaDexCurve.sol#186-211): External calls: - require(bool,string)(token.approve(address(migrationAdapter),lpTokens),adapter approval) (contracts/evm/src/ElpidaDexCurve.sol#200) - require(bool,string)(quote.approve(address(migrationAdapter),total),quote approval) (contracts/evm/src/ElpidaDexCurve.sol#201) - require(bool,string)(token.app",
+      "elements": [
+        {
+          "name": "_graduate",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            186,
+            187,
+            188,
+            189,
+            190,
+            191,
+            192,
+            193,
+            194,
+            195,
+            196,
+            197,
+            198,
+            199,
+            200,
+            201,
+            202,
+            203,
+            204,
+            205,
+            206,
+            207,
+            208,
+            209,
+            210,
+            211
+          ]
+        },
+        {
+          "name": "require(bool,string)(token.approve(address(migrationAdapter),lpTokens),adapter approval)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            200
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.approve(address(migrationAdapter),total),quote approval)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            201
+          ]
+        },
+        {
+          "name": "require(bool,string)(token.approve(address(migrationAdapter),0),approval cleanup)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            203
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-events",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaFeeSplitter.depositToken(address,uint256) (contracts/evm/src/ElpidaFeeSplitter.sol#25-31): External calls: - require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding failed) (contracts/evm/src/ElpidaFeeSplitter.sol#28) Event emitted after the call(s): - FeesFunded(asset,amount,p,c) (contracts/evm/src/ElpidaFeeSplitter.sol#36) - _credit(asset,a",
+      "elements": [
+        {
+          "name": "depositToken",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding failed)",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            28
+          ]
+        },
+        {
+          "name": "FeesFunded(asset,amount,p,c)",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            36
+          ]
+        },
+        {
+          "name": "_credit(asset,amount)",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            30
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-events",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaV3MigrationAdapter.migrate(ElpidaV3MigrationAdapter.Request) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#53-74): External calls: - _pull(r.token,r.tokenAmount) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#59) - require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#140) - IWrappedMigrat",
+      "elements": [
+        {
+          "name": "migrate",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74
+          ]
+        },
+        {
+          "name": "_pull(r.token,r.tokenAmount)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            59
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            140
+          ]
+        },
+        {
+          "name": "IWrappedMigrationAsset(weth).deposit{value: msg.value}()",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            60
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-events",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaV3MigrationAdapter._rebalance(address,address,address,uint256,uint256,uint160) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#90-108): External calls: - (d0,d1) = IV3MigrationPool(pool).swap(address(this),zeroForOne,int256(budget),expected,) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#99) Event emitted after the call(s): - PoolRebalanced(pool,d0,d1) (contracts/evm/src/Elpi",
+      "elements": [
+        {
+          "name": "_rebalance",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            90,
+            91,
+            92,
+            93,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99,
+            100,
+            101,
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108
+          ]
+        },
+        {
+          "name": "(d0,d1) = IV3MigrationPool(pool).swap(address(this),zeroForOne,int256(budget),expected,)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            99
+          ]
+        },
+        {
+          "name": "PoolRebalanced(pool,d0,d1)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            103
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-events",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexFactory._launchPaired(string,string,address,uint256,uint256,address,bool) (contracts/evm/src/ElpidaDexFactory.sol#102-111): External calls: - _chargeLaunchFee(0,inUsdc) (contracts/evm/src/ElpidaDexFactory.sol#104) - ! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000)) (contracts/evm/src/ElpidaUsdPricing.sol#57) - (ok,None) = pricingOwner().call{value: fee}() (contract",
+      "elements": [
+        {
+          "name": "_launchPaired",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            102,
+            103,
+            104,
+            105,
+            106,
+            107,
+            108,
+            109,
+            110,
+            111
+          ]
+        },
+        {
+          "name": "_chargeLaunchFee(0,inUsdc)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            104
+          ]
+        },
+        {
+          "name": "! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000))",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            57
+          ]
+        },
+        {
+          "name": "(ok,None) = pricingOwner().call{value: fee}()",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            61
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-events",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaFeeSplitter.claim(address,address) (contracts/evm/src/ElpidaFeeSplitter.sol#39-46): External calls: - (ok,None) = recipient.call{value: amount}() (contracts/evm/src/ElpidaFeeSplitter.sol#43) - require(bool,string)(IFeeToken(asset).transfer(recipient,amount),token payout) (contracts/evm/src/ElpidaFeeSplitter.sol#44) External calls sending eth: - (ok,None) = recipient.call{value:",
+      "elements": [
+        {
+          "name": "claim",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            39,
+            40,
+            41,
+            42,
+            43,
+            44,
+            45,
+            46
+          ]
+        },
+        {
+          "name": "(ok,None) = recipient.call{value: amount}()",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            43
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).transfer(recipient,amount),token payout)",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            44
+          ]
+        },
+        {
+          "name": "(ok,None) = recipient.call{value: amount}()",
+          "file": "contracts/evm/src/ElpidaFeeSplitter.sol",
+          "lines": [
+            43
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-events",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexFactory.launchWithMetadata(string,string,uint256,uint256,address,string) (contracts/evm/src/ElpidaDexFactory.sol#84-86): External calls: - (token,curve) = _launch(name_,symbol_,firstBuy,minOut,reward,false) (contracts/evm/src/ElpidaDexFactory.sol#85) - (token,curve) = deployer.create(name_,symbol_,address(0),treasury,reward,nativeVirtualQuote(),VIRTUAL_TOKEN,migrationAdapter",
+      "elements": [
+        {
+          "name": "launchWithMetadata",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            84,
+            85,
+            86
+          ]
+        },
+        {
+          "name": "(token,curve) = _launch(name_,symbol_,firstBuy,minOut,reward,false)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            85
+          ]
+        },
+        {
+          "name": "(token,curve) = deployer.create(name_,symbol_,address(0),treasury,reward,nativeVirtualQuote(),VIRTUAL_TOKEN,migrationAdapter,graduationGrace)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            116
+          ]
+        },
+        {
+          "name": "require(bool,string)(IERC20Minimal(token).transfer(curve,TOKEN_SUPPLY),token seed)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            117
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-events",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaV3FeeLocker.collectFees() (contracts/evm/src/ElpidaV3FeeLocker.sol#45-51): External calls: - (amount0,amount1) = manager.collect(IV3FeePositionManager.CollectParams(tokenId,address(this),type()(uint128).max,type()(uint128).max)) (contracts/evm/src/ElpidaV3FeeLocker.sol#48) - _fund(token0,amount0) (contracts/evm/src/ElpidaV3FeeLocker.sol#49) - require(bool,string)(IFeeToken(asse",
+      "elements": [
+        {
+          "name": "collectFees",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            45,
+            46,
+            47,
+            48,
+            49,
+            50,
+            51
+          ]
+        },
+        {
+          "name": "(amount0,amount1) = manager.collect(IV3FeePositionManager.CollectParams(tokenId,address(this),type()(uint128).max,type()(uint128).max))",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            48
+          ]
+        },
+        {
+          "name": "_fund(token0,amount0)",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            49
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).approve(address(splitter),0),clear approval)",
+          "file": "contracts/evm/src/ElpidaV3FeeLocker.sol",
+          "lines": [
+            54
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-events",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexFactory.launchPairedWithMetadata(string,string,address,uint256,uint256,address,string) (contracts/evm/src/ElpidaDexFactory.sol#92-94): External calls: - (token,curve) = _launchPaired(name_,symbol_,asset,firstBuy,minOut,reward,false) (contracts/evm/src/ElpidaDexFactory.sol#93) - require(bool,string)(q.transferFrom(msg.sender,address(this),firstBuy),pair funding) (contracts/ev",
+      "elements": [
+        {
+          "name": "launchPairedWithMetadata",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            92,
+            93,
+            94
+          ]
+        },
+        {
+          "name": "(token,curve) = _launchPaired(name_,symbol_,asset,firstBuy,minOut,reward,false)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            93
+          ]
+        },
+        {
+          "name": "require(bool,string)(q.transferFrom(msg.sender,address(this),firstBuy),pair funding)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            105
+          ]
+        },
+        {
+          "name": "(token,curve) = deployer.create(name_,symbol_,asset,treasury,reward,template.virtualQuote,VIRTUAL_TOKEN,template.adapter,graduationGrace)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            106
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-events",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexFactory.launchWithPayment(string,string,address,uint256,uint256,address,string,bool) (contracts/evm/src/ElpidaDexFactory.sol#95-99): External calls: - (token,curve) = _launch(name_,symbol_,firstBuy,minOut,reward,inUsdc) (contracts/evm/src/ElpidaDexFactory.sol#97) - (token,curve) = deployer.create(name_,symbol_,address(0),treasury,reward,nativeVirtualQuote(),VIRTUAL_TOKEN,mig",
+      "elements": [
+        {
+          "name": "launchWithPayment",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            95,
+            96,
+            97,
+            98,
+            99
+          ]
+        },
+        {
+          "name": "(token,curve) = _launch(name_,symbol_,firstBuy,minOut,reward,inUsdc)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            97
+          ]
+        },
+        {
+          "name": "(token,curve) = deployer.create(name_,symbol_,address(0),treasury,reward,nativeVirtualQuote(),VIRTUAL_TOKEN,migrationAdapter,graduationGrace)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            116
+          ]
+        },
+        {
+          "name": "require(bool,string)(IERC20Minimal(token).transfer(curve,TOKEN_SUPPLY),token seed)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            117
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-events",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaUsdPricing._chargeLaunchFee(uint256,bool) (contracts/evm/src/ElpidaUsdPricing.sol#48-66): External calls: - ! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000)) (contracts/evm/src/ElpidaUsdPricing.sol#57) Event emitted after the call(s): - LaunchFeePaid(msg.sender,feeUsdc,10_000_000,timestamp) (contracts/evm/src/ElpidaUsdPricing.sol#59)",
+      "elements": [
+        {
+          "name": "_chargeLaunchFee",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66
+          ]
+        },
+        {
+          "name": "! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000))",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            57
+          ]
+        },
+        {
+          "name": "LaunchFeePaid(msg.sender,feeUsdc,10_000_000,timestamp)",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            59
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-events",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaUsdPricing._chargeLaunchFee(uint256,bool) (contracts/evm/src/ElpidaUsdPricing.sol#48-66): External calls: - (ok,None) = pricingOwner().call{value: fee}() (contracts/evm/src/ElpidaUsdPricing.sol#61) Event emitted after the call(s): - LaunchFeePaid(msg.sender,address(0),fee,timestamp) (contracts/evm/src/ElpidaUsdPricing.sol#62)",
+      "elements": [
+        {
+          "name": "_chargeLaunchFee",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            48,
+            49,
+            50,
+            51,
+            52,
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66
+          ]
+        },
+        {
+          "name": "(ok,None) = pricingOwner().call{value: fee}()",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            61
+          ]
+        },
+        {
+          "name": "LaunchFeePaid(msg.sender,address(0),fee,timestamp)",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            62
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-events",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaDexFactory._launch(string,string,uint256,uint256,address,bool) (contracts/evm/src/ElpidaDexFactory.sol#112-121): External calls: - _chargeLaunchFee(firstBuy,inUsdc) (contracts/evm/src/ElpidaDexFactory.sol#115) - ! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000)) (contracts/evm/src/ElpidaUsdPricing.sol#57) - (ok,None) = pricingOwner().call{value: fee}() (contracts/evm/s",
+      "elements": [
+        {
+          "name": "_launch",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121
+          ]
+        },
+        {
+          "name": "_chargeLaunchFee(firstBuy,inUsdc)",
+          "file": "contracts/evm/src/ElpidaDexFactory.sol",
+          "lines": [
+            115
+          ]
+        },
+        {
+          "name": "! (coin.transferFrom(msg.sender,pricingOwner(),10_000_000))",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            57
+          ]
+        },
+        {
+          "name": "(ok,None) = pricingOwner().call{value: fee}()",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            61
+          ]
+        }
+      ]
+    },
+    {
+      "check": "reentrancy-events",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "Reentrancy in ElpidaV3MigrationAdapter.migrate(ElpidaV3MigrationAdapter.Request) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#53-74): External calls: - _pull(r.token,r.tokenAmount) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#59) - require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#140) - IWrappedMigrat",
+      "elements": [
+        {
+          "name": "migrate",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74
+          ]
+        },
+        {
+          "name": "_pull(r.token,r.tokenAmount)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            59
+          ]
+        },
+        {
+          "name": "require(bool,string)(IFeeToken(asset).transferFrom(msg.sender,address(this),amount),funding)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            140
+          ]
+        },
+        {
+          "name": "IWrappedMigrationAsset(weth).deposit{value: msg.value}()",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            60
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaUsdPricing.price() (contracts/evm/src/ElpidaUsdPricing.sol#34-40) uses timestamp for comparisons Dangerous comparisons: - ! (value > 0 && round > 0 && answered >= round && timestamp > 0 && timestamp <= block.timestamp) (contracts/evm/src/ElpidaUsdPricing.sol#37) - ! (block.timestamp - timestamp <= maxPriceAge) (contracts/evm/src/ElpidaUsdPricing.sol#38)",
+      "elements": [
+        {
+          "name": "price",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            34,
+            35,
+            36,
+            37,
+            38,
+            39,
+            40
+          ]
+        },
+        {
+          "name": "! (value > 0 && round > 0 && answered >= round && timestamp > 0 && timestamp <= block.timestamp)",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            37
+          ]
+        },
+        {
+          "name": "! (block.timestamp - timestamp <= maxPriceAge)",
+          "file": "contracts/evm/src/ElpidaUsdPricing.sol",
+          "lines": [
+            38
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve.reopen() (contracts/evm/src/ElpidaDexCurve.sol#179-182) uses timestamp for comparisons Dangerous comparisons: - require(bool,string)(complete && pool == address(0) && block.timestamp >= completedAt + graduationGrace,not reopenable) (contracts/evm/src/ElpidaDexCurve.sol#180)",
+      "elements": [
+        {
+          "name": "reopen",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            179,
+            180,
+            181,
+            182
+          ]
+        },
+        {
+          "name": "require(bool,string)(complete && pool == address(0) && block.timestamp >= completedAt + graduationGrace,not reopenable)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            180
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve._buy(address,address,uint256,uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#113-127) uses timestamp for comparisons Dangerous comparisons: - require(bool,string)(out >= minOut,slippage) (contracts/evm/src/ElpidaDexCurve.sol#114) - require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer) (contracts/evm/src/ElpidaDexCurve.sol#118) - require(bool,strin",
+      "elements": [
+        {
+          "name": "_buy",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122,
+            123,
+            124,
+            125,
+            126,
+            127
+          ]
+        },
+        {
+          "name": "require(bool,string)(out >= minOut,slippage)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            114
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.transferFrom(payer,address(this),spent),quote transfer)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            118
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.balanceOf(address(this)) - balance == spent,unsupported quote)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            119
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve._fees(uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#72-76) uses timestamp for comparisons Dangerous comparisons: - base > fee (contracts/evm/src/ElpidaDexCurve.sol#75)",
+      "elements": [
+        {
+          "name": "_fees",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            72,
+            73,
+            74,
+            75,
+            76
+          ]
+        },
+        {
+          "name": "base > fee",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            75
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve._quoteSell(uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#135-140) uses timestamp for comparisons Dangerous comparisons: - require(bool,string)(! complete && input > 0 && input <= sold,complete/invalid sell) (contracts/evm/src/ElpidaDexCurve.sol#136) - require(bool,string)(gross <= realReserve,insufficient real reserve) (contracts/evm/src/ElpidaDexCurve.sol#138) - require(bo",
+      "elements": [
+        {
+          "name": "_quoteSell",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            135,
+            136,
+            137,
+            138,
+            139,
+            140
+          ]
+        },
+        {
+          "name": "require(bool,string)(! complete && input > 0 && input <= sold,complete/invalid sell)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            136
+          ]
+        },
+        {
+          "name": "require(bool,string)(gross <= realReserve,insufficient real reserve)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            138
+          ]
+        },
+        {
+          "name": "require(bool,string)(out > 0,sell dust)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            139
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaV3MigrationAdapter._mint(ElpidaV3MigrationAdapter.Request,ElpidaV3MigrationAdapter.Result,address,address,uint256,uint256) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#109-122) uses timestamp for comparisons Dangerous comparisons: - require(bool,string)(used0 * 10000 >= x * 9990 || used1 * 10000 >= y * 9990,mint ratio) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#117)",
+      "elements": [
+        {
+          "name": "_mint",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            109,
+            110,
+            111,
+            112,
+            113,
+            114,
+            115,
+            116,
+            117,
+            118,
+            119,
+            120,
+            121,
+            122
+          ]
+        },
+        {
+          "name": "require(bool,string)(used0 * 10000 >= x * 9990 || used1 * 10000 >= y * 9990,mint ratio)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            117
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve._claim(address) (contracts/evm/src/ElpidaDexCurve.sol#151-177) uses timestamp for comparisons Dangerous comparisons: - combined == 0 (contracts/evm/src/ElpidaDexCurve.sol#159) - amount == 0 (contracts/evm/src/ElpidaDexCurve.sol#172)",
+      "elements": [
+        {
+          "name": "_claim",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            151,
+            152,
+            153,
+            154,
+            155,
+            156,
+            157,
+            158,
+            159,
+            160,
+            161,
+            162,
+            163,
+            164,
+            165,
+            166,
+            167,
+            168,
+            169,
+            170,
+            171,
+            172,
+            173,
+            174,
+            175,
+            176,
+            177
+          ]
+        },
+        {
+          "name": "combined == 0",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            159
+          ]
+        },
+        {
+          "name": "amount == 0",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            172
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaV3MigrationAdapter.migrate(ElpidaV3MigrationAdapter.Request) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#53-74) uses timestamp for comparisons Dangerous comparisons: - require(bool,string)(! entered && migrations[msg.sender].pool == address(0),reentrancy/repeat) (contracts/evm/src/ElpidaV3MigrationAdapter.sol#54)",
+      "elements": [
+        {
+          "name": "migrate",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            53,
+            54,
+            55,
+            56,
+            57,
+            58,
+            59,
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74
+          ]
+        },
+        {
+          "name": "require(bool,string)(! entered && migrations[msg.sender].pool == address(0),reentrancy/repeat)",
+          "file": "contracts/evm/src/ElpidaV3MigrationAdapter.sol",
+          "lines": [
+            54
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve._quoteBuy(uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#90-99) uses timestamp for comparisons Dangerous comparisons: - spent == cap || out > SALE_CAP - sold (contracts/evm/src/ElpidaDexCurve.sol#97) - require(bool,string)(out > 0,buy dust) (contracts/evm/src/ElpidaDexCurve.sol#98) - gross > cap (contracts/evm/src/ElpidaDexCurve.sol#93)",
+      "elements": [
+        {
+          "name": "_quoteBuy",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            90,
+            91,
+            92,
+            93,
+            94,
+            95,
+            96,
+            97,
+            98,
+            99
+          ]
+        },
+        {
+          "name": "spent == cap || out > SALE_CAP - sold",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            97
+          ]
+        },
+        {
+          "name": "require(bool,string)(out > 0,buy dust)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            98
+          ]
+        },
+        {
+          "name": "gross > cap",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            93
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve._accrue(uint256,uint256,address,uint256) (contracts/evm/src/ElpidaDexCurve.sol#128-131) uses timestamp for comparisons Dangerous comparisons: - fee > base (contracts/evm/src/ElpidaDexCurve.sol#130)",
+      "elements": [
+        {
+          "name": "_accrue",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            128,
+            129,
+            130,
+            131
+          ]
+        },
+        {
+          "name": "fee > base",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            130
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve.currentFeeBps() (contracts/evm/src/ElpidaDexCurve.sol#67-71) uses timestamp for comparisons Dangerous comparisons: - elapsed >= SNIPE_WINDOW (contracts/evm/src/ElpidaDexCurve.sol#69)",
+      "elements": [
+        {
+          "name": "currentFeeBps",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            67,
+            68,
+            69,
+            70,
+            71
+          ]
+        },
+        {
+          "name": "elapsed >= SNIPE_WINDOW",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            69
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve._trySend(address,uint256) (contracts/evm/src/ElpidaDexCurve.sol#216-221) uses timestamp for comparisons Dangerous comparisons: - ok = ok && (data.length == 0 || abi.decode(data,(bool))) (contracts/evm/src/ElpidaDexCurve.sol#220)",
+      "elements": [
+        {
+          "name": "_trySend",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            216,
+            217,
+            218,
+            219,
+            220,
+            221
+          ]
+        },
+        {
+          "name": "ok = ok && (data.length == 0 || abi.decode(data,(bool)))",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            220
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve._graduate() (contracts/evm/src/ElpidaDexCurve.sol#186-211) uses timestamp for comparisons Dangerous comparisons: - require(bool,string)(complete && pool == address(0),not complete/already migrated) (contracts/evm/src/ElpidaDexCurve.sol#187) - lpTokens > remaining (contracts/evm/src/ElpidaDexCurve.sol#194) - require(bool,string)(lpTokens - remaining <= remaining / 1_000_000,migration",
+      "elements": [
+        {
+          "name": "_graduate",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            186,
+            187,
+            188,
+            189,
+            190,
+            191,
+            192,
+            193,
+            194,
+            195,
+            196,
+            197,
+            198,
+            199,
+            200,
+            201,
+            202,
+            203,
+            204,
+            205,
+            206,
+            207,
+            208,
+            209,
+            210,
+            211
+          ]
+        },
+        {
+          "name": "require(bool,string)(complete && pool == address(0),not complete/already migrated)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            187
+          ]
+        },
+        {
+          "name": "lpTokens > remaining",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            194
+          ]
+        },
+        {
+          "name": "require(bool,string)(lpTokens - remaining <= remaining / 1_000_000,migration rounding)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            195
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve._pay(address,uint256) (contracts/evm/src/ElpidaDexCurve.sol#212-215) uses timestamp for comparisons Dangerous comparisons: - require(bool,string)(ok,native payout) (contracts/evm/src/ElpidaDexCurve.sol#213) - require(bool,string)(quote.transfer(recipient,value),quote payout) (contracts/evm/src/ElpidaDexCurve.sol#214)",
+      "elements": [
+        {
+          "name": "_pay",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            212,
+            213,
+            214,
+            215
+          ]
+        },
+        {
+          "name": "require(bool,string)(ok,native payout)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            213
+          ]
+        },
+        {
+          "name": "require(bool,string)(quote.transfer(recipient,value),quote payout)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            214
+          ]
+        }
+      ]
+    },
+    {
+      "check": "timestamp",
+      "impact": "Low",
+      "confidence": "Medium",
+      "description": "ElpidaDexCurve.sell(uint256,uint256) (contracts/evm/src/ElpidaDexCurve.sol#141-146) uses timestamp for comparisons Dangerous comparisons: - require(bool,string)(out >= minOut,slippage) (contracts/evm/src/ElpidaDexCurve.sol#142)",
+      "elements": [
+        {
+          "name": "sell",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            141,
+            142,
+            143,
+            144,
+            145,
+            146
+          ]
+        },
+        {
+          "name": "require(bool,string)(out >= minOut,slippage)",
+          "file": "contracts/evm/src/ElpidaDexCurve.sol",
+          "lines": [
+            142
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -101,8 +101,11 @@ Rust toolchain, then runs `tests/solana.test.mjs` with `--strict` (zero skips al
   (the raw copy stays in the gitignored `backups/`), and older runs can be imported with
   `scripts/import-fork-report.mjs`; the first one is `docs/evidence/base-sepolia-fork-48075531.json`. A claims
   assertion fails when a report is incomplete, mentions a credential or is not mentioned by any document.
-- **Static analysis** (Slither) is triaged in prose in `AUDIT_SCOPE.md`; no report is committed and the tool is not in
-  the toolchain.
+- **Static analysis** is reproducible but not automated: `pip install slither-analyzer solc-select`, `solc-select install
+  0.8.24`, then the command in `AUDIT_SCOPE.md` §7. Its output is committed at
+  `docs/security/slither-2026-10-25.json` (slither 0.11.6, solc 0.8.24, 82 findings with detector, file and line), and a
+  claims assertion fails if those counts stop matching the brief. Add the toolchain to CI when the triage must track
+  every change rather than a release.
 - **The full suite runtime** is still minutes, not seconds. The cache removes the repeated compiles; the remaining
   cost is real Uniswap v3 deployments in the EVM tests, which is the point of those tests.
 - **Coverage excludes `packages/solana` and the contracts.** Solidity and Rust are not V8 code, and only files Node
