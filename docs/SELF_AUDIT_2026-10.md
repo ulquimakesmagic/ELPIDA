@@ -15,7 +15,7 @@ rebuild noted in `HUMAN_ACTIONS.md`).
 |---|---|---|
 | Invariant fuzz (`economic-invariants`) | Curve, ETH and USDC pairs | 43 seeds, 88 of 88 runs passed |
 | Lifecycle fuzz (`fuzz-lifecycle`, new) | Launch → curve → atomic graduation → pool swaps → fee collection → claims | 30 seeds, 64 of 64 runs passed |
-| Mythril | 6 in-scope contracts | No real issue. 1 contract clean, 10 pattern findings triaged below, 1 contract [MIGRATION_ADAPTER_RESULT] |
+| Mythril | 6 in-scope contracts | No real issue in the 5 it finished: 1 clean, 10 pattern findings triaged below. The migration adapter ran out of memory (8 GB); to run elsewhere |
 | `cargo clippy` | Solana program | 4 style warnings; no correctness issue |
 | `cargo audit` | Solana dependencies | 0 vulnerabilities; 3 warnings in transitive crates from Anchor 0.31.2 |
 | Aderyn | EVM sources | Not run here (needs `binaries.soliditylang.org`, blocked in this workspace); command below |
@@ -66,12 +66,18 @@ selector: `0xc7385485` is `tokenMetadataURI(address)`, `0x48153279` is `previewB
 | `ElpidaFeeSplitter` | SWC-101 in `claim(address,address)` | **False positive.** No `unchecked` blocks; with 0.8 checked arithmetic an underflow reverts and cannot wrap. |
 | `ElpidaFeeSplitter` | SWC-114 (transaction order dependence) in `claim` | **Not exploitable.** `claim` pays only the fixed treasury or creator, whatever the caller or order; front-running a claim just pays the same recipient earlier. |
 | `ElpidaFeeSplitter` | SWC-107 (state access after external call) ×2 in `claim` | **Guarded.** The amount is zeroed before the payout (checks-effects-interactions) and `guarded` blocks re-entry; the post-call accesses are the event and the lock reset. |
-| `ElpidaV3MigrationAdapter` | [MIGRATION_ADAPTER_ROW] | [MIGRATION_ADAPTER_ASSESSMENT] |
+| `ElpidaV3MigrationAdapter` | **Not completed.** Killed for running out of memory (8 GB) every time: twice alongside other runs on 24 Oct, then alone with the default search and alone with one transaction and a depth limit of 64 (`-t 1 --max-depth 64`) | No Mythril result. The adapter is covered instead by Slither (its `reentrancy-eth` and `reentrancy-balance` entries are triaged in the brief, plus F-4), `tests/reentrancy.test.mjs`, `dex-migration`, `graduation-safety`, `graduation-griefing`, both fuzz campaigns above (every lifecycle run graduates through it) and the mainnet-fork lifecycle runs. Run Mythril on a machine with at least 16 GB (command below) before the audit, or leave it to the auditors. |
 
 Commands (Mythril 0.24 in a Python virtual environment; `<Name>.hex` is the runtime bytecode from `scripts/compile.mjs`):
 
 ```
 myth analyze -f <Name>.hex --bin-runtime --execution-timeout 900 -o json > <Name>.json
+```
+
+To get the runtime bytecode on another machine (after `npm ci`):
+
+```
+node -e "import('./scripts/compile.mjs').then(async m=>{const o=await m.compileContracts();process.stdout.write(o['contracts/evm/src/ElpidaV3MigrationAdapter.sol'].ElpidaV3MigrationAdapter.evm.deployedBytecode.object)})" > ElpidaV3MigrationAdapter.hex
 ```
 
 ## 3. Solana program: clippy and dependencies

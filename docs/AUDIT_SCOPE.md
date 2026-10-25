@@ -99,6 +99,9 @@ Static analysis: Slither 0.11 with solc 0.8.24 (same settings as the build), on 
 82 results: 17 High, 23 Medium and 42 Low, all patterns. Our triage is below. We expect auditors to confirm or
 overturn it.
 
+Other free tools (fuzz campaigns, Mythril, `cargo clippy` and `cargo audit` on the Solana program) and the decision
+not to cap the creator's first buy are in `SELF_AUDIT_2026-10.md`.
+
 | Slither result | Our assessment |
 |---|---|
 | `arbitrary-send-eth` (×4): factory fee/refund, curve `_pay`/`_trySend`, splitter `claim` | False positive. Recipients are the immutable treasury and creator, `msg.sender` (refunds, sell proceeds), or the buyer of a partially filled buy. |
