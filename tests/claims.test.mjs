@@ -135,6 +135,17 @@ test('every published fork report is complete, referenced and free of credential
     let report;
     try { report = JSON.parse(source); } catch { problems.push(`${file}: not valid JSON`); continue; }
 
+    if (report.kind === 'checklist-verification') {
+      if (!Array.isArray(report.results) || report.results.length === 0) problems.push(`${file}: lists no results`);
+      else {
+        if (report.counts?.hashes !== report.results.length) problems.push(`${file}: counts.hashes disagrees with the results`);
+        if (report.counts?.verified !== report.results.filter(entry => entry.verified).length) problems.push(`${file}: counts.verified disagrees with the results`);
+        if (!report.results.every(entry => typeof entry.verified === 'boolean')) problems.push(`${file}: a result has no verified flag`);
+      }
+      if (!prose.includes(file)) problems.push(`${file}: no document mentions it, so nobody will find it`);
+      continue;
+    }
+
     if (!['PASS', 'FAIL'].includes(report.result)) problems.push(`${file}: result is ${report.result}`);
     if (!Number.isInteger(report.block) || report.block <= 0) problems.push(`${file}: no block number`);
     if (!Array.isArray(report.checks) || report.checks.length === 0) problems.push(`${file}: lists no checks`);

@@ -96,6 +96,10 @@ Rust toolchain, then runs `tests/solana.test.mjs` with `--strict` (zero skips al
 
 ## 5. What is still manual
 
+- **Checklist hashes are checkable**: `npm run verify:checklist` looks every full transaction hash in
+  `MAINNET_CHECKLIST_2026-10-19.md` up with `eth_getTransactionReceipt` across the configured testnets and writes a dated
+  report such as `docs/evidence/checklist-verification-2026-10-25.json`. That run verified 8 of 8 on Base Sepolia; the
+  20 truncated hashes (`0x27a4…0e4b`) in that document cannot be checked and are listed as such.
 - **Fork lifecycle runs** (`npm run test:chain-fork`, `test:base-fork`, `test:equity-*`) need archive-capable public
   RPC endpoints and minutes per network. They are not in CI. Each run now writes a sanitised report to `docs/evidence/`
   (the raw copy stays in the gitignored `backups/`), and older runs can be imported with
