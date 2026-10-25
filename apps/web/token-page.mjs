@@ -62,8 +62,8 @@ export function renderToken(ctx, address) {
   const linkPills=[['website','Website','globe'],['twitter','X','at-sign'],['telegram','Telegram','send'],['discord','Discord','message-circle']].filter(([k])=>social[k]).map(([k,label,glyph])=>pill(social[k],label,glyph));
   const explorerHref=token.url??addressUrl(token.address);
   const description=social.description||'';
-  const descText=h('p.tk-desc',{id:'tk-desc','data-clamped':description.length>150?'true':'false'},description||'The creator has not added a description.');
-  const descMore=description.length>150?h('button.link-button',{type:'button','aria-controls':'tk-desc','aria-expanded':'false',on:{click:e=>{const open=descText.dataset.clamped==='true';descText.dataset.clamped=open?'false':'true';e.currentTarget.setAttribute('aria-expanded',String(open));e.currentTarget.textContent=open?'less':'more';}}},'more'):null;
+  const descText=h('p.tk-desc',{id:'tk-desc','data-clamped':description.length>110?'true':'false'},description||'The creator has not added a description.');
+  const descMore=description.length>110?h('button.link-button',{type:'button','aria-controls':'tk-desc','aria-expanded':'false',on:{click:e=>{const open=descText.dataset.clamped==='true';descText.dataset.clamped=open?'false':'true';e.currentTarget.setAttribute('aria-expanded',String(open));e.currentTarget.textContent=open?'less':'more';}}},'more'):null;
   // Curve progress: real reserve raised toward the reserve that completes the curve (net of the fee).
   // Model 10 shows the cost at the 1.25% base fee: during the first minute the anti-snipe fee would inflate it.
   const remainingDisplay = token.remainingBase ?? token.remainingBuy;
@@ -98,22 +98,31 @@ export function renderToken(ctx, address) {
     tile2('24h volume', volumeValue),
     tile2('Holders', holdersValue),
     tile2('24h trades', txValue, '', 'Indexed trades in the last 24 hours'));
+  // The desktop top bar is hidden on token pages (token.css) so the chart fits on first view; its wallet button is
+  // mirrored here. The mirror only forwards clicks, so connect and account settings behave exactly as in the bar.
+  const accountButton = document.getElementById('account-button'), accountLabel = document.getElementById('account-label');
+  const walletText = h('span', accountLabel?.textContent?.trim() || 'Connect wallet');
+  const walletMirror = accountButton ? h('button.btn-accent.btn-wallet.tk-wallet', { type: 'button', on: { click: () => accountButton.click() } }, icon('wallet', 'icon-sm'), walletText) : null;
+  if (walletMirror && accountLabel && typeof MutationObserver === 'function') {
+    const follow = new MutationObserver(() => { if (!walletMirror.isConnected) { follow.disconnect(); return; } walletText.textContent = accountLabel.textContent.trim() || 'Connect wallet'; });
+    follow.observe(accountLabel, { childList: true, characterData: true, subtree: true });
+  }
   const head = h('header.tk-head',
     h('nav.tk-crumb', { 'aria-label': 'Breadcrumb' }, h('a', { href: '#/' }, icon('arrow-left', 'icon-sm'), 'Explore'), h('span', { 'aria-hidden': 'true' }, '/'), h('span.tk-crumb-now', token.symbol),
-      h('span.tk-chain', { title: ctx.envLabel() }, chainIcon(token.network ?? ctx.wallet.net.key), h('span', ctx.envLabel()))),
+      h('span.tk-crumb-end', h('span.tk-chain', { title: ctx.envLabel() }, chainIcon(token.network ?? ctx.wallet.net.key), h('span', ctx.envLabel())), walletMirror)),
     h('div.tk-id', h('span.tk-avatar', avatar(token, 'avatar-lg'), h('span.tk-avatar-chain', { title: ctx.envLabel() }, chainIcon(token.network ?? ctx.wallet.net.key))),
-      h('div.tk-id-copy', h('h1', { title: token.name }, token.name),
-        h('div.tk-tags',
+      h('div.tk-id-copy',
+        h('div.tk-title', h('h1', { title: token.name }, token.name),
+          h('div.tk-tags',
           h('span.tk-tag.tk-tag-strong', '$' + token.symbol),
           h('span.tk-tag', { title: `Trading pair: ${q}` }, assetIcon(q), q),
           created ? h('span.tk-tag', { title: new Date(created * 1000).toLocaleString() }, `Launched ${ago(created)} ago`) : null,
           token.creator ? h('a.tk-tag.tk-creator', { href: addressUrl(token.creator) ?? '#', target: '_blank', rel: 'noopener noreferrer', title: `Creator: ${token.creator}` }, 'by ', h('span.mono', short(token.creator)), h('span.badge-dev', 'Dev')) : null,
           h('span.tk-tag.tk-addr', { title: token.address }, short(token.address), copyButton(token.address, '')),
           h('span.tk-tag', { title: 'Copy a link that shows a preview card on X, Telegram and Discord' }, 'Share', copyButton(`${location.origin}/token/${encodeURIComponent(token.network ?? ctx.wallet.net.key)}/${token.address}`, '')),
-          token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null),
-        h('div.tk-links', ...linkPills, explorerHref ? h('a.tk-pill.tk-pill-end', { href: explorerHref, target: '_blank', rel: 'noopener noreferrer', title: 'Open in explorer' }, 'Explorer', icon('arrow-up-right', 'icon-sm')) : null, txUrl(launchHash) ? h('a.tk-pill', { href: txUrl(launchHash), target: '_blank', rel: 'noopener noreferrer', title: 'The transaction that created this token' }, 'Launch transaction', icon('arrow-up-right', 'icon-sm')) : null))),
-    h('div.tk-about', descText, descMore),
-    token.metadataURI ? h('p.tk-lock', icon('lock', 'icon-xs'), 'Details are recorded at launch and cannot be edited.') : null);
+          token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null)),
+        h('div.tk-sub', h('div.tk-about', descText, descMore),
+          h('div.tk-links', ...linkPills, explorerHref ? h('a.tk-pill.tk-pill-end', { href: explorerHref, target: '_blank', rel: 'noopener noreferrer', title: 'Open in explorer' }, 'Explorer', icon('arrow-up-right', 'icon-sm')) : null, txUrl(launchHash) ? h('a.tk-pill', { href: txUrl(launchHash), target: '_blank', rel: 'noopener noreferrer', title: 'The transaction that created this token' }, 'Launch transaction', icon('arrow-up-right', 'icon-sm')) : null)))));
   const chart = terminalChart(ctx, token, q);
   const priceCard = h('section.tk-card.tk-pricecard', { 'aria-label': 'Chart' }, chart, h('p.tk-foot', priceSource));
 
@@ -400,8 +409,8 @@ function tradePanel(ctx, token, { dex, solana }) {
   setSide('buy');
   tickFeeWindow();
   const section = h('section.panel.trade-panel.tk-trade', { 'aria-labelledby': 'trade-title' }, h('h2#trade-title.visually-hidden', 'Trade'),
-    h('p.small.muted', token.tax ? `Buy tax ${token.tax.buyBps/100}% / sell tax ${token.tax.sellBps/100}%, fixed at launch. Tax revenue: 30% Elpida / 70% creator allocations. ${token.graduated?'The V2 pool fee is additional; the curve fee has stopped. LP fees compound in locked liquidity. Creator tax claims are paid in this token.':'The 1.25% curve fee remains additional, split 50/50. First-minute protection adds locked liquidity.'}` : token.graduated ? `Trading on ${dex === 'test' ? 'the locked test pool' : dex}. Liquidity is locked permanently. The curve fee has stopped; the DEX pool fee applies.${token.venue === 'PumpSwap' ? ' LP fees are harvested 50/50 to Elpida and the creator.' : ''}` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'),
-    form);
+    form,
+    h('p.small.muted.tk-trade-note', token.tax ? `Buy tax ${token.tax.buyBps/100}% / sell tax ${token.tax.sellBps/100}%, fixed at launch. Tax revenue: 30% Elpida / 70% creator allocations. ${token.graduated?'The V2 pool fee is additional; the curve fee has stopped. LP fees compound in locked liquidity. Creator tax claims are paid in this token.':'The 1.25% curve fee remains additional, split 50/50. First-minute protection adds locked liquidity.'}` : token.graduated ? `Trading on ${dex === 'test' ? 'the locked test pool' : dex}. Liquidity is locked permanently. The curve fee has stopped; the DEX pool fee applies.${token.venue === 'PumpSwap' ? ' LP fees are harvested 50/50 to Elpida and the creator.' : ''}` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'));
   // Lets the phone buy bar open the panel on the right side.
   section.selectSide = next => { if (next !== side) setSide(next); amount.focus({ preventScroll: true }); };
   return section;

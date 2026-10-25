@@ -253,9 +253,73 @@
    (style-src 'self') blocks. Unstyled, the logo's SVG grew to the full pane height and, as a second child of the
    vertically centred pane cell, pushed the drawing canvas up by half its height: candles, volume bars and markers
    were drawn out of line with the price axis. These are the library's own rules, served from our stylesheet. */
-a#tv-attr-logo { --fill: #131722; --stroke: #fff; position: absolute; left: 10px; bottom: 10px; height: 19px; width: 35px; margin: 0; padding: 0; border: 0; z-index: 3; }
+/* The app is dark by default; the library only sets [data-dark] for its own dark background, and ours is
+   transparent, so it painted the light variant: a white plate on a black page. Dark values are the default here. */
+a#tv-attr-logo { --fill: #D1D4DC; --stroke: #131722; position: absolute; left: 10px; bottom: 10px; height: 19px; width: 35px; margin: 0; padding: 0; border: 0; z-index: 3; }
 a#tv-attr-logo[data-dark] { --fill: #D1D4DC; --stroke: #131722; }
+[data-theme="light"] a#tv-attr-logo { --fill: #131722; --stroke: #fff; }
 a#tv-attr-logo svg { display: block; width: 100%; height: 100%; }
 .tk-mobilebar[data-hidden="true"] { opacity: 0; pointer-events: none; transform: translate(-50%, 12px); }
 @media (max-width: 780px) { .tk-mobilebar { transition: opacity .18s, transform .18s; } }
 @media (prefers-reduced-motion: reduce) { .tk-mobilebar { transition: none; } }
+
+/* ---------- Compact header: chart and trade panel on first view ---------- */
+/* Desktop token pages drop the shared top bar; the wallet button is mirrored into the breadcrumb row. Phones keep
+   the bar, which holds the chain and wallet buttons there. */
+@media (min-width: 781px) {
+  body[data-route="token"] .topbar { display: none; }
+  body[data-route="token"] main { padding-top: 14px; }
+}
+.tk-page { gap: 12px; }
+.tk-head { gap: 10px; }
+.tk-crumb-end { margin-left: auto; display: inline-flex; align-items: center; gap: 12px; min-width: 0; }
+.tk-crumb-end .tk-chain { margin-left: 0; }
+.tk-wallet { min-height: 36px; padding: 0 14px; font-size: 13px; }
+@media (max-width: 780px) { .tk-wallet { display: none; } }
+.tk-id { align-items: flex-start; gap: 14px; }
+.tk-id .avatar-lg { width: 52px; height: 52px; min-width: 52px; }
+.tk-id-copy { flex: 1 1 auto; gap: 8px; }
+.tk-title { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; }
+.tk-title h1 { font-size: 22px; margin-right: 6px; }
+.tk-title .tk-tags { gap: 6px; }
+.tk-tag { padding: 4px 9px; }
+.tk-tags .copy { min-height: 0; width: 22px; height: 22px; padding: 0; justify-content: center; border: 0; background: none; color: var(--muted); }
+.tk-tags .copy:hover { color: var(--ink); }
+.tk-sub { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 16px; min-width: 0; }
+.tk-sub .tk-about { flex: 1 1 380px; max-width: 90ch; flex-wrap: nowrap; }
+.tk-sub .tk-desc { font-size: 13px; line-height: 1.45; }
+.tk-sub .tk-desc[data-clamped="true"] { -webkit-line-clamp: 1; }
+.tk-sub .tk-about .link-button { min-height: 0; flex: none; }
+.tk-sub .tk-links { flex: none; gap: 6px; }
+.tk-sub .tk-pill-end { margin-left: 0; }
+.tk-sub .tk-pill { padding: 6px 10px; }
+.tk-strip { gap: 8px; }
+.tk-strip-tile { padding: 10px 14px; gap: 5px; border-radius: 14px; }
+.tk-strip-tile > span { font-size: 11px; }
+.tk-strip-tile strong { font-size: 16px; }
+.tk-strip-price .tk-price-value { font-size: 17px; }
+.tk-strip-tile strong small { display: inline; margin: 0 0 0 6px; }
+@media (max-width: 640px) {
+  .tk-id .avatar-lg { width: 44px; height: 44px; min-width: 44px; }
+  .tk-title h1 { font-size: 19px; }
+  .tk-sub .tk-about { flex-basis: 100%; }
+}
+/* Chart: the Live badge shares the first control row, and the plot gives up height on short screens so the whole
+   chart still fits on first view (about 716 px tall at 125% display scaling on a 1080p screen). */
+@media (min-width: 641px) {
+  .price-history .chart-top { flex-direction: row; flex-wrap: wrap; align-items: flex-start; gap: 8px 10px; }
+  .price-history .chart-top .tk-live { align-self: center; }
+  .price-history .chart-controls { width: auto; flex: 1 1 0; min-width: 0; }
+  .price-history .terminal-chart { height: clamp(300px, calc(100vh - 360px), 420px); }
+}
+.tk-pricecard { padding: 16px 18px; }
+@media (min-width: 641px) { .price-history .chart-top .tk-live { align-self: flex-start; margin-top: 7px; } }
+.tk-trade-note { margin: 12px 0 0; }
+@media (max-width: 640px) {
+  .tk-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .tk-strip-tile:first-child, .tk-strip-tile:last-child { grid-column: auto; }
+  .tk-strip-tile { padding: 9px 10px; gap: 4px; }
+  .tk-strip-tile strong, .tk-strip-price .tk-price-value { font-size: 14px; }
+  .tk-strip-tile strong small { display: block; margin: 2px 0 0; font-size: 10px; }
+  .tk-strip-price .pct-pill { font-size: 10px; padding: 2px 6px; }
+}

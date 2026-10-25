@@ -416,6 +416,8 @@ main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; 
   .footer-intro { grid-column: 1 / -1; }
   .footer-strip { margin: 0 -20px; }
   .toasts { bottom: calc(100px + env(safe-area-inset-bottom)); right: 12px; }
+  /* The tabbar is fixed (86px tall, 12px from the bottom) over the footer; without this its last row sits behind it. */
+  .site-footer { padding-bottom: calc(112px + env(safe-area-inset-bottom)); }
   .tabbar { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); position: fixed; z-index: 40; left: 50%; transform: translateX(-50%);
     bottom: calc(12px + env(safe-area-inset-bottom)); width: min(480px, calc(100% - 24px)); padding: 6px; border-radius: 24px;
     background: var(--topbar-bg); -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2); border: .67px solid var(--line); box-shadow: var(--shadow-pop); }
