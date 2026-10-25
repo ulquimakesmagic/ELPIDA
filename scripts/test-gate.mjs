@@ -9,8 +9,14 @@
 //   - environmental skips (no Solana CLI / no cargo)        -> exit 2 only with --strict, otherwise warned
 //   - a run that produced no summary (crash, hang, kill)    -> exit 4
 //
+// With --coverage it also asks Node for a V8 coverage report and can enforce floors:
+//
+//   - coverage requested but no report produced               -> exit 5
+//   - line/branch/function coverage below the given floor    -> exit 6
+//
 // Usage:
 //   node scripts/test-gate.mjs [files or directories...] [--strict] [--verbose]
+//                              [--coverage] [--min-lines=N] [--min-branches=N] [--min-funcs=N]
 // With no arguments it runs every tests/*.test.mjs.
 
 import { readdirSync, statSync, readFileSync } from 'node:fs';
@@ -22,7 +28,16 @@ const root = fileURLToPath(new URL('../', import.meta.url));
 const argv = process.argv.slice(2);
 const strict = argv.includes('--strict');
 const verbose = argv.includes('--verbose');
+const coverage = argv.includes('--coverage');
 const targets = argv.filter(arg => !arg.startsWith('--'));
+
+// Coverage floors. A flag wins over the environment, so CI can pin them explicitly.
+const floor = (flag, variable) => {
+  const inline = argv.find(arg => arg.startsWith(`--${flag}=`));
+  const value = inline ? inline.split('=')[1] : process.env[`COVERAGE_MIN_${variable}`];
+  return value === undefined || value === '' ? null : Number(value);
+};
+const floors = { lines: floor('min-lines', 'LINES'), branches: floor('min-branches', 'BRANCHES'), funcs: floor('min-funcs', 'FUNCS') };
 
 // A skip is environmental only when a specific tool is absent. Anything else is a real gap and fails the gate.
 const ENVIRONMENTAL = [
@@ -65,11 +80,11 @@ if (!files.length) {
   process.exit(3);
 }
 
-const child = spawn(process.execPath, ['--test', '--test-reporter=tap', ...files], {
-  cwd: root,
-  env: process.env,
-  stdio: ['ignore', 'pipe', 'pipe'],
-});
+const child = spawn(process.execPath, [
+  '--test', '--test-reporter=tap',
+  ...(coverage ? ['--experimental-test-coverage', ...['packages/core/**/*.mjs', 'packages/indexer/**/*.mjs', 'apps/api/**/*.mjs', 'apps/web/**/*.mjs'].map(glob => `--test-coverage-include=${glob}`)] : []),
+  ...files,
+], { cwd: root, env: process.env, stdio: ['ignore', 'pipe', 'pipe'] });
 
 let buffer = '';
 child.stdout.on('data', chunk => { buffer += chunk.toString('utf8'); });
@@ -111,11 +126,27 @@ child.on('close', code => {
   const environmental = skips.filter(skip => skip.environmental);
   const failed = summary.fail > 0 || failures.length > 0;
 
+  // Node prints the coverage table as TAP comments, ending with an `all files` row.
+  const coverageRow = buffer.match(/^# all files\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)\s*\|\s*([\d.]+)/m);
+  const measured = coverageRow ? { lines: Number(coverageRow[1]), branches: Number(coverageRow[2]), funcs: Number(coverageRow[3]) } : null;
+  const below = [];
+  if (coverage && measured) {
+    for (const [key, label] of [['lines', 'line'], ['branches', 'branch'], ['funcs', 'function']]) {
+      if (floors[key] !== null && measured[key] < floors[key]) below.push(`${label} coverage ${measured[key].toFixed(2)}% is below the ${floors[key]}% floor`);
+    }
+  }
+
   const report = [
     '',
     `test gate: ${summary.tests} tests, ${summary.pass} passed, ${summary.fail} failed, ${skips.length} skipped`,
     `           ${files.length} file(s)${strict ? ' (strict)' : ''}`,
   ];
+
+  if (coverage && measured) {
+    report.push(`coverage:  ${measured.lines.toFixed(2)}% lines, ${measured.branches.toFixed(2)}% branches, ${measured.funcs.toFixed(2)}% functions` +
+      ` (floors ${['lines', 'branches', 'funcs'].map(key => (floors[key] === null ? '-' : `${floors[key]}%`)).join(' / ')})`);
+  }
+  if (below.length) report.push(`FAIL: ${below.join('; ')}`);
 
   if (environmental.length) {
     report.push(`WARNING: ${environmental.length} test(s) skipped because a tool is missing:`);
@@ -143,11 +174,16 @@ child.on('close', code => {
   if (!summary.found) {
     report.push('FAIL: the run produced no TAP summary - the suite crashed or was killed before finishing.');
   }
+  if (coverage && !measured) {
+    report.push('FAIL: coverage was requested but Node produced no coverage report.');
+  }
 
   console.log(report.join('\n'));
 
   if (failed) process.exit(1);
   if (!summary.found) process.exit(4);
+  if (coverage && !measured) process.exit(5);
+  if (below.length) process.exit(6);
   if (unexpected.length) process.exit(2);
   if (strict && environmental.length) process.exit(2);
   if (code !== 0) process.exit(code ?? 1);

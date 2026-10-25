@@ -56,9 +56,10 @@ jobs:
       - name: EVM economics and graduation
         run: npm run test:evm
 
-      # The whole suite, with skips treated as findings rather than silence.
-      - name: full suite (no silent skips)
-        run: npm run test:gate
+      # The whole suite, with skips treated as findings rather than silence, and a coverage floor a few
+      # points under the measured baseline (25 Oct 2026: 80.73% lines, 81.25% branches, 83.53% functions).
+      - name: full suite (no silent skips) with coverage floors
+        run: npm run test:gate -- --coverage --min-lines=78 --min-branches=79 --min-funcs=81
 
   solana:
     name: solana program

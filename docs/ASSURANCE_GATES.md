@@ -40,6 +40,8 @@ Solana CLI that is 28 of 29 Solana tests, silently.
 | a skip that is **not** a known missing toolchain | 2 |
 | the same, when a skip is environmental, under `--strict` | 2 |
 | no TAP summary (crash, hang, kill) | 4 |
+| `--coverage` requested but Node produced no report | 5 |
+| coverage below a requested floor | 6 |
 
 Environmental skips are recognised by reason (`solana-test-validator not found`, `cargo not found`, …). They are
 listed with the file that owns the test, never summarised away, and become fatal under `--strict`.
@@ -48,7 +50,23 @@ listed with the file that owns the test, never summarised away, and become fatal
 npm run test:gate                      # the whole suite
 npm run test:gate:strict               # the whole suite, no environmental skips allowed
 node scripts/test-gate.mjs tests/solana.test.mjs --strict
+npm run test:coverage                  # the whole suite, with a coverage report
+node scripts/test-gate.mjs tests --coverage --min-lines=78 --min-branches=79 --min-funcs=81
 ```
+
+## 2b. Coverage
+
+`--coverage` adds Node's V8 coverage for `packages/core`, `packages/indexer`, `apps/api` and `apps/web`, and enforces
+floors (`--min-lines`, `--min-branches`, `--min-funcs`, or `COVERAGE_MIN_LINES` and friends). Node prints the table as
+TAP comments, so the gate reads the `all files` row from the same stream it already parses.
+
+Measured on the development PC, 25 October 2026, over the full suite (440 tests, 98 files):
+
+| Lines | Branches | Functions |
+|---|---|---|
+| 80.73% | 81.25% | 83.53% |
+
+CI enforces 78 / 79 / 81. Raise them when the measured numbers rise; never lower them to make a change pass.
 
 ## 3. Claims harness (`tests/claims.test.mjs`)
 
@@ -81,9 +99,9 @@ Rust toolchain, then runs `tests/solana.test.mjs` with `--strict` (zero skips al
 - **Fork lifecycle runs** (`npm run test:chain-fork`, `test:base-fork`, `test:equity-*`) need archive-capable public
   RPC endpoints and minutes per network. They are not in CI, and their reports still land in the gitignored
   `backups/` directory. Move them to `docs/evidence/` and link them from the checklist.
-- **Coverage** is not measured. Node 24 can do it: add `--experimental-test-coverage --test-coverage-lines=<n>` to a
-  CI step once a baseline is recorded.
 - **Static analysis** (Slither) is triaged in prose in `AUDIT_SCOPE.md`; no report is committed and the tool is not in
   the toolchain.
 - **The full suite runtime** is still minutes, not seconds. The cache removes the repeated compiles; the remaining
   cost is real Uniswap v3 deployments in the EVM tests, which is the point of those tests.
+- **Coverage excludes `packages/solana` and the contracts.** Solidity and Rust are not V8 code, and only files Node
+  actually loads appear in the report, so the percentages are a regression floor rather than a completeness measure.
