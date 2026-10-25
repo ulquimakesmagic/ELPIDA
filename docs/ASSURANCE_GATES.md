@@ -97,8 +97,10 @@ Rust toolchain, then runs `tests/solana.test.mjs` with `--strict` (zero skips al
 ## 5. What is still manual
 
 - **Fork lifecycle runs** (`npm run test:chain-fork`, `test:base-fork`, `test:equity-*`) need archive-capable public
-  RPC endpoints and minutes per network. They are not in CI, and their reports still land in the gitignored
-  `backups/` directory. Move them to `docs/evidence/` and link them from the checklist.
+  RPC endpoints and minutes per network. They are not in CI. Each run now writes a sanitised report to `docs/evidence/`
+  (the raw copy stays in the gitignored `backups/`), and older runs can be imported with
+  `scripts/import-fork-report.mjs`; the first one is `docs/evidence/base-sepolia-fork-48075531.json`. A claims
+  assertion fails when a report is incomplete, mentions a credential or is not mentioned by any document.
 - **Static analysis** (Slither) is triaged in prose in `AUDIT_SCOPE.md`; no report is committed and the tool is not in
   the toolchain.
 - **The full suite runtime** is still minutes, not seconds. The cache removes the repeated compiles; the remaining

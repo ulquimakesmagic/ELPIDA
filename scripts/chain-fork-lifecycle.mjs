@@ -9,6 +9,7 @@
 // Writes backups/chain-fork/<network>.json with every check, the gas each step used, and what to collect from faucets.
 import assert from 'node:assert/strict';
 import { mkdirSync, writeFileSync } from 'node:fs';
+import { writeEvidence } from './evidence.mjs';
 import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Contract, ContractFactory, Interface, ZeroAddress, formatEther, formatUnits, parseEther } from 'ethers';
@@ -175,6 +176,9 @@ async function main() {
     mkdirSync('backups/chain-fork', { recursive: true });
     writeFileSync(`backups/chain-fork/${key}.json`, JSON.stringify(report, (k, v) => typeof v === 'bigint' ? v.toString() : v, 2));
     console.log(`Report: backups/chain-fork/${key}.json`);
+    // The committed copy a reviewer can open; `backups/` is gitignored.
+    try { console.log(`Evidence: ${writeEvidence(report, { network: key })}`); }
+    catch (error) { console.log(`Evidence not written: ${error.message}`); }
   }
 }
 

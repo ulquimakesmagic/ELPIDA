@@ -122,6 +122,34 @@ test('the test suite contains no skipped-by-default or vacuous tests', () => {
   assert.deepEqual(problems, [], problems.join('\n'));
 });
 
+test('every published fork report is complete, referenced and free of credentials', () => {
+  const dir = join(root, 'docs', 'evidence');
+  if (!existsSync(dir)) return;
+
+  const prose = readdirSync(join(root, 'docs')).filter(name => name.endsWith('.md'))
+    .map(name => read(`docs/${name}`)).join('\n') + read('README.md');
+  const problems = [];
+
+  for (const file of readdirSync(dir).filter(name => name.endsWith('.json'))) {
+    const source = read(`docs/evidence/${file}`);
+    let report;
+    try { report = JSON.parse(source); } catch { problems.push(`${file}: not valid JSON`); continue; }
+
+    if (!['PASS', 'FAIL'].includes(report.result)) problems.push(`${file}: result is ${report.result}`);
+    if (!Number.isInteger(report.block) || report.block <= 0) problems.push(`${file}: no block number`);
+    if (!Array.isArray(report.checks) || report.checks.length === 0) problems.push(`${file}: lists no checks`);
+    if (!(report.network || report.chainId || report.upstreamChain)) problems.push(`${file}: no network identity`);
+    if (!prose.includes(file)) problems.push(`${file}: no document mentions it, so nobody will find it`);
+
+    // Committed evidence must not carry a provider URL with a key, or anything that looks like key material.
+    if (/https?:\/\/[^\s"]*[?&](api[-_]?key|key|token)=/i.test(source)) problems.push(`${file}: contains a URL with a credential`);
+    if (/private[_ ]?key|mnemonic/i.test(source)) problems.push(`${file}: mentions key material`);
+    // A UTF-8 report read as Latin-1 shows up as mojibake; catch it before it lands in a review.
+    if (/[Ã¢Ã¤Ã¶][\u0080-\u00bf\u2013\u2014\u20ac]/.test(source)) problems.push(`${file}: looks mis-encoded`);
+  }
+
+  assert.deepEqual(problems, [], problems.join('\n'));
+});
 test('every npm script the CI workflow calls exists', () => {
   const workflowDir = join(root, '.github', 'workflows');
   if (!existsSync(workflowDir)) return;
