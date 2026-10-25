@@ -8,6 +8,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync, readdirSync, existsSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { SALE_CAP, VIRTUAL_TOKEN, TOKEN_SUPPLY, BASE_FEE_BPS, SNIPE_START_BPS, SNIPE_WINDOW_SECONDS, MODEL_VERSIONS } from '../packages/core/curve-model.mjs';
@@ -178,6 +179,17 @@ test('the committed Slither report matches the counts the audit brief states', (
   assert.equal(report.counts.total, report.results.length, 'the count summary disagrees with the listed findings');
   assert.match(report.compiler, /0\.8\.24/, 'the report must record the compiler that produced it');
   assert.ok(!/[A-Za-z]:\\/.test(text), 'the report leaks an absolute path');
+});
+
+test('the committed Solana binaries are the ones the human-actions note describes', () => {
+  const note = read('docs/HUMAN_ACTIONS.md');
+  const recorded = [...note.matchAll(/\b[0-9a-f]{64}\b/g)].map(match => match[0]);
+  assert.ok(recorded.length > 0, 'the note no longer records a build hash');
+
+  for (const path of ['contracts/solana/build/elpida_launchpad.so', 'contracts/solana/build/elpida_launchpad-mainnet.so']) {
+    const actual = createHash('sha256').update(readFileSync(join(root, path))).digest('hex');
+    assert.ok(recorded.includes(actual), `${path} does not match any hash in docs/HUMAN_ACTIONS.md (${actual.slice(0, 16)}…). Rebuild or update the note.`);
+  }
 });
 
 test('every npm script the CI workflow calls exists', () => {
