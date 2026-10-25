@@ -52,6 +52,8 @@ const metadataKey = (chain, factory, token) => `elpida:metadata:${chain}:${facto
 // New deployments: model 10 (DEX, Base Sepolia) and model 8 (basic). A pinned model 9 team deployment stays usable.
 // Model 10 (DEX graduation) runs on every network with an enabled public DEX; the rest keep the beta curve.
 const modelOf = (chainId, dex = false) => chainId===84532||dex?DEX_MODEL:BETA_MODEL;
+/** How long a replaced RPC connection stays open so requests already sent on it can finish. */
+export const RETIRE_AFTER_MS = 60000;
 const deploymentKey = (chainId, dex = false) => `elpida:${modelOf(chainId, dex)}:deployment:${chainId}`;
 /** Whole native coins (a decimal string) to wei. */
 const wei = text => parseUnits(String(text), 18);
@@ -155,15 +157,22 @@ export class TestnetWallet {
         await ask({ method: 'wallet_switchEthereumChain', params: [{ chainId }] });
       }
     } catch (error) { const text = walletErrorText(error, name); if (text) throw Object.assign(new Error(text), { code: error.code }); throw error; }
-    this.provider?.destroy();
-    this.signerProvider?.destroy();
+    // Reconnecting (a second click, a slow wallet, returning to the tab) must not cancel reads still in flight: the
+    // read connection is kept while the network is the same, and a replaced one is closed only after its requests
+    // have had time to finish. Destroying it at once showed "provider destroyed; cancelled request" (ITACHI, 24 Oct).
+    const retire = old => { if (old) setTimeout(() => { try { old.destroy(); } catch {} }, this.retireAfterMs ?? RETIRE_AFTER_MS); };
+    retire(this.signerProvider);
     this.signerProvider = new BrowserProvider(eth, undefined, { cacheTimeout: -1 });
     // Wallet RPCs often restrict historical logs, and some are slow or broken on testnets. Read, estimate gas and
     // wait for receipts through the registry's chain RPC; signatures and submissions always stay with the wallet.
-    const rpc=new FetchRequest(net.rpcUrl);rpc.timeout=15000;
     // Paced: public testnet RPCs refuse bursts (Base Sepolia allows 25 requests a second), and one refusal used to fail
     // the whole wallet read.
-    this.provider = new PacedJsonRpcProvider(rpc, net.chainId, { staticNetwork:true,cacheTimeout: -1, batchMaxCount: 1 });
+    if (!this.provider || this.readEndpoint !== `${net.chainId}:${net.rpcUrl}`) {
+      retire(this.provider);
+      const rpc=new FetchRequest(net.rpcUrl);rpc.timeout=15000;
+      this.provider = new PacedJsonRpcProvider(rpc, net.chainId, { staticNetwork:true,cacheTimeout: -1, batchMaxCount: 1 });
+      this.readEndpoint = `${net.chainId}:${net.rpcUrl}`;
+    }
     this.signer = new PublicRpcSigner(await this.signerProvider.getSigner(), this.provider, { onSlow: message => this.onProgress?.(message) });
     this.address = await this.signer.getAddress();
     await this.checkNetwork();
