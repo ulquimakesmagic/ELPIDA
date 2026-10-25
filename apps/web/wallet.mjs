@@ -366,7 +366,10 @@ export class TestnetWallet {
     if (!tokenCheaperInPool({ poolSqrtPriceX96, graduationSqrtPriceX96: limit, tokenIsToken0 })) throw new Error(`Graduation is waiting on ${symbol}'s ${dex} pool, which someone priced above the curve. Holders can sell into that pool at a profit, and completion works once it is back near the curve price. Nothing was sent.`);
     // Up to the completing buy's size again; the price limit decides how much is actually spent, and the rest stays
     // with you (refunded in the same transaction for native coin).
-    const budget = input, router = this.dex.router, deadline = BigInt((await this.provider.getBlock('latest')).timestamp + 300);
+    // A UI flow that quotes, approves and then sends can take minutes on a loaded machine, and it expired its own
+    // transaction at 300 s (seen in the full suite: the F-1 unblock test reverted with "Transaction too old"). The
+    // swap is bounded by sqrtPriceLimitX96, so the deadline is not the safety mechanism here; give it half an hour.
+    const budget = input, router = this.dex.router, deadline = BigInt((await this.provider.getBlock('latest')).timestamp + 1800);
     if (native && await this.provider.getBalance(this.address) < budget + input) throw new Error(`Someone placed cheap ${symbol} in its ${dex} pool below the curve price, which blocks graduation. Clearing it first needs up to ${formatUnits(budget, 18)} ${unit} more than this buy; you receive those tokens, at or below the curve price. Nothing was sent.`);
     const steps = [];
     if (!native) { const coin = new Contract(quoteAsset, this.config.contracts.quote.abi, this.signer); if (await coin.allowance(this.address, router) < budget) steps.push({ to: quoteAsset, data: coin.interface.encodeFunctionData('approve', [router, budget]), label: `Approve the ${dex} purchase exactly…` }); }

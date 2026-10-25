@@ -1,0 +1,245 @@
+{
+  "kind": "checklist-verification",
+  "source": "docs/MAINNET_CHECKLIST_2026-10-19.md",
+  "checkedAt": "2026-10-25T15:08:36.142Z",
+  "networks": [
+    {
+      "key": "base-sepolia",
+      "chainId": 84532
+    },
+    {
+      "key": "ethereum-sepolia",
+      "chainId": 11155111
+    },
+    {
+      "key": "bnb-testnet",
+      "chainId": 97
+    },
+    {
+      "key": "robinhood-testnet",
+      "chainId": 46630
+    }
+  ],
+  "counts": {
+    "hashes": 8,
+    "verified": 8,
+    "failed": 0,
+    "truncated": 20
+  },
+  "truncated": [
+    {
+      "hash": "0x27a4…0e4b",
+      "label": "A2",
+      "line": 14
+    },
+    {
+      "hash": "0x98a0…7145",
+      "label": "A2",
+      "line": 14
+    },
+    {
+      "hash": "0x2A71…b56d",
+      "label": "A2",
+      "line": 14
+    },
+    {
+      "hash": "0x7c4C…E3FC",
+      "label": "A2",
+      "line": 14
+    },
+    {
+      "hash": "0x9c6F…Ce1d",
+      "label": "A2",
+      "line": 14
+    },
+    {
+      "hash": "0xa32a27d5…a698d",
+      "label": "A4",
+      "line": 16
+    },
+    {
+      "hash": "0x45d075b6…63901",
+      "label": "A4",
+      "line": 16
+    },
+    {
+      "hash": "0xD641…6d2",
+      "label": "A7",
+      "line": 19
+    },
+    {
+      "hash": "0xdff81827…48b3",
+      "label": "A7",
+      "line": 19
+    },
+    {
+      "hash": "0x0a8706af…1009a",
+      "label": "A7",
+      "line": 19
+    },
+    {
+      "hash": "0x1d56d926…76329",
+      "label": "A7",
+      "line": 19
+    },
+    {
+      "hash": "0x6cbd0da9…93faa",
+      "label": "A7",
+      "line": 19
+    },
+    {
+      "hash": "0x8c48…fBbE",
+      "label": "A7",
+      "line": 19
+    },
+    {
+      "hash": "0xa4d033c1…0b26b",
+      "label": "A7",
+      "line": 19
+    },
+    {
+      "hash": "0x9919cfb1…2a8f6",
+      "label": "A7",
+      "line": 19
+    },
+    {
+      "hash": "0xc7abaeb1…baf57",
+      "label": "A7",
+      "line": 19
+    },
+    {
+      "hash": "0xf566d91c…f4a63",
+      "label": "A7",
+      "line": 19
+    },
+    {
+      "hash": "0xdd280c37…1c5b",
+      "label": "A8",
+      "line": 20
+    },
+    {
+      "hash": "0x8dfddbf7…e08e",
+      "label": "A8",
+      "line": 20
+    },
+    {
+      "hash": "0x8194…290f",
+      "label": "A8",
+      "line": 20
+    }
+  ],
+  "results": [
+    {
+      "hash": "0x284ca031a4fd714a984a491d485776940c8d9261564729657f9c4a86a09d5535",
+      "label": "A2",
+      "line": 14,
+      "chain": "base-sepolia",
+      "chainId": 84532,
+      "block": 48364694,
+      "status": 1,
+      "from": "0xf5b0ce04241f9518dfa3cbfbaafc7e40638e639d",
+      "to": "0xbbcdc54cdba0477f80adbf93559b4108bff31136",
+      "gasUsed": 7054331,
+      "verified": true,
+      "chainsTried": 4
+    },
+    {
+      "hash": "0x6bf48beae98950e0e816b845e84d4d7a2a963776628486938a4b17322970bcf4",
+      "label": "A3",
+      "line": 15,
+      "chain": "base-sepolia",
+      "chainId": 84532,
+      "block": 48438394,
+      "status": 1,
+      "from": "0xf5b0ce04241f9518dfa3cbfbaafc7e40638e639d",
+      "to": "0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4",
+      "gasUsed": 129572,
+      "verified": true,
+      "chainsTried": 4
+    },
+    {
+      "hash": "0x454d242e065e7dd855c7fdc532414c05f4ff7b3f92e184a985b7088b87d402ff",
+      "label": "A3",
+      "line": 15,
+      "chain": "base-sepolia",
+      "chainId": 84532,
+      "block": 48464771,
+      "status": 1,
+      "from": "0xf5b0ce04241f9518dfa3cbfbaafc7e40638e639d",
+      "to": "0x94cc0aac535ccdb3c01d6787d6413c739ae12bc4",
+      "gasUsed": 142653,
+      "verified": true,
+      "chainsTried": 4
+    },
+    {
+      "hash": "0x7adadb397e0df37f83b3216aff6a16d7b487b2f87c08e9be7f1857ddaccf40cd",
+      "label": "A4",
+      "line": 16,
+      "chain": "base-sepolia",
+      "chainId": 84532,
+      "block": 49290981,
+      "status": 1,
+      "from": "0xf5b0ce04241f9518dfa3cbfbaafc7e40638e639d",
+      "to": "0x98a0e75dbbe9eda5d228319c72d496b814ba7145",
+      "gasUsed": 3126071,
+      "verified": true,
+      "chainsTried": 4
+    },
+    {
+      "hash": "0xabba0cc50a005a85834dec72c9b0e945d22b37e0d88cd6ab7352a61ec1636887",
+      "label": "A5",
+      "line": 17,
+      "chain": "base-sepolia",
+      "chainId": 84532,
+      "block": 48465197,
+      "status": 1,
+      "from": "0xf5b0ce04241f9518dfa3cbfbaafc7e40638e639d",
+      "to": "0xbbcdc54cdba0477f80adbf93559b4108bff31136",
+      "gasUsed": 36969,
+      "verified": true,
+      "chainsTried": 4
+    },
+    {
+      "hash": "0x10d1d79c504f9fa01ccefd9a4eead968b602417bb29ba44dbfd4ad8b75e14913",
+      "label": "A5",
+      "line": 17,
+      "chain": "base-sepolia",
+      "chainId": 84532,
+      "block": 48465238,
+      "status": 1,
+      "from": "0xf5b0ce04241f9518dfa3cbfbaafc7e40638e639d",
+      "to": "0x2a715d594051f1d8f44943d93e6d1da510b2b56d",
+      "gasUsed": 393019,
+      "verified": true,
+      "chainsTried": 4
+    },
+    {
+      "hash": "0x3aa3a139790eac32a0e131817ce70f0fa103655a92e4475bfa41bc66df168077",
+      "label": "A5",
+      "line": 17,
+      "chain": "base-sepolia",
+      "chainId": 84532,
+      "block": 48465278,
+      "status": 1,
+      "from": "0xf5b0ce04241f9518dfa3cbfbaafc7e40638e639d",
+      "to": "0x9c6fda1f1922a706096ebd1694d6cf28a795ce1d",
+      "gasUsed": 54119,
+      "verified": true,
+      "chainsTried": 4
+    },
+    {
+      "hash": "0x3950759d369a3552528b0e0bb554538122e42947781ab3cc8a82803a7953acf8",
+      "label": "A5",
+      "line": 17,
+      "chain": "base-sepolia",
+      "chainId": 84532,
+      "block": 48465339,
+      "status": 1,
+      "from": "0xf5b0ce04241f9518dfa3cbfbaafc7e40638e639d",
+      "to": "0x9c6fda1f1922a706096ebd1694d6cf28a795ce1d",
+      "gasUsed": 53742,
+      "verified": true,
+      "chainsTried": 4
+    }
+  ]
+}

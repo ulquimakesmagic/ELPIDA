@@ -181,3 +181,7 @@ slither contracts/evm/src/ElpidaAtomicDexFactory.sol --solc <solc-0.8.24> \
 The scope was reduced on 23 Oct by moving `IERC20Minimal` into `ElpidaInterfaces.sol`, so the mainnet contracts no
 longer import the older curve and pool prototypes. With every embedded metadata hash stripped, the executable
 bytecode of all 36 compiled contracts is byte-for-byte identical before and after.
+
+The report this command produced is committed at `docs/security/slither-2026-10-25.json` (slither 0.11.6, solc
+0.8.24): 82 results, 17 High, 23 Medium and 42 Low, each with its detector, file and line. `tests/claims.test.mjs`
+fails if the committed counts stop matching this section, so a re-run that changes the result has to update both.

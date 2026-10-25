@@ -196,6 +196,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const chat=new HolderChat({path:port===0?':memory:':dataFile('public-holder-chat.sqlite'),origin:()=>publicUrl??`http://${host}:${server.address().port}`,holding:async i=>Number(await heldBalance(i,true))>0});
   let chatWindow=Date.now(),chatReads=0,chatWrites=0;
   const chatLimit=write=>{if(Date.now()-chatWindow>=60000){chatWindow=Date.now();chatReads=0;chatWrites=0;}return write?++chatWrites>120:++chatReads>600;};
+  // The routes below await a chain sync per request, so without a window one client can force unbounded RPC work.
+  let syncWindow=Date.now(),syncReads=0;
+  const syncLimit=()=>{if(Date.now()-syncWindow>=60000){syncWindow=Date.now();syncReads=0;}return ++syncReads>240;};
   let terminalWindow=Date.now(),terminalCount=0,thesisCount=0;
   const uploadAdmission=new UploadAdmission({path:port===0?':memory:':dataFile('metadata-admission.sqlite')});
   let diagnosticWindow=Date.now(),diagnosticCount=0;
@@ -317,10 +320,10 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if (url.pathname === '/api/config') return send(200, { ...runtime.config, serverTime: Date.now()/1000, vanity: vanity.status(), circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), relay: feedRelay.publicConfig(), csrf });
         if(url.pathname==='/api/metadata/resolve')return send(200,await metadataStore.resolve(url.searchParams.get('uri')));
         if(url.pathname.startsWith('/api/content/')){const record=metadataStore.get(url.pathname.slice('/api/content/'.length));if(!record)return send(404,{error:'Content not found.'});res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}
-        if (url.pathname === '/api/indexer/status') { await runtime.indexer.sync(); return send(200,runtime.indexer.status()); }
-        if (url.pathname === '/api/tokens') { await runtime.indexer.sync(); return send(200,runtime.listings()); }
+        if (url.pathname === '/api/indexer/status') { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); return send(200,runtime.indexer.status()); }
+        if (url.pathname === '/api/tokens') { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); return send(200,runtime.listings()); }
         const indexed = url.pathname.match(/^\/api\/tokens\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?$/);
-        if (indexed) { await runtime.indexer.sync(); const token=runtime.listings().find(t=>t.address===indexed[1].toLowerCase()); if(!token)return send(404,{error:'Token not found.'}); return send(200,indexed[2]==='trades'?runtime.indexer.trades(token.address):indexed[2]==='holders'?runtime.indexer.holders(token.address):indexed[2]==='candles'?runtime.indexer.candles(token.address,Number(url.searchParams.get('interval')??60)):token); }
+        if (indexed) { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); const token=runtime.listings().find(t=>t.address===indexed[1].toLowerCase()); if(!token)return send(404,{error:'Token not found.'}); return send(200,indexed[2]==='trades'?runtime.indexer.trades(token.address):indexed[2]==='holders'?runtime.indexer.holders(token.address):indexed[2]==='candles'?runtime.indexer.candles(token.address,Number(url.searchParams.get('interval')??60)):token); }
         if (url.pathname === '/api/state') return send(200, await runtime.state(url.searchParams.get('account') ?? '0'));
         // Simulation buys for the Explore live feed: the same public shape as /api/public/recent-trades.
         if (url.pathname === '/api/recent-trades') { const limit=Math.max(1,Math.min(50,Number(url.searchParams.get('limit'))||20)),tokens=new Map(runtime.listings().map(t=>[t.address.toLowerCase(),t])); return send(200, runtime.indexer.recentTrades(limit).flatMap(trade=>{const t=tokens.get(String(trade.token).toLowerCase());return t?[recentTrade('local',t,trade)]:[];})); }

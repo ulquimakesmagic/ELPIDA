@@ -107,7 +107,9 @@ test('the pool reserves single-use keys, never stores them in plaintext and sign
 test('the pool refills itself in a worker thread', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'elpida-vanity-')), pool = new VanityMintPool({ path: join(dir, 'v.json'), key: randomBytes(32), programId: PROGRAM, suffix: 'h', target: 1, workers: 1 });
   try {
-    for (let i = 0; i < 100 && pool.status().available < 1; i++) await new Promise(r => setTimeout(r, 100));
+    // Wait for the pool to be full AND the grinders to have stopped: the worker reports grinding=1 for a moment
+    // after it fills the target, which made this test fail roughly one run in five on a loaded machine.
+    for (let i = 0; i < 100 && (pool.status().available < 1 || pool.status().grinding > 0); i++) await new Promise(r => setTimeout(r, 100));
     assert.equal(pool.status().available, 1);
     assert.equal(pool.status().grinding, 0, 'stops at the target');
   } finally { pool.stop(); rmSync(dir, { recursive: true, force: true }); }
