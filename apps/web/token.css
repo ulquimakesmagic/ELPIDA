@@ -171,3 +171,91 @@
 .price-history .chart-options { flex-wrap: nowrap; flex: 0 0 auto; }
 .price-history .chart-options .btn { white-space: nowrap; }
 @media (max-width: 640px) { .price-history .chart-controls-end { flex-wrap: wrap; } }
+
+/* ---------- Token page v2 ---------- */
+.tk-avatar { position: relative; flex: none; display: inline-flex; }
+.tk-avatar-chain { position: absolute; right: -5px; bottom: -5px; display: inline-flex; padding: 2px; border-radius: 50%; background: var(--bg); line-height: 0; }
+.tk-avatar-chain img, .tk-avatar-chain svg { width: 20px; height: 20px; border-radius: 50%; }
+.tk-creator { text-decoration: none; }
+.tk-creator:hover { color: var(--ink); background: var(--hover); }
+.tk-creator .badge-dev, .badge-you { margin-left: 2px; }
+.tk-page .badge-dev { background: var(--accent-tint); color: var(--accent-text); font-weight: 600; }
+.badge-you { font-size: var(--text-xs, 11px); padding: 1px 8px; border-radius: var(--r-pill); background: var(--panel-3); color: var(--ink); font-weight: 600; }
+.trader { display: inline-flex; align-items: center; gap: 6px; }
+
+/* Market strip: six numbers under the header, full width. */
+.tk-strip { display: grid; grid-template-columns: minmax(0, 1.4fr) repeat(5, minmax(0, 1fr)); gap: 10px; }
+.tk-strip-tile { display: grid; align-content: start; gap: 8px; min-width: 0; padding: 14px 16px; border-radius: var(--r-tile); border: .67px solid var(--line-soft); background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo)); }
+.tk-strip-tile > span { font: 500 12px/1 var(--font-sans); color: var(--muted); }
+.tk-strip-tile strong { font: 650 18px/1.15 var(--font-sans); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.tk-strip-tile strong small { display: block; margin-top: 4px; font: 500 11px/1.2 var(--font-sans); }
+.tk-strip-cap { border-color: var(--accent-line); }
+.tk-strip-price { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; min-width: 0; }
+.tk-strip-price .tk-price-value { font-size: 20px; }
+.tk-page .up { color: var(--up); }
+.tk-page .down { color: var(--down); }
+
+/* Activity: who-filter chips */
+.tk-who { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--r-pill); background: var(--panel-2); border: .67px solid var(--line-soft); }
+.tk-who[hidden] { display: none; }
+.tk-who button { min-height: 30px; padding: 0 12px; border: 0; border-radius: var(--r-pill); background: transparent; color: var(--muted); font: 500 12px/1 var(--font-sans); cursor: pointer; }
+.tk-who button[aria-pressed=true] { background: var(--panel-3); color: var(--ink); }
+.tk-who button:disabled { opacity: .45; cursor: not-allowed; }
+.tk-who button:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 2px; }
+.tk-records .activity-controls[hidden] { display: none; }
+.tk-tabs { overflow-x: auto; scrollbar-width: none; }
+.tk-tabs button { white-space: nowrap; }
+.tk-empty { padding: 16px 20px 0; }
+.tk-row-buy td:first-child { box-shadow: inset 2px 0 0 var(--up); }
+.tk-row-sell td:first-child { box-shadow: inset 2px 0 0 var(--down); }
+.tk-info { padding: 16px 20px 0; }
+.tk-info > .tk-card { box-shadow: none; background: var(--panel-2); }
+
+/* Safety */
+.tk-safety-list { list-style: none; margin: 0 0 10px; padding: 0; display: grid; gap: 9px; font-size: 13px; line-height: 1.4; }
+.tk-safety-list li { display: grid; grid-template-columns: 20px minmax(0, 1fr); gap: 8px; align-items: start; }
+.tk-safety-mark { display: grid; place-items: center; width: 20px; height: 20px; border-radius: 50%; font: 700 11px/1 var(--font-sans); }
+.is-ok .tk-safety-mark { background: var(--up-soft); color: var(--up); }
+.is-warn .tk-safety-mark { background: var(--down-bg); color: var(--down); }
+
+/* Chart markers */
+.chart-marker-toggle { display: inline-flex; align-items: center; gap: 6px; border-radius: var(--r-pill); min-height: 30px; font-size: 12px; padding: 0 12px; }
+.chart-marker-toggle[aria-pressed=false] { opacity: .55; }
+.marker-dot { width: 8px; height: 8px; border-radius: 50%; }
+.marker-dev { background: var(--accent); }
+.marker-mine { background: linear-gradient(90deg, var(--up) 50%, var(--down) 50%); }
+
+/* Phone buy bar: sits above the tab bar, only where the trade panel scrolls out of view. */
+.tk-mobilebar { display: none; }
+@media (max-width: 1000px) {
+  .tk-strip { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+}
+@media (max-width: 780px) {
+  .tk-page { padding-bottom: 76px; }
+  .tk-mobilebar { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; position: fixed; z-index: 39; left: 50%; transform: translateX(-50%);
+    bottom: calc(104px + env(safe-area-inset-bottom)); width: min(480px, calc(100% - 24px)); padding: 8px; border-radius: 20px;
+    background: var(--topbar-bg); -webkit-backdrop-filter: blur(16px) saturate(1.2); backdrop-filter: blur(16px) saturate(1.2); border: .67px solid var(--line); box-shadow: var(--shadow-pop); }
+  .tk-mobilebar .btn { min-height: 46px; }
+  .tk-mobilebar .btn-buy { background: linear-gradient(180deg, var(--accent-hi), var(--accent)); color: var(--accent-ink); border-color: transparent; }
+}
+@media (max-width: 640px) {
+  .tk-strip { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .tk-strip-tile:first-child { grid-column: 1 / -1; }
+  .tk-strip-tile:last-child { grid-column: 1 / -1; }
+  .tk-strip-tile { padding: 12px; }
+  .tk-strip-tile strong { font-size: 16px; }
+  .tk-records .activity-controls { flex-wrap: wrap; width: 100%; padding-bottom: 10px; }
+  .tk-info { padding: 12px 12px 0; }
+  .tk-empty { padding: 12px 14px 0; }
+}
+
+/* TradingView attribution logo. Lightweight Charts styles it with an injected <style> element, which the CSP
+   (style-src 'self') blocks. Unstyled, the logo's SVG grew to the full pane height and, as a second child of the
+   vertically centred pane cell, pushed the drawing canvas up by half its height: candles, volume bars and markers
+   were drawn out of line with the price axis. These are the library's own rules, served from our stylesheet. */
+a#tv-attr-logo { --fill: #131722; --stroke: #fff; position: absolute; left: 10px; bottom: 10px; height: 19px; width: 35px; margin: 0; padding: 0; border: 0; z-index: 3; }
+a#tv-attr-logo[data-dark] { --fill: #D1D4DC; --stroke: #131722; }
+a#tv-attr-logo svg { display: block; width: 100%; height: 100%; }
+.tk-mobilebar[data-hidden="true"] { opacity: 0; pointer-events: none; transform: translate(-50%, 12px); }
+@media (max-width: 780px) { .tk-mobilebar { transition: opacity .18s, transform .18s; } }
+@media (prefers-reduced-motion: reduce) { .tk-mobilebar { transition: none; } }
