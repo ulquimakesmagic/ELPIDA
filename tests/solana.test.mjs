@@ -392,10 +392,24 @@ test('Solana: a closed reward account cannot block the protocol fee withdrawal',
   const owed = await pool(mint);
   assert.ok(owed.protocolFees > 0n && owed.creatorFees > 0n, 'both sides owe fees');
 
-  // Close the creator's reward account so that side cannot receive.
+  // Close the creator's reward account so that side cannot receive. It still holds fees paid by earlier tests in
+  // this file, and the token program refuses to close a non-empty account, so drain it first.
   const rewardAta = f.client.ata(f.rewardWallet.publicKey, f.quoteMint);
+  const treasuryAta = f.client.ata(f.treasury, f.quoteMint);
   const tokenProgram = (await f.connection.getAccountInfo(rewardAta, 'confirmed')).owner;
-  await send(f.connection, f.outsider, [new web3.TransactionInstruction({
+  const held = await balance(rewardAta);
+  const u64 = value => { const bytes = Buffer.alloc(8); bytes.writeBigUInt64LE(BigInt(value)); return bytes; };
+  const instructions = [];
+  if (held > 0n) instructions.push(new web3.TransactionInstruction({
+    programId: tokenProgram,
+    keys: [
+      { pubkey: rewardAta, isSigner: false, isWritable: true },
+      { pubkey: treasuryAta, isSigner: false, isWritable: true },
+      { pubkey: f.rewardWallet.publicKey, isSigner: true, isWritable: false },
+    ],
+    data: Buffer.concat([Buffer.from([3]), u64(held)]), // Transfer
+  }));
+  instructions.push(new web3.TransactionInstruction({
     programId: tokenProgram,
     keys: [
       { pubkey: rewardAta, isSigner: false, isWritable: true },
@@ -403,7 +417,8 @@ test('Solana: a closed reward account cannot block the protocol fee withdrawal',
       { pubkey: f.rewardWallet.publicKey, isSigner: true, isWritable: false },
     ],
     data: Buffer.from([9]), // CloseAccount
-  })], [f.rewardWallet]);
+  }));
+  await send(f.connection, f.outsider, instructions, [f.rewardWallet]);
 
   const treasuryBefore = await balance(f.client.ata(f.treasury, f.quoteMint));
   await withdraw(mint); // must not throw
