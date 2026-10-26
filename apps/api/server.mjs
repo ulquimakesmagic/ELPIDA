@@ -157,16 +157,22 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const circle = circleFunding ?? createCircleFunding({ path: port === 0 ? null : dataFile('circle-test-wallets.json') });
   const metadataStore=new MetadataStore({path:port===0?null:dataFile('ipfs-content'),chainBound:Boolean(publicUrl),...(process.env.ELPIDA_METADATA_MAX_BYTES?{maxBytes:Number(process.env.ELPIDA_METADATA_MAX_BYTES)}:{}),...(process.env.ELPIDA_METADATA_MAX_PENDING_BYTES?{maxPendingBytes:Number(process.env.ELPIDA_METADATA_MAX_PENDING_BYTES)}:{})});
   const walletTokenLists=new WalletTokenLists({path:port===0?null:dataFile('wallet-tokenlists.json')});
+  const bootStarted=Date.now(),buildId=String(process.env.RAILWAY_GIT_COMMIT_SHA??'dev').slice(0,12);
+  const bootPhase=phase=>console.log(JSON.stringify({event:'boot_phase',phase,build:buildId,ms:Date.now()-bootStarted}));
+  const bootFailure=error=>console.log(JSON.stringify({event:'subsystem_unavailable',code:String(error?.code??error?.name??'INIT').slice(0,40),message:String(error?.message??error).slice(0,160)}));
+  const soft=(name,make,disabled)=>{try{return make();}catch(error){bootFailure(error);console.log(JSON.stringify({event:'subsystem_unavailable',subsystem:name,degraded:true}));return disabled();}};
   // The simulation is rebuilt from its action journal on the data volume, so its index can stay in memory.
   const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:dataFile('token-metadata.json'), dex:port!==0, indexerPath:":memory:", journalPath:port===0?null:dataFile('simulation-journal-v2.jsonl'), log:console.log });
+  bootPhase('runtime_ready');
   const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore}).start();
+  bootPhase('indexers_ready');
   // Testnet-only price relay for test chains without a Chainlink feed (Robinhood testnet). Idle without its key.
-  const feedRelay=new FeedRelay({networks:port===0?[]:evmTestnets,env:port===0?{}:process.env}).start();
-  const graduationKeeper=configuredGraduationKeeper({env:port===0?{}:process.env,publicIndex,path:port===0?null:dataFile('graduation-keeper.sqlite')});
+  const feedRelay=soft('feedRelay',()=>new FeedRelay({networks:port===0?[]:evmTestnets,env:port===0?{}:process.env}).start(),()=>new FeedRelay({networks:[],env:{}}).start());
+  const graduationKeeper=soft('graduationKeeper',()=>configuredGraduationKeeper({env:port===0?{}:process.env,publicIndex,path:port===0?null:dataFile('graduation-keeper.sqlite')}),()=>configuredGraduationKeeper({env:{},publicIndex,path:null}));
   // Solana public indexer: the deployed program's pools and trades, read-only, stored on the data volume.
   const solanaNet=solanaConfig(),solanaRpc=process.env.SOLANA_RPC_URL??(/^https?:\/\//.test(solanaNet.rpcUrl)?solanaNet.rpcUrl:null);
   // D9: pre-ground Solana mint addresses ending in "hope" (encrypted at rest; random mint fallback).
-  const vanity=new VanityMintPool({path:port===0?null:dataFile('solana-vanity-mints.json'),key:vanityKey(process.env.ELPIDA_VANITY_KEY),programId:solanaNet.deployment?.programId,suffix:process.env.ELPIDA_VANITY_SUFFIX||'hope',target:Number(process.env.ELPIDA_VANITY_TARGET??3),workers:Number(process.env.ELPIDA_VANITY_WORKERS??1)});
+  const vanity=soft('vanity',()=>new VanityMintPool({path:port===0?null:dataFile('solana-vanity-mints.json'),key:vanityKey(process.env.ELPIDA_VANITY_KEY),programId:solanaNet.deployment?.programId,suffix:process.env.ELPIDA_VANITY_SUFFIX||'hope',target:Number(process.env.ELPIDA_VANITY_TARGET??3),workers:Number(process.env.ELPIDA_VANITY_WORKERS??1)}),()=>new VanityMintPool({path:null,key:null,programId:solanaNet.deployment?.programId,suffix:'hope',target:0,workers:0}));
   if(process.env.ELPIDA_VANITY_KEY&&!vanity.enabled)console.log(JSON.stringify({event:'vanity_mints_disabled',reason:'ELPIDA_VANITY_KEY must be 32 bytes (64 hex characters or base64), with a Solana deployment configured.'}));
   let solanaIndex=null,solanaTimer=null;
   if(port!==0&&solanaNet.deployment&&solanaRpc&&process.env.ELPIDA_SOLANA_INDEXER!=='off'){
@@ -177,7 +183,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     }catch(error){console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:String(error.name??'INIT').slice(0,40),message:error.message.slice(0,120)}));}
   }
   console.log(JSON.stringify({event:'storage_ready',durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),dataDir,publicNetworks:[...publicIndex.entries.keys()],simulation:runtime.config.simulation?.durable?`journal replay: ${runtime.config.simulation.replayed} actions restored, ${runtime.config.simulation.skipped} skipped`:'resets on process restart'}));
-  const priceKeeper=new PriceKeeper();
+  const priceKeeper=soft('priceKeeper',()=>new PriceKeeper(),()=>({refresh:async()=>{},snapshot:()=>({})}));
   const updatePrices=async()=>{await priceKeeper.refresh();const prices=priceKeeper.snapshot();const p=[prices.local,prices['base-sepolia'],prices['ethereum-sepolia']].find(p=>p.status==='fresh');if(p)await runtime.updatePrice(p.usd);};
   const priceTimer=port===0?null:setInterval(()=>updatePrices().catch(()=>{}),60000);priceTimer?.unref();
   if(port!==0)updatePrices().catch(()=>{});
@@ -418,6 +424,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   });
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
+  bootPhase('listening');
   return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, vanity, async close() {vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();await runtime.close(); } };
 }
 
