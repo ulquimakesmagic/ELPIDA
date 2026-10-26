@@ -15,10 +15,11 @@ export const testnets = [
     rpcFallbacks: ['https://base-sepolia-rpc.publicnode.com', 'https://base-sepolia.drpc.org'],
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     gasFaucet: 'https://docs.base.org/get-started/get-funds',
-    // Atomic Model 10 factory, verified 18 Oct 2026; optional creator buy and final-buy graduation.
-    shared: { factory: '0x98a0E75dbBe9EdA5D228319C72D496b814bA7145', block: 48289973, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 },
+    // Partner-tier atomic Model 10 factory, deployed by Malik 26 Oct 2026 (block 50624512); graduation adapter
+    // 0xe828…5659 reports PARTNER_TIERS_VERSION 1. Treasury 0xf5B0…639D.
+    shared: { factory: '0xb5dAE15BCCe080a49e8b776E59B3d982269aC74C', block: 50624512, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 },
     // Earlier team launchpads stay indexed so their tokens remain listed and tradable. No new launches go here.
-    legacy: [{ factory: '0x8194285faC2aFa04867a1C421EFee9f28ab0290f', block: 48272244, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1 }, { factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 48209837, model: 'curve-dex-v10', metadataVersion: 1 }, { factory: '0xe605787F7260F5Dae2768d2F9E93E7F18EE14f91', block: 47994800, model: 'curve-dex-v9', metadataVersion: 1 }],
+    legacy: [{ factory: '0x98a0E75dbBe9EdA5D228319C72D496b814bA7145', block: 48289973, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }, { factory: '0x8194285faC2aFa04867a1C421EFee9f28ab0290f', block: 48272244, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1 }, { factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 48209837, model: 'curve-dex-v10', metadataVersion: 1 }, { factory: '0xe605787F7260F5Dae2768d2F9E93E7F18EE14f91', block: 47994800, model: 'curve-dex-v9', metadataVersion: 1 }],
   },
   {
     key: 'ethereum-sepolia', name: 'Ethereum Sepolia', short: 'ETH SEPOLIA', kind: 'evm', enabled: true,
@@ -26,8 +27,10 @@ export const testnets = [
     rpcFallbacks: ['https://sepolia.drpc.org', 'https://1rpc.io/sepolia', 'https://sepolia.gateway.tenderly.co'],
     nativeCurrency: { name: 'Sepolia Ether', symbol: 'ETH', decimals: 18 },
     gasFaucet: 'https://cloud.google.com/application/web3/faucet/ethereum/sepolia',
-    // Atomic Model 10 factory (Uniswap v3), deployed 22 Oct 2026 in tx 0xdad271f4…82be9; first launch VEGETA.
-    shared: { factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 11972040, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 },
+    // Partner-tier atomic Model 10 factory (Uniswap v3), deployed by Malik 26 Oct 2026 (block 12000324); adapter 0x2a0f…b79a.
+    shared: { factory: '0x5aA283B8B12786314e76ac4E977B1E9275b407f6', block: 12000324, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 },
+    // The 22 Oct factory (tx 0xdad271f4…82be9; first launch VEGETA) stays indexed. No new launches go here.
+    legacy: [{ factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 11972040, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },
   {
     key: 'bnb-testnet', name: 'BNB Chain Testnet', short: 'BNB TESTNET', kind: 'evm', enabled: true,
@@ -37,7 +40,10 @@ export const testnets = [
     gasFaucet: 'https://www.bnbchain.org/en/testnet-faucet',
     // Atomic Model 10 factory (PancakeSwap v3), deployed 23 Oct 2026 in tx 0x7b0cefee…7247f; requires token details
     // on-chain at launch. Its graduation adapter is 0xD641…6d2 (same address as other chains' contracts: nonce match).
-    shared: { factory: '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE', block: 138485798, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 },
+    // Partner-tier factory, deployed by Malik 26 Oct 2026 (block 139102664); adapter 0x33ce…b9a6. The 23 Oct factory
+    // stays indexed (first launch MIDORIYA). No new launches go there.
+    shared: { factory: '0x5795b25C7fA37638eEacd29848522f8Cd48a1156', block: 139102664, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 },
+    legacy: [{ factory: '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE', block: 138485798, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },
   {
     key: 'robinhood-testnet', name: 'Robinhood Chain Testnet', short: 'ROBINHOOD TESTNET', kind: 'evm', enabled: true,
@@ -52,7 +58,10 @@ export const testnets = [
     relay: { source: { network: 'base-sepolia', feed: '0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1' }, feed: '0xdB7f43FFFdA626c1cc26206981C05507C75E983F', maxAge: 3600 },
     // Atomic Model 10 factory (the test Uniswap v3 above), deployed by Malik 24 Oct 2026 in tx 0x5933c8f8…c2e6; graduation
     // adapter 0xa37F…106A (WETH, 1%). Priced by the relay feed. Requires token details on-chain at launch.
-    shared: { factory: '0x64d93212adc10d28E867Db44EBC1480AFaeaAD97', block: 141864043, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 },
+    // Partner-tier factory, deployed by Malik 26 Oct 2026 (block 143196574) on the same test DEX and relay feed; adapter
+    // 0x8a9f…c031. The 24 Oct factory above stays indexed. No new launches go there.
+    shared: { factory: '0x4CabA05067171DbA4B840aDae1e652B8279dE499', block: 143196574, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 },
+    legacy: [{ factory: '0x64d93212adc10d28E867Db44EBC1480AFaeaAD97', block: 141864043, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },
 ];
 

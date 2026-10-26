@@ -26,8 +26,18 @@ with a free signature and is stored privately on the server (`partner-applicatio
   `setPartner` call. Connect the treasury wallet on that chain and press "Register with treasury", or paste the call
   into the treasury Safe on mainnet. The tab then reads the factory back and shows "registered".
 - **Ending early:** "End partnership", then "Clear with treasury" on each chain. Tokens already launched keep their tier.
-- Registration needs the partner-tier factories (PRs #105 and the LP follow-up) deployed. On today's testnet factories
-  the tab shows "factory has no registry". Solana registration arrives with the program upgrade.
+- Partner-tier launchpads deployed by Malik on 26 October 2026 and pinned for every visitor; the earlier ones stay
+  indexed, so their tokens (VEGETA, MIDORIYA and the rest) stay listed and tradable:
+
+  | Network | Factory | Block | Graduation adapter |
+  |---|---|---|---|
+  | Base Sepolia | `0xb5dAE15BCCe080a49e8b776E59B3d982269aC74C` | 50624512 | `0xe8280f27…5659` |
+  | Ethereum Sepolia | `0x5aA283B8B12786314e76ac4E977B1E9275b407f6` | 12000324 | `0x2a0f0804…b79a` |
+  | BNB testnet | `0x5795b25C7fA37638eEacd29848522f8Cd48a1156` | 139102664 | `0x33cef203…b9a6` |
+  | Robinhood testnet | `0x4CabA05067171DbA4B840aDae1e652B8279dE499` | 143196574 | `0x8a9f579b…c031` |
+
+  Each was checked on chain: `PARTNER_TIERS_VERSION` 1 on the factory and its adapter, automatic graduation on,
+  treasury `0xf5B0…639D`. Solana registration arrives with the program upgrade.
 
 ## Cloudflare in front of elpida.fun, 20 October 2026
 
