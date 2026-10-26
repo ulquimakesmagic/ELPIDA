@@ -224,6 +224,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     const requestId=randomBytes(8).toString('hex');res.setHeader('X-Request-Id',requestId);
     const send = (code, data) => { if(code>=400)console.error(JSON.stringify({event:'request_failed',requestId,status:code,method:req.method,path:String(req.url).split('?')[0].slice(0,160)}));res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
     res.setHeader('Cache-Control', 'no-store');
+    // Public reads change on the indexer's 15 s tick; static vendor files never change for a given URL.
+    if (req.method === 'GET' && String(req.url).startsWith('/api/public/')) res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=30');
     if (/^\/(api\/|health)/.test(String(req.url))) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -258,7 +260,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown EVM network.'});
           const entry=publicIndex.entryFor(key,address),token=publicIndex.detail(key,address);
           if(!entry?.validated||!token||!['creator-signed','published'].includes(token.metadataStatus))return send(404,{error:'No published token image.'});
-          const image=normalizeMetadata(token.metadata).image;
+          const image=publicIndex.rawImage(key,address)??normalizeMetadata(token.metadata).image;
           const data=image.match(/^data:(image\/(?:png|jpeg|webp|gif|avif|bmp));base64,([A-Za-z0-9+/]+=*)$/);
           if(!data)return send(404,{error:'Use the public image URL in the token list.'});
           res.writeHead(200,{'Content-Type':data[1],'Cache-Control':'public, max-age=3600'});return res.end(Buffer.from(data[2],'base64'));
@@ -334,7 +336,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if (url.pathname === '/api/state') return send(200, await runtime.state(url.searchParams.get('account') ?? '0'));
         // Simulation buys for the Explore live feed: the same public shape as /api/public/recent-trades.
         if (url.pathname === '/api/recent-trades') { const limit=Math.max(1,Math.min(50,Number(url.searchParams.get('limit'))||20)),tokens=new Map(runtime.listings().map(t=>[t.address.toLowerCase(),t])); return send(200, runtime.indexer.recentTrades(limit).flatMap(trade=>{const t=tokens.get(String(trade.token).toLowerCase());return t?[recentTrade('local',t,trade)]:[];})); }
-        if (vendorFiles.has(url.pathname)) { res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' }); return res.end(await readFile(vendorFiles.get(url.pathname))); }
+        if (vendorFiles.has(url.pathname)) { res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800' }); return res.end(await readFile(vendorFiles.get(url.pathname))); }
         const seoOrigin = canonicalOrigin(), seoPage = PAGES.find(p => p.path === url.pathname);
         const seoBody = url.pathname === '/robots.txt' ? [renderRobots(seoOrigin), 'text/plain'] : url.pathname === '/sitemap.xml' ? [renderSitemap(seoOrigin), 'application/xml'] : url.pathname === '/llms.txt' ? [renderLlms(seoOrigin), 'text/plain'] : seoPage ? [renderPage(seoPage, seoOrigin), 'text/html'] : null;
         if (seoBody) { res.setHeader('Cache-Control', 'public, max-age=3600'); res.writeHead(200, { 'Content-Type': `${seoBody[1]}; charset=utf-8` }); return res.end(seoBody[0]); }
@@ -353,7 +355,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           return res.end(token ? renderTokenPage({ token, network: key, networkName: nets.get(key), origin: canonicalOrigin(), testnet: key !== 'solana-mainnet' }) : renderTokenNotFound({ origin: canonicalOrigin() }));
         }
         const resource = resources.get(url.pathname);
-        if (resource) { const content = await readFile(resolve(webRoot, resource[0])); res.writeHead(200, { 'Content-Type': `${resource[1]}; charset=utf-8` }); return res.end(content); }
+        if (resource) { const content = await readFile(resolve(webRoot, resource[0])); res.writeHead(200, { 'Content-Type': `${resource[1]}; charset=utf-8`, 'Cache-Control': 'public, max-age=300, stale-while-revalidate=600' }); return res.end(content); }
         if (url.pathname.startsWith('/assets/')) {
           const file = resolve(assetRoot, '.' + decodeURIComponent(url.pathname.slice('/assets'.length)));
           const type = assetTypes[file.slice(file.lastIndexOf('.'))];
