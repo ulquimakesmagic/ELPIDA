@@ -14,6 +14,27 @@ export function priceText(value) {
   return v.toFixed(digits).replace(/0+$/, '').replace(/\.$/, '');
 }
 
+const SUBSCRIPT = '₀₁₂₃₄₅₆₇₈₉';
+
+/**
+ * Axis labels. A sub-cent token produces ticks like 0.000004636, and six of those stacked on the price scale are
+ * unreadable; the exchange notation used elsewhere in the app (0.0₅4636) is shorter and matches the header.
+ */
+export function axisLabel(value) {
+  const v = Number(value);
+  if (!Number.isFinite(v)) return '—';
+  const abs = Math.abs(v);
+  if (abs > 0 && abs < 0.0001) {
+    const [mantissa, exponent] = v.toExponential(3).split('e');
+    const zeros = -Number(exponent) - 1;
+    if (zeros >= 3) {
+      const digits = mantissa.replace('.', '').replace(/0+$/, '');
+      return `0.0${[...String(zeros)].map(d => SUBSCRIPT[d]).join('')}${digits}`;
+    }
+  }
+  return priceText(v);
+}
+
 /** Signed percentage between two prices, empty when the reference is unusable. */
 export function pctText(from, to) {
   if (!(from > 0) || !Number.isFinite(to)) return '';

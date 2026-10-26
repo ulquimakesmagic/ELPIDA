@@ -50,18 +50,19 @@
 /* Chart */
 .price-history { display: grid; gap: 10px; min-width: 0; }
 /* One row of controls above the plot: value basis on the left, markers/style/range on the right. */
-.price-history .chart-toolbar { display: flex; flex-wrap: wrap; gap: 8px; justify-content: space-between; align-items: center; }
-.price-history .chart-tools { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.price-history .chart-toolbar { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-start; align-items: center; }
+.price-history .chart-tools { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
 .chart-seg { display: inline-flex; padding: 3px; gap: 2px; border-radius: var(--r-pill); background: var(--panel-2); border: .67px solid var(--line-soft); }
-.chart-seg-btn { border: 0; background: transparent; border-radius: var(--r-pill); min-height: 28px; padding: 0 12px; font: 500 12px/1 var(--font-sans); color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
+.chart-seg-btn { border: 0; background: transparent; border-radius: var(--r-pill); min-height: 26px; padding: 0 10px; font: 500 12px/1 var(--font-sans); color: var(--muted); cursor: pointer; transition: background .15s, color .15s; }
 .chart-seg-btn:hover { color: var(--ink); }
 .chart-seg-btn[aria-pressed="true"] { background: var(--panel-3); color: var(--ink); }
 .chart-seg-btn:focus-visible { outline: 2px solid var(--focus, var(--accent)); outline-offset: 1px; }
-.chart-menu { position: relative; }
-.chart-menu-summary { display: inline-flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; padding: 6px 12px; border-radius: var(--r-pill); border: .67px solid var(--line-soft); background: var(--panel-2); color: var(--muted); font: 500 12px/1 var(--font-sans); }
+.chart-menu { position: relative; height: 32px; }
+.chart-menu-summary { display: inline-flex; align-items: center; gap: 6px; list-style: none; cursor: pointer; padding: 5px 10px; height: 32px; box-sizing: border-box; border-radius: var(--r-pill); border: .67px solid var(--line-soft); background: var(--panel-2); color: var(--muted); font: 500 12px/1 var(--font-sans); }
 .chart-menu-summary::-webkit-details-marker { display: none; }
 .chart-menu-summary:hover, .chart-menu[open] .chart-menu-summary { color: var(--ink); }
-.chart-menu-summary .icon { width: 14px; height: 14px; }
+.chart-menu-summary svg, .chart-menu-summary .icon { width: 14px; height: 14px; flex: none; }
+.chart-menu-summary > * { flex: none; }
 .chart-menu-body { position: absolute; z-index: 6; top: calc(100% + 6px); right: 0; min-width: 190px; display: grid; gap: 2px; padding: 8px; border-radius: 12px; background: var(--panel-2); border: .67px solid var(--line-soft); box-shadow: 0 18px 40px rgba(0,0,0,.45); }
 .chart-menu-row { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: 8px; font: 500 12px/1.2 var(--font-sans); color: var(--ink-2); cursor: pointer; }
 .chart-menu-row:hover { background: var(--panel-3); color: var(--ink); }
@@ -172,7 +173,11 @@
 @media (max-width: 780px) {
   .chart-stage { height: 320px; }
   .price-history .chart-toolbar { gap: 6px; }
-  .chart-seg-btn { padding: 0 10px; }
+  /* Phone: the toolbar is two rows at most — basis, markers and style, then the ranges. */
+  .chart-menu-label { display: none; }
+  .chart-menu-summary { padding: 5px 9px; }
+  .chart-seg-btn { padding: 0 9px; }
+  .price-history .chart-tools { gap: 5px; }
 }
   .price-history .chart-controls-end .chart-options .btn, .price-history .chart-fit { padding: 0 9px; }
 }
@@ -379,3 +384,5 @@ a#tv-attr-logo svg { display: block; width: 100%; height: 100%; }
   .price-history .chart-top .tk-live { align-self: flex-start; margin-top: 0; }
   .price-history .chart-controls { width: 100%; flex: none; }
 }
+
+.chart-menu-label { white-space: nowrap; }

@@ -1,5 +1,5 @@
 import {h,icon,compact,usdRate} from './ui.mjs';
-import {priceText,pctText,tipPosition,tipFields} from './chart-format.mjs';
+import {axisLabel,priceText,pctText,tipPosition,tipFields} from './chart-format.mjs';
 import {tradeMarkers} from './token-insights.mjs';
 
 // Executed-trade chart for the token page.
@@ -34,18 +34,18 @@ export function terminalChart(ctx,token,q){
   stage.append(plot,tip,overlay);
   const panel=h('div.price-history',toolbar,stage,status,h('p.chart-credit',h('a',{href:'https://www.tradingview.com/',target:'_blank',rel:'noopener noreferrer'},'Charts by TradingView'),' · Lightweight Charts™ · Copyright © 2026 TradingView, Inc.'));
 
-  let chart,observer,main,vol,markerApi,rate,scale,unit,revision=0,timer,lastSignature='';
+  let chart,observer,resizeObserver,main,vol,markerApi,rate,scale,unit,revision=0,timer,lastSignature='';
   // A sub-cent token plots at 5e-7, and the library's tick generator throws "unexpected base" on a span that small.
   // Prices are drawn in a scaled domain (x 10^magnitude) and divided back in the formatter.
   let magnitude=0,lastCrosshair=null;
-  const axisText=value=>priceText(Number(value)/10**magnitude);
+  const axisText=value=>axisLabel(Number(value)/10**magnitude);
   let current={points:[],data:[],vol:[]};
   const decimals=ctx.wallet===ctx.solWallet?6:18;
   const reduced=typeof matchMedia==='function'&&matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function cleanup(){
     if(chart){try{pref.range=chart.timeScale().getVisibleRange();}catch{/* empty chart */}}
-    observer?.disconnect();chart?.remove();chart=main=vol=markerApi=null;
+    observer?.disconnect();resizeObserver?.disconnect();chart?.remove();chart=main=vol=markerApi=null;
   }
 
   // Desktop: the chart sits beside the trade panel, so size it to end just above the fold (300–560 px).
@@ -75,17 +75,17 @@ export function terminalChart(ctx,token,q){
   function markerMenu(){
     const row=(field,label,title)=>h('label.chart-menu-row',{title},h('input',{type:'checkbox',checked:pref[field]!==false,on:{change:event=>{pref[field]=event.target.checked;applyMarkers();}}}),h('span',label));
     return h('details.chart-menu',
-      h('summary.chart-menu-summary',icon('chart-candlestick','icon-sm'),'Markers'),
+      h('summary.chart-menu-summary',{title:'Markers'},icon('chart-candlestick','icon-sm'),h('span.chart-menu-label','Markers')),
       h('div.chart-menu-body',row('dev','Creator trades','Mark the creator’s own buys and sells'),row('mine','My trades','Mark your own buys and sells')));
   }
   function draw(){
     const style=pref.style??'candles';
+    // Every control is a direct child, so a narrow screen wraps between controls instead of inside a group.
     toolbar.replaceChildren(
-      h('div.chart-basis',segment('Chart value',[['price','Price'],['cap','MCap']],pref.basis,v=>{pref.basis=v;draw();load();})),
-      h('div.chart-tools',
-        markerMenu(),
-        segment('Chart style',[['line','Line'],['candles','Candles']],style,v=>{pref.style=v;draw();build();load();}),
-        segment('Chart range',RANGES,pref.interval,v=>{pref.interval=Number(v);draw();load();})));
+      segment('Chart value',[['price','Price'],['cap','MCap']],pref.basis,v=>{pref.basis=v;draw();load();}),
+      markerMenu(),
+      segment('Chart style',[['line','Line'],['candles','Candles']],style,v=>{pref.style=v;draw();build();load();}),
+      segment('Chart range',RANGES,pref.interval,v=>{pref.interval=Number(v);draw();load();}));
   }
 
   /* ---------- chart ---------- */
@@ -98,7 +98,8 @@ export function terminalChart(ctx,token,q){
     // --line-soft is already an rgba token: passing it through alpha() would make the grid far too loud.
     const grid=tone('--line-soft','rgba(255,255,255,.086)'),cross=tone('--line-strong','rgba(255,255,255,.22)');
     chart=lib.createChart(plot,{
-      autoSize:true,
+      width:Math.max(280,plot.clientWidth||plot.parentElement?.clientWidth||320),
+      height:Math.max(180,plot.clientHeight||plot.parentElement?.clientHeight||320),
       layout:{background:{type:'solid',color:tone('--paper','#080B09')},textColor:tone('--ink-3','#9AAA9E'),fontFamily:getComputedStyle(document.body).fontFamily,fontSize:11,attributionLogo:false},
       grid:{vertLines:{color:grid,style:lib.LineStyle.Dotted},horzLines:{color:grid,style:lib.LineStyle.Dotted}},
       rightPriceScale:{borderVisible:false,entireTextOnly:true,minimumWidth:64,scaleMargins:{top:.1,bottom:.24}},
@@ -124,6 +125,12 @@ export function terminalChart(ctx,token,q){
       if(!point){hideTip();return;}
       showTip(move.point,point);
     });
+    resizeObserver=new ResizeObserver(()=>{
+      if(!chart)return;
+      const width=plot.clientWidth,height=plot.clientHeight;
+      if(width>0&&height>0)chart.applyOptions({width,height});
+    });
+    resizeObserver.observe(plot);
     lifecycle.observe(document.body,{childList:true,subtree:true});
     return true;
   }
@@ -221,7 +228,12 @@ export function terminalChart(ctx,token,q){
       overlay.hidden=true;
       if(!quiet||!chart){build();}
       paint(points,data);
-      if(!quiet){if(pref.range)chart.timeScale().setVisibleRange(pref.range);else chart.timeScale().fitContent();}
+      if(!quiet){
+        if(pref.range)chart.timeScale().setVisibleRange(pref.range);
+        // Fit only when the history actually fills the pane. A young token has three bars, and stretching them
+        // across the whole width reads as a broken chart; keep a normal bar width and let the space stay empty.
+        else chart.timeScale().fitContent();
+      }
       const lineMode=(pref.style??'candles')==='line';
       status.textContent=`Executed trades only · ${unit}${lineMode&&panel.sparse?' · line mode: most bars hold a single trade':''}. ${rate===null?'USD reference unavailable.':'USD uses the current reference rate, not historical rates.'} Scroll to zoom, drag to pan.`;
     }catch{
