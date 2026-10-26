@@ -173,12 +173,10 @@ export function renderToken(ctx, address) {
   const safety = h('section.tk-card.tk-safety', { 'aria-label': 'Safety' }, h('h2.tk-h', 'Safety'), safetyList, h('p.hint', 'Checks come from the contracts and indexed holders. A warning is worth a look, not a verdict.'));
   const me = ctx.mode === 'testnet' ? ctx.wallet?.address : ctx.state.wallet;
   const info = h('div.tk-info.stack', details, addresses, about, tech);
-  let markerRows = null;
   const activity = marketActivity(ctx, token, q, { addressUrl, isCreator, me, info,
     onCounts: ({ holders }) => { holdersValue.textContent = holders ?? '—'; },
     onHolders: rows => drawSafety(rows),
-    onTrades: rows => { markerRows = rows; chart.refreshMarkers?.(); } });
-  chart.markerSource = { rows: () => markerRows, creator: token.creator, me };
+    onTrades: rows => { markerRows = rows; } });
   const desk=holderTerminal(ctx,token,{onVolume:v=>volumeValue.textContent=fmtValue(v,token)});
   const trade = tradePanel(ctx, token, { dex, solana });
   const sideButton = s => h(`button.btn.btn-lg.${s === 'buy' ? 'btn-buy' : 'btn-sell'}`, { type: 'button', on: { click: () => { trade.selectSide?.(s); trade.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' }); } } }, s === 'buy' ? `Buy ${token.symbol}` : 'Sell');
