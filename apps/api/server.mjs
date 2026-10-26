@@ -1,6 +1,8 @@
 import {CreatorFeeTotals} from './creator-fees.mjs';
 import { indexedChange, indexedActivity, activityOf } from '../web/discovery.mjs';
 import { protocolAnalytics } from './protocol-analytics.mjs';
+import { AdminAuth, parseAdminAddresses, sessionCookie, clearCookie } from './admin-auth.mjs';
+import { readTreasuries, operatorAddresses, cachedLoader } from './admin-overview.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
 import {configuredGraduationKeeper} from './graduation-keeper.mjs';
 import { FeedRelay } from './feed-relay.mjs';
@@ -51,6 +53,7 @@ resources.set('/trade-filter.mjs',['trade-filter.mjs','text/javascript']);
 resources.set('/token-insights.mjs',['token-insights.mjs','text/javascript']);
 resources.set('/portfolio-view.mjs',['portfolio-view.mjs','text/javascript']);
 resources.set('/portfolio-model.mjs',['portfolio-model.mjs','text/javascript']);
+resources.set('/admin-view.mjs',['admin-view.mjs','text/javascript']);
 resources.set('/tax-policy.mjs',['tax-policy.mjs','text/javascript']);
 resources.set('/tax-wallet.mjs',['tax-wallet.mjs','text/javascript']);
 resources.set('/tax-allocation.mjs',['tax-allocation.mjs','text/javascript']);
@@ -193,6 +196,18 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const cookieSecurity = publicUrl ? '; Secure' : '';
   const creatorFeeTotals=new CreatorFeeTotals();
   const csrf = randomBytes(24).toString('hex');
+  // Operator panel (read-only): wallet sign-in against the factory treasuries plus ELPIDA_ADMIN_ADDRESSES.
+  const adminAuth=new AdminAuth({host:(()=>{try{return publicUrl?new URL(publicUrl).host:'localhost';}catch{return 'elpida';}})()});
+  const adminAddresses=parseAdminAddresses(process.env.ELPIDA_ADMIN_ADDRESSES);
+  const treasuryNetworks=()=>evmTestnets.filter(n=>publicIndex.entries.get(n.key)).map(n=>({key:n.key,name:n.name,explorer:n.explorer,nativeSymbol:n.nativeCurrency?.symbol,factory:n.shared?.factory,provider:publicIndex.entries.get(n.key).index.provider}));
+  const treasuries=cachedLoader(()=>readTreasuries(treasuryNetworks()),60000);
+  const analyticsSources=()=>{
+    const sources=evmTestnets.map(net=>({key:net.key,name:net.name,status:publicIndex.status(net.key),tokens:publicIndex.listings(net.key),trades:publicIndex.tradeRows(net.key)}));
+    if(solanaIndex)sources.push({key:solanaIndex.network.key,name:solanaIndex.network.name,status:{enabled:true,...solanaIndex.status(),scope:'Elpida curves and PumpSwap swaps on migrated Elpida pools'},tokens:solanaIndex.listings(),trades:solanaIndex.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()});
+    if(!solanaIndex)sources.push({key:solanaNet.key,name:solanaNet.name,status:{enabled:false,reason:'No public Solana deployment configured.'},tokens:[],trades:[]});
+    for(const source of sources){const rows=source.trades;source.trades=(function*(){for(const row of rows)yield JSON.parse(row.data);})();}
+    return sources;
+  };
   function indexedMarket(network,address){
     if(network==='local'){const token=runtime.indexer.listings().find(t=>t.address===address.toLowerCase());if(!token)throw new Error('Token not indexed.');return {token,index:runtime.indexer.indexFor?.(address)??runtime.indexer,sol:false};}
     if(network.startsWith('solana-')){if(!solanaIndex||solanaIndex.network.key!==network||solanaIndex.status().error||!solanaIndex.status().lastSuccess||Date.now()-Date.parse(solanaIndex.status().lastSuccess)>180000)throw new Error('Network not indexed.');const token=solanaIndex.token(address);if(!token)throw new Error('Token not indexed.');return {token,index:solanaIndex,sol:true};}
@@ -289,6 +304,15 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           return send(200,{position,theses:feed,volume24hQuote:String(volume),holderCoverage:sol?'Solana ranking covers the largest indexed token accounts; other authors are unranked.':'Ranked by current confirmed indexed wallet balances.',indexedBlock:sol?index.status().cursorSlot:index.tip()?.height,own:author?theses.latest(i):null});
         }
         if(url.pathname==='/api/theses/history'){const i=thesisIdentity(url.searchParams.get('network'),url.searchParams.get('token'),url.searchParams.get('author'));indexedMarket(i.network,i.token);return send(200,theses.history(i));}
+        if(url.pathname==='/api/admin/challenge')return send(200,adminAuth.challenge());
+        if(url.pathname==='/api/admin/session'){const s=adminAuth.session(req.headers.cookie);return send(200,s?{signedIn:true,address:s.address,expires:s.expires}:{signedIn:false});}
+        if(url.pathname==='/api/admin/overview'){
+          const s=adminAuth.session(req.headers.cookie);if(!s)return send(401,{error:'Sign in as an operator to see this.'});
+          const health=evaluateOperations(operationsInput());
+          const activity=Object.fromEntries(['24h','7d','all'].map(period=>{try{const a=protocolAnalytics({sources:analyticsSources(),prices:priceSnapshot(),period});return [period,{totals:a.totals,coverage:a.coverage}];}catch(error){return [period,{error:error.message}];}}));
+          let treasury=[];try{treasury=await treasuries();}catch(error){treasury=[{error:String(error.message).slice(0,160)}];}
+          return send(200,{operator:s.address,generatedAt:Date.now(),health,backup:backupRunner.status(),relay:feedRelay.status(),graduation:graduationKeeper.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),metadata:metadataStore.status().storage},prices:priceSnapshot(),networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,{name:n.name,...publicIndex.status(n.key)}])),...(solanaIndex?{[solanaIndex.network.key]:{name:solanaIndex.network.name,enabled:true,...solanaIndex.status()}}:{})},treasury,activity,admins:{configured:adminAddresses.length,treasuries:treasury.filter(t=>t.treasury).length}});
+        }
         if(url.pathname==='/api/operations/status'){const result=evaluateOperations(operationsInput());return send(result.status==='critical'?503:200,{...result,backup:backupRunner.status(),metadataStorage:metadataStore.status().storage});}
         if(url.pathname==='/api/metadata/challenge'){
           let client=String(req.headers.cookie??'').split(';').map(v=>v.trim()).find(v=>v.startsWith('elpida_upload='))?.slice(14);
@@ -301,10 +325,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if (url.pathname === '/api/rewards') return send(200,await runtime.rewards.dashboard());
         if(url.pathname==='/api/prices')return send(200,priceSnapshot());
         if(url.pathname==='/api/public/analytics'){
-          const sources=evmTestnets.map(net=>({key:net.key,name:net.name,status:publicIndex.status(net.key),tokens:publicIndex.listings(net.key),trades:publicIndex.tradeRows(net.key)}));
-          if(solanaIndex)sources.push({key:solanaIndex.network.key,name:solanaIndex.network.name,status:{enabled:true,...solanaIndex.status(),scope:'Elpida curves and PumpSwap swaps on migrated Elpida pools'},tokens:solanaIndex.listings(),trades:solanaIndex.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()});
-          if(!solanaIndex)sources.push({key:solanaNet.key,name:solanaNet.name,status:{enabled:false,reason:'No public Solana deployment configured.'},tokens:[],trades:[]});
-          for(const source of sources){const rows=source.trades;source.trades=(function*(){for(const row of rows)yield JSON.parse(row.data);})();}
+          const sources=analyticsSources();
           try{return send(200,protocolAnalytics({sources,prices:priceSnapshot(),period:url.searchParams.get('period')??'7d',network:url.searchParams.get('network')??'all'}));}catch(error){return send(400,{error:error.message});}
         }
         if(url.pathname==='/api/public/tokenized-equity'){const view=tokenizedEquity.describeNetwork(url.searchParams.get('network')??'');return view?send(200,{...view,live:false,note:'Tokenized stocks are disabled until each capability is verified with the provider. Nothing here is an official partnership.'}):send(404,{error:'No tokenized-stock provider is designated for this network.'});}
@@ -398,6 +419,12 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       try { body = JSON.parse(rawBody.toString()); } catch { return send(400, { error: 'Invalid request.' }); }
       if (!body || typeof body !== 'object' || Array.isArray(body)) return send(400, { error: 'Invalid request.' });
       const action = url.pathname.slice('/api/'.length);
+      if(action==='admin/session'){
+        const isAllowed=async signer=>adminAddresses.includes(signer)||operatorAddresses([],await treasuries()).has(signer);
+        try{const r=await adminAuth.signIn(body,isAllowed);res.setHeader('Set-Cookie',sessionCookie(r.token,{secure:!!publicUrl}));return send(200,{signedIn:true,address:r.address,expires:r.expires});}
+        catch(error){return send(error.status??400,{error:error.message});}
+      }
+      if(action==='admin/logout'){adminAuth.signOut(req.headers.cookie);res.setHeader('Set-Cookie',clearCookie({secure:!!publicUrl}));return send(200,{signedIn:false});}
       if(['chat/report/prepare','chat/report/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat reporting is busy. Retry shortly.'});return send(200,action==='chat/report/prepare'?await chat.prepareReport(body):await chat.saveReport(body));}
       if(['chat/prepare','chat/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat publishing is busy. Retry shortly.'});return send(200,action==='chat/prepare'?await chat.prepare(body):await chat.save(body));}
       if(['theses/prepare','theses/save'].includes(action)){if(Date.now()-terminalWindow>=60000){terminalWindow=Date.now();terminalCount=0;thesisCount=0;}if(++thesisCount>30)return send(429,{error:'Thesis publishing is busy. Retry in a minute.'});return send(200,action==='theses/prepare'?await theses.prepare(body):await theses.save(body));}
