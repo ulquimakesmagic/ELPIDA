@@ -1,12 +1,16 @@
 import { JsonRpcProvider, Contract, verifyMessage, keccak256, toUtf8Bytes } from 'ethers';
 import { join } from 'node:path';
 import { readFileSync, existsSync, writeFileSync, renameSync } from 'node:fs';
-import { EvmIndexer } from '../../packages/indexer/evm-indexer.mjs';
+import { EvmIndexer, mapLimit } from '../../packages/indexer/evm-indexer.mjs';
 import { normalizeMetadata } from '../web/metadata.mjs';
 import { isDexModel, MODEL_VERSIONS } from '../../packages/core/curve-model.mjs';
 import { testnetDexes } from '../../packages/core/uniswap.mjs';
 
 // A read-only worker per configured deployment. Never accepts user RPCs or private keys.
+// How often the public indexes poll, and how many networks sync at once. A trade is visible to the API once the
+// network that carries it has been read, so the interval is the freshness of every trade endpoint.
+const TICK_MS=Math.max(2000,Math.min(60000,Number(process.env.ELPIDA_INDEX_INTERVAL_MS)||8000));
+const TICK_CONCURRENCY=Math.max(1,Math.min(8,Number(process.env.ELPIDA_INDEX_CONCURRENCY)||3));
 // One token's inline data: image made every listing 1.1 MB. A listing ships the URL instead; the bytes are
 // served once by /api/wallet-logo and cached by the browser.
 const INLINE_IMAGE=/^data:image\//i;
@@ -44,7 +48,7 @@ export class PublicIndexer {
   }
   async tick(){
     if(this.running||this.stopping)return;this.running=true;
-    try{for(const e of [...this.entries.keys()].flatMap(key=>this.all(key))){
+    try{await mapLimit([...this.entries.keys()].flatMap(key=>this.all(key)),TICK_CONCURRENCY,async e=>{
       try{
         if(!e.validated){const d=deploymentOf(e),chain=Number((await e.provider.getNetwork()).chainId),v=Number(await new Contract(d.factory,['function MODEL_VERSION() view returns(uint256)'],e.provider).MODEL_VERSION());if(chain!==e.net.chainId||v!==MODEL_VERSIONS[d.model])throw new Error('Deployment identity mismatch');e.validated=true;}
         await e.index.sync();e.error=null;e.errorCode=null;e.lastSuccess=new Date().toISOString();
@@ -59,7 +63,7 @@ export class PublicIndexer {
         this.log(JSON.stringify({event:'public_indexer_error',network:e.net.key,...(e.legacy?{factory:deploymentOf(e).factory}:{}),code:e.errorCode,rpc:rpcHost(this.rpcs?.get(e.net.key)),message:e.error}));
         if(!e.legacy)this.failover(e.net.key);
       }
-    }}finally{this.running=false;}
+    });}finally{this.running=false;}
   }
   /**
    * After repeated failures on one public RPC (a node that refuses the server's address, rate-limits it or has pruned
@@ -75,7 +79,7 @@ export class PublicIndexer {
     this.log(JSON.stringify({event:'public_indexer_rpc_failover',network:key,from,to:rpcHost(r)}));
   }
   static FAILOVER_AFTER=3;
-  start(){this.job=this.tick();this.timer=setInterval(()=>{this.job=this.tick();},15000);this.timer.unref();return this;}
+  start(){this.job=this.tick();this.timer=setInterval(()=>{this.job=this.tick();},TICK_MS);this.timer.unref();return this;}
   status(key){const e=this.entries.get(key);return e?{...e.index.status(),error:e.error,errorCode:e.errorCode??null,rpc:rpcHost(this.rpcs?.get(key)),lastSuccess:e.lastSuccess,enabled:true,
     // Earlier launchpads on the same network have their own index; a stuck one must be visible too.
     legacy:(this.legacy?.get(key)??[]).map(l=>{const s=l.index.status();return {factory:deploymentOf(l).factory,indexedBlock:s.indexedBlock,lag:s.lag,error:l.error??null,errorCode:l.errorCode??null,lastSuccess:l.lastSuccess??null};})}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}
