@@ -36,7 +36,7 @@ export class PublicIndexer {
   /** The deployment entry that indexed `address` on network `key`, or null. */
   /** The stored image, including an inline data: URI, for the one route that serves it. */
   rawImage(key,address){const entry=this.entryFor(key,address);const image=entry?.metadata?.get(String(address).toLowerCase())?.image;return typeof image==='string'?image:null;}
-  entryFor(key,address){const a=String(address).toLowerCase();return this.all(key).find(e=>e.index.tokens().some(t=>t.address===a))??null;}
+  entryFor(key,address){const a=String(address).toLowerCase();return this.all(key).find(e=>Boolean(e.index.tokenAt(a)))??null;}
   /** Trade rows across every deployment on the network, in timestamp order. */
   tradeRows(key){
     const entries=this.all(key);if(entries.length<2)return entries[0]?.index.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()??[];
@@ -81,12 +81,18 @@ export class PublicIndexer {
     legacy:(this.legacy?.get(key)??[]).map(l=>{const s=l.index.status();return {factory:deploymentOf(l).factory,indexedBlock:s.indexedBlock,lag:s.lag,error:l.error??null,errorCode:l.errorCode??null,lastSuccess:l.lastSuccess??null};})}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}
   quotes(key){const e=this.entries.get(key);if(!e)return null;const status=e.index.status();if(!e.validated||status.indexedBlock==null)return null;const factory=deploymentOf(e).factory;return {factory,chainId:e.net.chainId,indexedBlock:status.indexedBlock,assets:e.index.db.prepare("SELECT data FROM events WHERE json_extract(data,'$.name')='QuoteApproved' ORDER BY height,idx").all().map(r=>JSON.parse(r.data)).filter(r=>r.kind==='factory'&&r.address.toLowerCase()===factory.toLowerCase()).map(r=>r.args[0])};}
   /** Tokens from every deployment on the network. `extra(entry, token)` adds per-deployment fields. */
+  /** The listing row for a single token; `listings(key)` exists for the market list, not for one page. */
+  listing(key,address,extra){
+    const e=this.entryFor(key,address),t=e?.index.tokenAt(address);if(!t)return null;
+    const d=deploymentOf(e),s=e.index.snapshot(t.address)??{};
+    return {...t,...s,metadata:publicMetadata(e,t),metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})};
+  }
   listings(key,extra){return this.all(key).flatMap(e=>{const d=deploymentOf(e);return e.index.listings().map(t=>({...t,metadata:publicMetadata(e,t),metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})}));});}
   // No post-launch metadata path: details are published only in the launch transaction. Details a creator signed
   // before this rule (22-23 Oct 2026 testnet) are still loaded from metadata.json and shown as before.
   /** Latest trades on every indexed network, each with the token's public name, symbol and image. */
   recentTrades(limit=20){const out=[];for(const key of this.entries.keys()){const tokens=new Map(this.listings(key).map(t=>[t.address.toLowerCase(),t]));for(const e of this.all(key))for(const trade of e.index.recentTrades(limit)){const t=tokens.get(String(trade.token).toLowerCase());if(t)out.push(recentTrade(key,t,trade));}}return out.sort((a,b)=>b.timestamp-a.timestamp).slice(0,limit);}
-  detail(key,address,kind,interval=60){const e=this.entryFor(key,address),token=this.listings(key).find(t=>t.address===address.toLowerCase());if(!token)return null;return kind==='trades'?e.index.trades(address):kind==='candles'?e.index.candles(address,interval):kind==='holders'?e.index.holders(address):token;}
+  detail(key,address,kind,interval=60){const e=this.entryFor(key,address),token=this.listing(key,address);if(!token)return null;return kind==='trades'?e.index.trades(address):kind==='candles'?e.index.candles(address,interval):kind==='holders'?e.index.holders(address):token;}
   async close(){this.stopping=true;clearInterval(this.timer);while(this.running)await new Promise(r=>setTimeout(r,100));const providers=new Set();for(const e of [...this.entries.keys()].flatMap(key=>this.all(key))){await e.index.close();providers.add(e.provider);}for(const p of providers)p.destroy();}
 }
 
