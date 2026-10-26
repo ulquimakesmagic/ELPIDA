@@ -9,6 +9,7 @@ import {configuredGraduationKeeper} from './graduation-keeper.mjs';
 import { FeedRelay } from './feed-relay.mjs';
 import { testDexArtifacts } from './test-dex-artifacts.mjs';
 import { PublicIndexer, recentTrade } from './public-indexer.mjs';
+import { TradeFeed } from './trade-feed.mjs';
 import { SolanaIndexer } from '../../packages/indexer/solana-indexer.mjs';
 import { validateSolanaRpc } from '../../packages/solana/rpc-config.mjs';
 import * as solanaWeb3 from '@solana/web3.js';
@@ -43,7 +44,7 @@ import { isDexModel } from '../../packages/core/curve-model.mjs';
 
 const webRoot = fileURLToPath(new URL('../web/', import.meta.url));
 const ethersFile = fileURLToPath(new URL('../../node_modules/ethers/dist/ethers.min.js', import.meta.url));
-const resources = new Map([['/', ['index.html', 'text/html']], ['/launch', ['index.html', 'text/html']], ['/reward-policy.mjs', ['reward-policy.mjs', 'text/javascript']], ['/reward-ui.mjs', ['reward-ui.mjs', 'text/javascript']], ['/metadata.mjs', ['metadata.mjs', 'text/javascript']], ['/launch-capabilities.mjs', ['launch-capabilities.mjs', 'text/javascript']], ['/styles.css', ['styles.css', 'text/css']], ['/app.mjs', ['app.mjs', 'text/javascript']], ['/wallet.mjs', ['wallet.mjs', 'text/javascript']], ['/solana-wallet.mjs', ['solana-wallet.mjs', 'text/javascript']], ['/ui.mjs', ['ui.mjs', 'text/javascript']], ['/launch-flow.mjs', ['launch-flow.mjs', 'text/javascript']], ['/token-page.mjs', ['token-page.mjs', 'text/javascript']], ['/amounts.mjs', ['amounts.mjs', 'text/javascript']], ['/rewards-view.mjs', ['rewards-view.mjs', 'text/javascript']]]);
+const resources = new Map([['/', ['index.html', 'text/html']], ['/launch', ['index.html', 'text/html']], ['/reward-policy.mjs', ['reward-policy.mjs', 'text/javascript']], ['/reward-ui.mjs', ['reward-ui.mjs', 'text/javascript']], ['/metadata.mjs', ['metadata.mjs', 'text/javascript']], ['/launch-capabilities.mjs', ['launch-capabilities.mjs', 'text/javascript']], ['/styles.css', ['styles.css', 'text/css']], ['/app.mjs', ['app.mjs', 'text/javascript']], ['/live-trades.mjs', ['live-trades.mjs', 'text/javascript']], ['/wallet.mjs', ['wallet.mjs', 'text/javascript']], ['/solana-wallet.mjs', ['solana-wallet.mjs', 'text/javascript']], ['/ui.mjs', ['ui.mjs', 'text/javascript']], ['/launch-flow.mjs', ['launch-flow.mjs', 'text/javascript']], ['/token-page.mjs', ['token-page.mjs', 'text/javascript']], ['/amounts.mjs', ['amounts.mjs', 'text/javascript']], ['/rewards-view.mjs', ['rewards-view.mjs', 'text/javascript']]]);
 // Static design assets (brand, fonts, icon sprite): only these extensions, only inside apps/web/assets.
 const assetRoot = fileURLToPath(new URL('../web/assets/', import.meta.url));
 resources.set('/terminal-chart.mjs',['terminal-chart.mjs','text/javascript']);
@@ -172,7 +173,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // The simulation is rebuilt from its action journal on the data volume, so its index can stay in memory.
   const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:dataFile('token-metadata.json'), dex:port!==0, indexerPath:":memory:", journalPath:port===0?null:dataFile('simulation-journal-v2.jsonl'), log:console.log });
   bootPhase('runtime_ready');
-  const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore}).start();
+  const tradeFeed=new TradeFeed({log:line=>console.log(line)});
+  const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore,onTrades:(network,trades)=>tradeFeed.publish(network,trades)}).start();
   bootPhase('indexers_ready');
   // Testnet-only price relay for test chains without a Chainlink feed (Robinhood testnet). Idle without its key.
   const feedRelay=soft('feedRelay',()=>new FeedRelay({networks:port===0?[]:evmTestnets,env:port===0?{}:process.env}).start(),()=>new FeedRelay({networks:[],env:{}}).start());
@@ -351,7 +353,14 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         }
         if(url.pathname==='/api/public/tokenized-equity'){const view=tokenizedEquity.describeNetwork(url.searchParams.get('network')??'');return view?send(200,{...view,live:false,note:'Tokenized stocks are disabled until each capability is verified with the provider. Nothing here is an official partnership.'}):send(404,{error:'No tokenized-stock provider is designated for this network.'});}
         if(url.pathname==='/api/graduation/status')return send(200,graduationKeeper.status());
-        if(url.pathname==='/api/public/status')return send(200,{graduation:graduationKeeper.status(),relay:feedRelay.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),simulationEphemeral:!runtime.config.simulation?.durable,simulation:runtime.config.simulation},networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,publicIndex.status(n.key)])),...(solanaIndex?{[solanaIndex.network.key]:{enabled:true,...solanaIndex.status()}}:{})}});
+        if(url.pathname==='/api/public/status')return send(200,{stream:tradeFeed.status(),graduation:graduationKeeper.status(),relay:feedRelay.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),simulationEphemeral:!runtime.config.simulation?.durable,simulation:runtime.config.simulation},networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,publicIndex.status(n.key)])),...(solanaIndex?{[solanaIndex.network.key]:{enabled:true,...solanaIndex.status()}}:{})}});
+        if(url.pathname==='/api/public/stream'){
+          if(req.method!=='GET')return send(405,{error:'Use GET for the event stream.'});
+          const address=String(req.headers['x-forwarded-for']??req.socket?.remoteAddress??'').split(',')[0].trim();
+          const opened=tradeFeed.subscribe({res,address});
+          if(!opened.ok)return send(opened.status,{error:opened.error});
+          return;
+        }
         if(url.pathname==='/api/public/recent-trades'){
           // Newest trades across every public index, for the "Last sale" strip: token identity, side and time only.
           const limit=Math.max(1,Math.min(50,Number(url.searchParams.get('limit'))||20)),list=publicIndex.recentTrades(limit);
@@ -495,7 +504,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
   bootPhase('listening');
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, vanity, async close() {vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();partnerApps.db.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();partnerApps.db.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
