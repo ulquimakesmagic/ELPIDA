@@ -111,3 +111,64 @@
 .analytics-table-scroll { max-height: 420px; overflow: auto; }
 .analytics-table a { color: var(--accent-text); }
 @media (max-width: 640px) { .analytics-page .page-head h1 { font-size: 30px; letter-spacing: -.8px; } }
+
+/* ---------- Portfolio v2: totals bar, holdings and launches as tables ---------- */
+.pf-v2 { display: grid; gap: 14px; min-width: 0; }
+.pf-top { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px 16px; }
+.pf-title { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 14px; min-width: 0; }
+.pf-title h1 { margin: 0; font: 650 28px/1.1 var(--font-sans); letter-spacing: -.5px; }
+.pf-title .tk-chain { margin-left: 0; color: var(--muted); font-size: 13px; }
+.pf-top-actions { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.pf-strip .tk-strip-tile { position: relative; }
+.pf-strip .pf-sum { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; }
+.pf-strip .pf-sum small { display: inline; margin: 0; font: 500 11px/1 var(--font-sans); color: var(--muted); }
+.pf-v2 [data-dir="up"] { color: var(--up); }
+.pf-v2 [data-dir="down"] { color: var(--down); }
+.pf-v2 .up { color: var(--up); }
+.pf-v2 .down { color: var(--down); }
+.pf-claim { position: absolute; top: 9px; right: 12px; display: inline-flex; align-items: center; gap: 3px; font: 600 11px/1 var(--font-sans); color: var(--accent-text); text-decoration: none; }
+.pf-claim:hover { text-decoration: underline; }
+.pf-card { padding: 4px 0 14px; overflow: hidden; }
+.pf-table { min-width: 860px; }
+.pf-table td { height: 62px; }
+.pf-token { display: inline-flex; align-items: center; gap: 12px; color: var(--ink); text-decoration: none; min-width: 0; }
+.pf-token:hover strong { text-decoration: underline; }
+.pf-token .avatar { width: 36px; height: 36px; border-radius: 10px; }
+.pf-token .tk-avatar-chain { right: -4px; bottom: -4px; padding: 1.5px; }
+.pf-token .tk-avatar-chain img, .pf-token .tk-avatar-chain svg { width: 15px; height: 15px; }
+.pf-name { display: grid; gap: 3px; min-width: 0; }
+.pf-name strong { font-weight: 600; max-width: 24ch; overflow: hidden; text-overflow: ellipsis; }
+.pf-name small { color: var(--muted); font-size: 12px; }
+.pf-curve { display: inline-flex; align-items: center; gap: 8px; min-width: 130px; }
+.pf-curve .bar { flex: 1 1 80px; height: 6px; }
+.pf-curve .bar > span { background: var(--accent); }
+.pf-curve small { color: var(--ink-2); font-variant-numeric: tabular-nums; }
+.pf-status { font: 600 12px/1 var(--font-sans); padding: 5px 9px; border-radius: var(--r-pill); background: var(--panel-3); }
+.pf-status.up { background: var(--up-soft); }
+.pf-pct { opacity: .85; }
+.pf-note { margin: 0; padding: 12px 20px 0; }
+.pf-scope { margin: 0; }
+.pf-v2 .pf-tabs { justify-self: start; }
+@media (max-width: 640px) {
+  .pf-title h1 { font-size: 24px; }
+  .pf-top-actions { width: 100%; }
+  .pf-top-actions .btn-accent { flex: 1 1 auto; justify-content: center; }
+  .pf-note { padding: 10px 14px 0; }
+  .pf-v2 .pf-tabs { justify-self: stretch; }
+}
+/* Phones: each table row becomes a compact card, the token on top and labelled figures below in two columns. */
+@media (max-width: 640px) {
+  .pf-table { min-width: 0; }
+  .pf-table thead { display: none; }
+  .pf-table, .pf-table tbody { display: block; }
+  .pf-table tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 8px 14px; padding: 14px; border-top: .67px solid var(--line-faint); }
+  .pf-table tr:first-child { border-top: 0; }
+  .pf-table td { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; height: auto; padding: 0; border: 0; text-align: right; white-space: nowrap; min-width: 0; font-size: 13px; }
+  .pf-table td[data-label]::before { content: attr(data-label); color: var(--muted); font-size: 11px; text-align: left; }
+  .pf-table td.pf-cell-token { grid-column: 1 / -1; display: block; text-align: left; }
+  .pf-table td.pf-cell-status { grid-column: 1 / -1; }
+  .pf-table td.pf-cell-action { display: none; }
+  .tk-row:hover td { background: none; }
+  .pf-claim { position: static; margin-top: 4px; }
+  .pf-strip .tk-strip-tile:last-child { display: grid; }
+}

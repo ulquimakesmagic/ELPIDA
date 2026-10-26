@@ -16,6 +16,7 @@ import { renderLaunch } from './launch-flow.mjs';
 import { renderDocs } from './docs-view.mjs';
 import { renderToken } from './token-page.mjs';
 import { renderRewards } from './rewards-view.mjs';
+import { portfolioView } from './portfolio-view.mjs';
 import { circleFundingPanel } from './circle-funding.mjs';
 import { initShell, renderLastSale, syncSearch } from './shell.mjs';
 import { startResilience } from './resilience.mjs';
@@ -263,7 +264,7 @@ function rerender(reason) {
       if (previous.focused) document.getElementById(previous.focused)?.focus({ preventScroll: true });
     }
   }
-  else if (r.name === 'portfolio') view.replaceChildren(portfolioView());
+  else if (r.name === 'portfolio') view.replaceChildren(portfolioView(ctx, { connect: connectCurrent, rerender: () => rerender('route') }));
   else if (r.name === 'rewards') view.replaceChildren(renderRewards(ctx));
   else if (r.name === 'docs') view.replaceChildren(renderDocs(ctx, r.section));
   else if (!exploreView || !view.contains(exploreView.root)) {
@@ -276,63 +277,7 @@ function rerender(reason) {
 function notFoundView() { return h('section.not-found', h('h1', 'Page not found.'), h('p', 'That page doesn’t exist. Every token, launch and chart starts from Explore.'), h('a.btn-accent', { href: '#/' }, icon('compass', 'icon-sm'), 'Explore tokens')); }
 function loadingView() { return currentRoute.name === 'explore' ? exploreSkeleton() : h('div', h('div.page-head', h('div', h('h1', 'Loading…'), h('p', 'Loading the launchpad…'))), h('div.token-grid', [1, 2, 3].map(() => h('div.skeleton', { 'aria-hidden': 'true' })))); }
 
-/* ---------- Token cards (portfolio) ---------- */
-function age(created){const seconds=Math.max(0,(nowSeconds()*1000-created)/1000);return seconds<60?`${Math.floor(seconds)}s`:seconds<3600?`${Math.floor(seconds/60)}m`:seconds<86400?`${Math.floor(seconds/3600)}h`:`${Math.floor(seconds/86400)}d`;}
-function tokenCard(token) {
-  const life = lifecycle(token), pct = progressOf(token), p = pricing(token);
-  const chain=networkByKey(token.network);
-  return h('a.token-card', { href: `#/token/${token.address}${token.network?'?network='+encodeURIComponent(token.network):''}`, 'aria-label': `${token.name}, ${token.symbol}. ${chain?.name??'Simulation'}. ${life.label}.` },
-    h('div.token-card-head', avatar(token), h('div', h('h3', token.name), h('span.sym', `$${token.symbol}`))),
-    h('div.chips', h('span.chip',chainIcon(token.network),chain?.name??'Simulation'),h(`span.chip${life.chip ? '.' + life.chip : ''}`, life.label), h('span.chip',assetIcon(token.quoteSymbol??'ETH'),`${token.quoteSymbol ?? state.nativeSymbol ?? 'ETH'} pair`),
-      token.devBoughtPct != null ? h('span.chip.dev-chip', { title: devLabel(token.devBoughtPct, token.devHoldingPct) }, `Dev ${number(token.devBoughtPct, 1)}% → ${token.devHoldingPct != null ? number(token.devHoldingPct, 1) + '%' : '—'}`) : null),
-    h('p.desc', token.metadata?.description || 'No description yet.'),
-    // Market cap = price × the full 1B supply (all minted at launch), the same figure as FDV.
-    h('div.figures', h('div.figure', h('span', 'Market cap'), h('strong', fmtValue(p.marketCap, token))), h('div.figure', h('span', 'Price'), h('strong.nowrap', fmtPrice(token)))),
-    h('div.figures',h('div.figure',h('span',{title:token.graduated?'Indexed quote assets in the DEX pool; not total two-sided TVL.':'Real quote funds collected by the curve. Virtual reserves are excluded.'},'Liquidity'),h('strong',fmtValue(token.reserve,token))),h('div.figure',h('span','Age'),h('strong',token.created?age(token.created):'Unavailable'))),
-    h('p.card-change',{'data-direction':!token.priceChange24h?'unknown':token.priceChange24h.percent>=0?'up':'down',title:token.priceChange24h?.basis??'Requires confirmed prices near both comparison times'},token.priceChange24h?icon(token.priceChange24h.percent>=0?'trending-up':'trending-down','icon-sm'):null,token.priceChange24h?`${token.priceChange24h.percent>=0?'+':''}${number(token.priceChange24h.percent,2)}% — 24h`:'24h change unavailable'),
-    token.complete&&!token.graduated?h('p.small.muted','Migration pending. Open token for status and next action.'):null,
-    h('div.progress', h('div.progress-label', h('span', token.graduated ? 'Graduated' : 'Bonding curve'), h('strong', `${number(pct, 1)}%`)), bar(pct, token.complete || token.graduated)));
-}
-
-/* ---------- Portfolio ---------- */
-const PORTFOLIO_TABS = [['launched', 'Launched'], ['holdings', 'Holdings'], ['drafts', 'Drafts']];
-function portfolioView() {
-  const asked = new URLSearchParams(location.hash.split('?')[1] ?? '').get('tab');
-  const tab = PORTFOLIO_TABS.some(([k]) => k === asked) ? asked : 'launched';
-  const signedIn = mode !== 'testnet' || !!wallet?.address;
-  const held = signedIn ? state.tokens.filter(t => Number(t.balance) > 0) : [];
-  const created = signedIn ? state.tokens.filter(t => t.creator?.toLowerCase() === state.wallet?.toLowerCase()) : [];
-  const draft = storage.get('elpida:launch-draft');
-  const hasDraft = !!(draft && (draft.name || draft.symbol));
-  const counts = { launched: created.length, holdings: held.length, drafts: hasDraft ? 1 : 0 };
-  const empty = (title, text, action) => h('div.pf-empty', h('span.pf-mark', icon('sprout')), h('h2', title), h('p', text), action);
-  const connectAction = h('button.btn.btn-primary', { type: 'button', on: { click: connectCurrent } }, 'Connect wallet');
-  let body;
-  if (tab === 'drafts') {
-    body = hasDraft ? h('div.pf-drafts', h('div.pf-draft', avatar({ symbol: draft.symbol || 'NEW', metadata: { image: draft.image } }), h('div', h('h3', draft.name || 'Untitled token'), h('span.sym.muted.small', draft.symbol ? `$${String(draft.symbol).toUpperCase()}` : 'No symbol yet'), h('p.small.muted', 'Saved in this browser for this session. It is not uploaded anywhere.')),
-        h('div.pf-actions', h('a.btn.btn-primary.btn-sm', { href: '#/launch' }, 'Continue'), h('button.btn.btn-secondary.btn-sm', { type: 'button', on: { click: () => { storage.remove('elpida:launch-draft'); rerender('route'); } } }, 'Discard'))))
-      : empty('No drafts', 'Start a token and your progress is kept in this browser until you launch it.', h('a.btn.btn-primary', { href: '#/launch' }, icon('plus', 'icon-sm'), 'New token'));
-  } else if (!signedIn) {
-    body = empty('Nothing here yet', 'Connect your wallet to see the tokens you launched and hold.', connectAction);
-  } else if (tab === 'launched') {
-    body = created.length ? h('div.token-grid', created.map(tokenCard)) : empty('Nothing launched yet', 'Your launches appear here with their curve progress and creator fees.', h('a.btn.btn-primary', { href: '#/launch' }, icon('plus', 'icon-sm'), 'Create token'));
-  } else {
-    body = held.length ? h('div.activity', held.map(t => {
-      const p = pricing(t), value = Number(t.balance) * p.price;
-      return h('a.fee-row.token-row', { href: `#/token/${t.address}` },
-        h('div.token-card-head', avatar(t), chainIcon(t.network ?? currentChain()), h('div', h('h3', t.name), h('span.sym.muted.small', `$${t.symbol}`))),
-        h('div.figure', h('span', 'Balance'), h('strong', `${compact(t.balance)} ${t.symbol}`)),
-        h('div.figure', h('span', 'Value'), h('strong', fmtValue(value, t))),
-        h('div.figure', h('span', 'Share of supply'), h('strong', `${number(Number(t.balance) / Number(t.supply) * 100, 3)}%`)));
-    })) : empty('No holdings yet', 'Tokens you buy appear here with their current value in the trading pair.', h('a.btn.btn-primary', { href: '#/' }, 'Explore tokens'));
-  }
-  const sub = mode === 'local' ? 'Holdings of the selected demo account in the local simulation.' : !signedIn ? 'Connect your wallet to see your tokens.' : `Holdings of ${short(state.wallet)} on ${wallet.net.name}.`;
-  return h('div.pf',
-    h('p.pf-eyebrow', icon('folder-open', 'icon-sm'), 'Portfolio'),
-    h('div.pf-head', h('div', h('h1', 'Everything you launched and hold.'), h('p.muted', sub)), h('a.tk-pill', { href: '#/launch' }, icon('plus', 'icon-sm'), 'New token')),
-    h('div.pf-tabs', { role: 'tablist', 'aria-label': 'Portfolio sections' }, PORTFOLIO_TABS.map(([key, label]) => h('a', { role: 'tab', href: `#/portfolio?tab=${key}`, 'aria-selected': String(key === tab) }, label, h('span.tk-count', String(counts[key]))))),
-    body);
-}
+/* Portfolio lives in portfolio-view.mjs. */
 
 /* ---------- Network and test funds ---------- */
 /** Wallet picker for the current network: one row per wallet this browser announces. */
