@@ -34,19 +34,54 @@ export class EvmIndexer {
       CREATE TABLE IF NOT EXISTS identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS blocks (height INTEGER PRIMARY KEY, hash TEXT NOT NULL, parent TEXT NOT NULL, timestamp INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS tokens (address TEXT PRIMARY KEY, height INTEGER NOT NULL, data TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS events (tx TEXT NOT NULL, idx INTEGER NOT NULL, height INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(tx,idx));
+      CREATE TABLE IF NOT EXISTS events (tx TEXT NOT NULL, idx INTEGER NOT NULL, height INTEGER NOT NULL, data TEXT NOT NULL, address TEXT, PRIMARY KEY(tx,idx));
       CREATE TABLE IF NOT EXISTS snapshots (address TEXT NOT NULL, height INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(address,height));
       CREATE TABLE IF NOT EXISTS trades (tx TEXT NOT NULL, idx INTEGER NOT NULL, address TEXT NOT NULL, height INTEGER NOT NULL, timestamp INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(tx,idx));`);
+    this.migrate();
     const identity = json({chainId,factory:this.factory,fromBlock});
     const prior = this.db.prepare('SELECT value FROM identity WHERE id=1').get();
     if (prior && prior.value !== identity) { this.db.close(); throw new Error('Indexer database belongs to a different deployment.'); }
     this.db.prepare('INSERT OR IGNORE INTO identity VALUES(1,?)').run(identity);
-    this.queue = Promise.resolve(); this.lastError = null;
+    this.queue = Promise.resolve(); this.lastError = null; this.cache = new Map();
+  }
+  /**
+   * Every token page used to scan a whole table. These indexes are created on open and are cheap to verify
+   * (IF NOT EXISTS); a database written by an older build gains them on the next start, with no data rewrite.
+   */
+  migrate() {
+    // Databases written before the column existed get it here, filled from the JSON they already hold.
+    if(!this.db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name='address'").get()) {
+      this.db.exec('ALTER TABLE events ADD COLUMN address TEXT');
+      this.db.exec("UPDATE events SET address=lower(json_extract(data,'$.address')) WHERE address IS NULL");
+    }
+    this.db.exec(`
+      CREATE INDEX IF NOT EXISTS trades_address ON trades(address,height DESC,idx DESC);
+      CREATE INDEX IF NOT EXISTS trades_recent ON trades(timestamp DESC,height DESC,idx DESC);
+      CREATE INDEX IF NOT EXISTS events_address ON events(address,height,idx);
+      CREATE INDEX IF NOT EXISTS snapshots_latest ON snapshots(address,height DESC);`);
+  }
+  /**
+   * A cheap fingerprint of the stored history. Holders and candles are recomputed from the full trade log, so
+   * they are worth keeping until the log changes; counting rows detects a sync, a rollback and a test fixture.
+   */
+  revision() {return `${this.db.prepare('SELECT COUNT(*) n FROM trades').get().n}:${this.db.prepare('SELECT COUNT(*) n FROM events').get().n}`;}
+  cached(key, build) {
+    const revision = this.revision(), hit = this.cache.get(key);
+    if (hit && hit.revision === revision) return hit.value;
+    const value = build();
+    if (this.cache.size >= 256) this.cache.clear();
+    this.cache.set(key, { revision, value });
+    return value;
   }
   tip() {return this.db.prepare('SELECT * FROM blocks ORDER BY height DESC LIMIT 1').get();}
   tokens() {return this.db.prepare('SELECT data FROM tokens ORDER BY height DESC,address').all().map(r=>decode(r.data));}
+  /** One token row by address; `tokens()` decodes every launch to answer the same question. */
+  tokenAt(address) {return decode(this.db.prepare('SELECT data FROM tokens WHERE address=?').get(String(address).toLowerCase())?.data);}
   snapshot(address) {return decode(this.db.prepare('SELECT data FROM snapshots WHERE address=? ORDER BY height DESC LIMIT 1').get(address.toLowerCase())?.data);}
-  listings() {return this.tokens().map(t=>({...t,...this.snapshot(t.address)}));}
+  listings() {
+    const latest=new Map(this.db.prepare('SELECT address,data FROM snapshots WHERE height=(SELECT MAX(height) FROM snapshots WHERE address=snapshots.address)').all().map(r=>[r.address,decode(r.data)]));
+    return this.tokens().map(t=>({...t,...latest.get(t.address)}));
+  }
   rollback(height) {
     this.db.exec('BEGIN IMMEDIATE');
     try {for(const table of ['blocks','tokens','events','snapshots','trades']) this.db.prepare(`DELETE FROM ${table} WHERE height>?`).run(height);this.db.exec('COMMIT');}
@@ -147,7 +182,7 @@ export class EvmIndexer {
       for(const l of logs) {
         const info=addressMap.get(l.address.toLowerCase()),kind=info?.kind??'factory',e=this.parse(kind,l);
         if(!e)continue;
-        this.db.prepare('INSERT OR IGNORE INTO events VALUES(?,?,?,?)').run(l.transactionHash,l.index,height,json({address:l.address,kind,name:e.name,args:e.args.toArray(),blockHash:block.hash}));
+        this.db.prepare('INSERT OR IGNORE INTO events(tx,idx,height,data,address) VALUES(?,?,?,?,?)').run(l.transactionHash,l.index,height,json({address:l.address,kind,name:e.name,args:e.args.toArray(),blockHash:block.hash}),l.address.toLowerCase());
         if(info && (['Bought','Sold'].includes(e.name)||e.name==='Swap')) {
           const dex=e.name==='Swap',first=this.snapshot(info.r.address)?.tokenFirst??snapshots.find(([r])=>r.address===info.r.address)?.[1].tokenFirst;
           const tokenDelta=dex?(this.contracts.tax?(first?e.args.amount0In-e.args.amount0Out:e.args.amount1In-e.args.amount1Out):(first?e.args.amount0:e.args.amount1)):0n,quoteDelta=dex?(this.contracts.tax?(first?e.args.amount1In-e.args.amount1Out:e.args.amount0In-e.args.amount0Out):(first?e.args.amount1:e.args.amount0)):0n;
@@ -208,16 +243,19 @@ export class EvmIndexer {
   /** Latest trades across every token of this index, newest first (the "Last sale" strip). */
   recentTrades(limit=20){return this.db.prepare('SELECT timestamp,data FROM trades ORDER BY timestamp DESC,height DESC,idx DESC LIMIT ?').all(Math.max(1,Math.min(100,limit))).map(r=>({...decode(r.data),timestamp:r.timestamp}));}
   trades(address,limit=100){return this.db.prepare('SELECT data FROM trades WHERE address=? ORDER BY height DESC,idx DESC LIMIT ?').all(address.toLowerCase(),Math.max(1,Math.min(500,limit))).map(r=>decode(r.data));}
-  holders(address,limit=50){
-    const balances=new Map(),token=this.tokens().find(t=>t.address===address.toLowerCase());if(!token)return [];
-    for(const row of this.db.prepare('SELECT data FROM events ORDER BY height,idx').all()){
-      const e=decode(row.data);if(e.address.toLowerCase()!==token.address||e.kind!=='token'||e.name!=='Transfer')continue;
+  holders(address,limit=50){return this.cached(`holders:${String(address).toLowerCase()}:${limit}`,()=>this.computeHolders(address,limit));}
+  computeHolders(address,limit=50){
+    const balances=new Map(),token=this.tokenAt(address);if(!token)return [];
+    const transfers=this.db.prepare("SELECT data FROM events WHERE address=? ORDER BY height,idx").all(token.address);
+    for(const row of transfers){
+      const e=decode(row.data);if(e.kind!=='token'||e.name!=='Transfer')continue;
       const [from,to,value]=e.args,n=BigInt(value);for(const [a,delta]of [[from,-n],[to,n]]){const key=a.toLowerCase();balances.set(key,(balances.get(key)??0n)+delta);}
     }
     const excluded=new Set([ZeroAddress,dead,token.curve,this.snapshot(token.address)?.pool].filter(Boolean).map(a=>a.toLowerCase()));
     const supply=parseUnits(this.snapshot(token.address)?.supply??'0',18);
     return [...balances].filter(([a,n])=>n>0n&&!excluded.has(a)).sort((a,b)=>a[1]>b[1]?-1:a[1]<b[1]?1:0).slice(0,limit).map(([address,n])=>({address,balance:formatUnits(n,18),supplyShare:ratio(n,supply,12)}));
   }
+
   /** One wallet's balance in every listed token, from a single pass over Transfer events (the same source as holders()). */
   balancesOf(owner){
     const who=String(owner??'').toLowerCase();if(!/^0x[0-9a-f]{40}$/.test(who))throw new Error('Invalid owner address.');
@@ -231,9 +269,15 @@ export class EvmIndexer {
     }
     return [...balances].filter(([,n])=>n>0n).map(([address,n])=>({address,balance:formatUnits(n,18)}));
   }
-  candles(address,interval=60,limit=100) {
+
+  candles(address,interval=60,limit=100) {return this.cached(`candles:${String(address).toLowerCase()}:${interval}:${limit}`,()=>this.computeCandles(address,interval,limit));}
+  computeCandles(address,interval=60,limit=100) {
     if(![60,300,900,3600,14400,86400].includes(interval))throw new Error('Unsupported candle interval.');
-    const rows=this.db.prepare('SELECT data FROM trades WHERE address=? ORDER BY height,idx').all(address.toLowerCase()),buckets=new Map();
+    const span=Math.max(1,Math.min(500,limit))*interval;
+    // The answer is the last `limit` buckets, so history older than that cannot change it.
+    const latest=this.db.prepare('SELECT MAX(timestamp) t FROM trades WHERE address=?').get(address.toLowerCase())?.t;
+    if(latest==null)return [];
+    const rows=this.db.prepare('SELECT data FROM trades WHERE address=? AND timestamp>=? ORDER BY height,idx').all(address.toLowerCase(),latest-span*2),buckets=new Map();
     const compare=(a,b)=>{const scale=s=>BigInt(s.split('.')[0]+(s.split('.')[1]??'').padEnd(24,'0'));return scale(a)<scale(b);};
     for(const row of rows){const t=decode(row.data),time=Math.floor(t.timestamp/interval)*interval,p=t.priceQuote;if(p===null)continue;
       let c=buckets.get(time);if(!c){c={timestamp:time,open:p,high:p,low:p,close:p,quoteVolumeRaw:0n,tokenVolumeRaw:0n,trades:0,priceBasis:t.priceBasis};buckets.set(time,c);}
@@ -241,6 +285,6 @@ export class EvmIndexer {
     }
     return [...buckets.values()].slice(-Math.max(1,Math.min(500,limit))).map(c=>({...c,quoteVolumeRaw:c.quoteVolumeRaw.toString(),tokenVolumeRaw:c.tokenVolumeRaw.toString()}));
   }
-  status(){const tip=this.tip();return {chainId:this.chainId,factory:this.factory,indexedBlock:tip?.height??null,headBlock:this.head??null,lag:tip && this.head!==undefined?this.head-tip.height:null,confirmations:this.confirmations,finality:this.confirmations?'confirmation depth':'local provisional',error:this.lastError,backend:'SQLite WAL',adapters:['Elpida curve',this.contracts.dexPool?'Uniswap v3':'Elpida custom test pool'],tokens:this.tokens().length};}
+  status(){const tip=this.tip();return {chainId:this.chainId,factory:this.factory,indexedBlock:tip?.height??null,headBlock:this.head??null,lag:tip && this.head!==undefined?this.head-tip.height:null,confirmations:this.confirmations,finality:this.confirmations?'confirmation depth':'local provisional',error:this.lastError,backend:'SQLite WAL',adapters:['Elpida curve',this.contracts.dexPool?'Uniswap v3':'Elpida custom test pool'],tokens:this.db.prepare('SELECT COUNT(*) n FROM tokens').get().n};}
   async close(){await this.queue;this.db.close();}
 }
