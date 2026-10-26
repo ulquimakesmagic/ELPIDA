@@ -323,3 +323,50 @@ a#tv-attr-logo svg { display: block; width: 100%; height: 100%; }
   .tk-strip-tile strong small { display: block; margin: 2px 0 0; font-size: 10px; }
   .tk-strip-price .pct-pill { font-size: 10px; padding: 2px 6px; }
 }
+
+/* ---------- Terminal polish: one stats bar, one toolbar row, chart fills the first screen ---------- */
+/* The six numbers sit in one bar with dividers instead of six boxes. */
+.tk-strip { gap: 0; padding: 0; border-radius: 16px; border: .67px solid var(--line-soft); background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo)); overflow: hidden; }
+.tk-strip-tile { border: 0; border-radius: 0; background: none; padding: 9px 16px; gap: 4px; }
+.tk-strip-tile + .tk-strip-tile { border-left: .67px solid var(--line-soft); }
+.tk-strip-cap { border-color: var(--line-soft); }
+.tk-strip-cap > span { color: var(--accent-text); }
+/* Chart toolbar: one compact row on desktop, wrapping only when the card is narrow. */
+.price-history .chart-top { flex-wrap: nowrap; align-items: center; gap: 6px; }
+.price-history .chart-top .tk-live { align-self: center; margin-top: 0; padding: 4px 8px; }
+.price-history .chart-controls { flex-direction: row; flex-wrap: wrap; justify-content: flex-start; align-items: center; gap: 6px; }
+.price-history .chart-controls-end { flex-wrap: wrap; gap: 6px; margin-left: auto; justify-content: flex-end; }
+.price-history .chart-options { padding: 2px; }
+.price-history .chart-options .btn, .price-history .chart-fit, .chart-marker-toggle { min-height: 28px; padding: 0 9px; font-size: 12px; }
+.chart-marker-toggle { gap: 5px; }
+/* The readout stops before the price axis instead of covering its top label. */
+.chart-wrap .chart-readout { right: 84px; }
+.chart-wrap { margin-top: 8px; }
+/* No top bar on desktop token pages, so the sticky rail can sit near the top. */
+@media (min-width: 1001px) { body[data-route="token"] .tk-rail { top: 14px; } }
+@media (max-width: 1000px) {
+  .tk-strip { border: 0; background: none; overflow: visible; gap: 6px; }
+  .tk-strip-tile { border: .67px solid var(--line-soft); border-radius: 12px; background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo)); }
+  .tk-strip-tile + .tk-strip-tile { border-left: .67px solid var(--line-soft); }
+  .tk-strip-cap { border-color: var(--accent-line); }
+  .price-history .chart-top { flex-wrap: wrap; }
+}
+/* When the toolbar wraps, everything starts at the left and the Live badge lines up with the first row. */
+.price-history .chart-top { align-items: flex-start; justify-content: flex-start; }
+.price-history .chart-top .tk-live { align-self: flex-start; margin-top: 3px; }
+@media (max-width: 640px) {
+  .price-history .chart-top { flex-wrap: wrap; }
+  .price-history .chart-controls { width: 100%; flex: 1 1 100%; flex-direction: row; align-items: center; }
+  .price-history .chart-options { align-self: auto; }
+  .price-history .chart-controls-end { margin-left: 0; justify-content: flex-start; }
+  /* Phones: the readout keeps the basis, close, change and volume on one line; open, high and low are in the crosshair. */
+  .chart-wrap .chart-readout { right: 60px; flex-wrap: nowrap; overflow: hidden; white-space: nowrap; }
+  .chart-wrap .chart-readout .cr-cell[data-k="O"], .chart-wrap .chart-readout .cr-cell[data-k="H"], .chart-wrap .chart-readout .cr-cell[data-k="L"] { display: none; }
+  .price-history .chart-controls-end { flex-wrap: wrap; }
+}
+@media (max-width: 640px) {
+  .tk-pricecard .price-history { padding: 0; }
+  .price-history .chart-top { flex-direction: column; flex-wrap: nowrap; align-items: stretch; }
+  .price-history .chart-top .tk-live { align-self: flex-start; margin-top: 0; }
+  .price-history .chart-controls { width: 100%; flex: none; }
+}
