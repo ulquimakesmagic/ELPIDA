@@ -60,9 +60,15 @@ test('an older database gains the address column and the trade indexes on open',
   const columns = index.db.prepare("SELECT name FROM pragma_table_info('events')").all().map(r => r.name);
   assert.ok(columns.includes('address'), 'the address column is added');
   const indexes = index.db.prepare("SELECT name FROM sqlite_master WHERE type='index'").all().map(r => r.name);
-  for (const name of ['trades_address', 'trades_recent', 'events_address']) assert.ok(indexes.includes(name), `${name} exists`);
+  for (const name of ['trades_address', 'trades_recent', 'events_address', 'events_sender', 'events_recipient']) assert.ok(indexes.includes(name), `${name} exists`);
   const filled = index.db.prepare('SELECT COUNT(*) n FROM events WHERE address IS NULL').get().n;
   assert.equal(filled, 0, 'every existing event is backfilled');
+  assert.equal(index.db.prepare('SELECT COUNT(*) n FROM events WHERE sender IS NULL').get().n, 0, 'the wallet side of every transfer is backfilled');
+});
+
+test('portfolio balances come from the indexed wallet columns and match the transfer history', () => {
+  assert.deepEqual(index.balancesOf(holder), [{ address: token, balance: '0.04' }]);
+  assert.deepEqual(index.balancesOf(pad(44)), [], 'a wallet that never received anything has no balance');
 });
 
 test('existing history is still readable through the new paths', () => {

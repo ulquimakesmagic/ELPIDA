@@ -34,7 +34,7 @@ export class EvmIndexer {
       CREATE TABLE IF NOT EXISTS identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS blocks (height INTEGER PRIMARY KEY, hash TEXT NOT NULL, parent TEXT NOT NULL, timestamp INTEGER NOT NULL);
       CREATE TABLE IF NOT EXISTS tokens (address TEXT PRIMARY KEY, height INTEGER NOT NULL, data TEXT NOT NULL);
-      CREATE TABLE IF NOT EXISTS events (tx TEXT NOT NULL, idx INTEGER NOT NULL, height INTEGER NOT NULL, data TEXT NOT NULL, address TEXT, PRIMARY KEY(tx,idx));
+      CREATE TABLE IF NOT EXISTS events (tx TEXT NOT NULL, idx INTEGER NOT NULL, height INTEGER NOT NULL, data TEXT NOT NULL, address TEXT, sender TEXT, recipient TEXT, PRIMARY KEY(tx,idx));
       CREATE TABLE IF NOT EXISTS snapshots (address TEXT NOT NULL, height INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(address,height));
       CREATE TABLE IF NOT EXISTS trades (tx TEXT NOT NULL, idx INTEGER NOT NULL, address TEXT NOT NULL, height INTEGER NOT NULL, timestamp INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(tx,idx));`);
     this.migrate();
@@ -49,15 +49,24 @@ export class EvmIndexer {
    * (IF NOT EXISTS); a database written by an older build gains them on the next start, with no data rewrite.
    */
   migrate() {
-    // Databases written before the column existed get it here, filled from the JSON they already hold.
+    // Databases written before these columns existed get them here, filled from the JSON they already hold.
     if(!this.db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name='address'").get()) {
       this.db.exec('ALTER TABLE events ADD COLUMN address TEXT');
       this.db.exec("UPDATE events SET address=lower(json_extract(data,'$.address')) WHERE address IS NULL");
+    }
+    // The wallet sides of a transfer, so a portfolio does not decode every event on the network.
+    if(!this.db.prepare("SELECT 1 FROM pragma_table_info('events') WHERE name='sender'").get()) {
+      this.db.exec('ALTER TABLE events ADD COLUMN sender TEXT');
+      this.db.exec('ALTER TABLE events ADD COLUMN recipient TEXT');
+      this.db.exec("UPDATE events SET sender=lower(json_extract(data,'$.args[0]')),recipient=lower(json_extract(data,'$.args[1]'))"
+        +" WHERE sender IS NULL AND json_extract(data,'$.name')='Transfer'");
     }
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS trades_address ON trades(address,height DESC,idx DESC);
       CREATE INDEX IF NOT EXISTS trades_recent ON trades(timestamp DESC,height DESC,idx DESC);
       CREATE INDEX IF NOT EXISTS events_address ON events(address,height,idx);
+      CREATE INDEX IF NOT EXISTS events_sender ON events(sender,height,idx);
+      CREATE INDEX IF NOT EXISTS events_recipient ON events(recipient,height,idx);
       CREATE INDEX IF NOT EXISTS snapshots_latest ON snapshots(address,height DESC);`);
   }
   /**
@@ -182,7 +191,7 @@ export class EvmIndexer {
       for(const l of logs) {
         const info=addressMap.get(l.address.toLowerCase()),kind=info?.kind??'factory',e=this.parse(kind,l);
         if(!e)continue;
-        this.db.prepare('INSERT OR IGNORE INTO events(tx,idx,height,data,address) VALUES(?,?,?,?,?)').run(l.transactionHash,l.index,height,json({address:l.address,kind,name:e.name,args:e.args.toArray(),blockHash:block.hash}),l.address.toLowerCase());
+        this.db.prepare('INSERT OR IGNORE INTO events(tx,idx,height,data,address,sender,recipient) VALUES(?,?,?,?,?,?,?)').run(l.transactionHash,l.index,height,json({address:l.address,kind,name:e.name,args:e.args.toArray(),blockHash:block.hash}),l.address.toLowerCase(),e.name==='Transfer'?String(e.args[0]).toLowerCase():null,e.name==='Transfer'?String(e.args[1]).toLowerCase():null);
         if(info && (['Bought','Sold'].includes(e.name)||e.name==='Swap')) {
           const dex=e.name==='Swap',first=this.snapshot(info.r.address)?.tokenFirst??snapshots.find(([r])=>r.address===info.r.address)?.[1].tokenFirst;
           const tokenDelta=dex?(this.contracts.tax?(first?e.args.amount0In-e.args.amount0Out:e.args.amount1In-e.args.amount1Out):(first?e.args.amount0:e.args.amount1)):0n,quoteDelta=dex?(this.contracts.tax?(first?e.args.amount1In-e.args.amount1Out:e.args.amount0In-e.args.amount0Out):(first?e.args.amount1:e.args.amount0)):0n;
@@ -260,12 +269,14 @@ export class EvmIndexer {
   balancesOf(owner){
     const who=String(owner??'').toLowerCase();if(!/^0x[0-9a-f]{40}$/.test(who))throw new Error('Invalid owner address.');
     const listed=new Set(this.tokens().map(t=>t.address)),balances=new Map();
-    for(const row of this.db.prepare('SELECT data FROM events ORDER BY height,idx').all()){
-      const e=decode(row.data);if(e.kind!=='token'||e.name!=='Transfer')continue;
-      const token=e.address.toLowerCase();if(!listed.has(token))continue;
-      const [from,to,value]=e.args,n=BigInt(value);
-      if(String(from).toLowerCase()===who)balances.set(token,(balances.get(token)??0n)-n);
-      if(String(to).toLowerCase()===who)balances.set(token,(balances.get(token)??0n)+n);
+    // Outgoing and incoming transfers only; a transfer to oneself cancels out because it appears in both.
+    for(const [sql,side]of [['SELECT address,data FROM events WHERE sender=? ORDER BY height,idx',-1n],['SELECT address,data FROM events WHERE recipient=? ORDER BY height,idx',1n]]){
+      for(const row of this.db.prepare(sql).all(who)){
+        const e=decode(row.data);if(e.kind!=='token'||e.name!=='Transfer')continue;
+        const token=e.address.toLowerCase();if(!listed.has(token))continue;
+        const n=BigInt(e.args[2]);
+        balances.set(token,(balances.get(token)??0n)+side*n);
+      }
     }
     return [...balances].filter(([,n])=>n>0n).map(([address,n])=>({address,balance:formatUnits(n,18)}));
   }
