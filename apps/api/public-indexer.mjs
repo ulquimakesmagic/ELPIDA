@@ -7,6 +7,14 @@ import { isDexModel, MODEL_VERSIONS } from '../../packages/core/curve-model.mjs'
 import { testnetDexes } from '../../packages/core/uniswap.mjs';
 
 // A read-only worker per configured deployment. Never accepts user RPCs or private keys.
+// One token's inline data: image made every listing 1.1 MB. A listing ships the URL instead; the bytes are
+// served once by /api/wallet-logo and cached by the browser.
+const INLINE_IMAGE=/^data:image\//i;
+export const publicMetadata=(entry,token)=>{
+  const metadata=entry.metadata.get(token.address)??{};
+  const image=typeof metadata.image==='string'?metadata.image:'';
+  return INLINE_IMAGE.test(image)?{...metadata,image:`/api/wallet-logo/${entry.net.key}/${token.address}`,imageInline:true}:metadata;
+};
 export class PublicIndexer {
   constructor({networks,contracts,dataDir,metadataStore,providerFactory=rpc=>new JsonRpcProvider(rpc,undefined,{cacheTimeout:-1,batchMaxCount:1}),log=console.log}){
     this.entries=new Map();this.legacy=new Map();this.metadataStore=metadataStore;this.log=log;this.stopping=false;
@@ -26,6 +34,8 @@ export class PublicIndexer {
   /** The current deployment first, then any legacy deployments on the same network. */
   all(key){const e=this.entries.get(key);return e?[e,...(this.legacy?.get(key)??[])]:[];}
   /** The deployment entry that indexed `address` on network `key`, or null. */
+  /** The stored image, including an inline data: URI, for the one route that serves it. */
+  rawImage(key,address){const entry=this.entryFor(key,address);const image=entry?.metadata?.get(String(address).toLowerCase())?.image;return typeof image==='string'?image:null;}
   entryFor(key,address){const a=String(address).toLowerCase();return this.all(key).find(e=>e.index.tokens().some(t=>t.address===a))??null;}
   /** Trade rows across every deployment on the network, in timestamp order. */
   tradeRows(key){
@@ -71,7 +81,7 @@ export class PublicIndexer {
     legacy:(this.legacy?.get(key)??[]).map(l=>{const s=l.index.status();return {factory:deploymentOf(l).factory,indexedBlock:s.indexedBlock,lag:s.lag,error:l.error??null,errorCode:l.errorCode??null,lastSuccess:l.lastSuccess??null};})}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}
   quotes(key){const e=this.entries.get(key);if(!e)return null;const status=e.index.status();if(!e.validated||status.indexedBlock==null)return null;const factory=deploymentOf(e).factory;return {factory,chainId:e.net.chainId,indexedBlock:status.indexedBlock,assets:e.index.db.prepare("SELECT data FROM events WHERE json_extract(data,'$.name')='QuoteApproved' ORDER BY height,idx").all().map(r=>JSON.parse(r.data)).filter(r=>r.kind==='factory'&&r.address.toLowerCase()===factory.toLowerCase()).map(r=>r.args[0])};}
   /** Tokens from every deployment on the network. `extra(entry, token)` adds per-deployment fields. */
-  listings(key,extra){return this.all(key).flatMap(e=>{const d=deploymentOf(e);return e.index.listings().map(t=>({...t,metadata:e.metadata.get(t.address)??{},metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})}));});}
+  listings(key,extra){return this.all(key).flatMap(e=>{const d=deploymentOf(e);return e.index.listings().map(t=>({...t,metadata:publicMetadata(e,t),metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})}));});}
   // No post-launch metadata path: details are published only in the launch transaction. Details a creator signed
   // before this rule (22-23 Oct 2026 testnet) are still loaded from metadata.json and shown as before.
   /** Latest trades on every indexed network, each with the token's public name, symbol and image. */

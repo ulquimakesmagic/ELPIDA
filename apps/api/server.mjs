@@ -162,16 +162,22 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const circle = circleFunding ?? createCircleFunding({ path: port === 0 ? null : dataFile('circle-test-wallets.json') });
   const metadataStore=new MetadataStore({path:port===0?null:dataFile('ipfs-content'),chainBound:Boolean(publicUrl),...(process.env.ELPIDA_METADATA_MAX_BYTES?{maxBytes:Number(process.env.ELPIDA_METADATA_MAX_BYTES)}:{}),...(process.env.ELPIDA_METADATA_MAX_PENDING_BYTES?{maxPendingBytes:Number(process.env.ELPIDA_METADATA_MAX_PENDING_BYTES)}:{})});
   const walletTokenLists=new WalletTokenLists({path:port===0?null:dataFile('wallet-tokenlists.json')});
+  const bootStarted=Date.now(),buildId=String(process.env.RAILWAY_GIT_COMMIT_SHA??'dev').slice(0,12);
+  const bootPhase=phase=>console.log(JSON.stringify({event:'boot_phase',phase,build:buildId,ms:Date.now()-bootStarted}));
+  const bootFailure=error=>console.log(JSON.stringify({event:'subsystem_unavailable',code:String(error?.code??error?.name??'INIT').slice(0,40),message:String(error?.message??error).slice(0,160)}));
+  const soft=(name,make,disabled)=>{try{return make();}catch(error){bootFailure(error);console.log(JSON.stringify({event:'subsystem_unavailable',subsystem:name,degraded:true}));return disabled();}};
   // The simulation is rebuilt from its action journal on the data volume, so its index can stay in memory.
   const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:dataFile('token-metadata.json'), dex:port!==0, indexerPath:":memory:", journalPath:port===0?null:dataFile('simulation-journal-v2.jsonl'), log:console.log });
+  bootPhase('runtime_ready');
   const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore}).start();
+  bootPhase('indexers_ready');
   // Testnet-only price relay for test chains without a Chainlink feed (Robinhood testnet). Idle without its key.
-  const feedRelay=new FeedRelay({networks:port===0?[]:evmTestnets,env:port===0?{}:process.env}).start();
-  const graduationKeeper=configuredGraduationKeeper({env:port===0?{}:process.env,publicIndex,path:port===0?null:dataFile('graduation-keeper.sqlite')});
+  const feedRelay=soft('feedRelay',()=>new FeedRelay({networks:port===0?[]:evmTestnets,env:port===0?{}:process.env}).start(),()=>new FeedRelay({networks:[],env:{}}).start());
+  const graduationKeeper=soft('graduationKeeper',()=>configuredGraduationKeeper({env:port===0?{}:process.env,publicIndex,path:port===0?null:dataFile('graduation-keeper.sqlite')}),()=>configuredGraduationKeeper({env:{},publicIndex,path:null}));
   // Solana public indexer: the deployed program's pools and trades, read-only, stored on the data volume.
   const solanaNet=solanaConfig(),solanaRpc=process.env.SOLANA_RPC_URL??(/^https?:\/\//.test(solanaNet.rpcUrl)?solanaNet.rpcUrl:null);
   // D9: pre-ground Solana mint addresses ending in "hope" (encrypted at rest; random mint fallback).
-  const vanity=new VanityMintPool({path:port===0?null:dataFile('solana-vanity-mints.json'),key:vanityKey(process.env.ELPIDA_VANITY_KEY),programId:solanaNet.deployment?.programId,suffix:process.env.ELPIDA_VANITY_SUFFIX||'hope',target:Number(process.env.ELPIDA_VANITY_TARGET??3),workers:Number(process.env.ELPIDA_VANITY_WORKERS??1)});
+  const vanity=soft('vanity',()=>new VanityMintPool({path:port===0?null:dataFile('solana-vanity-mints.json'),key:vanityKey(process.env.ELPIDA_VANITY_KEY),programId:solanaNet.deployment?.programId,suffix:process.env.ELPIDA_VANITY_SUFFIX||'hope',target:Number(process.env.ELPIDA_VANITY_TARGET??3),workers:Number(process.env.ELPIDA_VANITY_WORKERS??1)}),()=>new VanityMintPool({path:null,key:null,programId:solanaNet.deployment?.programId,suffix:'hope',target:0,workers:0}));
   if(process.env.ELPIDA_VANITY_KEY&&!vanity.enabled)console.log(JSON.stringify({event:'vanity_mints_disabled',reason:'ELPIDA_VANITY_KEY must be 32 bytes (64 hex characters or base64), with a Solana deployment configured.'}));
   let solanaIndex=null,solanaTimer=null;
   if(port!==0&&solanaNet.deployment&&solanaRpc&&process.env.ELPIDA_SOLANA_INDEXER!=='off'){
@@ -182,7 +188,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     }catch(error){console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:String(error.name??'INIT').slice(0,40),message:error.message.slice(0,120)}));}
   }
   console.log(JSON.stringify({event:'storage_ready',durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),dataDir,publicNetworks:[...publicIndex.entries.keys()],simulation:runtime.config.simulation?.durable?`journal replay: ${runtime.config.simulation.replayed} actions restored, ${runtime.config.simulation.skipped} skipped`:'resets on process restart'}));
-  const priceKeeper=new PriceKeeper();
+  const priceKeeper=soft('priceKeeper',()=>new PriceKeeper(),()=>({refresh:async()=>{},snapshot:()=>({})}));
   const updatePrices=async()=>{await priceKeeper.refresh();const prices=priceKeeper.snapshot();const p=[prices.local,prices['base-sepolia'],prices['ethereum-sepolia']].find(p=>p.status==='fresh');if(p)await runtime.updatePrice(p.usd);};
   const priceTimer=port===0?null:setInterval(()=>updatePrices().catch(()=>{}),60000);priceTimer?.unref();
   if(port!==0)updatePrices().catch(()=>{});
@@ -235,6 +241,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     const requestId=randomBytes(8).toString('hex');res.setHeader('X-Request-Id',requestId);
     const send = (code, data) => { if(code>=400)console.error(JSON.stringify({event:'request_failed',requestId,status:code,method:req.method,path:String(req.url).split('?')[0].slice(0,160)}));res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
     res.setHeader('Cache-Control', 'no-store');
+    // Public reads change on the indexer's 15 s tick; static vendor files never change for a given URL.
+    if (req.method === 'GET' && String(req.url).startsWith('/api/public/')) res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=30');
     if (/^\/(api\/|health)/.test(String(req.url))) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
@@ -269,7 +277,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown EVM network.'});
           const entry=publicIndex.entryFor(key,address),token=publicIndex.detail(key,address);
           if(!entry?.validated||!token||!['creator-signed','published'].includes(token.metadataStatus))return send(404,{error:'No published token image.'});
-          const image=normalizeMetadata(token.metadata).image;
+          const image=publicIndex.rawImage(key,address)??normalizeMetadata(token.metadata).image;
           const data=image.match(/^data:(image\/(?:png|jpeg|webp|gif|avif|bmp));base64,([A-Za-z0-9+/]+=*)$/);
           if(!data)return send(404,{error:'Use the public image URL in the token list.'});
           res.writeHead(200,{'Content-Type':data[1],'Cache-Control':'public, max-age=3600'});return res.end(Buffer.from(data[2],'base64'));
@@ -361,7 +369,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if (url.pathname === '/api/state') return send(200, await runtime.state(url.searchParams.get('account') ?? '0'));
         // Simulation buys for the Explore live feed: the same public shape as /api/public/recent-trades.
         if (url.pathname === '/api/recent-trades') { const limit=Math.max(1,Math.min(50,Number(url.searchParams.get('limit'))||20)),tokens=new Map(runtime.listings().map(t=>[t.address.toLowerCase(),t])); return send(200, runtime.indexer.recentTrades(limit).flatMap(trade=>{const t=tokens.get(String(trade.token).toLowerCase());return t?[recentTrade('local',t,trade)]:[];})); }
-        if (vendorFiles.has(url.pathname)) { res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8' }); return res.end(await readFile(vendorFiles.get(url.pathname))); }
+        if (vendorFiles.has(url.pathname)) { res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800' }); return res.end(await readFile(vendorFiles.get(url.pathname))); }
         const seoOrigin = canonicalOrigin(), seoPage = PAGES.find(p => p.path === url.pathname);
         const seoBody = url.pathname === '/robots.txt' ? [renderRobots(seoOrigin), 'text/plain'] : url.pathname === '/sitemap.xml' ? [renderSitemap(seoOrigin), 'application/xml'] : url.pathname === '/llms.txt' ? [renderLlms(seoOrigin), 'text/plain'] : seoPage ? [renderPage(seoPage, seoOrigin), 'text/html'] : null;
         if (seoBody) { res.setHeader('Cache-Control', 'public, max-age=3600'); res.writeHead(200, { 'Content-Type': `${seoBody[1]}; charset=utf-8` }); return res.end(seoBody[0]); }
@@ -380,7 +388,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           return res.end(token ? renderTokenPage({ token, network: key, networkName: nets.get(key), origin: canonicalOrigin(), testnet: key !== 'solana-mainnet' }) : renderTokenNotFound({ origin: canonicalOrigin() }));
         }
         const resource = resources.get(url.pathname);
-        if (resource) { const content = await readFile(resolve(webRoot, resource[0])); res.writeHead(200, { 'Content-Type': `${resource[1]}; charset=utf-8` }); return res.end(content); }
+        if (resource) { const content = await readFile(resolve(webRoot, resource[0])); res.writeHead(200, { 'Content-Type': `${resource[1]}; charset=utf-8`, 'Cache-Control': 'public, max-age=300, stale-while-revalidate=600' }); return res.end(content); }
         if (url.pathname.startsWith('/assets/')) {
           const file = resolve(assetRoot, '.' + decodeURIComponent(url.pathname.slice('/assets'.length)));
           const type = assetTypes[file.slice(file.lastIndexOf('.'))];
@@ -457,6 +465,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   });
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
+  bootPhase('listening');
   return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, vanity, async close() {vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();await runtime.close(); } };
 }
 
