@@ -261,16 +261,23 @@ export class TestnetWallet {
     this.pairsScanned=undefined;this.approvedQuotes=[];await this.loadPairs(factory);
     return {hash:result.tx.hash,message:'USDC trading pair is approved. Launch-fee currency remains independently selectable.'};
   }
+  /** A positive decimal string, so a blank field cannot reach parseUnits as an invalid number. */
+  nativeAmount(value) {
+    const text=String(value??'').trim();
+    if(!/^\d+(\.\d+)?$/.test(text)||Number(text)<=0)throw new Error('Enter an amount greater than zero.');
+    return text;
+  }
   async getUsdcConversionQuote(body) {
     await this.checkNetwork();await this.verifyFactory();
+    const nativeAmount=this.nativeAmount(body?.nativeAmount);
     const slippageBps=Math.round(Number(body.slippage??'1')*100);
-    const q=await quoteUsdcConversion({Contract,provider:this.provider,dex:this.dex,usdc:this.feeUsdc,amountOut:parseUnits(body.nativeAmount,18),slippageBps});
+    const q=await quoteUsdcConversion({Contract,provider:this.provider,dex:this.dex,usdc:this.feeUsdc,amountOut:parseUnits(nativeAmount,18),slippageBps});
     return {nativeAmount:formatUnits(q.amountOut,18),usdcAmount:formatUnits(q.amountIn,6),maxUsdc:formatUnits(q.maxUsdc,6),quotedAt:q.quotedAt,fee:q.fee};
   }
   async convertUsdc(body) {
     await this.checkNetwork();await this.verifyFactory();
     if(!Number.isSafeInteger(body.quotedAt)||Date.now()-body.quotedAt>60000||body.quotedAt>Date.now())throw new Error('Conversion quote expired. Get a fresh quote.');
-    const q=await quoteUsdcConversion({Contract,provider:this.provider,dex:this.dex,usdc:this.feeUsdc,amountOut:parseUnits(body.nativeAmount,18),slippageBps:Math.round(Number(body.slippage??'1')*100)});
+    const q=await quoteUsdcConversion({Contract,provider:this.provider,dex:this.dex,usdc:this.feeUsdc,amountOut:parseUnits(this.nativeAmount(body.nativeAmount),18),slippageBps:Math.round(Number(body.slippage??'1')*100)});
     const ceiling=parseUnits(body.maxUsdc,6);if(ceiling<=0n||q.amountIn>ceiling)throw new Error('USDC conversion price moved beyond your maximum. Get a new quote.');q.maxUsdc=ceiling;
     const coin=new Contract(this.feeUsdc,this.config.contracts.quote.abi,this.signer);
     if(await coin.balanceOf(this.address)<ceiling)throw new Error('Add at least '+body.maxUsdc+' USDC on this network. Native gas is also required.');

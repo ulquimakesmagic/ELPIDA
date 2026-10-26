@@ -19,7 +19,10 @@ export function usdcFunding(ctx, { amount, symbol, context='launch', onComplete 
   }}},'Confirm USDC conversion');
   const quote=h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:async()=>{
     if(session.pending)return;session.error='';session.quoted=null;session.pending=true;session.draw();
-    try{session.requestedAmount=amount();const body={nativeAmount:session.requestedAmount,slippage:'1'};const quoted=ctx.mode==='local'?await ctx.api('conversion-quote',body):await ctx.wallet.getUsdcConversionQuote(body);session.quoted=quoted;session.message=`Receive ${number(quoted.nativeAmount,8)} ${symbol}. Estimated cost ${number(quoted.usdcAmount,6)} USDC; maximum ${number(quoted.maxUsdc,6)} USDC with 1% slippage. Approve USDC, then confirm the swap. Native gas is required. The later launch or buy is separate.`;}
+    try{session.requestedAmount=String(amount()??'').trim();
+      // An empty or non-numeric field reached parseUnits() and surfaced as "invalid FixedNumber string value".
+      if(!/^\d+(\.\d+)?$/.test(session.requestedAmount)||Number(session.requestedAmount)<=0)throw new Error('Enter the amount you want to fund first.');
+      const body={nativeAmount:session.requestedAmount,slippage:'1'};const quoted=ctx.mode==='local'?await ctx.api('conversion-quote',body):await ctx.wallet.getUsdcConversionQuote(body);session.quoted=quoted;session.message=`Receive ${number(quoted.nativeAmount,8)} ${symbol}. Estimated cost ${number(quoted.usdcAmount,6)} USDC; maximum ${number(quoted.maxUsdc,6)} USDC with 1% slippage. Approve USDC, then confirm the swap. Native gas is required. The later launch or buy is separate.`;}
     catch(e){session.error=errorText(e);}finally{session.pending=false;session.draw();}
   }}},'Get USDC conversion quote');
   session.draw=()=>{status.textContent=session.message;error.textContent=session.error;confirm.hidden=!session.quoted;confirm.disabled=session.pending;quote.disabled=session.pending;};session.draw();
