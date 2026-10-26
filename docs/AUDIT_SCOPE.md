@@ -6,15 +6,15 @@ will run on mainnet. **Nothing here is audited yet.** Commit to audit: the `main
 
 ## 1. Scope
 
-**EVM, in scope: 9 files, 631 source lines** (Solidity 0.8.24, optimizer on with 1 run, `shanghai`). Everything that
+**EVM, in scope: 9 files, 671 source lines** (Solidity 0.8.24, optimizer on with 1 run, `shanghai`). Everything that
 `ElpidaAtomicDexFactory` deploys or calls:
 
 | File | SLOC | Role |
 |---|---|---|
 | `contracts/evm/src/ElpidaAtomicDexFactory.sol` | 8 | Mainnet factory: `ElpidaDexFactory` with graduation inside the completing buy, and token details required at launch |
-| `contracts/evm/src/ElpidaDexFactory.sol` | 101 | Launch (native or approved-asset pair), $10 fee, metadata URI once, curve deployer |
+| `contracts/evm/src/ElpidaDexFactory.sol` | 125 | Launch (native or approved-asset pair), $10 fee, metadata URI once, curve deployer, partner-tier registry |
 | `contracts/evm/src/ElpidaUsdPricing.sol` | 63 | Chainlink-compatible USD pricing, configured once, staleness checks |
-| `contracts/evm/src/ElpidaDexCurve.sol` | 196 | Virtual constant-product curve, anti-snipe fee, fees, completion, graduation, reopen |
+| `contracts/evm/src/ElpidaDexCurve.sol` | 212 | Virtual constant-product curve, anti-snipe fee, fees, partner buyback and burn, completion, graduation, reopen |
 | `contracts/evm/src/ElpidaV3MigrationAdapter.sol` | 122 | Uniswap v3 / PancakeSwap v3 pool creation, repricing a pre-created pool, full-range mint |
 | `contracts/evm/src/ElpidaV3FeeLocker.sol` | 53 | Holds the LP position forever; anyone can collect fees into the splitter |
 | `contracts/evm/src/ElpidaFeeSplitter.sol` | 41 | Pool fees, 50/50 to two fixed recipients |
@@ -42,6 +42,17 @@ clusters (`test_networks_only`, checklist B4).
    - Fees: a base fee of 1.25%, split 50/50 between protocol and creator. During the first 60 s an anti-snipe fee
      falls from 90% to the base. Anything above the base goes to `liquidityBonus`, which is locked into graduation
      liquidity.
+   - **Early-partner tiers** (`DESIGN_PARTNER_TIERS.md`):
+     - the treasury registers a launching wallet with `buybackBps` 1000 or 2000 and an expiry at most 180 days
+       ahead;
+     - a curve launched by that wallet before the expiry reads the value once (`launchBuybackBps`) and fixes it as
+       an immutable;
+     - on every trade the creator still gets `base - base / 2`; `base * buybackBps / 10000` comes out of the
+       protocol's half;
+     - that amount buys tokens at the current curve price, with no fee, in the same transaction, and sends them to
+       `0xdead` (`_buybackBurn`);
+     - a buyback that would reach `SALE_CAP`, or that buys nothing, is added to `liquidityBonus` instead, so a
+       buyback never completes the curve.
    - Buys that would cross the cap are partially filled, and the unused native value is refunded.
 3. **Graduation (atomic factory).** The buy that reaches `SALE_CAP` calls `_graduate`. The adapter:
    - creates the pool, or reprices one that already exists, swapping at most 2% of each asset with the price limit
@@ -59,8 +70,11 @@ clusters (`test_networks_only`, checklist B4).
 ## 3. Roles and trust
 
 - **Treasury** (immutable, set at factory deployment). It receives launch fees and the protocol share of fees. It can
-  call `configureUsdPricing` **once** and `approveQuote` (add-only, immutable templates). It has no other powers:
-  no owner, pause, upgrade, rescue, fee change or withdrawal of users' funds.
+  call `configureUsdPricing` **once** and `approveQuote` (add-only, immutable templates). It can also manage the
+  partner-tier registry (`setPartner`): it affects only **future** launches by the registered wallet, can only
+  move 10% or 20% of the fee from the protocol's own half to buy back and burn, and never changes the creator's 50%.
+  It has no other powers: no owner, pause, upgrade, rescue, fee change on launched tokens or withdrawal of users'
+  funds.
   - **Deployment consequence:** the treasury cannot be changed later, so the mainnet treasury must be the multisig
     from the start (checklist C3). It must also be able to receive the native coin (a Safe can), or every native
     launch reverts.
@@ -70,6 +84,10 @@ clusters (`test_networks_only`, checklist B4).
   - the DEX position manager, factory and WETH: read and checked against each other in the adapter constructor.
 
 ## 4. Invariants we test and want reviewed
+
+- Partner tiers: the creator's share is unchanged by any tier; protocol + creator + burn = the base fee exactly;
+  burned tokens equal `buybackBurned` and sit at `0xdead`; a buyback never completes the curve; a tier change never
+  affects a token already launched (`partner-tiers`, and both fuzz campaigns run Partner and Elite launches).
 
 - The curve is always exactly backed: the contract's quote balance equals `realReserve + protocolFees +
   creatorFees + liquidityBonus` (plus `quoteDust` after graduation). Tokens are conserved across curve, holders and

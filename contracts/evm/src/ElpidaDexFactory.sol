@@ -46,6 +46,15 @@ contract ElpidaDexFactory is ElpidaUsdPricing {
     event QuoteApproved(address indexed asset,uint256 virtualQuote,address adapter);
     event CustomPair(address indexed token,address indexed quote);
     event Launched(address indexed creator,address indexed token,address indexed curve,uint256 firstBuy,bool nativePair);
+    /// Early-partner tiers: part of Elpida's fee share buys back and burns the token, for tokens a partner wallet
+    /// launches before its expiry. The creator's 50% never changes. Set only by the treasury; each launched token
+    /// fixes its share for life, so changing or ending a tier never affects tokens already launched.
+    struct Partner { uint16 buybackBps; uint64 expiresAt; }
+    mapping(address => Partner) public partners;
+    uint64 public constant MAX_PARTNER_WINDOW = 180 days;
+    /// The burn share for the launch in progress, read once by the new curve's constructor; zero outside a launch.
+    uint16 public launchBuybackBps;
+    event PartnerSet(address indexed creator,uint16 buybackBps,uint64 expiresAt);
     constructor(address treasury_,address adapter_,uint256 startFdvUsd_,uint256 graduationGrace_) {
         require(treasury_ != address(0), "zero address");
         require(adapter_.code.length > 0, "adapter config");
@@ -55,6 +64,23 @@ contract ElpidaDexFactory is ElpidaUsdPricing {
         deployer = new ElpidaDexCurveDeployer();
     }
     function pricingOwner() internal view override returns(address){return treasury;}
+    function PARTNER_TIERS_VERSION() external pure returns(uint256){return 1;}
+    /// Register, change or end (0, 0) a tier: 1000 (Partner, 10% of the fee) or 2000 (Elite, 20%) buy back and burn.
+    function setPartner(address creator,uint16 buybackBps,uint64 expiresAt) external {
+        require(msg.sender == treasury, "owner only");
+        require(creator != address(0), "partner");
+        if (buybackBps == 0) { require(expiresAt == 0, "partner terms"); delete partners[creator]; }
+        else {
+            require((buybackBps == 1000 || buybackBps == 2000) && expiresAt > block.timestamp && expiresAt <= block.timestamp + MAX_PARTNER_WINDOW, "partner terms");
+            partners[creator] = Partner(buybackBps, expiresAt);
+        }
+        emit PartnerSet(creator, buybackBps, expiresAt);
+    }
+    /// The burn share a launch by `creator` would get now: its tier until the expiry (inclusive), otherwise 0.
+    function buybackShareOf(address creator) public view returns(uint16){
+        Partner memory p = partners[creator];
+        return p.buybackBps != 0 && block.timestamp <= p.expiresAt ? p.buybackBps : 0;
+    }
     function automaticGraduation() public pure virtual returns(bool){return false;}
     /// True when every launch must publish its token details (an ipfs:// URI) in the launch transaction itself.
     function requiresMetadata() public pure virtual returns(bool){return false;}
@@ -103,7 +129,9 @@ contract ElpidaDexFactory is ElpidaUsdPricing {
         require(!entered,"reentrancy");entered=true;QuoteTemplate memory template=approvedQuotes[asset];require(template.adapter!=address(0)&&reward!=address(0),"pair/reward");
         _chargeLaunchFee(0,inUsdc);
         IERC20Minimal q=IERC20Minimal(asset);uint256 beforeBalance=q.balanceOf(address(this));require(q.transferFrom(msg.sender,address(this),firstBuy),"pair funding");require(q.balanceOf(address(this))-beforeBalance==firstBuy,"unsupported quote");
+        launchBuybackBps=buybackShareOf(msg.sender);
         (token,curve)=deployer.create(name_,symbol_,asset,treasury,reward,template.virtualQuote,VIRTUAL_TOKEN,template.adapter,graduationGrace);
+        launchBuybackBps=0;
         require(IERC20Minimal(token).transfer(curve,TOKEN_SUPPLY),"token seed");require(q.approve(curve,firstBuy),"pair approval");ElpidaDexCurve(curve).initialBuy(msg.sender,firstBuy,minOut);require(q.approve(curve,0),"cleanup");
         // A first buy larger than the whole curve is partially filled; return the unused quote to the creator.
         uint256 unused=q.balanceOf(address(this))-beforeBalance;if(unused>0)require(q.transfer(msg.sender,unused),"refund");
@@ -113,7 +141,9 @@ contract ElpidaDexFactory is ElpidaUsdPricing {
         require(!entered, "reentrancy"); entered = true;
         require(reward != address(0), "reward required");
         _chargeLaunchFee(firstBuy,inUsdc);
+        launchBuybackBps=buybackShareOf(msg.sender);
         (token,curve)=deployer.create(name_,symbol_,address(0),treasury,reward,nativeVirtualQuote(),VIRTUAL_TOKEN,migrationAdapter,graduationGrace);
+        launchBuybackBps=0;
         require(IERC20Minimal(token).transfer(curve,TOKEN_SUPPLY), "token seed");
         ElpidaDexCurve(curve).initialBuy{value:firstBuy}(msg.sender,firstBuy,minOut);
         isElpidaToken[token] = true; emit Launched(msg.sender,token,curve,firstBuy,true);
