@@ -110,3 +110,11 @@ test('HTTP: challenge, signed session cookie, overview behind it, CSRF and sign-
   assert.equal((await post('admin/logout', {}, { Cookie: jar })).status, 200);
   assert.equal((await fetch(app.url + '/api/admin/overview', { headers: { Cookie: jar } })).status, 401, 'signed out');
 });
+
+test('the operator page lives at #/monkey; #/admin is not a page', async () => {
+  const { readFileSync } = await import('node:fs');
+  const app = readFileSync(new URL('../apps/web/app.mjs', import.meta.url), 'utf8'), view = readFileSync(new URL('../apps/web/admin-view.mjs', import.meta.url), 'utf8');
+  assert.match(app, /'\/monkey': 'admin'/);
+  assert.doesNotMatch(app, /'\/admin':/);
+  assert.doesNotMatch(view, /href: '#\/admin/);
+});

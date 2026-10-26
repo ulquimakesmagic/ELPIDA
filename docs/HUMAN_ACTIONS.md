@@ -1,17 +1,33 @@
 # Actions that need Malik
 
-## Operator panel (`elpida.fun/#/admin`), 26 October 2026
+## Operator panel (`elpida.fun/#/monkey`), 26 October 2026
 
 A read-only operations view: health and incidents, each factory's treasury balance (native and USDC), launches and
 volume, indexers, the price relay, graduation and backups. It cannot send transactions.
 
-- **Sign in** with your wallet on an EVM network: open `elpida.fun/#/admin`, connect, then "Sign in with this
+- **Sign in** with your wallet on an EVM network: open `elpida.fun/#/monkey`, connect, then "Sign in with this
   wallet" and sign the message (free, no transaction). The server lets in the treasury of any configured factory,
   read from the contract, so on testnets your treasury wallet works with no setup.
 - **Optional:** to let in other wallets, add the Railway variable `ELPIDA_ADMIN_ADDRESSES` (comma-separated
   addresses). This is needed on mainnet: the treasury there is a Safe, which cannot sign a message, so list the
   owners' own wallets. Addresses are public; this variable holds no secret.
 - Sessions last eight hours and end on every redeploy.
+- The page lives at `#/monkey`, not `#/admin`, so it is not the first thing a scanner finds. That only hides the
+  door: the lock is the wallet signature, checked by the server on every request. `#/admin` shows "Page not found".
+
+### Partners tab (`#/monkey?tab=partners`)
+
+Devs apply from the footer link "Partner with Elpida" (`#/partners`). Each application proves its launching wallets
+with a free signature and is stored privately on the server (`partner-applications.sqlite` in the data volume).
+
+- **Review:** approve with a tier (Partner or Elite), a window (30 to 90 days; 60 by default) and the chains to
+  register, or reject. Notes are visible to other operators. Every action records who did it.
+- **Register (you sign):** approval does not touch the chain. For each chain the tab shows the factory's
+  `setPartner` call. Connect the treasury wallet on that chain and press "Register with treasury", or paste the call
+  into the treasury Safe on mainnet. The tab then reads the factory back and shows "registered".
+- **Ending early:** "End partnership", then "Clear with treasury" on each chain. Tokens already launched keep their tier.
+- Registration needs the partner-tier factories (PRs #105 and the LP follow-up) deployed. On today's testnet factories
+  the tab shows "factory has no registry". Solana registration arrives with the program upgrade.
 
 ## Cloudflare in front of elpida.fun, 20 October 2026
 

@@ -1,9 +1,12 @@
 import { h, icon, short, number, compact, errorText } from './ui.mjs';
 import { chainIcon } from './chain-ui.mjs';
 import { withWalletTimeout } from './wallet.mjs';
+import { renderPartners } from './admin-partners.mjs';
 
-// Operator panel (#/admin). Read-only: it shows health, treasury balances, activity, indexers, the price relay,
-// graduation and backups. Sign-in is a wallet signature checked by the server against the factory treasuries and
+// Operator panel (#/monkey; deliberately not #/admin, the first path scanners try). The Operations tab is read-only:
+// health, treasury balances, activity, indexers, the price
+// relay, graduation and backups. The Partners tab (#/monkey?tab=partners) reviews early-partner applications; see
+// admin-partners.mjs. Sign-in is a wallet signature checked by the server against the factory treasuries and
 // ELPIDA_ADMIN_ADDRESSES; the session is an HttpOnly cookie the page never sees. Nothing here sends a transaction.
 
 const ago = iso => { const t = typeof iso === 'number' ? iso : Date.parse(iso ?? ''); if (!Number.isFinite(t) || t <= 0) return 'never'; const s = Math.max(0, Math.round((Date.now() - t) / 1000)); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`; };
@@ -133,9 +136,14 @@ export function renderAdmin(ctx, { connect }) {
     try {
       const session = await getJson('admin/session');
       if (!session.signedIn) { root.replaceChildren(signInView()); return; }
+      const tab = /(?:^|[?&])tab=partners(?:&|$)/.test(location.hash.split('?')[1] ?? '') ? 'partners' : 'ops';
+      const tabs = h('nav.op-tabs', { 'aria-label': 'Admin sections' },
+        h('a', { href: '#/monkey', 'aria-current': tab === 'ops' ? 'page' : undefined }, 'Operations'),
+        h('a', { href: '#/monkey?tab=partners', 'aria-current': tab === 'partners' ? 'page' : undefined }, 'Partners'));
+      if (tab === 'partners') { root.replaceChildren(tabs, renderPartners(ctx, { getJson })); return; }
       const data = await getJson('admin/overview');
       if (!root.isConnected) return;
-      root.replaceChildren(dashboard(data, load));
+      root.replaceChildren(tabs, dashboard(data, load));
     } catch (e) {
       root.replaceChildren(e.status === 401 ? signInView('Your session ended. Sign in again.') : h('div.pf-empty', h('h2', 'Operations view unavailable'), h('p', errorText(e)), h('button.btn.btn-secondary', { type: 'button', on: { click: load } }, 'Retry')));
     }

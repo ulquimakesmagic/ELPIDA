@@ -18,6 +18,7 @@ import { renderToken } from './token-page.mjs';
 import { renderRewards } from './rewards-view.mjs';
 import { portfolioView } from './portfolio-view.mjs';
 import { renderAdmin } from './admin-view.mjs';
+import { partnersView } from './partners-view.mjs';
 import { circleFundingPanel } from './circle-funding.mjs';
 import { initShell, renderLastSale, syncSearch } from './shell.mjs';
 import { startResilience } from './resilience.mjs';
@@ -196,7 +197,7 @@ function parseRoute() {
   if (doc) return { name: 'docs', section: doc[1] };
   const token = hash.match(/^\/token\/([A-Za-z0-9]{32,64})$/);
   if (token) return { name: 'token', address: token[1],network:new URLSearchParams(query).get('network') };
-  return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/docs': 'docs', '/admin': 'admin' }[hash] ?? 'notfound' };
+  return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/docs': 'docs', '/monkey': 'admin', '/partners': 'partners' }[hash] ?? 'notfound' };
 }
 function route() {
   const next = parseRoute(); const changed = next.name !== currentRoute.name || next.address !== currentRoute.address;
@@ -205,14 +206,14 @@ function route() {
 
   if(next.network&&networkByKey(next.network)&&next.network!==currentChain()){chooseChain(next.network).catch(e=>toast(errorText(e),{kind:'error'}));return;}
   $$('[data-nav]').forEach(link => { if (link.dataset.nav === next.name) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
-  document.title = { explore: 'Explore tokens across chains | Elpida', portfolio: 'Portfolio | Elpida', rewards: 'Creator rewards | Elpida', launch: 'Create a token | Elpida', token: 'Token | Elpida', analytics: 'Analytics — Launches, volume & fees | Elpida', admin: 'Operations | Elpida', docs: 'Docs | Elpida', notfound: 'Page not found | Elpida' }[next.name];
+  document.title = { explore: 'Explore tokens across chains | Elpida', portfolio: 'Portfolio | Elpida', rewards: 'Creator rewards | Elpida', launch: 'Create a token | Elpida', token: 'Token | Elpida', analytics: 'Analytics — Launches, volume & fees | Elpida', admin: 'Operations | Elpida', partners: 'Partner with Elpida | Elpida', docs: 'Docs | Elpida', notfound: 'Page not found | Elpida' }[next.name];
   rerender('route');
   { const v = $('#view'); v.classList.remove('view-enter'); void v.offsetWidth; v.classList.add('view-enter'); }
   if(changed&&wallet?.address&&!['explore','analytics'].includes(next.name))refresh({preserveInput:true,walletRead:true}).catch(e=>toast(errorText(e),{kind:'error'}));
   if (changed) { window.scrollTo({ top: 0 }); if (next.name !== 'launch'&&!['top-search-input','sheet-search-input'].includes(document.activeElement?.id)) $('#main').focus({ preventScroll: true }); }
   if(next.name==='explore'&&pendingSearchReveal&&exploreView){pendingSearchReveal=false;exploreView.setQuery(exploreView.query,{reveal:true});}
 }
-let launchView = null, analyticsView = null, exploreView = null;
+let launchView = null, analyticsView = null, exploreView = null, partnerPage = null;
 const freshPrice = p => !!p && p.status === 'fresh' && Number.isFinite(p.usd) && nowSeconds() - p.updatedAt <= (p.maxAge ?? 180);
 /** What the Explore view reads from the app; it never touches wallets or routing directly. */
 const exploreSource = {
@@ -243,6 +244,7 @@ function rerender(reason) {
   if (r.name !== 'explore') closeExplore();
   if(r.name==='notfound'){view.setAttribute('aria-busy','false');view.replaceChildren(notFoundView());return;}
   // The operator panel loads its own data; a background refresh must not reset it mid-read.
+  if(r.name==='partners'){view.setAttribute('aria-busy','false');if(reason==='route'||!partnerPage||!view.contains(partnerPage.root)){partnerPage=partnersView(ctx,{connect:connectCurrent});view.replaceChildren(partnerPage.root);}else partnerPage.update();return;}
   if(r.name==='admin'){view.setAttribute('aria-busy','false');if(reason==='route'||!view.querySelector('.op')||view.querySelector('.op-signin'))view.replaceChildren(renderAdmin(ctx,{connect:connectCurrent}));return;}
   if (r.name === 'launch') {
     // The launch flow owns its own state; a data refresh only updates balances and connection status.
@@ -411,7 +413,8 @@ async function openTools() {
         deployed&&wallet.dex&&wallet.feeUsdc&&!/^0x0{40}$/i.test(wallet.feeUsdc)&&state?.pricing?.owner&&pairs?.usdc?.unavailable?h('div.stack',h('p.small.muted','Approve the configured USDC asset for trading. This creates its graduation adapter and fixes the starting valuation in USDC at the launchpad\u2019s starting FDV. Existing tokens are unchanged.'),h('button.btn.btn-secondary',{type:'button',on:{click:()=>act('setup-usdc-pair',{}).then(r=>{downloadSafeBatch(r);openTools();})}},'Enable USDC trading pair')):null,
         h('p.small.muted', deployed ? `${wallet.deployment.shared ? 'Shared team' : 'Your'} launchpad: ${short(wallet.deployment.factory)}.${wallet.modelUpgradeAvailable ? ' This is the older model 9 launchpad. Model 10 adds launch protection, the 10x curve and the graduation escape hatch; existing tokens keep trading on model 9.' : wallet.needsMetadataUpgrade ? ' A newer version with shared token metadata is available.' : ''}` : 'Each public testnet needs a one-time launchpad setup from your wallet before the first token.'),
         treasuryInput ? h('label.field', h('span.small.muted', 'Treasury: receives launch fees and alone can finish the setup. It can never be changed. Use a Safe multisig for anything beyond testing.'), treasuryInput) : null,
-        (!deployed || wallet.needsMetadataUpgrade || wallet.modelUpgradeAvailable || wallet.feeFixUpgradeAvailable || wallet.launchUpgradeAvailable) && wallet.address ? h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { downloadSafeBatch(await run('deploy', { treasury: treasuryInput?.value ?? '' })); openTools(); } catch (e) { fail(e); } } } }, wallet.launchUpgradeAvailable?'Deploy automatic-graduation launchpad':wallet.feeFixUpgradeAvailable?'Deploy corrected Base Sepolia launchpad':deployed ? 'Set up the newer launchpad' : 'Set up launchpad') : null,
+        (!deployed || wallet.needsMetadataUpgrade || wallet.modelUpgradeAvailable || wallet.feeFixUpgradeAvailable || wallet.launchUpgradeAvailable || wallet.partnerUpgradeAvailable) && wallet.address ? h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { downloadSafeBatch(await run('deploy', { treasury: treasuryInput?.value ?? '' })); openTools(); } catch (e) { fail(e); } } } }, wallet.launchUpgradeAvailable?'Deploy automatic-graduation launchpad':wallet.partnerUpgradeAvailable?'Deploy partner-tier launchpad':wallet.feeFixUpgradeAvailable?'Deploy corrected Base Sepolia launchpad':deployed ? 'Set up the newer launchpad' : 'Set up launchpad') : null,
+        wallet.partnerUpgradeAvailable?h('p.small.muted','This launchpad predates partner tiers. Deploy the new version to register partners (10% or 20% of fees buy back and burn). Test gas only. Existing tokens keep their contracts and stay listed. After deployment, share the factory address so it can be pinned for all visitors.'):null,
         wallet.feeFixUpgradeAvailable?h('p.small.muted','The current Model 10 factory predates the shared-recipient fee fix. Deploy a corrected testnet factory using test ETH for gas. Pricing stays unchanged. Existing tokens keep their original contracts. After deployment, share the factory address so it can be registered for all visitors.'):null,
         deployed ? h('div.stack', h('p.small.muted', state?.pricing?.verified ? `$10 launch fee, converted by the on-chain price feed at execution. Starting FDV: $${Number(wallet.startFdvUsd ?? 5000).toLocaleString()} before the first purchase.` : 'USD pricing must be activated before launching.'), !state?.pricing?.verified ? h('button.btn.btn-secondary',{type:'button',on:{click:()=>act('apply-pricing',{}).then(r=>{downloadSafeBatch(r);openTools();})}},wallet.deployment?.treasury&&wallet.deployment.treasury.toLowerCase()!==String(wallet.address).toLowerCase()?'Download the Safe setup file':'Activate price feed') : null) : null,
         deployed && wallet.dex && wallet.address && pairs && (pairs.xstock.unavailable || pairs.token.unavailable) ? h('div.stack', h('p.small.muted', 'xStock and paired-token launches need approved assets. The launchpad owner can deploy the labelled test assets (TEST-STOCK and TEST-MEME) and approve them: six confirmations, gas only.'),

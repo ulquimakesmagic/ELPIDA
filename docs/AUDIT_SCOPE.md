@@ -6,7 +6,7 @@ will run on mainnet. **Nothing here is audited yet.** Commit to audit: the `main
 
 ## 1. Scope
 
-**EVM, in scope: 9 files, 671 source lines** (Solidity 0.8.24, optimizer on with 1 run, `shanghai`). Everything that
+**EVM, in scope: 9 files, 719 source lines** (Solidity 0.8.24, optimizer on with 1 run, `shanghai`). Everything that
 `ElpidaAtomicDexFactory` deploys or calls:
 
 | File | SLOC | Role |
@@ -15,9 +15,9 @@ will run on mainnet. **Nothing here is audited yet.** Commit to audit: the `main
 | `contracts/evm/src/ElpidaDexFactory.sol` | 125 | Launch (native or approved-asset pair), $10 fee, metadata URI once, curve deployer, partner-tier registry |
 | `contracts/evm/src/ElpidaUsdPricing.sol` | 63 | Chainlink-compatible USD pricing, configured once, staleness checks |
 | `contracts/evm/src/ElpidaDexCurve.sol` | 212 | Virtual constant-product curve, anti-snipe fee, fees, partner buyback and burn, completion, graduation, reopen |
-| `contracts/evm/src/ElpidaV3MigrationAdapter.sol` | 122 | Uniswap v3 / PancakeSwap v3 pool creation, repricing a pre-created pool, full-range mint |
+| `contracts/evm/src/ElpidaV3MigrationAdapter.sol` | 128 | Uniswap v3 / PancakeSwap v3 pool creation, repricing a pre-created pool, full-range mint, passes the curve's buyback share to the locker |
 | `contracts/evm/src/ElpidaV3FeeLocker.sol` | 53 | Holds the LP position forever; anyone can collect fees into the splitter |
-| `contracts/evm/src/ElpidaFeeSplitter.sol` | 41 | Pool fees, 50/50 to two fixed recipients |
+| `contracts/evm/src/ElpidaFeeSplitter.sol` | 83 | Pool fees: 50% to the creator; for partner tokens a fixed share bought back and burned; the rest to the treasury |
 | `contracts/evm/src/ElpidaToken.sol` | 40 | Fixed-supply ERC-20 (1B, no mint, no owner, no hooks) |
 | `contracts/evm/src/ElpidaInterfaces.sol` | 7 | Shared minimal ERC-20 interface |
 
@@ -52,7 +52,14 @@ clusters (`test_networks_only`, checklist B4).
      - that amount buys tokens at the current curve price, with no fee, in the same transaction, and sends them to
        `0xdead` (`_buybackBurn`);
      - a buyback that would reach `SALE_CAP`, or that buys nothing, is added to `liquidityBonus` instead, so a
-       buyback never completes the curve.
+       buyback never completes the curve;
+     - after graduation the adapter passes the curve's `buybackBps` to the locker and splitter. Of each pool-fee
+       deposit the creator still gets `amount - amount / 2`; the burn share of the **token** side goes straight to
+       `0xdead`; the burn share of the **quote** side is queued in `pendingBuyback`;
+     - anyone can call `buyback()`, which swaps at most 1% of the pool's quote balance per call through the pool
+       (recipient `0xdead`). Only the pool can call the swap callback, only during that swap, and only for at most
+       the queued amount. The 1% cap is the sandwich defence: with the 1% pool fee, moving the price around a
+       buyback of at most 1% of depth costs the attacker more than it returns.
    - Buys that would cross the cap are partially filled, and the unused native value is refunded.
 3. **Graduation (atomic factory).** The buy that reaches `SALE_CAP` calls `_graduate`. The adapter:
    - creates the pool, or reprices one that already exists, swapping at most 2% of each asset with the price limit
@@ -65,7 +72,7 @@ clusters (`test_networks_only`, checklist B4).
    `reopen()` after `graduationGrace` (24 h on mainnet).
 5. **Fees.** Curve fees are paid with `withdrawFees`/`claimFees`, which never revert because a recipient fails.
    Pool fees are paid with locker `collectFees`, then splitter `claim`. All of these are permissionless and pay
-   only to the two recipients fixed at launch.
+   only to the two recipients fixed at launch (and, for partner tokens, to `0xdead` through `buyback()`).
 
 ## 3. Roles and trust
 
@@ -88,6 +95,10 @@ clusters (`test_networks_only`, checklist B4).
 - Partner tiers: the creator's share is unchanged by any tier; protocol + creator + burn = the base fee exactly;
   burned tokens equal `buybackBurned` and sit at `0xdead`; a buyback never completes the curve; a tier change never
   affects a token already launched (`partner-tiers`, and both fuzz campaigns run Partner and Elite launches).
+- Partner tiers after graduation: the splitter's balance of each asset equals the two recipients' claims plus
+  `pendingBuyback`; each `buyback()` spends at most 1% of the pool's quote balance; nobody but the pool, inside the
+  splitter's own swap, can take quote from the splitter (`partner-tiers-lp`, and the fuzz campaign calls
+  `buyback()` at random and drains the queue at the end).
 
 - The curve is always exactly backed: the contract's quote balance equals `realReserve + protocolFees +
   creatorFees + liquidityBonus` (plus `quoteDust` after graduation). Tokens are conserved across curve, holders and

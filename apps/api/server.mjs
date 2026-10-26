@@ -3,6 +3,7 @@ import { indexedChange, indexedActivity, activityOf } from '../web/discovery.mjs
 import { protocolAnalytics } from './protocol-analytics.mjs';
 import { AdminAuth, parseAdminAddresses, sessionCookie, clearCookie } from './admin-auth.mjs';
 import { readTreasuries, operatorAddresses, cachedLoader } from './admin-overview.mjs';
+import { PartnerApplications, registryStatus, registrationCall } from './partner-applications.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
 import {configuredGraduationKeeper} from './graduation-keeper.mjs';
 import { FeedRelay } from './feed-relay.mjs';
@@ -55,6 +56,8 @@ resources.set('/token-insights.mjs',['token-insights.mjs','text/javascript']);
 resources.set('/portfolio-view.mjs',['portfolio-view.mjs','text/javascript']);
 resources.set('/portfolio-model.mjs',['portfolio-model.mjs','text/javascript']);
 resources.set('/admin-view.mjs',['admin-view.mjs','text/javascript']);
+resources.set('/admin-partners.mjs',['admin-partners.mjs','text/javascript']);
+resources.set('/partners-view.mjs',['partners-view.mjs','text/javascript']);
 resources.set('/tax-policy.mjs',['tax-policy.mjs','text/javascript']);
 resources.set('/tax-wallet.mjs',['tax-wallet.mjs','text/javascript']);
 resources.set('/tax-allocation.mjs',['tax-allocation.mjs','text/javascript']);
@@ -203,6 +206,14 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const adminAddresses=parseAdminAddresses(process.env.ELPIDA_ADMIN_ADDRESSES);
   const treasuryNetworks=()=>evmTestnets.filter(n=>publicIndex.entries.get(n.key)).map(n=>({key:n.key,name:n.name,explorer:n.explorer,nativeSymbol:n.nativeCurrency?.symbol,factory:n.shared?.factory,provider:publicIndex.entries.get(n.key).index.provider}));
   const treasuries=cachedLoader(()=>readTreasuries(treasuryNetworks()),60000);
+  // Early-partner applications: private, reviewed in the admin panel; registration is a treasury-signed setPartner.
+  const siteHost=(()=>{try{return publicUrl?new URL(publicUrl).host:'localhost';}catch{return 'elpida';}})();
+  const partnerApps=new PartnerApplications({path:port===0?':memory:':dataFile('partner-applications.sqlite'),host:siteHost});
+  let partnerWindow=Date.now(),partnerChallenges=0,partnerApplies=0;
+  const partnerLimit=apply=>{if(Date.now()-partnerWindow>=60000){partnerWindow=Date.now();partnerChallenges=0;partnerApplies=0;}return apply?++partnerApplies>10:++partnerChallenges>60;};
+  const registryNetworks=()=>treasuryNetworks().map(n=>({key:n.key,name:n.name,explorer:n.explorer,factory:n.factory,provider:n.provider}));
+  let registryCache={at:0,key:'',value:null};
+  async function partnerRegistry(applications,fresh){const key=applications.filter(a=>a.approved).map(a=>`${a.id}:${a.status}`).join(',');if(!fresh&&registryCache.value&&registryCache.key===key&&Date.now()-registryCache.at<30000)return registryCache.value;const value=await registryStatus(applications,registryNetworks());registryCache={at:Date.now(),key,value};return value;}
   const analyticsSources=()=>{
     const sources=evmTestnets.map(net=>({key:net.key,name:net.name,status:publicIndex.status(net.key),tokens:publicIndex.listings(net.key),trades:publicIndex.tradeRows(net.key)}));
     if(solanaIndex)sources.push({key:solanaIndex.network.key,name:solanaIndex.network.name,status:{enabled:true,...solanaIndex.status(),scope:'Elpida curves and PumpSwap swaps on migrated Elpida pools'},tokens:solanaIndex.listings(),trades:solanaIndex.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()});
@@ -314,6 +325,16 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           const activity=Object.fromEntries(['24h','7d','all'].map(period=>{try{const a=protocolAnalytics({sources:analyticsSources(),prices:priceSnapshot(),period});return [period,{totals:a.totals,coverage:a.coverage}];}catch(error){return [period,{error:error.message}];}}));
           let treasury=[];try{treasury=await treasuries();}catch(error){treasury=[{error:String(error.message).slice(0,160)}];}
           return send(200,{operator:s.address,generatedAt:Date.now(),health,backup:backupRunner.status(),relay:feedRelay.status(),graduation:graduationKeeper.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),metadata:metadataStore.status().storage},prices:priceSnapshot(),networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,{name:n.name,...publicIndex.status(n.key)}])),...(solanaIndex?{[solanaIndex.network.key]:{name:solanaIndex.network.name,enabled:true,...solanaIndex.status()}}:{})},treasury,activity,admins:{configured:adminAddresses.length,treasuries:treasury.filter(t=>t.treasury).length}});
+        }
+        if(url.pathname==='/api/admin/partners'){
+          const s=adminAuth.session(req.headers.cookie);if(!s)return send(401,{error:'Sign in as an operator to see this.'});
+          const applications=partnerApps.list();let registry={},registryError=null;
+          try{registry=await partnerRegistry(applications,url.searchParams.get('fresh')==='1');}catch(error){registryError=String(error.message).slice(0,160);}
+          let treasury=[];try{treasury=await treasuries();}catch{}
+          const networks=registryNetworks().map(n=>({key:n.key,name:n.name,explorer:n.explorer,factory:n.factory,treasury:treasury.find(t=>t.network===n.key)?.treasury??null,kind:'evm'}));
+          networks.push({key:solanaNet.key,name:solanaNet.name,kind:'solana',supported:false,reason:'Solana partner registration arrives with the program upgrade.'});
+          const calls=Object.fromEntries(applications.filter(a=>a.approved&&a.evm&&['approved','ended'].includes(a.status)).map(a=>[a.id,Object.fromEntries(networks.filter(n=>n.kind==='evm'&&n.factory&&a.approved.chains.includes(n.key)).map(n=>[n.key,a.status==='approved'?registrationCall(n.factory,a.evm,a.approved.buybackBps,a.approved.expiresAt):registrationCall(n.factory,a.evm,0,0)]))]));
+          return send(200,{operator:s.address,generatedAt:Date.now(),counts:partnerApps.counts(),applications,networks,registry,registryError,calls});
         }
         if(url.pathname==='/api/operations/status'){const result=evaluateOperations(operationsInput());return send(result.status==='critical'?503:200,{...result,backup:backupRunner.status(),metadataStorage:metadataStore.status().storage});}
         if(url.pathname==='/api/metadata/challenge'){
@@ -433,6 +454,14 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         try{const r=await adminAuth.signIn(body,isAllowed);res.setHeader('Set-Cookie',sessionCookie(r.token,{secure:!!publicUrl}));return send(200,{signedIn:true,address:r.address,expires:r.expires});}
         catch(error){return send(error.status??400,{error:error.message});}
       }
+      if(action==='admin/partners/review'){
+        const s=adminAuth.session(req.headers.cookie);if(!s)return send(401,{error:'Sign in as an operator to do this.'});
+        try{return send(200,partnerApps.review(body.id,body,s.address));}catch(error){return send(error.status??400,{error:error.message});}
+      }
+      if(action==='partners/challenge'||action==='partners/apply'){
+        if(partnerLimit(action==='partners/apply'))return send(429,{error:'Applications are busy. Try again in a minute.'});
+        try{return send(200,action==='partners/challenge'?partnerApps.challenge(body):partnerApps.apply(body));}catch(error){return send(error.status??400,{error:error.message});}
+      }
       if(action==='admin/logout'){adminAuth.signOut(req.headers.cookie);res.setHeader('Set-Cookie',clearCookie({secure:!!publicUrl}));return send(200,{signedIn:false});}
       if(['chat/report/prepare','chat/report/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat reporting is busy. Retry shortly.'});return send(200,action==='chat/report/prepare'?await chat.prepareReport(body):await chat.saveReport(body));}
       if(['chat/prepare','chat/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat publishing is busy. Retry shortly.'});return send(200,action==='chat/prepare'?await chat.prepare(body):await chat.save(body));}
@@ -475,7 +504,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
   bootPhase('listening');
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();partnerApps.db.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
