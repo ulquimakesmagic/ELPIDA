@@ -9,7 +9,9 @@ import { testnetDexes } from '../../packages/core/uniswap.mjs';
 // A read-only worker per configured deployment. Never accepts user RPCs or private keys.
 // How often the public indexes poll, and how many networks sync at once. A trade is visible to the API once the
 // network that carries it has been read, so the interval is the freshness of every trade endpoint.
-const TICK_MS=Math.max(2000,Math.min(60000,Number(process.env.ELPIDA_INDEX_INTERVAL_MS)||5000));
+// The EVM networks expose no WebSocket endpoint, so a block is seen no sooner than one poll. 3 s is the floor that
+// stays inside the public RPCs' rate limits for four chains; ELPIDA_INDEX_INTERVAL_MS tunes it per deployment.
+const TICK_MS=Math.max(1500,Math.min(60000,Number(process.env.ELPIDA_INDEX_INTERVAL_MS)||3000));
 const TICK_CONCURRENCY=Math.max(1,Math.min(8,Number(process.env.ELPIDA_INDEX_CONCURRENCY)||3));
 // One token's inline data: image made every listing 1.1 MB. A listing ships the URL instead; the bytes are
 // served once by /api/wallet-logo and cached by the browser.
