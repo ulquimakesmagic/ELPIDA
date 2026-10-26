@@ -21,12 +21,18 @@ export function terminalChart(ctx,token,q){
  let chart,observer,main,vol,markerApi,rate,scale,unit,formatter,revision=0,timer,lastRows='';
  const decimals=ctx.wallet===ctx.solWallet?6:18;
  function cleanup(){if(chart){try{pref.range=chart.timeScale().getVisibleRange();}catch{}}observer?.disconnect();chart?.remove();chart=main=vol=markerApi=null;}
- const lifecycle=new MutationObserver(()=>{if(!panel.isConnected){cleanup();clearInterval(timer);lifecycle.disconnect();}});
+ // Desktop (chart beside the trade panel): size the plot so it ends just above the bottom of the window, between
+ // 300 and 560 px. Narrower layouts keep the stylesheet heights. Written through CSSOM, which the CSP allows.
+ const wide=typeof matchMedia==='function'?matchMedia('(min-width: 1001px)'):null;
+ function fitHeight(){if(!plot.isConnected)return;if(!wide?.matches){plot.style.removeProperty('height');return;}const top=plot.getBoundingClientRect().top+(window.scrollY||0);plot.style.height=`${Math.round(Math.min(560,Math.max(300,window.innerHeight-top-18)))}px`;}
+ let fitTimer;const onResize=()=>{clearTimeout(fitTimer);fitTimer=setTimeout(fitHeight,120);};
+ if(typeof window!=='undefined'&&window.addEventListener){window.addEventListener('resize',onResize);requestAnimationFrame?.(()=>requestAnimationFrame(fitHeight));}
+ const lifecycle=new MutationObserver(()=>{if(!panel.isConnected){cleanup();clearInterval(timer);window.removeEventListener?.('resize',onResize);lifecycle.disconnect();}});
  function group(label,values,current,update){return h('div.chart-options',{role:'group','aria-label':label},values.map(([v,t])=>h('button.btn.btn-secondary.btn-sm',{type:'button','aria-pressed':String(v===current),on:{click:()=>{update(v);pref.range=null;draw();load();}}},t)));}
  function draw(){controls.replaceChildren(
   group('Chart interval',INTERVALS,pref.interval,v=>pref.interval=v),
-  h('div.chart-controls-end',group('Chart value',[['cap','Market cap'],['price','Price']],pref.basis,v=>pref.basis=v),...(panel.sparse?[]:[group('Chart style',[['candles','Candles'],['area','Area']],pref.style==='line'?'area':pref.style,v=>pref.style=v)]),
-   markerToggle('dev','Dev trades','Mark the creator\'s buys and sells on the chart'),markerToggle('mine','My trades','Mark your own buys and sells on the chart'),
+  h('div.chart-controls-end',group('Chart value',[['cap','MCap'],['price','Price']],pref.basis,v=>pref.basis=v),...(panel.sparse?[]:[group('Chart style',[['candles','Candles'],['area','Area']],pref.style==='line'?'area':pref.style,v=>pref.style=v)]),
+   markerToggle('dev','Dev','Mark the creator\'s buys and sells on the chart'),markerToggle('mine','Mine','Mark your own buys and sells on the chart'),
    h('button.btn.btn-secondary.btn-sm.chart-fit',{type:'button','aria-label':'Fit chart to all data',title:'Fit to data',on:{click:()=>{pref.range=null;chart?.timeScale().fitContent();}}},'Fit')));}
  function markerToggle(kind,label,title){return h('button.btn.btn-secondary.btn-sm.chart-marker-toggle',{type:'button',title,'aria-pressed':String(pref[kind]!==false),on:{click:event=>{pref[kind]=pref[kind]===false;event.currentTarget.setAttribute('aria-pressed',String(pref[kind]));applyMarkers();}}},h('i',{class:`marker-dot marker-${kind}`,'aria-hidden':'true'}),label);}
  // Dev and own-trade markers, from the trades the page already fetched (panel.markerSource). Only buckets that
@@ -52,7 +58,7 @@ export function terminalChart(ctx,token,q){
  function showLegend(bar,volume){
   if(!bar){legend.replaceChildren();return;}
   const up=bar.close>=bar.open,chg=pctText(bar.open,bar.close);
-  const cell=(k,v)=>h('span.cr-cell',h('em',k),v);
+  const cell=(k,v)=>h('span.cr-cell',{'data-k':k},h('em',k),v);
   legend.replaceChildren(h('span.cr-basis',pref.basis==='cap'?'Market cap':'Price'),cell('O',formatter(bar.open)),cell('H',formatter(bar.high)),cell('L',formatter(bar.low)),cell('C',formatter(bar.close)),chg?h('span.cr-chg',{'data-dir':up?'up':'down'},chg):null,h('span.cr-unit',unit),volume!==undefined&&volumeUnit!==null?cell('Vol',volumeUnit==='$'?'$'+compact(volume):`${compact(volume)} ${volumeUnit}`.trim()):null);
  }
  function empty(message,sub){overlay.replaceChildren(h('div.chart-empty',icon('chart-candlestick','icon-lg'),h('strong',message),sub?h('span',sub):null));overlay.hidden=false;}
@@ -71,7 +77,7 @@ export function terminalChart(ctx,token,q){
    chart=lib.createChart(plot,{width:plot.clientWidth,height:plot.clientHeight||380,
     layout:{background:{color:'transparent'},textColor:tone('--muted','#929298'),fontFamily:getComputedStyle(document.body).fontFamily,fontSize:11,attributionLogo:true},
     grid:{vertLines:{visible:false},horzLines:{color:tone('--line-faint','rgba(255,255,255,.06)')}},
-    timeScale:{timeVisible:true,secondsVisible:false,borderVisible:false,rightOffset:4,barSpacing:9,minBarSpacing:2},
+    timeScale:{timeVisible:true,secondsVisible:false,borderVisible:false,rightOffset:4,barSpacing:9,minBarSpacing:2,maxBarSpacing:28},
     rightPriceScale:{borderVisible:false,scaleMargins:{top:.1,bottom:.26}},
     crosshair:{mode:lib.CrosshairMode.Normal,vertLine:{color:tone('--line-strong','rgba(255,255,255,.3)'),style:lib.LineStyle.Dashed,labelBackgroundColor:tone('--panel-3','#2a2a30')},horzLine:{color:tone('--line-strong','rgba(255,255,255,.3)'),style:lib.LineStyle.Dashed,labelBackgroundColor:tone('--panel-3','#2a2a30')}}});
    panel.seriesStyle=style;main=chart.addSeries(style==='candles'?lib.CandlestickSeries:lib.AreaSeries,style==='candles'
