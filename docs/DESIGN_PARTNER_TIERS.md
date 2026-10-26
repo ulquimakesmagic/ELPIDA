@@ -1,4 +1,4 @@
-# Design: early-partner fee tiers (one release, before the audit)
+# Design: early-partner tiers with buyback and burn (one release, before the audit)
 
 Status: **agreed scope, 26 October 2026 (Malik).** Community takeovers were considered and dropped: Elpida takes no
 power to redirect anyone's creator fees. This release adds early-partner fee tiers only, on every chain, deployed to
@@ -8,16 +8,22 @@ the four EVM testnets and the Solana devnet program, then audited once with the 
 
 A **"Partner with Elpida"** form in the site footer. Devs apply to become early partners:
 
-| Tier | Creator share of trading fees | Elpida share |
-|---|---|---|
-| Standard (everyone) | 50% | 50% |
-| Partner 60 | 60% | 40% |
-| Partner 70 | 70% | 30% |
+| Tier | Creator | Buyback and burn | Elpida |
+|---|---|---|---|
+| Standard (everyone) | 50% | — | 50% |
+| Partner | 50% | 10% | 40% |
+| Elite (solid projects, assigned by Elpida) | 50% | 20% | 30% |
 
-Elpida reviews applications in the admin panel. Approval registers the dev's launching wallet on each chain with a
-tier and an **expiry date**: 60 days by default, set per partner at approval (one to two months). Every token that
-wallet launches **before the expiry** carries the tier's split for its whole life, on the bonding-curve fee and on the
-locked pool's LP fees. Tokens launched after the expiry, or by anyone else, are standard 50/50.
+Percentages are shares of the 1.25% trading fee, and of the locked pool's LP fees after graduation.
+
+- **The creator's share never changes.** The tier gives up part of Elpida's share to **buy back and burn the token**,
+  which benefits every holder. (Decided 26 October 2026 instead of direct holder payouts. Direct payouts would need
+  the holder-payout system finished and audited, would invite snapshot gaming, and could look like dividends. They
+  can be reconsidered later.)
+- Elpida reviews applications in the admin panel. Approval registers the dev's launching wallet on each chain with a
+  tier and an **expiry date**: 60 days by default, set per partner at approval (one to two months).
+- Every token that wallet launches **before the expiry** carries the tier for its whole life. Tokens launched later,
+  or by anyone else, are Standard.
 
 The tier is an onboarding incentive: it rewards devs who bring launches to Elpida early. It is not a permanent
 status.
@@ -26,37 +32,61 @@ status.
 
 ### 2.1 Partner registry, in the factory
 
-- `setPartner(address creator, uint16 creatorShareBps, uint64 expiresAt)`, callable only by the **treasury** (the Safe
-  on mainnet):
-  - `creatorShareBps` must be 6000 or 7000, and `expiresAt` must be in the future and at most 180 days ahead;
+- `setPartner(address creator, uint16 buybackBps, uint64 expiresAt)`, callable only by the **treasury** (the Safe on
+  mainnet):
+  - `buybackBps` must be 1000 (Partner) or 2000 (Elite), and `expiresAt` must be in the future and at most 180 days
+    ahead;
   - `setPartner(creator, 0, 0)` ends a partnership early;
-  - emits `PartnerSet(creator, creatorShareBps, expiresAt)`.
-- `creatorShareOf(address)` is a public view returning the share a launch by that wallet would get right now:
-  5000 unless a tier exists and has not expired.
+  - emits `PartnerSet`.
+- `buybackShareOf(address)` returns the burn share a launch by that wallet would get right now: 0 unless a tier exists
+  and has not expired.
 - At launch, the factory records the **launching wallet's** share for this launch. The new curve reads it once in its
-  constructor, the same way it already reads `automaticGraduation()`, and stores it as an **immutable**
-  `creatorShareBps`.
-- **Changing or ending a tier never affects tokens already launched.**
+  constructor, the same way it reads `automaticGraduation()`, and stores it as an **immutable** `buybackBps`.
+- Changing or ending a tier never affects tokens already launched.
 
-### 2.2 Using the share
+### 2.2 On the bonding curve
 
-- **Curve:** `creatorFees += base * creatorShareBps / 10000`, and the protocol gets the rest. This replaces the
-  hard-coded `base / 2`. The fee is still exactly 1.25%, and rounding still favours the creator by at most 1 wei. The
-  anti-snipe surplus (above 1.25% in the first minute) still goes to locked liquidity.
-- **Graduation:** the curve passes `creatorShareBps` to the migration adapter (new field in its `Request`). The adapter
-  passes it to the LP fee locker, and the locker passes it to the fee splitter, which uses it instead of `amount / 2`.
-- Fixed for life: there is no way to change a token's share after launch.
+On every buy and sell, the base fee (1.25%) splits three ways:
 
-### 2.3 Solana
+- **creator:** 50%, rounded in the creator's favour exactly as today;
+- **burn:** `buybackBps`;
+- **Elpida:** the rest.
+
+The burn part is used **in the same transaction** to buy tokens from the curve at the current price, with no fee.
+Those tokens go straight to the dead address.
+
+- There is no keeper and no separate call that could be front-run or delayed.
+- The quote paid goes into the curve's real reserve, so it ends up in the locked pool at graduation.
+- If a buyback would reach the sale cap, it is skipped, and that amount is added to the locked-liquidity bonus
+  instead. A buyback can never complete or graduate the curve.
+- A buyback too small to buy one token unit goes to the locked-liquidity bonus too.
+- The accounting invariant becomes: quote balance = real reserve + Elpida fees + creator fees + liquidity bonus
+  (unchanged, because the bought tokens are paid into the reserve). Tokens are still conserved: curve, holders,
+  pool and the dead address.
+- The anti-snipe surplus (above 1.25% in the first minute) is unchanged: it still goes to locked liquidity.
+
+### 2.3 After graduation (LP fees)
+
+The fee splitter splits LP fees the same three ways:
+
+- **Token side:** the burn share of the token-side fees is sent to the dead address when fees are collected.
+- **Quote side:** the burn share of ETH or USDC fees is held for buyback. Anyone can call `buyback()`, which swaps it
+  for the token through the pool and burns what it receives.
+- **Protecting that swap:**
+  - the swap's price limit is the pool's **30-minute time-weighted average price** plus 1%;
+  - the adapter starts the pool's price history at graduation (`increaseObservationCardinalityNext`);
+  - a pool moved within the last 30 minutes cannot be pushed past that limit, so a sandwich gains nothing;
+  - each call spends at most a fixed fraction of what is pending.
+
+### 2.4 Solana
 
 The same in the Anchor program, in one upgrade:
 
-- a `PartnerConfig` PDA per creator wallet, holding `creator_share_bps` and `expires_at`, written only by the program's
-  treasury authority;
-- at launch, the program reads it (if present and not expired) and stores the share in the pool state;
-- the curve fee split and the PumpSwap LP-fee harvest use it.
-
-The devnet program is upgraded once, then verified (`HUMAN_ACTIONS.md`).
+- a `PartnerConfig` PDA per creator wallet (`buyback_bps`, `expires_at`), written only by the program's treasury
+  authority;
+- the share is fixed in the pool state at launch;
+- curve trades buy and burn in the same instruction;
+- PumpSwap LP-fee harvests burn the token side and hold the SOL side for a bounded buyback.
 
 ## 3. Site, server and admin panel
 
@@ -72,26 +102,29 @@ The devnet program is upgraded once, then verified (`HUMAN_ACTIONS.md`).
   - a list of active partners with their tier, expiry, chains and the tokens launched under the tier;
   - "End partnership", which also needs the treasury's signature.
 - **Visible to everyone:**
-  - the create page tells a partner wallet its share and expiry before launch;
-  - the token page shows "Partner token · 70/30" in its details and safety card.
+  - the create page tells a partner wallet its tier and expiry before launch;
+  - the token page shows "Partner · 10% of fees buy back and burn" (or "Elite · 20%") and the total burned so far.
 - **Partner terms:** the tier, the expiry, future launches only, and that Elpida may end it early (again future
   launches only).
 
 ## 4. What does not change
 
 - Tokens already launched keep their 50/50 split and recipients. Their factories stay indexed as legacy deployments.
+- The creator's 50% is never reduced, for anyone.
 - Unchanged: the $10 launch fee, Model 10 pricing, the 1.25% fee, graduation and locked liquidity.
 - The treasury's only new power is the partner registry. It cannot change any launched token's split, recipient,
   liquidity or tokens.
 
 ## 5. Delivery, in order
 
-1. **EVM contracts** with unit tests and invariants:
-   - the split sums exactly for 5000, 6000 and 7000;
+1. **EVM contracts**, in two PRs: (a) the registry and the curve buyback; (b) the LP-fee buyback with the TWAP
+   limit. Unit tests and invariants:
+   - the split sums exactly for 0, 1000 and 2000;
+   - burned tokens go to the dead address and never complete the curve;
    - expiry is enforced at the launch block;
    - only the treasury can register;
    - a tier change does not touch launched tokens;
-   - the pool fee splitter uses the token's share;
+   - the splitter burns the token side, and a quote-side buyback cannot fill past the TWAP limit;
    - both fuzz campaigns run with partner launches too.
 2. **Solana program** changes with tests.
 3. **Server:** applications store and APIs; admin review and transaction preparation; indexer and API expose each
@@ -104,4 +137,4 @@ The devnet program is upgraded once, then verified (`HUMAN_ACTIONS.md`).
 ## 6. Open choice
 
 - **Cap on launches per partner within the window** (for example 10), so one approved wallet cannot launch dozens of
-  70% tokens. Off unless Malik wants it; it is a small addition to the registry.
+  Elite tokens. Off unless Malik wants it; it is a small addition to the registry.
