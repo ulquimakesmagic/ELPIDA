@@ -13,6 +13,20 @@ volume, indexers, the price relay, graduation and backups. It cannot send transa
   owners' own wallets. Addresses are public; this variable holds no secret.
 - Sessions last eight hours and end on every redeploy.
 
+### Partners tab (`#/admin?tab=partners`)
+
+Devs apply from the footer link "Partner with Elpida" (`#/partners`). Each application proves its launching wallets
+with a free signature and is stored privately on the server (`partner-applications.sqlite` in the data volume).
+
+- **Review:** approve with a tier (Partner or Elite), a window (30 to 90 days; 60 by default) and the chains to
+  register, or reject. Notes are visible to other operators. Every action records who did it.
+- **Register (you sign):** approval does not touch the chain. For each chain the tab shows the factory's
+  `setPartner` call. Connect the treasury wallet on that chain and press "Register with treasury", or paste the call
+  into the treasury Safe on mainnet. The tab then reads the factory back and shows "registered".
+- **Ending early:** "End partnership", then "Clear with treasury" on each chain. Tokens already launched keep their tier.
+- Registration needs the partner-tier factories (PRs #105 and the LP follow-up) deployed. On today's testnet factories
+  the tab shows "factory has no registry". Solana registration arrives with the program upgrade.
+
 ## Cloudflare in front of elpida.fun, 20 October 2026
 
 Nameservers moved from Vercel to Cloudflare; DNS, SSL and the `elpida-fallback` Worker are configured as recorded in
