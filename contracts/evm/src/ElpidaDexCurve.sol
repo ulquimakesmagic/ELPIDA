@@ -42,8 +42,15 @@ contract ElpidaDexCurve {
     bool private entered;
     bool private firstBuyDone;
     bool public immutable automaticGraduation;
+    /// Share of the base fee that buys back and burns this token: 0, 1000 (Partner) or 2000 (Elite). It comes out of
+    /// the protocol's half; the creator keeps 50%. Fixed for the token's life, read once from the factory.
+    uint256 public immutable buybackBps;
+    /// Running totals of buyback-and-burn on the curve.
+    uint256 public buybackBurned;
+    uint256 public buybackQuoteSpent;
     event Bought(address indexed payer, address indexed recipient, uint256 quoteIn, uint256 tokensOut);
     event Sold(address indexed seller, uint256 tokensIn, uint256 quoteOut);
+    event BuybackBurned(uint256 quoteIn, uint256 tokensBurned);
     event FeesWithdrawn(address indexed recipient, uint256 amount);
     event FeePayoutFailed(address indexed recipient, uint256 amount);
     event AntiSnipeFee(address indexed trader, uint256 feeBps, uint256 lockedAmount);
@@ -62,6 +69,10 @@ contract ElpidaDexCurve {
         graduationGrace = grace_; launchedAt = block.timestamp;
         (bool ok, bytes memory data) = factory_.staticcall(abi.encodeWithSignature("automaticGraduation()"));
         automaticGraduation = ok && data.length == 32 && abi.decode(data, (bool));
+        // Factories without partner tiers, or any value other than 10% or 20%, give no buyback.
+        (ok, data) = factory_.staticcall(abi.encodeWithSignature("launchBuybackBps()"));
+        uint256 share = ok && data.length == 32 ? abi.decode(data, (uint256)) : 0;
+        buybackBps = share == 1000 || share == 2000 ? share : 0;
     }
     /// Mirrors the Solana program's `current_fee_bps`: linear decay from 90% to the base fee over 60 s.
     function currentFeeBps() public view returns (uint256) {
@@ -126,8 +137,22 @@ contract ElpidaDexCurve {
         if (complete && automaticGraduation) _graduate();
     }
     function _accrue(uint256 fee, uint256 base, address trader, uint256 feeBps) private {
-        protocolFees += base / 2; creatorFees += base - base / 2;
+        // Creator: 50%, with any 1 wei remainder, exactly as before. Burn: `buybackBps`, taken from the protocol's half
+        // (at most 20% of `base`, never more than floor(base / 2)). Protocol: the rest.
+        uint256 creatorPart = base - base / 2; uint256 burnPart = base * buybackBps / 10000;
+        protocolFees += base - creatorPart - burnPart; creatorFees += creatorPart;
         if (fee > base) { liquidityBonus += fee - base; emit AntiSnipeFee(trader, feeBps, fee - base); }
+        if (burnPart > 0) _buybackBurn(burnPart);
+    }
+    /// Spends `quoteIn` (already held by the curve) buying tokens at the current curve price, with no fee, and burns
+    /// them. It never completes the curve: a buyback that would reach the sale cap, or buys nothing, adds the quote
+    /// to the locked-liquidity bonus instead. The quote paid joins the real reserve, so it ends up in the pool.
+    function _buybackBurn(uint256 quoteIn) private {
+        uint256 out = (virtualToken - sold) * quoteIn / (virtualQuote + realReserve + quoteIn);
+        if (out == 0 || sold + out >= SALE_CAP) { liquidityBonus += quoteIn; return; }
+        realReserve += quoteIn; sold += out; buybackBurned += out; buybackQuoteSpent += quoteIn;
+        require(token.transfer(address(0xdead), out), "buyback burn");
+        emit BuybackBurned(quoteIn, out);
     }
     function quoteSell(uint256 input) public view returns (uint256 out, uint256 fee) {
         (out, fee,) = _quoteSell(input, currentFeeBps());

@@ -18,9 +18,10 @@ test('metadata is immutable, emitted with creation, and rolls back with a failed
  const [launch_]=parse(f.factory,receipt,'Launched'),[metadata]=parse(f.factory,receipt,'MetadataPublished');
  assert.equal(metadata.args.token,launch_.args.token);assert.equal(metadata.args.uri,uri);assert.equal(await f.factory.tokenMetadataURI(launch_.args.token),uri);assert.equal(await f.factory.METADATA_VERSION(),1n);
  // D11: the only state-changing entry points are the launch functions (which write metadata for the token they
- // just created) and treasury configuration. No function takes an existing token and a URI.
+ // just created) and treasury configuration (including the partner-tier registry, which affects future launches
+ // only). No function takes an existing token and a URI.
  const writable=f.factory.interface.fragments.filter(x=>x.type==='function'&&!['view','pure'].includes(x.stateMutability)).map(x=>x.name).sort();
- assert.deepEqual(writable,['approveQuote','configureUsdPricing','launch','launchPaired','launchPairedWithMetadata','launchWithMetadata','launchWithPayment']);
+ assert.deepEqual(writable,['approveQuote','configureUsdPricing','launch','launchPaired','launchPairedWithMetadata','launchWithMetadata','launchWithPayment','setPartner']);
  // A second launch with a different URI cannot touch the first token's metadata.
  const other='ipfs://'+rawCid(Buffer.from('other'));await mined(f.factory.launchWithMetadata('Second','TWO',buy,0,f.addresses[0],other,{value:FEE+buy}));
  assert.equal(await f.factory.tokenMetadataURI(launch_.args.token),uri);

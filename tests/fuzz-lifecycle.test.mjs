@@ -18,12 +18,15 @@ function prng(seed) { let a = seed >>> 0; return () => { a = (a + 0x6D2B79F5) >>
 const pick = (rand, list) => list[Math.floor(rand() * list.length)];
 const frac = (rand, amount) => amount * BigInt(Math.floor(rand() * 1000) + 1) / 1000n;
 
-async function lifecycle(t, { native, seed }) {
-  const f = await dexFixture(t, { factoryName: 'ElpidaAtomicDexFactory' }), rand = prng(seed), tag = `seed ${seed} ${native ? 'ETH' : 'USDC'}`;
+async function lifecycle(t, { native, seed, tier = 0 }) {
+  const f = await dexFixture(t, { factoryName: 'ElpidaAtomicDexFactory' }), rand = prng(seed), tag = `seed ${seed} ${native ? 'ETH' : 'USDC'}${tier ? ` tier ${tier}` : ''}`;
+  // Early-partner tier (docs/DESIGN_PARTNER_TIERS.md): the launcher is registered, so every curve trade buys back and burns.
+  if (tier) await mined(f.factory.connect(f.signers[2]).setPartner(f.addresses[0], tier, BigInt(await f.now()) + 30n * 86400n));
   const traders = [f.signers[0], f.signers[1], f.signers[3]], who = traders.map((_, i) => f.addresses[[0, 1, 3][i]]);
   await mined(f.usdc.mint(f.addresses[3], parseUnits('1000000', 6)));
   const l = await launch(f, { native, firstBuy: rand() < 0.3 ? 1n : native ? frac(rand, parseEther('0.5')) : frac(rand, parseUnits('1000', 6)) });
   const quote = native ? f.dex.weth : f.usdc, token = l.token, curve = l.curve;
+  assert.equal(await curve.buybackBps(), BigInt(tier), `${tag}: the launch carries the tier`);
   const tokenAccounts = async extra => (await Promise.all([...who, f.addresses[2], curve.target, DEAD, ...extra].map(a => token.balanceOf(a)))).reduce((a, b) => a + b, 0n);
   const curveChecks = async label => {
     assert.equal(await quoteBalance(f, l), await liabilities(l), `${label}: curve holds exactly what it owes`);
@@ -108,8 +111,13 @@ async function lifecycle(t, { native, seed }) {
   await mined(locker.collectFees()); await mined(curve.withdrawFees());
   for (const asset of [token, quote]) for (const r of [f.addresses[2], await splitter.creator()]) await mined(splitter.claim(asset.target, r));
   assert.equal(await quoteBalance(f, l), 0n, `${tag}: curve fully paid out`);
+  if (tier) { const burned = await curve.buybackBurned(); assert.ok(burned > 0n, `${tag}: trades bought back and burned`); assert.ok(await token.balanceOf(DEAD) >= burned, `${tag}: burned tokens sit at the dead address`); }
   for (const asset of [token, quote]) assert.equal(await asset.balanceOf(splitter.target), 0n, `${tag}: splitter fully paid out`);
 }
 
 for (const seed of SEEDS) for (const native of [true, false])
   test(`lifecycle fuzz ${native ? 'ETH' : 'USDC'} seed ${seed}: curve, atomic graduation, pool swaps, fee collection and claims stay exact`, t => lifecycle(t, { native, seed }));
+// Elite partner launches (20% of the fee buys back and burns): the default seed runs both pairs; a longer campaign
+// (ELPIDA_LIFECYCLE_SEEDS) runs every seed with the tier as well.
+for (const seed of [SEEDS[0], ...SEEDS.slice(2)]) for (const native of [true, false])
+  test(`lifecycle fuzz ${native ? 'ETH' : 'USDC'} seed ${seed} elite partner: buyback and burn keep every account exact`, t => lifecycle(t, { native, seed, tier: 2000 }));
