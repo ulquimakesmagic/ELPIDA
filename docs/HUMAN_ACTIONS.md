@@ -1,5 +1,18 @@
 # Actions that need Malik
 
+## Operator panel (`elpida.fun/#/admin`), 26 October 2026
+
+A read-only operations view: health and incidents, each factory's treasury balance (native and USDC), launches and
+volume, indexers, the price relay, graduation and backups. It cannot send transactions.
+
+- **Sign in** with your wallet on an EVM network: open `elpida.fun/#/admin`, connect, then "Sign in with this
+  wallet" and sign the message (free, no transaction). The server lets in the treasury of any configured factory,
+  read from the contract, so on testnets your treasury wallet works with no setup.
+- **Optional:** to let in other wallets, add the Railway variable `ELPIDA_ADMIN_ADDRESSES` (comma-separated
+  addresses). This is needed on mainnet: the treasury there is a Safe, which cannot sign a message, so list the
+  owners' own wallets. Addresses are public; this variable holds no secret.
+- Sessions last eight hours and end on every redeploy.
+
 ## Cloudflare in front of elpida.fun, 20 October 2026
 
 Nameservers moved from Vercel to Cloudflare; DNS, SSL and the `elpida-fallback` Worker are configured as recorded in

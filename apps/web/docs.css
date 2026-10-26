@@ -184,3 +184,38 @@
   .pf-nets { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; width: 100%; padding-bottom: 2px; }
   .pf-net { flex: none; }
 }
+
+/* ---------- Operator panel (#/admin), read-only ---------- */
+.op { display: grid; gap: 14px; min-width: 0; }
+.op-signin { display: grid; justify-items: center; gap: 12px; text-align: center; max-width: 520px; margin: 40px auto; padding: 32px 24px; }
+.op-signin h1 { margin: 0; font: 650 26px/1.15 var(--font-sans); }
+.op-signin p { margin: 0; max-width: 46ch; }
+.op-dash { display: grid; gap: 14px; min-width: 0; }
+.op-head { display: flex; flex-wrap: wrap; align-items: flex-end; justify-content: space-between; gap: 10px 16px; }
+.op-head h1 { margin: 0; font: 650 28px/1.1 var(--font-sans); letter-spacing: -.5px; }
+.op-head p { margin: 4px 0 0; }
+.op-actions { display: flex; gap: 8px; }
+.op-banner { display: grid; gap: 10px; padding: 14px 18px; border-radius: 16px; border: .67px solid var(--line-soft); background: var(--panel-2); }
+.op-banner.op-ok { border-color: color-mix(in srgb, var(--up) 40%, transparent); }
+.op-banner.op-warn { border-color: color-mix(in srgb, #ffcf7a 45%, transparent); }
+.op-banner.op-bad { border-color: color-mix(in srgb, var(--down) 50%, transparent); background: var(--down-bg); }
+.op-incidents { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; font-size: 13px; }
+.op-incidents li { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
+.op-incidents code { font-size: 11px; }
+.op-pill { display: inline-flex; align-items: center; padding: 3px 8px; border-radius: var(--r-pill); font: 600 11px/1 var(--font-sans); text-transform: lowercase; background: var(--panel-3); color: var(--ink-2); }
+.op-pill.op-ok { background: var(--up-soft); color: var(--up); }
+.op-pill.op-warn { background: color-mix(in srgb, #ffcf7a 16%, transparent); color: #ffcf7a; }
+.op-pill.op-bad { background: var(--down-bg); color: var(--down); }
+[data-theme="light"] .op-pill.op-warn { color: #8a5a00; }
+.op-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; align-items: start; }
+.op-grid-3 { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.op-card { padding: 16px 18px; }
+.op-card .tk-table th, .op-card .tk-table td { padding-left: 10px; padding-right: 10px; }
+.op-table td { height: 44px; }
+.op-net { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
+.op-net .asset-icon { width: 16px; height: 16px; border-radius: 50%; }
+.op-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; margin: 0; font-size: 13px; }
+.op-kv dt { color: var(--muted); }
+.op-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.op-card .meta { margin: 10px 0 0; }
+@media (max-width: 1100px) { .op-grid, .op-grid-3 { grid-template-columns: minmax(0, 1fr); } }
