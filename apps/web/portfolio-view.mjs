@@ -1,6 +1,6 @@
 import { h, icon, short, number, compact, avatar, pricing, fmtValue, progressOf, usdRate, bar, storage } from './ui.mjs';
 import { chainIcon } from './chain-ui.mjs';
-import { holdingRows, withPosition, summarize, sumFees } from './portfolio-model.mjs';
+import { holdingRows, withPosition, summarize, sumFees, crossChainTokens, networkCounts } from './portfolio-model.mjs';
 
 // Portfolio: one summary bar, then Holdings (value, entry and P&L per token), Launched (curve, market cap and
 // lifetime creator fees per launch) and Drafts. Every figure comes from the indexed state, `/api/terminal`
@@ -11,6 +11,17 @@ const LOAD_LIMIT = 30;
 const href = t => `#/token/${t.address}${t.network ? '?network=' + encodeURIComponent(t.network) : ''}`;
 const usd = v => { if (v === null || v === undefined || !Number.isFinite(v)) return '—'; const a = Math.abs(v); const sign = v < 0 ? '-' : ''; return a > 0 && a < 0.01 ? `${sign}<$0.01` : `${sign}$${a < 1000 ? number(a, 2) : compact(a)}`; };
 const signed = v => v === null || v === undefined || !Number.isFinite(v) ? '—' : `${v > 0 ? '+' : ''}${usd(v)}`;
+
+// Short-lived answers, so a background refresh of the page does not refetch every position and fee total.
+const cache = new Map();
+async function cached(key, ttl, load, keep = () => true) {
+  const hit = cache.get(key);
+  if (hit && Date.now() - hit.at < ttl) return hit.value;
+  const value = await load();
+  if (keep(value)) { cache.set(key, { at: Date.now(), value }); if (cache.size > 400) cache.delete(cache.keys().next().value); }
+  return value;
+}
+const BALANCES_TTL = 30000, POSITION_TTL = 20000, FEES_TTL = 30000;
 
 /** Run `task` over `items` with at most `limit` in flight. */
 async function each(items, limit, task) {
@@ -24,9 +35,28 @@ export function portfolioView(ctx, { connect, rerender }) {
   const signedIn = mode !== 'testnet' || !!ctx.wallet?.address;
   const author = mode === 'testnet' ? ctx.wallet?.address : state.wallet;
   const network = ctx.currentChain();
-  const tokens = state?.tokens ?? [];
-  let rows = signedIn ? holdingRows(tokens, { price: t => pricing(t).price, rate: usdRate }) : [];
-  const created = signedIn && state.wallet ? tokens.filter(t => t.creator?.toLowerCase() === state.wallet.toLowerCase()) : [];
+  const params = new URLSearchParams(location.hash.split('?')[1] ?? '');
+  // EVM wallets on public testnets see every EVM network: indexed balances joined to Explore's token list. Solana
+  // and the local simulation keep the selected network only.
+  const crossChain = mode === 'testnet' && ctx.wallet !== ctx.solWallet && /^0x[0-9a-fA-F]{40}$/.test(author ?? '');
+  const everyToken = crossChain ? (ctx.allTokens?.() ?? []) : [];
+  const balancesKey = crossChain ? `balances:${author.toLowerCase()}` : null, balancesHit = balancesKey ? cache.get(balancesKey) : null;
+  const live = (state?.tokens ?? []).map(t => ({ ...t, network: t.network ?? network }));
+  const tokens = crossChain && balancesHit && everyToken.length ? crossChainTokens(balancesHit.value.balances, everyToken, { network, tokens: live }) : live;
+  const ownerKey = String(state.wallet ?? author ?? '').toLowerCase();
+  const allCreated = signedIn && ownerKey ? (crossChain && everyToken.length ? everyToken : live).filter(t => t.creator?.toLowerCase() === ownerKey) : [];
+  const allRows = signedIn ? holdingRows(tokens, { price: t => pricing(t).price, rate: usdRate }) : [];
+  const nets = networkCounts([...allRows.map(r => r.token), ...allCreated]);
+  const chosenNet = nets.some(n => n.network === params.get('net')) ? params.get('net') : 'all';
+  const onNet = t => chosenNet === 'all' || t.network === chosenNet;
+  let rows = allRows.filter(r => onNet(r.token));
+  const created = allCreated.filter(onNet);
+  if (crossChain && (!balancesHit || Date.now() - balancesHit.at >= BALANCES_TTL)) {
+    // Fetch once, then draw again from the cache. A failure keeps the selected network's own figures.
+    queueMicrotask(async () => {
+      try { await cached(balancesKey, BALANCES_TTL, () => ctx.api(`public/balances?owner=${encodeURIComponent(author)}`)); if (document.querySelector('.pf-v2')) rerender(); } catch {}
+    });
+  }
   const draft = storage.get('elpida:launch-draft');
   const hasDraft = !!(draft && (draft.name || draft.symbol));
   const tab = TABS.some(([k]) => k === asked) ? asked : rows.length || !created.length ? 'holdings' : 'launched';
@@ -71,7 +101,7 @@ export function portfolioView(ctx, { connect, rerender }) {
     else {
       const tbody = h('tbody', rows.map(row => {
         const t = row.token, entry = h('td.num', { 'data-label': 'Avg entry MC' }, '—'), pnl = h('td.num', { 'data-label': 'P&L' }, h('span.muted', 'Loading…'));
-        posCells.set(t.address.toLowerCase(), { entry, pnl, row });
+        posCells.set(`${t.network}:${t.address.toLowerCase()}`, { entry, pnl, row });
         return h('tr.tk-row', h('td.pf-cell-token', tokenCell(t)), h('td.num', { 'data-label': 'Balance' }, `${compact(row.balance)}`), h('td.num.pf-cell-main', { 'data-label': 'Value' }, h('strong', fmtValue(row.value, t))), h('td.num', { 'data-label': 'Share' }, `${number(row.share, row.share < 0.01 ? 4 : 2)}%`), entry, pnl, h('td.num', { 'data-label': '24h' }, change(t)), h('td.num.pf-cell-action', h('a.btn.btn-secondary.btn-sm', { href: href(t) }, 'Trade')));
       }));
       body = h('div.tk-card.pf-card', h('div.table-scroll', h('table.market-table.tk-table.pf-table',
@@ -83,7 +113,7 @@ export function portfolioView(ctx, { connect, rerender }) {
     else {
       const status = t => { const pct = progressOf(t); return t.graduated ? h('span.pf-status.up', 'Graduated') : t.complete ? h('span.pf-status', 'Graduating') : h('span.pf-curve', bar(pct, false, `Bonding curve ${number(pct, 1)}%`), h('small', `${number(pct, 1)}%`)); };
       const tbody = h('tbody', created.map(t => {
-        const fees = h('td.num', { 'data-label': 'Creator fees' }, h('span.muted', 'Loading…')); feeCells.set(t.address.toLowerCase(), fees);
+        const fees = h('td.num', { 'data-label': 'Creator fees' }, h('span.muted', 'Loading…')); feeCells.set(`${t.network}:${t.address.toLowerCase()}`, fees);
         return h('tr.tk-row', h('td.pf-cell-token', tokenCell(t)), h('td.pf-cell-status', { 'data-label': 'Curve' }, status(t)), h('td.num.pf-cell-main', { 'data-label': 'Market cap' }, h('strong', fmtValue(pricing(t).marketCap, t))), h('td.num', { 'data-label': '24h volume' }, t.volume24h != null ? fmtValue(Number(t.volume24h), t) : '—'), h('td.num', { 'data-label': 'You hold' }, t.devHoldingPct != null ? `${number(t.devHoldingPct, 2)}%` : '—'), fees, h('td.num', { 'data-label': '24h' }, change(t)), h('td.num.pf-cell-action', h('a.btn.btn-secondary.btn-sm', { href: href(t) }, 'Open')));
       }));
       body = h('div.tk-card.pf-card', h('div.table-scroll', h('table.market-table.tk-table.pf-table',
@@ -103,16 +133,16 @@ export function portfolioView(ctx, { connect, rerender }) {
     };
     drawFees();
     queueMicrotask(() => each(created.slice(0, LOAD_LIMIT), 4, async t => {
-      const cellEl = feeCells.get(t.address.toLowerCase());
+      const cellEl = feeCells.get(`${t.network}:${t.address.toLowerCase()}`);
       for (let attempt = 0; attempt < 4; attempt++) {
         try {
-          const result = await ctx.api(`creator-fees?network=${encodeURIComponent(t.network ?? network)}&token=${encodeURIComponent(t.address)}`);
+          const result = await cached(`fees:${t.network}:${t.address.toLowerCase()}`, FEES_TTL, () => ctx.api(`creator-fees?network=${encodeURIComponent(t.network ?? network)}&token=${encodeURIComponent(t.address)}`), r => r?.status === 'ready');
           if (!strip.isConnected) return;
-          results.set(t.address.toLowerCase(), result);
+          results.set(`${t.network}:${t.address.toLowerCase()}`, result);
           if (cellEl) cellEl.textContent = result.status === 'ready' ? (result.assets.filter(a => Number(a.amount) > 0).map(a => `${number(a.amount, 6)} ${a.symbol}`).join(' + ') || '0') : result.status === 'loading' ? 'Indexing…' : 'Unavailable';
           drawFees();
           if (result.status !== 'loading') return;
-        } catch { if (cellEl) cellEl.textContent = 'Unavailable'; results.set(t.address.toLowerCase(), null); drawFees(); return; }
+        } catch { if (cellEl) cellEl.textContent = 'Unavailable'; results.set(`${t.network}:${t.address.toLowerCase()}`, null); drawFees(); return; }
         await new Promise(resolve => setTimeout(resolve, 5000));
       }
     }));
@@ -120,12 +150,12 @@ export function portfolioView(ctx, { connect, rerender }) {
 
   // Positions load on every tab, so the P&L totals are right wherever the page opens.
   if (signedIn && rows.length) queueMicrotask(() => each(rows.slice(0, LOAD_LIMIT), 4, async row => {
-    const t = row.token, cells = posCells.get(t.address.toLowerCase());
+    const t = row.token, cells = posCells.get(`${t.network}:${t.address.toLowerCase()}`);
     try {
-      const data = await ctx.api(`terminal?network=${encodeURIComponent(t.network ?? network)}&token=${t.address}${author ? `&author=${encodeURIComponent(author)}` : ''}`);
+      const data = await cached(`position:${t.network}:${t.address.toLowerCase()}:${String(author).toLowerCase()}`, POSITION_TTL, () => ctx.api(`terminal?network=${encodeURIComponent(t.network ?? network)}&token=${t.address}${author ? `&author=${encodeURIComponent(author)}` : ''}`));
       if (!strip.isConnected) return;
       const p = data.position;
-      rows = withPosition(rows, t.address, p);
+      rows = withPosition(rows, t.address, p, t.network);
       drawSummary();
       if (!cells) return;
       cells.entry.textContent = p?.entryMarketCapQuote ? fmtValue(Number(p.entryMarketCapQuote), t) : '—';
@@ -136,13 +166,23 @@ export function portfolioView(ctx, { connect, rerender }) {
     } catch { cells?.pnl.replaceChildren(h('span.muted', 'Unavailable')); }
   }));
 
-  const where = mode === 'local' ? ctx.envLabel() : !signedIn ? 'Not connected' : `${short(author)} · ${ctx.envLabel()}`;
+  const netName = key => ctx.networkByKey?.(key)?.name ?? key;
+  const where = mode === 'local' ? ctx.envLabel() : !signedIn ? 'Not connected' : crossChain ? `${short(author)} · every EVM testnet` : `${short(author)} · ${ctx.envLabel()}`;
+  const tabHref = (key, net) => `#/portfolio?tab=${key}${net && net !== 'all' ? `&net=${encodeURIComponent(net)}` : ''}`;
+  const chips = nets.length > 1 ? h('div.pf-nets', { role: 'group', 'aria-label': 'Filter by network' },
+    h('a.pf-net', { href: tabHref(tab, 'all'), 'aria-current': chosenNet === 'all' ? 'true' : null }, 'All networks', h('span.tk-count', String(nets.reduce((n, x) => n + x.count, 0)))),
+    ...nets.map(n => h('a.pf-net', { href: tabHref(tab, n.network), 'aria-current': chosenNet === n.network ? 'true' : null }, chainIcon(n.network), netName(n.network), h('span.tk-count', String(n.count))))) : null;
+  const balancesStatus = crossChain && balancesHit ? balancesHit.value.networks ?? [] : [];
+  const behind = balancesStatus.filter(n => !n.fresh).map(n => netName(n.network));
+  const scope = mode !== 'testnet' ? null : crossChain
+    ? (balancesHit ? `Indexed balances on ${balancesStatus.length} EVM testnets${behind.length ? `; ${behind.join(', ')} ${behind.length === 1 ? 'is' : 'are'} catching up` : ''}. ${ctx.wallet.net.name} reads your wallet directly. Solana holdings show when a Solana wallet is connected.` : `Loading balances on every EVM testnet. Showing ${ctx.wallet.net.name} meanwhile.`)
+    : `Showing ${ctx.wallet.net.name}. Switch the network to see tokens on other chains.`;
   return h('div.pf.pf-v2',
     h('header.pf-top',
-      h('div.pf-title', h('h1', 'Portfolio'), h('span.tk-chain', { title: ctx.envLabel() }, chainIcon(network), h('span', where))),
+      h('div.pf-title', h('h1', 'Portfolio'), h('span.tk-chain', { title: ctx.envLabel() }, crossChain ? icon('layers', 'icon-sm') : chainIcon(network), h('span', where))),
       h('div.pf-top-actions', h('a.tk-pill', { href: '#/rewards' }, icon('gift', 'icon-sm'), 'Rewards'), h('a.btn-accent.btn-accent-sm', { href: '#/launch' }, icon('plus', 'icon-sm'), 'New token'))),
     strip,
-    h('div.pf-tabs', { role: 'tablist', 'aria-label': 'Portfolio sections' }, TABS.map(([key, label]) => h('a', { role: 'tab', href: `#/portfolio?tab=${key}`, 'aria-selected': String(key === tab) }, label, h('span.tk-count', String(counts[key]))))),
+    h('div.pf-bar', h('div.pf-tabs', { role: 'tablist', 'aria-label': 'Portfolio sections' }, TABS.map(([key, label]) => h('a', { role: 'tab', href: tabHref(key, chosenNet), 'aria-selected': String(key === tab) }, label, h('span.tk-count', String(counts[key]))))), tab === 'drafts' ? null : chips),
     body,
-    mode === 'testnet' ? h('p.meta.pf-scope', `Showing ${ctx.wallet.net.name}. Switch the network to see tokens on other chains.`) : null);
+    scope ? h('p.meta.pf-scope', scope) : null);
 }

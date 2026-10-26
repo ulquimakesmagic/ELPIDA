@@ -316,6 +316,16 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           const token=solanaIndex.token(solanaMatch[1]);if(!token)return send(404,{error:'Token not indexed yet. Check indexer status and retry.'});
           return send(200,solanaMatch[2]==='trades'?solanaIndex.trades(token.address):solanaMatch[2]==='candles'?solanaIndex.candles(token.address,Number(url.searchParams.get('interval')??60)):solanaMatch[2]==='holders'?await solanaIndex.holders(token.address):token);
         }
+        // One wallet's indexed balances on every EVM testnet, for the cross-chain Portfolio. Balances come from Transfer
+        // events, like holders; `networks` says which ones answered and whether their index is fresh.
+        if(url.pathname==='/api/public/balances'){
+          const owner=String(url.searchParams.get('owner')??'');if(!/^0x[0-9a-fA-F]{40}$/.test(owner))return send(400,{error:'Invalid owner address.'});
+          const balances=[],networks=[];
+          for(const net of evmTestnets){const e=publicIndex.entries.get(net.key);if(!e)continue;
+            const fresh=!!(e.validated&&!e.error&&e.lastSuccess&&Date.now()-Date.parse(e.lastSuccess)<=180000);
+            try{balances.push(...publicIndex.balancesOf(net.key,owner));networks.push({network:net.key,fresh});}catch{networks.push({network:net.key,fresh:false,error:'unavailable'});}}
+          return send(200,{owner:owner.toLowerCase(),balances,networks});
+        }
         const publicMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?)?$/);
         if(publicMatch){const key=url.searchParams.get('network')??'base-sepolia';if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown public network.'});if(!publicMatch[1]){const activity=new Map();return send(200,publicIndex.listings(key,(e,t)=>{if(!activity.has(e))activity.set(e,indexedActivity(e.index.db));return {priceChange24h:indexedChange(e.index.db,t),...activityOf(activity.get(e),t.address)};}));}const data=publicIndex.detail(key,publicMatch[1],publicMatch[2],Number(url.searchParams.get('interval')??60));return data===null?send(404,{error:'Token not indexed yet. Check indexer status and retry.'}):send(200,data);}
         // Bytecode for the labelled test DEX and relay feed, fetched only when the launchpad owner deploys them.

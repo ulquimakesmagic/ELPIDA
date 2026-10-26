@@ -16,10 +16,38 @@ export function holdingRows(tokens, { price, rate }) {
     .sort((a, b) => (b.usd ?? -1) - (a.usd ?? -1) || b.value - a.value);
 }
 
-/** Attach the indexed position (`/api/terminal`) for a token address, matched case-insensitively. */
-export function withPosition(rows, address, position) {
+/** Attach the indexed position (`/api/terminal`) for a token, matched case-insensitively; with `network`, only on that network. */
+export function withPosition(rows, address, position, network) {
   const key = String(address ?? '').toLowerCase();
-  return rows.map(row => row.token.address?.toLowerCase() === key ? { ...row, position: position ?? null } : row);
+  return rows.map(row => row.token.address?.toLowerCase() === key && (network === undefined || row.token.network === network) ? { ...row, position: position ?? null } : row);
+}
+
+/**
+ * Cross-chain holdings: indexed balances (`/api/public/balances`) joined to the token list from every network.
+ * The current network's own state wins for its tokens, because it reads the wallet directly and is fresher than the
+ * index. Balances for tokens the list does not know are left out, never shown without a price.
+ */
+export function crossChainTokens(balances, allTokens, current = { network: null, tokens: [] }) {
+  const key = (network, address) => `${network}:${String(address).toLowerCase()}`;
+  const byKey = new Map((allTokens ?? []).map(t => [key(t.network, t.address), t]));
+  const out = new Map();
+  for (const b of balances ?? []) {
+    const token = byKey.get(key(b.network, b.address));
+    if (token) out.set(key(b.network, b.address), { ...token, network: b.network, balance: b.balance });
+  }
+  for (const t of current.tokens ?? []) {
+    const k = key(current.network, t.address), listed = byKey.get(k);
+    if (Number(t.balance) > 0) out.set(k, { ...listed, ...t, network: current.network });
+    else out.delete(k);
+  }
+  return [...out.values()];
+}
+
+/** Networks present in a set of tokens, with counts, in first-seen order. */
+export function networkCounts(tokens) {
+  const counts = new Map();
+  for (const t of tokens ?? []) if (t.network) counts.set(t.network, (counts.get(t.network) ?? 0) + 1);
+  return [...counts].map(([network, count]) => ({ network, count }));
 }
 
 /**

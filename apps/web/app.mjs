@@ -109,7 +109,7 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
     for(const t of next.tokens??[]){const key=`${currentChain()}:${t.address.toLowerCase()}`,publicToken=merged.get(key);merged.set(key,{...publicToken,...t,priceChange24h:publicToken?.priceChange24h??t.priceChange24h,network:currentChain()});}
     if(solWallet.deployment&&wallet!==solWallet){try{for(const t of await solWallet.publicTokens())merged.set(`${solWallet.net.key}:${t.address}`,{...t,network:solWallet.net.key,usdReference:usdReferenceFor({...t,usdReference:null},config.prices?.[solWallet.net.key],nowSeconds())});}catch{discoveryErrors.push(solWallet.net.name);}}
     allTokens=[...merged.values()];
-    if(currentRoute.name==='explore')rerender('background');
+    if(currentRoute.name==='explore'||currentRoute.name==='portfolio')rerender('background');
     refreshLastSale();
   }else{allTokens=next.tokens;refreshLastSale();}
   return state;
@@ -171,6 +171,8 @@ const ctx = {
   /** The EVM provider for signatures outside a launch (ownership verification): the chosen wallet. */
   evmProvider: () => evmWallet.eth,
   navigate: hash => { if (location.hash === hash) route(); else location.hash = hash; },
+  /** Tokens from every network (Explore's merged list), for the cross-chain Portfolio. */
+  allTokens: () => allTokens,
   envLabel, isCreatorOf: token => !!state?.wallet && [token.creator, token.reward].some(a => a?.toLowerCase() === state.wallet.toLowerCase()),
 };
 
