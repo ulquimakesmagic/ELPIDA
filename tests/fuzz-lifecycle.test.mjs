@@ -77,8 +77,9 @@ async function lifecycle(t, { native, seed, tier = 0 }) {
   const router = new Contract(f.dex.router.target, routerAbi(2), f.provider), extras = [pool, locker.target, splitter.target];
   const splitterChecks = async label => {
     for (const asset of [token, quote]) {
-      const [held, a, b] = await Promise.all([asset.balanceOf(splitter.target), splitter.claimable(asset.target, f.addresses[2]), splitter.claimable(asset.target, await splitter.creator())]);
-      assert.equal(held, a + b, `${label}: splitter holds exactly what both can claim`);
+      const [held, a, b, pending] = await Promise.all([asset.balanceOf(splitter.target), splitter.claimable(asset.target, f.addresses[2]), splitter.claimable(asset.target, await splitter.creator()), splitter.pendingBuyback(asset.target)]);
+      assert.equal(held, a + b + pending, `${label}: splitter holds exactly what both can claim, plus the pending buyback`);
+      if (!tier) assert.equal(pending, 0n, `${label}: a standard token never queues a buyback`);
     }
     assert.equal(await tokenAccounts(extras), TOKEN_SUPPLY, `${label}: every token is accounted for`);
     await lockedAndOwned(label);
@@ -96,6 +97,11 @@ async function lifecycle(t, { native, seed, tier = 0 }) {
       const amountIn = frac(rand, held); await mined(token.connect(s).approve(router.target, amountIn)); await mined(call(token.target, quote.target, amountIn));
     } else if (action < 0.93) {
       await mined(locker.connect(pick(rand, f.signers)).collectFees());
+    } else if (tier && action < 0.965) {
+      // Anyone can run the LP-fee buyback; it burns what it buys, or refuses when nothing is pending.
+      const deadBefore = await token.balanceOf(DEAD);
+      const done = await mined(splitter.connect(pick(rand, f.signers)).buyback()).then(() => true, e => { assert.match(String(e.message), /nothing to buy back/, `${label}: only an empty queue is refused`); return false; });
+      if (done) assert.ok(await token.balanceOf(DEAD) > deadBefore, `${label}: the buyback burned tokens`);
     } else {
       const recipient = rand() < 0.5 ? f.addresses[2] : await splitter.creator(), asset = rand() < 0.5 ? token : quote;
       const owed = await splitter.claimable(asset.target, recipient), before = await asset.balanceOf(recipient);
@@ -110,6 +116,8 @@ async function lifecycle(t, { native, seed, tier = 0 }) {
   // 4. Everything owed is paid out; the curve and the splitter end empty.
   await mined(locker.collectFees()); await mined(curve.withdrawFees());
   for (const asset of [token, quote]) for (const r of [f.addresses[2], await splitter.creator()]) await mined(splitter.claim(asset.target, r));
+  // Partner tokens: run the buyback until the queue is empty (each call spends at most 1% of the pool's quote side).
+  for (let i = 0; tier && i < 50 && (await splitter.pendingBuyback(quote.target)) > 0n; i++) await mined(splitter.buyback());
   assert.equal(await quoteBalance(f, l), 0n, `${tag}: curve fully paid out`);
   if (tier) { const burned = await curve.buybackBurned(); assert.ok(burned > 0n, `${tag}: trades bought back and burned`); assert.ok(await token.balanceOf(DEAD) >= burned, `${tag}: burned tokens sit at the dead address`); }
   for (const asset of [token, quote]) assert.equal(await asset.balanceOf(splitter.target), 0n, `${tag}: splitter fully paid out`);

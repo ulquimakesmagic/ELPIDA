@@ -26,13 +26,13 @@ contract ElpidaV3FeeLocker {
     bool private entered;
     event PositionLocked(uint256 indexed tokenId,uint128 liquidity);
     event PositionFeesCollected(uint256 indexed tokenId,uint256 amount0,uint256 amount1);
-    constructor(address manager_,address adapter_,address token0_,address token1_,uint24 fee_,int24 spacing_,address treasury_,address creator_) {
+    constructor(address manager_,address adapter_,address token0_,address token1_,uint24 fee_,int24 spacing_,address treasury_,address creator_,address launchToken_,address pool_,uint256 buybackBps_) {
         require(manager_.code.length>0 && adapter_!=address(0),"manager/adapter");
         require(token0_!=address(0) && token0_<token1_,"pair order");
         require(spacing_>0 && spacing_<=16384 && fee_>0,"fee/spacing");
         manager=IV3FeePositionManager(manager_);adapter=adapter_;token0=token0_;token1=token1_;fee=fee_;
         lower=(-887272 / spacing_)*spacing_;upper=(887272 / spacing_)*spacing_;
-        splitter=new ElpidaFeeSplitter(treasury_,creator_);
+        splitter=new ElpidaFeeSplitter(treasury_,creator_,launchToken_,pool_,buybackBps_);
     }
     function onERC721Received(address operator,address from,uint256 id,bytes calldata) external returns(bytes4) {
         require(msg.sender==address(manager) && operator==adapter && (from==adapter || from==address(0)) && !locked && !entered,"position source");
