@@ -205,6 +205,19 @@ export class EvmIndexer {
     const supply=parseUnits(this.snapshot(token.address)?.supply??'0',18);
     return [...balances].filter(([a,n])=>n>0n&&!excluded.has(a)).sort((a,b)=>a[1]>b[1]?-1:a[1]<b[1]?1:0).slice(0,limit).map(([address,n])=>({address,balance:formatUnits(n,18),supplyShare:ratio(n,supply,12)}));
   }
+  /** One wallet's balance in every listed token, from a single pass over Transfer events (the same source as holders()). */
+  balancesOf(owner){
+    const who=String(owner??'').toLowerCase();if(!/^0x[0-9a-f]{40}$/.test(who))throw new Error('Invalid owner address.');
+    const listed=new Set(this.tokens().map(t=>t.address)),balances=new Map();
+    for(const row of this.db.prepare('SELECT data FROM events ORDER BY height,idx').all()){
+      const e=decode(row.data);if(e.kind!=='token'||e.name!=='Transfer')continue;
+      const token=e.address.toLowerCase();if(!listed.has(token))continue;
+      const [from,to,value]=e.args,n=BigInt(value);
+      if(String(from).toLowerCase()===who)balances.set(token,(balances.get(token)??0n)-n);
+      if(String(to).toLowerCase()===who)balances.set(token,(balances.get(token)??0n)+n);
+    }
+    return [...balances].filter(([,n])=>n>0n).map(([address,n])=>({address,balance:formatUnits(n,18)}));
+  }
   candles(address,interval=60,limit=100) {
     if(![60,300,900,3600,14400,86400].includes(interval))throw new Error('Unsupported candle interval.');
     const rows=this.db.prepare('SELECT data FROM trades WHERE address=? ORDER BY height,idx').all(address.toLowerCase()),buckets=new Map();

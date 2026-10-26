@@ -75,6 +75,8 @@ export class PublicIndexer {
   // No post-launch metadata path: details are published only in the launch transaction. Details a creator signed
   // before this rule (22-23 Oct 2026 testnet) are still loaded from metadata.json and shown as before.
   /** Latest trades on every indexed network, each with the token's public name, symbol and image. */
+  /** A wallet's balances on one network, across every deployment indexed there. Skips entries that are not validated. */
+  balancesOf(key,owner){return this.all(key).filter(e=>e.validated&&!e.error).flatMap(e=>e.index.balancesOf(owner).map(b=>({...b,network:key})));}
   recentTrades(limit=20){const out=[];for(const key of this.entries.keys()){const tokens=new Map(this.listings(key).map(t=>[t.address.toLowerCase(),t]));for(const e of this.all(key))for(const trade of e.index.recentTrades(limit)){const t=tokens.get(String(trade.token).toLowerCase());if(t)out.push(recentTrade(key,t,trade));}}return out.sort((a,b)=>b.timestamp-a.timestamp).slice(0,limit);}
   detail(key,address,kind,interval=60){const e=this.entryFor(key,address),token=this.listings(key).find(t=>t.address===address.toLowerCase());if(!token)return null;return kind==='trades'?e.index.trades(address):kind==='candles'?e.index.candles(address,interval):kind==='holders'?e.index.holders(address):token;}
   async close(){this.stopping=true;clearInterval(this.timer);while(this.running)await new Promise(r=>setTimeout(r,100));const providers=new Set();for(const e of [...this.entries.keys()].flatMap(key=>this.all(key))){await e.index.close();providers.add(e.provider);}for(const p of providers)p.destroy();}

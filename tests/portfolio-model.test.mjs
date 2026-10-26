@@ -45,3 +45,31 @@ test('creator fees add up per asset and skip anything not ready', () => {
   ]).map(a => [a.symbol, Number(a.amount.toFixed(6))]), [['USDC', 3], ['ETH', 0.03]]);
   assert.deepEqual(sumFees([]), []);
 });
+
+import { crossChainTokens, networkCounts } from '../apps/web/portfolio-model.mjs';
+
+test('cross-chain holdings join indexed balances to the token list; the live network wins for its own tokens', () => {
+  const all = [
+    { network: 'base-sepolia', address: '0xA1', symbol: 'A', price: 1 },
+    { network: 'bnb-testnet', address: '0xa1', symbol: 'SAMEADDR', price: 2 },
+    { network: 'bnb-testnet', address: '0xB2', symbol: 'B', price: 3 },
+  ];
+  const balances = [
+    { network: 'base-sepolia', address: '0xa1', balance: '10' },
+    { network: 'bnb-testnet', address: '0xa1', balance: '20' },
+    { network: 'bnb-testnet', address: '0xb2', balance: '5' },
+    { network: 'bnb-testnet', address: '0xc3', balance: '7' },
+  ];
+  const live = { network: 'bnb-testnet', tokens: [{ address: '0xB2', balance: '0' }, { address: '0xa1', balance: '25', symbol: 'SAMEADDR' }] };
+  const out = crossChainTokens(balances, all, live);
+  const view = out.map(t => [t.network, t.symbol, t.balance]).sort();
+  assert.deepEqual(view, [['base-sepolia', 'A', '10'], ['bnb-testnet', 'SAMEADDR', '25']],
+    'same address on two chains stays two rows; a token sold since indexing drops out; an unknown token is not shown');
+  assert.deepEqual(networkCounts(out), [{ network: 'base-sepolia', count: 1 }, { network: 'bnb-testnet', count: 1 }]);
+});
+
+test('positions attach per network when the same address exists on two chains', () => {
+  const rows = [{ token: { network: 'n1', address: '0xA' }, position: null }, { token: { network: 'n2', address: '0xa' }, position: null }];
+  const out = withPosition(rows, '0xa', { basisKnown: true }, 'n2');
+  assert.equal(out[0].position, null); assert.deepEqual(out[1].position, { basisKnown: true });
+});
