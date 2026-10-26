@@ -9,6 +9,14 @@ const dead = '0x000000000000000000000000000000000000dead';
 const json = value => JSON.stringify(value, (_, v) => typeof v === 'bigint' ? v.toString() : v);
 const decode = value => value ? JSON.parse(value) : null;
 // Exact decimal display arithmetic; never convert balances to JS Number.
+/** Runs `fn` over `items` with at most `limit` in flight. */
+export async function mapLimit(items, limit, fn) {
+  const queue = [...items];
+  const workers = Array.from({ length: Math.min(limit, queue.length) }, async () => {
+    while (queue.length) await fn(queue.shift());
+  });
+  await Promise.all(workers);
+}
 export function ratio(numerator, denominator, digits = 24) {
   if (denominator === 0n) return null;
   return formatUnits(numerator * 10n ** BigInt(digits) / denominator, digits);
@@ -21,7 +29,7 @@ export class EvmIndexer {
     this.db = new DatabaseSync(path); this.provider = provider; this.factory = factory.toLowerCase();
     this.chainId = chainId; this.fromBlock = fromBlock; this.confirmations = confirmations; this.nativeSymbol = nativeSymbol; this.dexName = dexName;
     this.contracts = contracts; this.interfaces = Object.fromEntries(['factory','curve','pool','token',...(contracts.dexPool?['dexPool']:[])].map(k=>[k,new Interface(contracts[k].abi)]));
-    this.batchSize = Math.max(1, Math.min(500, batchSize));
+    this.batchSize = Math.max(1, Math.min(2000, batchSize));
     this.db.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS blocks (height INTEGER PRIMARY KEY, hash TEXT NOT NULL, parent TEXT NOT NULL, timestamp INTEGER NOT NULL);
@@ -71,18 +79,23 @@ export class EvmIndexer {
       const pools=[];
       for(const l of logs){const e=this.parse('curve',l);if(e?.name==='Graduated'&&!watched.has(e.args.pool.toLowerCase()))pools.push(e.args.pool);}
       if(pools.length)logs.push(...await this.provider.getLogs({address:[...new Set(pools)],fromBlock:height,toBlock:end}));
-      const heights=[...new Set([...logs.map(l=>l.blockNumber),end])].sort((a,b)=>a-b);
-      for(const h of heights)await this.scanBlock(h);
+      // The same transaction can appear in more than one of the three fetches above.
+      const unique=[...new Map(logs.map(l=>[`${l.transactionHash}:${l.index}`,l])).values()];
+      const heights=[...new Set([...unique.map(l=>l.blockNumber),end])].sort((a,b)=>a-b);
+      // Headers in parallel: the blocks are contiguous, so their linkage is verified locally below.
+      const blocks=new Map();
+      await mapLimit(heights,8,async h=>{blocks.set(h,await this.provider.getBlock(h));});
+      for(const h of heights)await this.scanBlock(h,{block:blocks.get(h),batch:unique,verified:true});
     }
     this.head=head;this.lastError=null;
     return this.status();
   }
-  async scanBlock(height) {
-    const block = await this.provider.getBlock(height);
+  async scanBlock(height,{block:given,batch,verified}={}) {
+    const block = given ?? await this.provider.getBlock(height);
     if(!block) throw new Error('Block unavailable; retry indexing.');
-    const tip=this.tip(); if(tip && (height===tip.height+1?block.parentHash!==tip.hash:(await this.provider.getBlock(tip.height))?.hash!==tip.hash)) throw new Error('Chain changed during indexing; retry.');
+    if(!verified){const tip=this.tip(); if(tip && (height===tip.height+1?block.parentHash!==tip.hash:(await this.provider.getBlock(tip.height))?.hash!==tip.hash)) throw new Error('Chain changed during indexing; retry.');}
     const call={blockTag:height};
-    const launches=await this.provider.getLogs({address:this.factory,fromBlock:height,toBlock:height});
+    const launches=batch?batch.filter(l=>l.blockNumber===height&&l.address.toLowerCase()===this.factory.toLowerCase()):await this.provider.getLogs({address:this.factory,fromBlock:height,toBlock:height});
     const metadataURIs=new Map(launches.map(log=>this.parse('factory',log)).filter(e=>e?.name==='MetadataPublished').map(e=>[e.args.token.toLowerCase(),e.args.uri]));
     const known=this.tokens(), fresh=[];
     for(const log of launches) {
@@ -109,7 +122,7 @@ export class EvmIndexer {
       const old=this.snapshot(r.address);if(old?.graduated)addressMap.set(old.pool.toLowerCase(),{r,kind:this.contracts.dexPool?'dexPool':'pool'});
     }
     // New curve first buys occur BEFORE Launched; scan the entire creation block.
-    let logs=addressMap.size?await this.provider.getLogs({address:[...addressMap.keys()],fromBlock:height,toBlock:height}):[];
+    let logs=addressMap.size?(batch?batch.filter(l=>l.blockNumber===height&&addressMap.has(l.address.toLowerCase())):await this.provider.getLogs({address:[...addressMap.keys()],fromBlock:height,toBlock:height})):[];
     const newPools=[];
     for(const l of logs) {
       const info=addressMap.get(l.address.toLowerCase());
