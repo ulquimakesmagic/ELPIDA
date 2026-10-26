@@ -242,7 +242,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     const send = (code, data) => { if(code>=400)console.error(JSON.stringify({event:'request_failed',requestId,status:code,method:req.method,path:String(req.url).split('?')[0].slice(0,160)}));res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); };
     res.setHeader('Cache-Control', 'no-store');
     // Public reads change on the indexer's 15 s tick; static vendor files never change for a given URL.
-    if (req.method === 'GET' && String(req.url).startsWith('/api/public/')) res.setHeader('Cache-Control', 'public, max-age=15, stale-while-revalidate=30');
+    if (req.method === 'GET' && String(req.url).startsWith('/api/public/')) res.setHeader('Cache-Control', 'public, max-age=5, stale-while-revalidate=10');
     if (/^\/(api\/|health)/.test(String(req.url))) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');

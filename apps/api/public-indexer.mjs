@@ -1,12 +1,16 @@
 import { JsonRpcProvider, Contract, verifyMessage, keccak256, toUtf8Bytes } from 'ethers';
 import { join } from 'node:path';
 import { readFileSync, existsSync, writeFileSync, renameSync } from 'node:fs';
-import { EvmIndexer } from '../../packages/indexer/evm-indexer.mjs';
+import { EvmIndexer, mapLimit } from '../../packages/indexer/evm-indexer.mjs';
 import { normalizeMetadata } from '../web/metadata.mjs';
 import { isDexModel, MODEL_VERSIONS } from '../../packages/core/curve-model.mjs';
 import { testnetDexes } from '../../packages/core/uniswap.mjs';
 
 // A read-only worker per configured deployment. Never accepts user RPCs or private keys.
+// How often the public indexes poll, and how many networks sync at once. A trade is visible to the API once the
+// network that carries it has been read, so the interval is the freshness of every trade endpoint.
+const TICK_MS=Math.max(2000,Math.min(60000,Number(process.env.ELPIDA_INDEX_INTERVAL_MS)||8000));
+const TICK_CONCURRENCY=Math.max(1,Math.min(8,Number(process.env.ELPIDA_INDEX_CONCURRENCY)||3));
 // One token's inline data: image made every listing 1.1 MB. A listing ships the URL instead; the bytes are
 // served once by /api/wallet-logo and cached by the browser.
 const INLINE_IMAGE=/^data:image\//i;
@@ -36,7 +40,7 @@ export class PublicIndexer {
   /** The deployment entry that indexed `address` on network `key`, or null. */
   /** The stored image, including an inline data: URI, for the one route that serves it. */
   rawImage(key,address){const entry=this.entryFor(key,address);const image=entry?.metadata?.get(String(address).toLowerCase())?.image;return typeof image==='string'?image:null;}
-  entryFor(key,address){const a=String(address).toLowerCase();return this.all(key).find(e=>e.index.tokens().some(t=>t.address===a))??null;}
+  entryFor(key,address){const a=String(address).toLowerCase();return this.all(key).find(e=>Boolean(e.index.tokenAt(a)))??null;}
   /** Trade rows across every deployment on the network, in timestamp order. */
   tradeRows(key){
     const entries=this.all(key);if(entries.length<2)return entries[0]?.index.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()??[];
@@ -44,7 +48,7 @@ export class PublicIndexer {
   }
   async tick(){
     if(this.running||this.stopping)return;this.running=true;
-    try{for(const e of [...this.entries.keys()].flatMap(key=>this.all(key))){
+    try{await mapLimit([...this.entries.keys()].flatMap(key=>this.all(key)),TICK_CONCURRENCY,async e=>{
       try{
         if(!e.validated){const d=deploymentOf(e),chain=Number((await e.provider.getNetwork()).chainId),v=Number(await new Contract(d.factory,['function MODEL_VERSION() view returns(uint256)'],e.provider).MODEL_VERSION());if(chain!==e.net.chainId||v!==MODEL_VERSIONS[d.model])throw new Error('Deployment identity mismatch');e.validated=true;}
         await e.index.sync();e.error=null;e.errorCode=null;e.lastSuccess=new Date().toISOString();
@@ -59,7 +63,7 @@ export class PublicIndexer {
         this.log(JSON.stringify({event:'public_indexer_error',network:e.net.key,...(e.legacy?{factory:deploymentOf(e).factory}:{}),code:e.errorCode,rpc:rpcHost(this.rpcs?.get(e.net.key)),message:e.error}));
         if(!e.legacy)this.failover(e.net.key);
       }
-    }}finally{this.running=false;}
+    });}finally{this.running=false;}
   }
   /**
    * After repeated failures on one public RPC (a node that refuses the server's address, rate-limits it or has pruned
@@ -75,12 +79,18 @@ export class PublicIndexer {
     this.log(JSON.stringify({event:'public_indexer_rpc_failover',network:key,from,to:rpcHost(r)}));
   }
   static FAILOVER_AFTER=3;
-  start(){this.job=this.tick();this.timer=setInterval(()=>{this.job=this.tick();},15000);this.timer.unref();return this;}
+  start(){this.job=this.tick();this.timer=setInterval(()=>{this.job=this.tick();},TICK_MS);this.timer.unref();return this;}
   status(key){const e=this.entries.get(key);return e?{...e.index.status(),error:e.error,errorCode:e.errorCode??null,rpc:rpcHost(this.rpcs?.get(key)),lastSuccess:e.lastSuccess,enabled:true,
     // Earlier launchpads on the same network have their own index; a stuck one must be visible too.
     legacy:(this.legacy?.get(key)??[]).map(l=>{const s=l.index.status();return {factory:deploymentOf(l).factory,indexedBlock:s.indexedBlock,lag:s.lag,error:l.error??null,errorCode:l.errorCode??null,lastSuccess:l.lastSuccess??null};})}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}
   quotes(key){const e=this.entries.get(key);if(!e)return null;const status=e.index.status();if(!e.validated||status.indexedBlock==null)return null;const factory=deploymentOf(e).factory;return {factory,chainId:e.net.chainId,indexedBlock:status.indexedBlock,assets:e.index.db.prepare("SELECT data FROM events WHERE json_extract(data,'$.name')='QuoteApproved' ORDER BY height,idx").all().map(r=>JSON.parse(r.data)).filter(r=>r.kind==='factory'&&r.address.toLowerCase()===factory.toLowerCase()).map(r=>r.args[0])};}
   /** Tokens from every deployment on the network. `extra(entry, token)` adds per-deployment fields. */
+  /** The listing row for a single token; `listings(key)` exists for the market list, not for one page. */
+  listing(key,address,extra){
+    const e=this.entryFor(key,address),t=e?.index.tokenAt(address);if(!t)return null;
+    const d=deploymentOf(e),s=e.index.snapshot(t.address)??{};
+    return {...t,...s,metadata:publicMetadata(e,t),metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})};
+  }
   listings(key,extra){return this.all(key).flatMap(e=>{const d=deploymentOf(e);return e.index.listings().map(t=>({...t,metadata:publicMetadata(e,t),metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})}));});}
   // No post-launch metadata path: details are published only in the launch transaction. Details a creator signed
   // before this rule (22-23 Oct 2026 testnet) are still loaded from metadata.json and shown as before.
@@ -88,7 +98,7 @@ export class PublicIndexer {
   /** A wallet's balances on one network, across every deployment indexed there. Skips entries that are not validated. */
   balancesOf(key,owner){return this.all(key).filter(e=>e.validated&&!e.error).flatMap(e=>e.index.balancesOf(owner).map(b=>({...b,network:key})));}
   recentTrades(limit=20){const out=[];for(const key of this.entries.keys()){const tokens=new Map(this.listings(key).map(t=>[t.address.toLowerCase(),t]));for(const e of this.all(key))for(const trade of e.index.recentTrades(limit)){const t=tokens.get(String(trade.token).toLowerCase());if(t)out.push(recentTrade(key,t,trade));}}return out.sort((a,b)=>b.timestamp-a.timestamp).slice(0,limit);}
-  detail(key,address,kind,interval=60){const e=this.entryFor(key,address),token=this.listings(key).find(t=>t.address===address.toLowerCase());if(!token)return null;return kind==='trades'?e.index.trades(address):kind==='candles'?e.index.candles(address,interval):kind==='holders'?e.index.holders(address):token;}
+  detail(key,address,kind,interval=60){const e=this.entryFor(key,address),token=this.listing(key,address);if(!token)return null;return kind==='trades'?e.index.trades(address):kind==='candles'?e.index.candles(address,interval):kind==='holders'?e.index.holders(address):token;}
   async close(){this.stopping=true;clearInterval(this.timer);while(this.running)await new Promise(r=>setTimeout(r,100));const providers=new Set();for(const e of [...this.entries.keys()].flatMap(key=>this.all(key))){await e.index.close();providers.add(e.provider);}for(const p of providers)p.destroy();}
 }
 

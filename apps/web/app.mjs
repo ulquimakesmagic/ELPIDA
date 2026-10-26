@@ -412,7 +412,8 @@ async function init() {
   const backgroundRefresh=()=>{if(!busy&&document.visibilityState==='visible'&&!(currentRoute.name==='rewards'&&document.activeElement?.closest('form')))refresh({preserveInput:true}).catch(()=>{});};
   setInterval(backgroundRefresh,60000);
   document.addEventListener('visibilitychange',backgroundRefresh);
-  setInterval(()=>{if(document.visibilityState==='visible')refreshLastSale();},30000);
+  // The trade strip polls faster than the full refresh: it is one small request, and it is what a trader watches.
+  setInterval(()=>{if(document.visibilityState==='visible')refreshLastSale();},8000);
   if (config.solana?.mainnet) {
     $('#footer-note').textContent = 'Solana mainnet beta: real funds, new contracts. Other networks are test networks with no monetary value.';
     $('#how-network-note').textContent = 'Solana runs as a mainnet beta with real funds and new, unaudited contracts; launching is invite-only while the beta gate is on. The other networks are test networks.';
