@@ -127,7 +127,7 @@ export class SolanaIndexer {
 
   /** Current state of every pool, stored as token rows. */
   async syncPools() {
-    const accounts = await this.connection.getProgramAccounts(this.client.programId, { commitment: 'confirmed', filters: [{ dataSize: POOL_SIZE }] });
+    const accounts = await this.client.poolAccounts(this.connection, { commitment: 'confirmed' });
     const pools = accounts.filter(({ account }) => this.client.isPool(account.data)).map(({ pubkey, account }) => ({ pubkey, ...this.client.decodePool(account.data) }));
     const configKeys = [...new Set(pools.map(p => p.config.toBase58()))];
     const infos = configKeys.length ? await this.connection.getMultipleAccountsInfo(configKeys.map(k => new this.web3.PublicKey(k))) : [];

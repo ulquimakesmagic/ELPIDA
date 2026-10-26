@@ -216,3 +216,34 @@ export async function registryStatus(applications, networks, { contract, timeout
   return out;
 }
 
+
+/**
+ * The Solana side: whether the deployed program has partner tiers (an empty `partner_tiers_version` simulated with
+ * the treasury as fee payer), and each approved partner's `["partner", wallet]` record. Same states as EVM; an
+ * older program reads as `unsupported`. `client` is createElpidaSolana; `now` in seconds.
+ */
+export async function solanaPartnerStatus(applications, { connection, web3, client, treasury, nowSeconds = () => Math.floor(Date.now() / 1000), timeoutMs = 8000 }) {
+  const within = p => Promise.race([p, new Promise((_, no) => setTimeout(() => no(new Error('RPC timed out')), timeoutMs))]);
+  let supported;
+  try {
+    const { blockhash } = await within(connection.getLatestBlockhash('confirmed'));
+    const probe = new web3.Transaction({ feePayer: new web3.PublicKey(treasury), recentBlockhash: blockhash }).add(new web3.TransactionInstruction({ programId: client.programId, keys: [], data: Buffer.from([189, 128, 102, 138, 53, 239, 157, 14]) }));
+    const { value } = await within(connection.simulateTransaction(probe));
+    supported = value.err === null ? true : value.err?.InstructionError?.[1]?.Custom === 101 ? false : `Version check failed: ${JSON.stringify(value.err).slice(0, 80)}`;
+  } catch (e) { supported = String(e.message).slice(0, 120); }
+  const wanted = applications.filter(a => a.solana && a.approved && ['approved', 'ended'].includes(a.status) && a.approved.chains.some(k => k.startsWith('solana-')));
+  const out = {};
+  if (supported !== true) {
+    for (const a of wanted) out[a.id] = supported === false ? { state: 'unsupported' } : { state: 'error', error: supported };
+    return { supported, records: out };
+  }
+  try {
+    const infos = wanted.length ? await within(connection.getMultipleAccountsInfo(wanted.map(a => client.partnerPda(a.solana)))) : [];
+    wanted.forEach((a, i) => {
+      const p = client.decodePartner(infos[i]?.data, nowSeconds());
+      if (!p || p.buybackBps === 0) { out[a.id] = { state: 'none' }; return; }
+      out[a.id] = { state: p.buybackBps === a.approved.buybackBps && p.expiresAt === a.approved.expiresAt ? 'registered' : 'different', live: p.live, buybackBps: p.buybackBps, expiresAt: p.expiresAt };
+    });
+  } catch (e) { for (const a of wanted) out[a.id] = { state: 'error', error: String(e.message).slice(0, 120) }; }
+  return { supported, records: out };
+}

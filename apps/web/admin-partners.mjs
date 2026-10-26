@@ -46,8 +46,8 @@ export function renderPartners(ctx, { getJson }) {
     const tier = h('select.select', ['partner', 'elite'].map(t => h('option', { value: t, selected: t === a.tier }, `${TIER[t].name} (${TIER[t].split})`)));
     const days = h('select.select', [30, 45, 60, 90].map(d => h('option', { value: d, selected: d === 60 }, `${d} days`)));
     const boxes = networks.map(n => {
-      const usable = n.kind === 'evm' ? !!(a.evm && n.factory) : false;
-      const reason = n.kind === 'solana' ? (a.solana ? n.reason : 'No Solana wallet given.') : !a.evm ? 'No EVM wallet given.' : !n.factory ? 'No factory on this network.' : '';
+      const usable = n.kind === 'evm' ? !!(a.evm && n.factory) : !!(a.solana && n.supported);
+      const reason = n.kind === 'solana' ? (!a.solana ? 'No Solana wallet given.' : n.supported ? '' : n.reason) : !a.evm ? 'No EVM wallet given.' : !n.factory ? 'No factory on this network.' : '';
       const box = h('input', { type: 'checkbox', value: n.key, checked: usable, disabled: !usable });
       return h('label.pa-chain', { title: reason }, box, chainIcon(n.key), h('span', n.name), reason ? h('small.muted', ` ${reason}`) : null);
     });
@@ -99,6 +99,35 @@ export function renderPartners(ctx, { getJson }) {
         h('div.op-actions', send, h('span.small.muted', treasury ? `Treasury ${short(treasury)}. Or paste the call into the treasury Safe on ${n.name}.` : 'Treasury unknown: RPC unavailable.'))) : null);
   }
 
+  /** Solana: the SOL pair's treasury signs `set_partner`; the page builds it from the approved terms. */
+  function solanaRow(a, n, record) {
+    const ended = a.status === 'ended';
+    const [lvl, label] = ended && record?.state === 'none' ? ['ok', 'cleared'] : STATE[record?.state] ?? ['warn', 'unknown'];
+    const needs = ended ? record?.state !== 'none' : record?.state !== 'registered';
+    const terms = ended ? { buybackBps: 0, expiresAt: 0 } : { buybackBps: a.approved.buybackBps, expiresAt: a.approved.expiresAt };
+    const treasury = n.treasury;
+    const canSend = () => ctx.mode === 'testnet' && ctx.wallet === ctx.solWallet && ctx.wallet?.net?.key === n.key && !!treasury && ctx.wallet.address === treasury;
+    const send = h('button.btn.btn-secondary.btn-sm', { type: 'button', on: { click: async () => {
+      if (!canSend()) { toast(treasury ? `Connect the Solana treasury ${short(treasury)} on ${n.name} to send this, or run the command shown.` : 'The Solana treasury is unknown.', { kind: 'error' }); return; }
+      send.disabled = true;
+      try {
+        const w = ctx.wallet, ix = w.client.setPartner({ authority: w.publicKey, creator: a.solana, ...terms });
+        await w.sendInstructions([ix], [], ended ? 'Confirm clearing the partner tier…' : 'Confirm the partner registration…');
+        toast(ended ? 'Tier cleared on Solana.' : 'Wallet registered on Solana.', { kind: 'success' });
+        load(true);
+      } catch (e) { toast(errorText(e), { kind: 'error' }); send.disabled = false; }
+    } } }, icon('wallet', 'icon-sm'), ended ? 'Clear with treasury' : 'Register with treasury');
+    const command = `npm run solana:partner -- --cluster ${n.cluster ?? 'devnet'} --creator ${a.solana} --bps ${terms.buybackBps} --expires ${terms.expiresAt}`;
+    return h('div.pa-reg',
+      h('div.pa-reg-head', h('span.op-net', chainIcon(n.key), n.name), h(`span.op-pill.op-${lvl}`, label),
+        record?.state === 'different' ? h('small.muted', ` on chain: ${record.buybackBps / 100}% until ${date(record.expiresAt)}`) : null,
+        record?.state === 'error' ? h('small.muted', ` ${record.error}`) : null),
+      needs ? h('div.pa-call',
+        h('dl.op-kv', h('dt', 'Wallet'), h('dd', copyButton(a.solana, short(a.solana))), h('dt', 'Terms'), h('dd', terms.buybackBps ? `${terms.buybackBps / 100}% until ${date(terms.expiresAt)}` : 'end (0, 0)'),
+          h('dt', 'Or run'), h('dd', copyButton(command, 'copy command'))),
+        h('div.op-actions', send, h('span.small.muted', treasury ? `Treasury ${short(treasury)} (the SOL pair's treasury, which is the deploy key on devnet).` : ''))) : null);
+  }
+
   function partner(a, networks, registry, calls) {
     const t = TIER[a.approved.tier], expired = a.approved.expiresAt * 1000 < Date.now();
     const end = h('button.btn.btn-secondary.btn-sm', { type: 'button', on: { click: () => { if (end.dataset.armed) decide(a.id, { decision: 'end' }, 'Partnership ended. Clear the tier on each chain below.'); else { end.dataset.armed = '1'; end.textContent = 'Click again to end'; } } } }, 'End partnership');
@@ -107,7 +136,7 @@ export function renderPartners(ctx, { getJson }) {
     return h('article.tk-card.op-card.pa-app',
       h('header.pa-app-head', h('div', h('strong', `${t.name} · ${t.split}`), h('span.muted.small', a.status === 'ended' ? ' · ended' : expired ? ` · window closed ${date(a.approved.expiresAt)}` : ` · launches until ${date(a.approved.expiresAt)}`)), contact(a)),
       wallets(a),
-      chains.map(n => n.kind === 'missing' ? h('div.pa-reg', h('div.pa-reg-head', h('span.op-net', chainIcon(n.key), n.name), h('span.op-pill.op-warn', 'not configured'), h('small.muted', ' This server does not index this network.'))) : n.kind === 'solana' ? h('div.pa-reg', h('div.pa-reg-head', h('span.op-net', chainIcon(n.key), n.name), h('span.op-pill.op-warn', 'pending upgrade'), h('small.muted', ` ${n.reason}`))) : chainRow(a, n, registry?.[a.id]?.[n.key], calls?.[a.id]?.[n.key])),
+      chains.map(n => n.kind === 'missing' ? h('div.pa-reg', h('div.pa-reg-head', h('span.op-net', chainIcon(n.key), n.name), h('span.op-pill.op-warn', 'not configured'), h('small.muted', ' This server does not index this network.'))) : n.kind === 'solana' ? (n.supported ? solanaRow(a, n, registry?.[a.id]?.[n.key]) : h('div.pa-reg', h('div.pa-reg-head', h('span.op-net', chainIcon(n.key), n.name), h('span.op-pill.op-warn', 'not available'), h('small.muted', ` ${n.reason}`)))) : chainRow(a, n, registry?.[a.id]?.[n.key], calls?.[a.id]?.[n.key])),
       notes(a),
       a.status === 'approved' && !expired ? h('div.op-actions', end) : null,
       noteForm(a));

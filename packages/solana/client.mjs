@@ -14,10 +14,18 @@ export const BPS = 10_000n;
 export const MODEL_VERSION = 3;
 export const CONFIG_SIZE = 117;
 export const POOL_SIZE = 260;
+/** Pools launched by the partner-tier program carry POOL_EXT_LEN more bytes (buyback share and burn totals). */
+export const POOL_EXT_LEN = 32;
+export const POOL_SIZE_PARTNER = POOL_SIZE + POOL_EXT_LEN;
+export const POOL_SIZES = [POOL_SIZE, POOL_SIZE_PARTNER];
+/** Early-partner burn shares of the base fee (docs/DESIGN_PARTNER_TIERS.md): Partner 10%, Elite 20%. */
+export const PARTNER_BPS = [1000, 2000];
+export const MAX_PARTNER_WINDOW_SECS = 180 * 86_400;
 export const STATUS_TRADING = 0;
 export const STATUS_GRADUATED = 1; // curve complete, waiting for migration
 export const STATUS_MIGRATED = 2; // liquidity moved into a locked PumpSwap pool
 export const MIGRATION_SIZE = 210;
+export const MIGRATION_EXT_LEN = 48;
 /** Test networks only: default tUSDC faucet mint (25,000 tUSDC, 6 decimals). */
 export const TEST_USDC_FAUCET_MAX = 25_000_000_000n;
 /** Test networks only: the program's per-call faucet limit, in whole units of any test asset. */
@@ -90,6 +98,9 @@ export const DISCRIMINATORS = {
   PricingConfig: [126, 131, 53, 131, 89, 154, 123, 85],
   PriceUpdateV2: [34, 241, 35, 99, 157, 126, 244, 205],
   reopenCurve: [133, 7, 138, 0, 67, 115, 150, 12],
+  setPartner: [177, 250, 113, 16, 75, 175, 141, 136],
+  partnerTiersVersion: [189, 128, 102, 138, 53, 239, 157, 14],
+  PartnerConfig: [212, 110, 106, 253, 66, 131, 77, 96],
 };
 
 // sha256("event:<Name>")[0..8] and field layouts (32-byte keys or little-endian u64s after the
@@ -109,7 +120,13 @@ export const EVENTS = {
   CurveConfigUpdated: { discriminator: [15, 223, 121, 188, 171, 123, 126, 224], fields: [['config', 'key'], ['quoteMint', 'key'], ['virtualQuote', 'u64'], ['virtualToken', 'u64'], ['curveSupply', 'u64'], ['launchFee', 'u64']] },
   // D7 escape hatch. graduatedAt / reopenedAt are positive i64 timestamps, decoded as u64.
   CurveReopened: { discriminator: [134, 18, 70, 177, 37, 255, 73, 7], fields: [['pool', 'key'], ['mint', 'key'], ['graduatedAt', 'u64'], ['reopenedAt', 'u64'], ['realQuote', 'u64'], ['liquidityBonus', 'u64']] },
+  // protocolBase / protocolQuote are what the treasury received; on partner pools the burn share is in PartnerHarvest.
   LpFeesHarvested: { discriminator: [230, 156, 123, 178, 68, 124, 167, 67], fields: [['pool', 'key'], ['pumpPool', 'key'], ['lpBurned', 'u64'], ['baseOut', 'u64'], ['quoteOut', 'u64'], ['protocolBase', 'u64'], ['protocolQuote', 'u64'], ['lpLocked', 'u64']] },
+  // Early-partner tiers. expiresAt is a positive i64 (0 when a tier is ended), decoded as u64.
+  PartnerSet: { discriminator: [153, 179, 203, 80, 133, 150, 149, 194], fields: [['creator', 'key'], ['buybackBps', 'u16'], ['expiresAt', 'u64']] },
+  PartnerPoolLaunched: { discriminator: [33, 177, 188, 7, 46, 3, 61, 253], fields: [['pool', 'key'], ['mint', 'key'], ['creator', 'key'], ['buybackBps', 'u16']] },
+  PartnerBuyback: { discriminator: [74, 130, 136, 217, 209, 39, 171, 220], fields: [['pool', 'key'], ['quoteIn', 'u64'], ['tokensBurned', 'u64'], ['totalBurned', 'u64']] },
+  PartnerHarvest: { discriminator: [115, 237, 236, 148, 151, 13, 153, 2], fields: [['pool', 'key'], ['baseBurned', 'u64'], ['quoteQueued', 'u64'], ['pendingBuyback', 'u64']] },
 };
 
 // Events of the first deployed program version (locked-pool model), still present in devnet history.
@@ -141,9 +158,10 @@ export function decodeEvents(logs, PublicKey) {
       if (legacy) event.legacy = true;
       let offset = 8;
       for (const [field, type] of fields) {
-        const size = type === 'key' ? 32 : 8;
+        const size = type === 'key' ? 32 : type === 'u16' ? 2 : 8;
         if (offset + size > bytes.length) { event.legacy = true; break; }
         if (type === 'key') event[field] = new PublicKey(bytes.subarray(offset, offset + 32)).toBase58();
+        else if (type === 'u16') event[field] = view.getUint16(offset, true);
         else event[field] = view.getBigUint64(offset, true);
         offset += size;
       }
@@ -189,6 +207,7 @@ export const PROGRAM_ERRORS = [
   'Paying the fee in USDC is not available for this pair.',
   'Token details must be published to IPFS first (an ipfs:// link of at most 200 characters). No launch was submitted.',
   'This curve can be reopened only 24 hours after it completed without migrating.',
+  'Partner tiers are 10% or 20% with an expiry at most 180 days ahead, or (0, 0) to end one.',
 ];
 
 /** Turns a Solana/Anchor error into a readable message. */
@@ -419,6 +438,7 @@ export function createElpidaSolana(web3, programIdInput) {
   const betaCreatorPda = creator => PublicKey.findProgramAddressSync([enc('beta-creator'), key(creator).toBytes()], programId)[0];
   const pricingPda = config => PublicKey.findProgramAddressSync([enc('pricing'), key(config).toBytes()], programId)[0];
   const migrationPda = mint => PublicKey.findProgramAddressSync([enc('pump-migration'), key(mint).toBytes()], programId)[0];
+  const partnerPda = creator => PublicKey.findProgramAddressSync([enc('partner'), key(creator).toBytes()], programId)[0];
   const ataWith = (owner, mint, program) => PublicKey.findProgramAddressSync([key(owner).toBytes(), key(program).toBytes(), key(mint).toBytes()], ataProgram)[0];
   /** PumpSwap accounts for the pool Elpida creates for `mint` (index 0, creator = LP-authority PDA). */
   const pumpAccounts = (mint, quoteMint, quoteProgram = tokenProgram) => {
@@ -433,11 +453,12 @@ export function createElpidaSolana(web3, programIdInput) {
   const pumpFixed = [meta(PUMP_EVENT_AUTHORITY), meta(pumpProgram)];
   const trade = (trader, config, mint, bytes) => {
     const pool = poolPda(mint);
-    return ix([meta(trader, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(mint), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true), meta(qata(trader, config), true), meta(ata(trader, mint), true), meta(tokenProgram), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId)], bytes);
+    // The mint is writable so partner pools can burn their buyback (older programs accept it too).
+    return ix([meta(trader, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(mint, true), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true), meta(qata(trader, config), true), meta(ata(trader, mint), true), meta(tokenProgram), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId)], bytes);
   };
 
   return {
-    programId, configPda, configFor, betaGatePda, metadataPda, betaCreatorPda, pricingPda, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, wsol,
+    programId, configPda, configFor, partnerPda, betaGatePda, metadataPda, betaCreatorPda, pricingPda, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, wsol,
     computeBudget: (units = LAUNCH_COMPUTE_UNITS) => ComputeBudgetProgram.setComputeUnitLimit({ units }),
     createAtaIdempotent(payer, owner, mint, program = tokenProgram) {
       return new TransactionInstruction({ programId: ataProgram, data: data([1]), keys: [meta(payer, true, true), meta(ata(owner, mint, program), true), meta(owner), meta(mint), meta(SystemProgram.programId), meta(program)] });
@@ -478,7 +499,9 @@ export function createElpidaSolana(web3, programIdInput) {
      * `legacy: true` builds the pre-metadata layout (no uri, no Metaplex accounts) for programs that have
      * not been upgraded yet; see `supportsMetadata` in the browser wallet.
      */
-    launch({ creator, config, mint, name, symbol, firstBuy, minTokensOut, reward, uri, legacy = false, priceUpdate = null, maxFee = (1n << 64n) - 1n, usdc = null }) {
+    /** `partnerTiers` (default: any non-legacy launch): the program has partner tiers (see `supportsPartnerTiers`); adds the creator's `partner` account. */
+    launch({ creator, config, mint, name, symbol, firstBuy, minTokensOut, reward, uri, legacy = false, priceUpdate = null, maxFee = (1n << 64n) - 1n, usdc = null, partnerTiers = !legacy }) {
+      if (legacy && partnerTiers) throw new Error('A program with partner tiers always takes token metadata.');
       if (!legacy && (!validMetadataUri(uri) || uri.length > MAX_LAUNCH_URI)) throw new Error(PROGRAM_ERRORS[30]);
       const pool = poolPda(mint), cfg = config.address ?? configPda;
       const usdcMetas = usdc ? [meta(usdc.mint), meta(ata(creator, usdc.mint, usdc.tokenProgram ?? tokenProgram), true), meta(ata(config.treasury, usdc.mint, usdc.tokenProgram ?? tokenProgram), true), meta(usdc.tokenProgram ?? tokenProgram)] : [];
@@ -487,7 +510,8 @@ export function createElpidaSolana(web3, programIdInput) {
         meta(mint, true, true), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true),
         meta(qata(creator, config), true), meta(ata(creator, mint), true), meta(tokenProgram), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId),
         meta(betaGatePda), meta(betaCreatorPda(creator)), meta(pricingPda(cfg)), meta(priceUpdate ?? SystemProgram.programId),
-        ...(legacy ? [] : [meta(metadataPda(mint), true), meta(mplProgram), meta(SYSVAR_RENT)]), ...usdcMetas,
+        // Partner-tier programs take the creator's partner record where earlier ones took the rent sysvar.
+        ...(legacy ? [] : [meta(metadataPda(mint), true), meta(mplProgram), partnerTiers ? meta(partnerPda(creator)) : meta(SYSVAR_RENT)]), ...usdcMetas,
       ], concat(DISCRIMINATORS.launch, str(name), str(symbol), u64(firstBuy), u64(minTokensOut), key(reward).toBytes(), u64(maxFee), [usdc ? 1 : 0], ...(legacy ? [] : [str(uri)])));
     },
     /**
@@ -512,6 +536,31 @@ export function createElpidaSolana(web3, programIdInput) {
       if(value.err===null)return true;
       if(value.err?.InstructionError?.[1]?.Custom===101)return false;
       throw new Error('Could not check optional creator buy support. Nothing was submitted.');
+    },
+    /** Whether the deployed program has early-partner tiers (simulates the empty `partner_tiers_version`). */
+    async supportsPartnerTiers(connection, feePayer) {
+      const { blockhash } = await connection.getLatestBlockhash('confirmed');
+      const probe = new Transaction({ feePayer: key(feePayer), recentBlockhash: blockhash }).add(ix([], DISCRIMINATORS.partnerTiersVersion));
+      const { value } = await connection.simulateTransaction(probe);
+      if (value.err === null) return true;
+      if (value.err?.InstructionError?.[1]?.Custom === 101) return false;
+      throw new Error('Could not check this network\'s Elpida program version (your wallet may need SOL for network fees). Nothing was submitted.');
+    },
+    /**
+     * The SOL pair's treasury registers `creator` for a tier: `buybackBps` 1000 (Partner) or 2000 (Elite) until
+     * `expiresAt` (unix seconds, at most 180 days ahead), or (0, 0) to end it. Future launches only.
+     */
+    setPartner({ authority, creator, buybackBps, expiresAt }) {
+      const i64 = value => { const bytes = new Uint8Array(8); new DataView(bytes.buffer).setBigInt64(0, BigInt(value), true); return bytes; };
+      return ix([meta(authority, true, true), meta(configFor(wsol)), meta(partnerPda(creator), true), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.setPartner, key(creator).toBytes(), u16(buybackBps), i64(expiresAt)));
+    },
+    /** A partner record, or null when the bytes are not one. `live` is true while it holds a tier that has not expired at `now`. */
+    decodePartner(raw, now = Math.floor(Date.now() / 1000)) {
+      const bytes = raw ? new Uint8Array(raw) : null;
+      if (!bytes || bytes.length < 8 + 32 + 2 + 8 + 1 || !sameBytes(bytes, DISCRIMINATORS.PartnerConfig)) return null;
+      const buybackBps = readU16(bytes, 40), expiresAt = Number(readI64(bytes, 42));
+      return { creator: new PublicKey(bytes.subarray(8, 40)), buybackBps, expiresAt, live: PARTNER_BPS.includes(buybackBps) && expiresAt > now };
     },
     /** Permissionless D7 escape hatch: reopens a curve that completed GRADUATION_GRACE_SECS ago without migrating. */
     reopenCurve: ({ mint }) => ix([meta(poolPda(mint), true)], DISCRIMINATORS.reopenCurve),
@@ -579,7 +628,7 @@ export function createElpidaSolana(web3, programIdInput) {
       return [
         this.createAtaIdempotent(payer, config.treasury, mint), this.createAtaIdempotent(payer, reward, mint), this.createAtaIdempotent(payer, reward, config.quoteMint, qp(config)),
         ix([
-          meta(payer, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(mint), meta(pool), meta(migrationPda(mint), true), meta(p.lpAuthority),
+          meta(payer, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(mint, true), meta(pool), meta(migrationPda(mint), true), meta(p.lpAuthority),
           meta(p.authorityBase, true), meta(p.authorityQuote, true), meta(p.authorityLp, true), meta(p.pool, true), meta(PUMP_GLOBAL_CONFIG), meta(p.lpMint, true),
           meta(p.poolBase, true), meta(p.poolQuote, true), meta(config.treasury), meta(reward),
           meta(ata(config.treasury, mint), true), meta(qata(config.treasury, config), true), meta(ata(reward, mint), true), meta(qata(reward, config), true),
@@ -594,6 +643,10 @@ export function createElpidaSolana(web3, programIdInput) {
         curvePool: new PublicKey(bytes.subarray(8, 40)), mint: new PublicKey(bytes.subarray(40, 72)), pumpPool: new PublicKey(bytes.subarray(72, 104)), lpMint: new PublicKey(bytes.subarray(104, 136)),
         lpLocked: readU64(bytes, 136), principal: readU128(bytes, 144), baseMigrated: readU64(bytes, 160), quoteMigrated: readU64(bytes, 168),
         harvestedLp: readU64(bytes, 176), harvestedBase: readU64(bytes, 184), harvestedQuote: readU64(bytes, 192), migratedAt: readI64(bytes, 200),
+        // Migrations by the partner-tier program: quote queued for buyback and partner burns (0 otherwise).
+        ...(bytes.length >= MIGRATION_SIZE + MIGRATION_EXT_LEN && bytes[MIGRATION_SIZE] === 1
+          ? { pendingBuyback: readU64(bytes, MIGRATION_SIZE + 1), baseBurned: readU64(bytes, MIGRATION_SIZE + 9), buybackQuoteSpent: readU64(bytes, MIGRATION_SIZE + 17), buybackBurned: readU64(bytes, MIGRATION_SIZE + 25) }
+          : { pendingBuyback: 0n, baseBurned: 0n, buybackQuoteSpent: 0n, buybackBurned: 0n }),
       };
     },
     /** PumpSwap `Pool` fields Elpida needs (trailing fields read as 0 when absent). */
@@ -620,16 +673,24 @@ export function createElpidaSolana(web3, programIdInput) {
         quoteDecimals: bytes[114], modelVersion: bytes[115],
       };
     },
-    isPool: raw => raw.length === POOL_SIZE && sameBytes(new Uint8Array(raw), DISCRIMINATORS.CurvePool),
+    isPool: raw => POOL_SIZES.includes(raw.length) && sameBytes(new Uint8Array(raw), DISCRIMINATORS.CurvePool),
+    /** Every curve pool of this program, older 260-byte and partner-era 292-byte layouts alike. */
+    async poolAccounts(connection, options = {}) {
+      const sizes = await Promise.all(POOL_SIZES.map(dataSize => connection.getProgramAccounts(programId, { ...options, filters: [{ dataSize }] })));
+      return sizes.flat();
+    },
     decodePool(raw) {
       const bytes = new Uint8Array(raw);
-      if (bytes.length !== POOL_SIZE || !sameBytes(bytes, DISCRIMINATORS.CurvePool)) throw new Error('Not an Elpida curve pool account.');
+      if (!POOL_SIZES.includes(bytes.length) || !sameBytes(bytes, DISCRIMINATORS.CurvePool)) throw new Error('Not an Elpida curve pool account.');
+      // Partner-era pools: version byte 1, buyback share, tokens burned and quote spent on buybacks.
+      const ext = bytes.length === POOL_SIZE_PARTNER && bytes[POOL_SIZE] === 1;
       return {
         config: new PublicKey(bytes.subarray(8, 40)), mint: new PublicKey(bytes.subarray(40, 72)), creator: new PublicKey(bytes.subarray(72, 104)), reward: new PublicKey(bytes.subarray(104, 136)),
         name: text(bytes.subarray(136, 168)), symbol: text(bytes.subarray(168, 178)),
         virtualQuote: readU64(bytes, 178), virtualToken: readU64(bytes, 186), curveSupply: readU64(bytes, 194), realQuote: readU64(bytes, 202),
         sold: readU64(bytes, 210), liquidityBonus: readU64(bytes, 218), protocolFees: readU64(bytes, 226), creatorFees: readU64(bytes, 234),
         createdAt: readI64(bytes, 242), graduatedAt: readI64(bytes, 250), status: bytes[258],
+        buybackBps: ext ? readU16(bytes, POOL_SIZE + 1) : 0, buybackBurned: ext ? readU64(bytes, POOL_SIZE + 3) : 0n, buybackQuoteSpent: ext ? readU64(bytes, POOL_SIZE + 11) : 0n,
       };
     },
     /** Raw SPL token-account amount (offset 64), or 0 when the account does not exist. */

@@ -30,6 +30,12 @@
 //!   trading resumes with unchanged reserves. The locked anti-snipe bonus stays for the eventual migration.
 //! - Token metadata (D11): `launch` creates Metaplex metadata (name, symbol, IPFS URI) in the same
 //!   transaction with `is_mutable = false` and the curve PDA as update authority, so nobody can change it.
+//! - Early-partner tiers (docs/DESIGN_PARTNER_TIERS.md): the SOL pair's treasury registers a creator wallet with
+//!   a 10% (Partner) or 20% (Elite) share and an expiry (`set_partner`). A pool launched by that wallet before the
+//!   expiry fixes the share at launch. On every trade the creator still gets half of the base fee; the share comes
+//!   out of the protocol half and buys tokens from the curve at its current price in the same instruction, and
+//!   those tokens are burned. After migration, the share of each LP-fee harvest is burned (token side) or queued
+//!   for buyback (quote side). Tier changes never affect pools already launched.
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
 use anchor_lang::solana_program::program::invoke_signed;
@@ -38,7 +44,7 @@ use anchor_lang::system_program;
 use anchor_spl::associated_token::{get_associated_token_address_with_program_id, AssociatedToken};
 use anchor_spl::token_2022::Token2022;
 use anchor_spl::token::spl_token::instruction::AuthorityType;
-use anchor_spl::token::{self, Mint, MintTo, SetAuthority, Token, TokenAccount, Transfer};
+use anchor_spl::token::{self, Burn, Mint, MintTo, SetAuthority, Token, TokenAccount, Transfer};
 use anchor_spl::token_interface::{self as ti, Mint as QuoteMint, TokenAccount as QuoteAccount, TokenInterface};
 
 declare_id!("ANkA5pytoVkiKQbjzd5NdPWKgmwfsihNJvSfg3vtKLNz");
@@ -76,6 +82,17 @@ pub const GRADUATION_GRACE_SECS: i64 = 86_400;
 pub const USD_DECIMALS: u32 = 6;
 /// Largest single test-faucet mint, in whole units of the test asset (10,000,000).
 pub const TEST_FAUCET_MAX_WHOLE: u64 = 10_000_000;
+/// Early-partner burn shares of the base fee: Partner 10%, Elite 20%.
+pub const PARTNER_BPS: [u16; 2] = [1_000, 2_000];
+/// Furthest expiry the treasury can give a partner tier.
+pub const MAX_PARTNER_WINDOW_SECS: i64 = 180 * 86_400;
+/// Bytes appended after `CurvePool`'s fixed layout in pools launched by this version (older pools have none and
+/// read as standard): version u8, buyback_bps u16, tokens burned u64, quote spent u64; the rest is reserved.
+pub const POOL_EXT_LEN: usize = 32;
+/// Bytes appended after `PumpMigration` in migrations made by this version: version u8, quote queued for buyback
+/// u64, base burned u64, quote spent on buybacks u64, base bought back and burned u64; the rest is reserved.
+pub const MIGRATION_EXT_LEN: usize = 48;
+const EXT_VERSION: u8 = 1;
 // PumpSwap `Pool` layout offsets (8-byte discriminator included).
 const PUMP_POOL_LP_SUPPLY: usize = 203;
 const PUMP_POOL_PROTOCOL_FEES: usize = 271;
@@ -116,6 +133,28 @@ pub struct PricingParams {
 pub mod elpida_launchpad {
     use super::*;
     pub fn optional_buy_version(_ctx: Context<OptionalBuyVersion>) -> Result<()> { Ok(()) }
+    /// Lets clients detect this version (partner tiers, the extra `partner` launch account, writable mint on trades).
+    pub fn partner_tiers_version(_ctx: Context<OptionalBuyVersion>) -> Result<()> { Ok(()) }
+
+    /// The SOL pair's treasury registers `creator` for an early-partner tier: `buyback_bps` 1000 or 2000 with an
+    /// expiry at most 180 days ahead, or (0, 0) to end it early. Only future launches by that wallet are affected.
+    pub fn set_partner(ctx: Context<SetPartner>, creator: Pubkey, buyback_bps: u16, expires_at: i64) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        require!(creator != Pubkey::default(), ElpidaError::InvalidParams);
+        if buyback_bps == 0 {
+            require!(expires_at == 0, ElpidaError::PartnerTerms);
+        } else {
+            let latest = now.checked_add(MAX_PARTNER_WINDOW_SECS).ok_or(ElpidaError::MathOverflow)?;
+            require!(PARTNER_BPS.contains(&buyback_bps) && expires_at > now && expires_at <= latest, ElpidaError::PartnerTerms);
+        }
+        let partner = &mut ctx.accounts.partner;
+        partner.creator = creator;
+        partner.buyback_bps = buyback_bps;
+        partner.expires_at = expires_at;
+        partner.bump = ctx.bumps.partner;
+        emit!(PartnerSet { creator, buyback_bps, expires_at });
+        Ok(())
+    }
 
     /// One-time setup by the program's upgrade authority: quote mint, treasury and curve parameters.
     pub fn initialize_curve(ctx: Context<InitializeCurve>, params: CurveParams) -> Result<()> {
@@ -284,7 +323,7 @@ pub mod elpida_launchpad {
             TOKEN_SUPPLY,
         )?;
         // Immutable Metaplex metadata, created while the creator is still the mint authority.
-        create_metadata(&a.token_metadata_program, &a.metadata, &a.mint.to_account_info(), &a.creator.to_account_info(), &a.pool.to_account_info(), &a.system_program.to_account_info(), &a.rent, &name, &symbol, &uri)?;
+        create_metadata(&a.token_metadata_program, &a.metadata, &a.mint.to_account_info(), &a.creator.to_account_info(), &a.pool.to_account_info(), &a.system_program.to_account_info(), &name, &symbol, &uri)?;
         token::set_authority(
             CpiContext::new(tp.clone(), SetAuthority { current_authority: a.creator.to_account_info(), account_or_mint: a.mint.to_account_info() }),
             AuthorityType::MintTokens,
@@ -297,6 +336,8 @@ pub mod elpida_launchpad {
         symbol_bytes[..symbol.len()].copy_from_slice(symbol.as_bytes());
         let (mint_key, creator_key) = (a.mint.key(), a.creator.key());
         let cfg: CurveConfig = **ctx.accounts.curve_config;
+        // Early-partner tier of the launching wallet, fixed for this pool's whole life.
+        let buyback_bps = partner_share(&a.partner.to_account_info(), &creator_key, now)?;
 
         let pool = &mut ctx.accounts.pool;
         pool.config = ctx.accounts.curve_config.key();
@@ -335,10 +376,14 @@ pub mod elpida_launchpad {
         if cfg.max_creator_buy_bps > 0 {
             require!(trade.tokens as u128 * BPS <= TOKEN_SUPPLY as u128 * cfg.max_creator_buy_bps as u128, ElpidaError::CreatorBuyCap);
         }
-        apply_buy(pool, &trade, now)?;
+        let burn_quote = apply_buy(pool, &trade, now, buyback_bps)?;
+        let burned = partner_buyback(pool, burn_quote)?;
         let bump = pool.bump;
         let pool_key = pool.key();
         let snapshot = Snapshot::of(pool);
+        let mut ext = PoolExt { buyback_bps, ..PoolExt::default() };
+        ext.record(burned, burn_quote)?;
+        ext.write(&mut ctx.accounts.pool.to_account_info().try_borrow_mut_data()?)?;
         let a = &ctx.accounts;
         quote_transfer(&a.quote_token_program, &a.quote_mint, a.creator_quote.to_account_info(), a.quote_vault.to_account_info(), a.creator.to_account_info(), trade.gross, decimals, &[])?;
         let seeds: &[&[u8]] = &[b"curve", mint_key.as_ref(), &[bump]];
@@ -346,6 +391,9 @@ pub mod elpida_launchpad {
             CpiContext::new_with_signer(a.token_program.to_account_info(), Transfer { from: a.token_vault.to_account_info(), to: a.creator_token.to_account_info(), authority: a.pool.to_account_info() }, &[seeds]),
             trade.tokens,
         )?;
+        burn_from_vault(&a.token_program, &a.mint.to_account_info(), &a.token_vault.to_account_info(), &a.pool.to_account_info(), seeds, burned)?;
+        if buyback_bps > 0 { emit!(PartnerPoolLaunched { pool: pool_key, mint: mint_key, creator: creator_key, buyback_bps }); }
+        if burned > 0 { emit!(PartnerBuyback { pool: pool_key, quote_in: burn_quote, tokens_burned: burned, total_burned: ext.burned }); }
         emit!(CurveLaunched {
             creator: creator_key, mint: mint_key, pool: pool_key, quote_in: trade.gross, tokens_out: trade.tokens, fee: trade.fee,
             real_quote: snapshot.real_quote, virtual_quote: snapshot.virtual_quote_total, token_reserve: snapshot.token_reserve, sold: snapshot.sold,
@@ -357,14 +405,17 @@ pub mod elpida_launchpad {
     pub fn buy(ctx: Context<Trade>, gross_in: u64, min_tokens_out: u64) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let cfg: CurveConfig = **ctx.accounts.curve_config;
+        let mut ext = PoolExt::read(&ctx.accounts.pool.to_account_info().try_borrow_data()?);
         let pool = &mut ctx.accounts.pool;
         require!(pool.status == STATUS_TRADING, ElpidaError::CurveClosed);
         let fee_bps = current_fee_bps(&cfg, pool.created_at, now);
         let trade = quote_buy(pool, gross_in, fee_bps, cfg.base_fee_bps as u64)?;
         require!(trade.tokens >= min_tokens_out, ElpidaError::Slippage);
-        apply_buy(pool, &trade, now)?;
+        let burn_quote = apply_buy(pool, &trade, now, ext.buyback_bps)?;
+        let burned = partner_buyback(pool, burn_quote)?;
         let (mint_key, bump, pool_key) = (pool.mint, pool.bump, pool.key());
         let snapshot = Snapshot::of(pool);
+        if ext.record(burned, burn_quote)? { ext.write(&mut ctx.accounts.pool.to_account_info().try_borrow_mut_data()?)?; }
         let a = &ctx.accounts;
         quote_transfer(&a.quote_token_program, &a.quote_mint, a.trader_quote.to_account_info(), a.quote_vault.to_account_info(), a.trader.to_account_info(), trade.gross, a.quote_mint.decimals, &[])?;
         let seeds: &[&[u8]] = &[b"curve", mint_key.as_ref(), &[bump]];
@@ -372,6 +423,8 @@ pub mod elpida_launchpad {
             CpiContext::new_with_signer(a.token_program.to_account_info(), Transfer { from: a.token_vault.to_account_info(), to: a.trader_token.to_account_info(), authority: a.pool.to_account_info() }, &[seeds]),
             trade.tokens,
         )?;
+        burn_from_vault(&a.token_program, &a.mint.to_account_info(), &a.token_vault.to_account_info(), &a.pool.to_account_info(), seeds, burned)?;
+        if burned > 0 { emit!(PartnerBuyback { pool: pool_key, quote_in: burn_quote, tokens_burned: burned, total_burned: ext.burned }); }
         emit!(CurveBought {
             pool: pool_key, buyer: a.trader.key(), quote_in: trade.gross, tokens_out: trade.tokens, fee: trade.fee, anti_snipe_fee: trade.surplus,
             real_quote: snapshot.real_quote, virtual_quote: snapshot.virtual_quote_total, token_reserve: snapshot.token_reserve, sold: snapshot.sold,
@@ -383,6 +436,7 @@ pub mod elpida_launchpad {
     pub fn sell(ctx: Context<Trade>, tokens_in: u64, min_quote_out: u64) -> Result<()> {
         let now = Clock::get()?.unix_timestamp;
         let cfg: CurveConfig = **ctx.accounts.curve_config;
+        let mut ext = PoolExt::read(&ctx.accounts.pool.to_account_info().try_borrow_data()?);
         let pool = &mut ctx.accounts.pool;
         require!(pool.status == STATUS_TRADING, ElpidaError::CurveClosed);
         let fee_bps = current_fee_bps(&cfg, pool.created_at, now);
@@ -390,15 +444,19 @@ pub mod elpida_launchpad {
         require!(trade.net >= min_quote_out, ElpidaError::Slippage);
         pool.real_quote = pool.real_quote.checked_sub(trade.gross).ok_or(ElpidaError::MathOverflow)?;
         pool.sold = pool.sold.checked_sub(tokens_in).ok_or(ElpidaError::MathOverflow)?;
-        split_fee(pool, &trade)?;
+        let burn_quote = split_fee(pool, &trade, ext.buyback_bps)?;
+        let burned = partner_buyback(pool, burn_quote)?;
         let (mint_key, bump, pool_key) = (pool.mint, pool.bump, pool.key());
         let snapshot = Snapshot::of(pool);
+        if ext.record(burned, burn_quote)? { ext.write(&mut ctx.accounts.pool.to_account_info().try_borrow_mut_data()?)?; }
         let a = &ctx.accounts;
         token::transfer(
             CpiContext::new(a.token_program.to_account_info(), Transfer { from: a.trader_token.to_account_info(), to: a.token_vault.to_account_info(), authority: a.trader.to_account_info() }),
             tokens_in,
         )?;
         let seeds: &[&[u8]] = &[b"curve", mint_key.as_ref(), &[bump]];
+        burn_from_vault(&a.token_program, &a.mint.to_account_info(), &a.token_vault.to_account_info(), &a.pool.to_account_info(), seeds, burned)?;
+        if burned > 0 { emit!(PartnerBuyback { pool: pool_key, quote_in: burn_quote, tokens_burned: burned, total_burned: ext.burned }); }
         quote_transfer(&a.quote_token_program, &a.quote_mint, a.quote_vault.to_account_info(), a.trader_quote.to_account_info(), a.pool.to_account_info(), trade.net, a.quote_mint.decimals, &[seeds])?;
         emit!(CurveSold {
             pool: pool_key, seller: a.trader.key(), tokens_in, quote_out: trade.net, fee: trade.fee, anti_snipe_fee: trade.surplus,
@@ -535,6 +593,7 @@ pub mod elpida_launchpad {
         migration.migrated_at = now;
         migration.bump = ctx.bumps.migration;
         migration.authority_bump = authority_bump;
+        MigrationExt::default().write(&mut ctx.accounts.migration.to_account_info().try_borrow_mut_data()?)?;
         let pool = &mut ctx.accounts.pool;
         pool.status = STATUS_MIGRATED;
         pool.real_quote = 0;
@@ -546,6 +605,8 @@ pub mod elpida_launchpad {
     /// Permissionless: withdraws only the LP tokens that represent trading-fee growth since migration
     /// (liquidity units above the migrated principal) and splits the proceeds 50/50 between the
     /// protocol treasury and the creator reward wallet. The principal liquidity stays locked.
+    /// Partner pools: the burn share comes out of the protocol half. Its token side is burned now; its quote side
+    /// stays with the LP authority, recorded as pending buyback (the mint must be passed writable to burn).
     pub fn harvest_lp_fees(ctx: Context<HarvestLpFees>) -> Result<()> {
         ctx.accounts.check_token_accounts()?;
         let a = &ctx.accounts;
@@ -591,10 +652,19 @@ pub mod elpida_launchpad {
         )?;
         let base_out = token_amount(&a.authority_base.to_account_info())?.checked_sub(base_before).ok_or(ElpidaError::MathOverflow)?;
         let quote_out = token_amount(&a.authority_quote.to_account_info())?.checked_sub(quote_before).ok_or(ElpidaError::MathOverflow)?;
-        let (protocol_base, protocol_quote) = (base_out / 2, quote_out / 2);
+        let (half_base, half_quote) = (base_out / 2, quote_out / 2);
+        let buyback_bps = PoolExt::read(&a.pool.to_account_info().try_borrow_data()?).buyback_bps as u128;
+        let (burn_base, queue_quote) = ((base_out as u128 * buyback_bps / BPS) as u64, (quote_out as u128 * buyback_bps / BPS) as u64);
+        let (protocol_base, protocol_quote) = (half_base - burn_base, half_quote - queue_quote);
+        if burn_base > 0 {
+            token::burn(
+                CpiContext::new_with_signer(a.token_program.to_account_info(), Burn { mint: a.mint.to_account_info(), from: a.authority_base.to_account_info(), authority: a.lp_authority.to_account_info() }, &[authority_seeds]),
+                burn_base,
+            )?;
+        }
         for (from, to, amount) in [
             (a.authority_base.to_account_info(), a.treasury_base.to_account_info(), protocol_base),
-            (a.authority_base.to_account_info(), a.reward_base.to_account_info(), base_out - protocol_base),
+            (a.authority_base.to_account_info(), a.reward_base.to_account_info(), base_out - half_base),
         ] {
             if amount > 0 {
                 token::transfer(
@@ -604,7 +674,7 @@ pub mod elpida_launchpad {
             }
         }
         let quote_program = a.quote_program_info();
-        for (to, amount) in [(a.treasury_quote.to_account_info(), protocol_quote), (a.reward_quote.to_account_info(), quote_out - protocol_quote)] {
+        for (to, amount) in [(a.treasury_quote.to_account_info(), protocol_quote), (a.reward_quote.to_account_info(), quote_out - half_quote)] {
             if amount > 0 {
                 ti::transfer_checked(
                     CpiContext::new_with_signer(quote_program.clone(), ti::TransferChecked { from: a.authority_quote.to_account_info(), mint: a.quote_mint.to_account_info(), to, authority: a.lp_authority.to_account_info() }, &[authority_seeds]),
@@ -616,6 +686,15 @@ pub mod elpida_launchpad {
         let lp_after = token_amount(&a.authority_lp.to_account_info())?;
         require!(liquidity_units(lp_after, &after)? >= a.migration.principal, ElpidaError::PrincipalBreached);
         let (pool_key, pump_pool) = (a.pool.key(), a.pump_pool.key());
+        if buyback_bps > 0 {
+            let info = ctx.accounts.migration.to_account_info();
+            let mut data = info.try_borrow_mut_data()?;
+            let mut ext = MigrationExt::read(&data).ok_or(ElpidaError::PartnerTerms)?;
+            ext.pending_buyback = ext.pending_buyback.checked_add(queue_quote).ok_or(ElpidaError::MathOverflow)?;
+            ext.base_burned = ext.base_burned.checked_add(burn_base).ok_or(ElpidaError::MathOverflow)?;
+            ext.write(&mut data)?;
+            emit!(PartnerHarvest { pool: pool_key, base_burned: burn_base, quote_queued: queue_quote, pending_buyback: ext.pending_buyback });
+        }
         let migration = &mut ctx.accounts.migration;
         migration.lp_locked = lp_after;
         migration.harvested_lp = migration.harvested_lp.checked_add(harvest).ok_or(ElpidaError::MathOverflow)?;
@@ -698,7 +777,7 @@ pub fn valid_metadata_uri(uri: &str) -> bool {
 /// no instruction that signs for it, and immutable metadata cannot be updated anyway.
 #[inline(never)]
 #[allow(clippy::too_many_arguments)]
-fn create_metadata<'info>(program: &AccountInfo<'info>, metadata: &AccountInfo<'info>, mint: &AccountInfo<'info>, creator: &AccountInfo<'info>, update_authority: &AccountInfo<'info>, system: &AccountInfo<'info>, rent: &AccountInfo<'info>, name: &str, symbol: &str, uri: &str) -> Result<()> {
+fn create_metadata<'info>(program: &AccountInfo<'info>, metadata: &AccountInfo<'info>, mint: &AccountInfo<'info>, creator: &AccountInfo<'info>, update_authority: &AccountInfo<'info>, system: &AccountInfo<'info>, name: &str, symbol: &str, uri: &str) -> Result<()> {
     let mut data = Vec::with_capacity(1 + 12 + name.len() + symbol.len() + uri.len() + 7);
     data.push(MPL_CREATE_METADATA_V3);
     for field in [name, symbol, uri] {
@@ -716,11 +795,12 @@ fn create_metadata<'info>(program: &AccountInfo<'info>, metadata: &AccountInfo<'
         AccountMeta::new(creator.key(), true),          // payer
         AccountMeta::new_readonly(update_authority.key(), false),
         AccountMeta::new_readonly(system.key(), false),
-        AccountMeta::new_readonly(rent.key(), false),
+        // The rent sysvar is optional for CreateMetadataAccountV3; leaving it out keeps the largest launch
+        // transaction (SOL pair, USDC fee, 32-byte name) within Solana's 1,232 bytes with the `partner` account.
     ];
     anchor_lang::solana_program::program::invoke(
         &Instruction { program_id: MPL_TOKEN_METADATA, accounts, data },
-        &[metadata.clone(), mint.clone(), creator.clone(), update_authority.clone(), system.clone(), rent.clone(), program.clone()],
+        &[metadata.clone(), mint.clone(), creator.clone(), update_authority.clone(), system.clone(), program.clone()],
     )?;
     Ok(())
 }
@@ -900,23 +980,115 @@ pub fn quote_sell(pool: &CurvePool, tokens_in: u64, fee_bps: u64, base_fee_bps: 
     Ok(TradeQuote { gross, net, tokens: tokens_in, fee, base_fee: base, surplus, graduates: false })
 }
 
-fn apply_buy(pool: &mut CurvePool, trade: &TradeQuote, now: i64) -> Result<()> {
+/// Books a buy and returns the partner burn share of its base fee (quote still in the vault, not yet spent).
+pub fn apply_buy(pool: &mut CurvePool, trade: &TradeQuote, now: i64, buyback_bps: u16) -> Result<u64> {
     pool.real_quote = pool.real_quote.checked_add(trade.net).ok_or(ElpidaError::MathOverflow)?;
     pool.sold = pool.sold.checked_add(trade.tokens).ok_or(ElpidaError::MathOverflow)?;
-    split_fee(pool, trade)?;
+    let burn = split_fee(pool, trade, buyback_bps)?;
     if trade.graduates {
         pool.status = STATUS_GRADUATED;
         pool.graduated_at = now;
     }
-    Ok(())
+    Ok(burn)
 }
 
-fn split_fee(pool: &mut CurvePool, trade: &TradeQuote) -> Result<()> {
-    let protocol = trade.base_fee / 2;
+/// Splits the base fee: the creator always gets the larger half; the partner burn share (`buyback_bps` of the base
+/// fee, 0 for standard pools) comes out of the protocol half and is returned for `partner_buyback`. Anything above
+/// the base fee (the anti-snipe surplus) is locked as liquidity.
+pub fn split_fee(pool: &mut CurvePool, trade: &TradeQuote, buyback_bps: u16) -> Result<u64> {
+    let creator = trade.base_fee - trade.base_fee / 2;
+    let burn = (trade.base_fee as u128 * buyback_bps as u128 / BPS) as u64;
+    let protocol = trade.base_fee.checked_sub(creator).and_then(|v| v.checked_sub(burn)).ok_or(ElpidaError::MathOverflow)?;
     pool.protocol_fees = pool.protocol_fees.checked_add(protocol).ok_or(ElpidaError::MathOverflow)?;
-    pool.creator_fees = pool.creator_fees.checked_add(trade.base_fee - protocol).ok_or(ElpidaError::MathOverflow)?;
+    pool.creator_fees = pool.creator_fees.checked_add(creator).ok_or(ElpidaError::MathOverflow)?;
     pool.liquidity_bonus = pool.liquidity_bonus.checked_add(trade.surplus).ok_or(ElpidaError::MathOverflow)?;
-    Ok(())
+    Ok(burn)
+}
+
+/// Spends `quote_in` (already in the vault) on the curve at its current price, with no fee, and returns the tokens
+/// to burn. The quote joins the real reserve, so it ends up in the pool at migration. A buyback never completes the
+/// curve: if it would reach the curve supply, buys nothing, or the curve is no longer trading, the quote is locked
+/// as liquidity bonus instead and nothing is burned.
+pub fn partner_buyback(pool: &mut CurvePool, quote_in: u64) -> Result<u64> {
+    if quote_in == 0 { return Ok(0); }
+    let avail = (pool.virtual_token - pool.sold) as u128;
+    let quote_side = pool.virtual_quote as u128 + pool.real_quote as u128;
+    let out = (avail * quote_in as u128 / (quote_side + quote_in as u128)) as u64;
+    if out == 0 || pool.status != STATUS_TRADING || pool.sold.checked_add(out).ok_or(ElpidaError::MathOverflow)? >= pool.curve_supply {
+        pool.liquidity_bonus = pool.liquidity_bonus.checked_add(quote_in).ok_or(ElpidaError::MathOverflow)?;
+        return Ok(0);
+    }
+    pool.real_quote = pool.real_quote.checked_add(quote_in).ok_or(ElpidaError::MathOverflow)?;
+    pool.sold += out;
+    Ok(out)
+}
+
+/// Burns curve-vault tokens bought back for a partner pool (the curve PDA owns the vault).
+fn burn_from_vault<'info>(token_program: &Program<'info, Token>, mint: &AccountInfo<'info>, vault: &AccountInfo<'info>, pool: &AccountInfo<'info>, seeds: &[&[u8]], amount: u64) -> Result<()> {
+    if amount == 0 { return Ok(()); }
+    token::burn(CpiContext::new_with_signer(token_program.to_account_info(), Burn { mint: mint.clone(), from: vault.clone(), authority: pool.clone() }, &[seeds]), amount)
+}
+
+/// The launching wallet's live tier: its `["partner", creator]` record if it exists, holds 1000 or 2000 and has not
+/// expired; otherwise 0 (standard). The address is seed-checked by the `Launch` accounts.
+fn partner_share(info: &AccountInfo, creator: &Pubkey, now: i64) -> Result<u16> {
+    if *info.owner != crate::ID || info.data_is_empty() { return Ok(0); }
+    let p = PartnerConfig::try_deserialize(&mut &info.try_borrow_data()?[..])?;
+    require_keys_eq!(p.creator, *creator, ElpidaError::PartnerTerms);
+    Ok(if PARTNER_BPS.contains(&p.buyback_bps) && p.expires_at > now { p.buyback_bps } else { 0 })
+}
+
+/// Partner-tier fields stored after a migration record (`MIGRATION_EXT_LEN` bytes, written by `migrate_to_pumpswap`
+/// of this version): quote queued for buyback, base burned at harvests, and buyback totals.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct MigrationExt { pub pending_buyback: u64, pub base_burned: u64, pub quote_spent: u64, pub bought_burned: u64 }
+pub fn migration_ext_offset() -> usize { 8 + PumpMigration::INIT_SPACE }
+impl MigrationExt {
+    pub fn read(data: &[u8]) -> Option<MigrationExt> {
+        let o = migration_ext_offset();
+        if data.len() < o + MIGRATION_EXT_LEN || data[o] != EXT_VERSION { return None; }
+        let u64_at = |i: usize| u64::from_le_bytes(data[i..i + 8].try_into().unwrap());
+        Some(MigrationExt { pending_buyback: u64_at(o + 1), base_burned: u64_at(o + 9), quote_spent: u64_at(o + 17), bought_burned: u64_at(o + 25) })
+    }
+    pub fn write(&self, data: &mut [u8]) -> Result<()> {
+        let o = migration_ext_offset();
+        require!(data.len() >= o + MIGRATION_EXT_LEN, ElpidaError::PartnerTerms);
+        data[o] = EXT_VERSION;
+        for (i, v) in [self.pending_buyback, self.base_burned, self.quote_spent, self.bought_burned].into_iter().enumerate() {
+            data[o + 1 + i * 8..o + 9 + i * 8].copy_from_slice(&v.to_le_bytes());
+        }
+        Ok(())
+    }
+}
+
+/// Partner-tier fields stored after a pool's fixed layout (`POOL_EXT_LEN` bytes). Pools without them (launched
+/// before this version) read as standard and are never written.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct PoolExt { pub buyback_bps: u16, pub burned: u64, pub quote_spent: u64 }
+pub fn pool_ext_offset() -> usize { 8 + CurvePool::INIT_SPACE }
+impl PoolExt {
+    pub fn read(data: &[u8]) -> PoolExt {
+        let o = pool_ext_offset();
+        if data.len() < o + POOL_EXT_LEN || data[o] != EXT_VERSION { return PoolExt::default(); }
+        let u64_at = |i: usize| u64::from_le_bytes(data[i..i + 8].try_into().unwrap());
+        PoolExt { buyback_bps: u16::from_le_bytes([data[o + 1], data[o + 2]]), burned: u64_at(o + 3), quote_spent: u64_at(o + 11) }
+    }
+    pub fn write(&self, data: &mut [u8]) -> Result<()> {
+        let o = pool_ext_offset();
+        require!(data.len() >= o + POOL_EXT_LEN, ElpidaError::PartnerTerms);
+        data[o] = EXT_VERSION;
+        data[o + 1..o + 3].copy_from_slice(&self.buyback_bps.to_le_bytes());
+        data[o + 3..o + 11].copy_from_slice(&self.burned.to_le_bytes());
+        data[o + 11..o + 19].copy_from_slice(&self.quote_spent.to_le_bytes());
+        Ok(())
+    }
+    /// Adds a buyback; returns whether anything changed (so standard pools are never written).
+    pub fn record(&mut self, burned: u64, quote_in: u64) -> Result<bool> {
+        if burned == 0 { return Ok(false); }
+        self.burned = self.burned.checked_add(burned).ok_or(ElpidaError::MathOverflow)?;
+        self.quote_spent = self.quote_spent.checked_add(quote_in).ok_or(ElpidaError::MathOverflow)?;
+        Ok(true)
+    }
 }
 
 struct Snapshot { real_quote: u64, virtual_quote_total: u64, token_reserve: u64, sold: u64, liquidity_bonus: u64, graduated: bool }
@@ -1070,7 +1242,7 @@ pub struct Launch<'info> {
     pub treasury: UncheckedAccount<'info>,
     #[account(init, payer = creator, mint::decimals = TOKEN_DECIMALS, mint::authority = creator)]
     pub mint: Box<Account<'info, Mint>>,
-    #[account(init, payer = creator, space = 8 + CurvePool::INIT_SPACE, seeds = [b"curve", mint.key().as_ref()], bump)]
+    #[account(init, payer = creator, space = 8 + CurvePool::INIT_SPACE + POOL_EXT_LEN, seeds = [b"curve", mint.key().as_ref()], bump)]
     pub pool: Box<Account<'info, CurvePool>>,
     #[account(init, payer = creator, associated_token::mint = mint, associated_token::authority = pool)]
     pub token_vault: Box<Account<'info, TokenAccount>>,
@@ -1100,9 +1272,32 @@ pub struct Launch<'info> {
     /// CHECK: fixed address.
     #[account(address = MPL_TOKEN_METADATA)]
     pub token_metadata_program: UncheckedAccount<'info>,
-    /// CHECK: the rent sysvar, for Metaplex.
-    #[account(address = anchor_lang::solana_program::sysvar::rent::ID)]
-    pub rent: UncheckedAccount<'info>,
+    /// CHECK: PDA ["partner", creator]; when it holds a live tier, this pool buys back and burns that share of its fees.
+    #[account(seeds = [b"partner", creator.key().as_ref()], bump)]
+    pub partner: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+#[instruction(creator: Pubkey)]
+pub struct SetPartner<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    /// The native SOL pair: its treasury is the partner authority, as the factory treasury is on EVM.
+    #[account(seeds = [b"curve-config", WSOL_MINT.as_ref()], bump = sol_config.bump, constraint = sol_config.treasury == authority.key() @ ElpidaError::Unauthorized)]
+    pub sol_config: Box<Account<'info, CurveConfig>>,
+    #[account(init_if_needed, payer = authority, space = 8 + PartnerConfig::INIT_SPACE, seeds = [b"partner", creator.as_ref()], bump)]
+    pub partner: Box<Account<'info, PartnerConfig>>,
+    pub system_program: Program<'info, System>,
+}
+
+/// An early-partner tier for one creator wallet (PDA ["partner", creator]); (0, 0) means ended.
+#[account]
+#[derive(InitSpace)]
+pub struct PartnerConfig {
+    pub creator: Pubkey,
+    pub buyback_bps: u16,
+    pub expires_at: i64,
+    pub bump: u8,
 }
 
 #[derive(Accounts)]
@@ -1293,7 +1488,7 @@ pub struct MigrateToPumpswap<'info> {
     /// CHECK: the LP authority's Token-2022 LP account, created by PumpSwap.
     #[account(mut, address = get_associated_token_address_with_program_id(&lp_authority.key(), &lp_mint.key(), &token_2022_program.key()) @ ElpidaError::PumpAccount)]
     pub authority_lp: UncheckedAccount<'info>,
-    #[account(init, payer = payer, space = 8 + PumpMigration::INIT_SPACE, seeds = [b"pump-migration", mint.key().as_ref()], bump)]
+    #[account(init, payer = payer, space = 8 + PumpMigration::INIT_SPACE + MIGRATION_EXT_LEN, seeds = [b"pump-migration", mint.key().as_ref()], bump)]
     pub migration: Box<Account<'info, PumpMigration>>,
     /// CHECK: PumpSwap pool PDA; created and seed-checked by PumpSwap.
     #[account(mut)]
@@ -1442,6 +1637,14 @@ pub struct CurveMigrated { pub pool: Pubkey, pub mint: Pubkey, pub pump_pool: Pu
 #[event]
 pub struct CurveReopened { pub pool: Pubkey, pub mint: Pubkey, pub graduated_at: i64, pub reopened_at: i64, pub real_quote: u64, pub liquidity_bonus: u64 }
 #[event]
+pub struct PartnerSet { pub creator: Pubkey, pub buyback_bps: u16, pub expires_at: i64 }
+#[event]
+pub struct PartnerPoolLaunched { pub pool: Pubkey, pub mint: Pubkey, pub creator: Pubkey, pub buyback_bps: u16 }
+#[event]
+pub struct PartnerBuyback { pub pool: Pubkey, pub quote_in: u64, pub tokens_burned: u64, pub total_burned: u64 }
+#[event]
+pub struct PartnerHarvest { pub pool: Pubkey, pub base_burned: u64, pub quote_queued: u64, pub pending_buyback: u64 }
+#[event]
 pub struct LpFeesHarvested { pub pool: Pubkey, pub pump_pool: Pubkey, pub lp_burned: u64, pub base_out: u64, pub quote_out: u64, pub protocol_base: u64, pub protocol_quote: u64, pub lp_locked: u64 }
 
 #[error_code]
@@ -1478,4 +1681,5 @@ pub enum ElpidaError {
     #[msg("USDC fee payment is not available for this pair")] UsdcFeeUnavailable,
     #[msg("Token metadata must be an ipfs:// URI of at most 200 printable characters")] InvalidUri,
     #[msg("The curve can be reopened only 24 hours after it completed without migrating")] GraceNotOver,
+    #[msg("Partner tiers are 10% or 20% with an expiry at most 180 days ahead, or (0, 0) to end one")] PartnerTerms,
 }

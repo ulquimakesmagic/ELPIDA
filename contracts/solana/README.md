@@ -24,7 +24,12 @@ The SOL pair's fee and curve come from `config/native-pricing.json`. On test net
    - The pool opens at the final curve price, raised slightly by the bonus.
    - The pool is created by the data-less PDA `["pump-lp", mint]`, which keeps the LP tokens forever. Only PumpSwap's 100-unit minimum stays in the pool unowned.
 4. **Escape hatch (D7).** If a completed curve has not migrated 24 hours after it completed (for example because PumpSwap changed or refused the pool), anyone can call `reopen_curve`. Trading resumes with the reserves unchanged, so holders can sell; completing the curve again restarts the grace period. The locked anti-snipe bonus stays in the vault for the eventual migration.
-5. **LP fees.** PumpSwap charges pools it did not create itself 0.25% to LPs and 0.05% to pump. It pays no coin-creator fee on these pools.
+5. **Early-partner tiers** (`docs/DESIGN_PARTNER_TIERS.md`). The SOL pair's treasury registers a creator wallet with `set_partner`: 10% (Partner) or 20% (Elite) and an expiry at most 180 days ahead, or (0, 0) to end it.
+   - A pool launched by that wallet before the expiry fixes the share at launch, in bytes appended after the pool's fixed layout (pools are 292 bytes from this version; older 260-byte pools read as standard). Changing or ending a tier never affects a launched pool.
+   - On every trade the creator still gets the larger half of the base fee. The share comes out of the protocol half and buys tokens from the curve at its current price, with no fee, in the same instruction; those tokens are burned (SPL burn, so the supply falls). The quote joins the real reserve.
+   - A buyback never completes the curve: if it would reach the curve supply, buys nothing, or follows the completing buy, its quote is locked as liquidity bonus instead.
+   - After migration, `harvest_lp_fees` burns the share of the token side at once and keeps the share of the quote side with the LP authority, recorded as `pending_buyback` in the migration record. Spending it on a capped PumpSwap buyback is the next program step; until then it stays there, accounted for.
+6. **LP fees.** PumpSwap charges pools it did not create itself 0.25% to LPs and 0.05% to pump. It pays no coin-creator fee on these pools.
    - Anyone can call `harvest_lp_fees`. It withdraws only the LP tokens that represent fee growth, and splits the base and quote 50/50 between the treasury and the creator reward wallet.
    - Fee growth is measured in liquidity units (`lp / lp_supply × √(base × quote)`). The position never drops below its migrated units, and the program checks this after every harvest.
    - A harvest must be at least 0.01% of the locked LP.
@@ -45,14 +50,17 @@ The SOL pair's fee and curve come from `config/native-pricing.json`. On test net
 | `set_beta_gate(authority, enabled)` | Program upgrade authority | Mainnet beta: while enabled, only allowlisted creators can launch. Trading is never gated. `authority` is the beta admin who manages the allowlist |
 | `allow_beta_creator(creator)` / `revoke_beta_creator` | Beta admin | Adds or removes a creator (PDA `["beta-creator", creator]`) |
 | `test_build_check` | Anyone | Succeeds only on the test build; lets scripts confirm a cluster runs the mainnet build |
-| `harvest_lp_fees` | Anyone, after migration | Withdraws LP fee growth and splits it 50/50; destination token accounts must exist (the client adds idempotent creation) |
+| `harvest_lp_fees` | Anyone, after migration | Withdraws LP fee growth and splits it 50/50; destination token accounts must exist (the client adds idempotent creation). Partner pools: the share of the token side is burned (the mint must be passed writable) and the share of the quote side is queued |
+| `set_partner(creator, buyback_bps, expires_at)` | Treasury of the SOL pair (`["curve-config", wSOL]`) | Early-partner tier for a creator wallet at PDA `["partner", creator]`: 1000 or 2000 with an expiry at most 180 days ahead, or (0, 0) to end it. Future launches only. Error 6032 `PartnerTerms`. `npm run solana:partner` sends it from the deploy key |
+| `partner_tiers_version` | Anyone | Empty; lets clients detect this version (launch takes the creator's `partner` account in place of the rent sysvar, trades pass the mint writable) |
 
-**Transaction size.** A launch is one legacy transaction, capped by Solana at 1,232 bytes. The client sends only bare `ipfs://<CIDv1>` links (66 characters, `MAX_LAUNCH_URI`); the largest supported launch, a SOL pair paying the fee in SPL-Token USDC with a 32-byte name, is 1,227 bytes. A Token-2022 USDC fee on a SOL pair would be 1,259 bytes, so the wallet refuses it before signing and suggests paying in SOL; it needs a v0 transaction with a lookup table if such a USDC mint is ever configured. Mainnet and devnet USDC are SPL-Token mints.
+**Transaction size.** A launch is one legacy transaction, capped by Solana at 1,232 bytes. From the partner-tier version the launch passes the creator's `partner` record where it used to pass the rent sysvar (optional for Metaplex's `CreateMetadataAccountV3`), so the size is unchanged. The client sends only bare `ipfs://<CIDv1>` links (66 characters, `MAX_LAUNCH_URI`); the largest supported launch, a SOL pair paying the fee in SPL-Token USDC with a 32-byte name, is 1,227 bytes. A Token-2022 USDC fee on a SOL pair would be 1,259 bytes, so the wallet refuses it before signing and suggests paying in SOL; it needs a v0 transaction with a lookup table if such a USDC mint is ever configured. Mainnet and devnet USDC are SPL-Token mints.
 
 **Accounts:**
 - One `CurveConfig` PDA `["curve-config", quote_mint]` per pair (the SOL pair uses the wrapped-SOL mint).
 - One `CurvePool` PDA `["curve", mint]` per token. Its associated token accounts hold the unsold supply and the quote.
-- One `PumpMigration` PDA `["pump-migration", mint]` per migrated token. It records the PumpSwap pool, the locked LP and the principal.
+- One `PumpMigration` PDA `["pump-migration", mint]` per migrated token. It records the PumpSwap pool, the locked LP and the principal (and, from this version, 48 appended bytes: the quote queued for buyback and the partner burns).
+- One `PartnerConfig` PDA `["partner", creator]` per registered creator wallet: the share, the expiry and the bump.
 
 There is no admin, rescue or reserve withdrawal. Error codes 6000+ are listed in `packages/solana/client.mjs`.
 
@@ -77,12 +85,12 @@ cp /tmp/sbf-main/elpida_launchpad.so build/elpida_launchpad-mainnet.so
 
 `Cargo.lock` pins dependencies compatible with the Solana toolchain's Rust 1.84 (for example `blake3` 1.5.5). The program ID is fixed by `declare_id!` and `keys/elpida_launchpad-keypair.json` (private, git-ignored).
 
-Release builds (16 October 2026, Agave / Solana CLI **2.3.13**, platform-tools v1.48), each reproduced byte for byte from a clean `target`:
+Release builds (26 October 2026, early-partner tiers; Agave / Solana CLI **2.3.13**, platform-tools v1.48), each reproduced byte for byte from a clean `target`:
 
 | File | Build | sha256 |
 |---|---|---|
-| `build/elpida_launchpad.so` | `--features testnet` (devnet, localnet) | `4e96db5726f91b9c5e0d7b8b9dafd779c6848307ea3350edbc10eda049199623` |
-| `build/elpida_launchpad-mainnet.so` | mainnet (test instructions refused) | `974ee70ca17d8722e855af89b3fed089c8f306baa0d69f280378d2b6fb11975e` |
+| `build/elpida_launchpad.so` | `--features testnet` (devnet, localnet) | `331765ca50908c188126cd167ec7b3a1f93c5c0dd046bc22dc0cf041c0471b4e` |
+| `build/elpida_launchpad-mainnet.so` | mainnet (test instructions refused) | `f469dde710b5d1d6c303cf88af3cdbe4735b8e17471948f1b0325ca7ea5bca1e` |
 
 The previous devnet build (`319e2ffe…`, before metadata and reopen) is kept as `fixtures/elpida_launchpad-pre-metadata.so` for the compatibility test. Browsers detect which build a cluster runs (`client.supportsMetadata`, a simulated `reopen_curve`) and use the earlier launch layout until the program is upgraded.
 

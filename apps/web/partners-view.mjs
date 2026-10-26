@@ -134,7 +134,7 @@ export function partnersView(ctx, { connect }) {
           h('li', h('strong', 'Review'), h('span', 'Elpida reviews each application and sets your tier and window.')),
           h('li', h('strong', 'Registered on chain'), h('span', 'The treasury registers your wallet in the launch factory on each chain.')),
           h('li', h('strong', 'Launch'), h('span', 'Every token you launch in the window burns 10% or 20% of fees, for life.'))),
-        callout('', 'info', 'Testnet: partner tiers are live on test networks first. Solana support arrives with the next program upgrade.'))));
+        callout('', 'info', 'Testnet: partner tiers are live on the EVM test networks, and on Solana devnet once its program upgrade is applied.'))));
   drawWallets();
   return { root, update: drawWallets };
 }
