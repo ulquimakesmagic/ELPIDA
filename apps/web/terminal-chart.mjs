@@ -163,7 +163,13 @@ export function terminalChart(ctx,token,q){
     try{
       const net=ctx.mode==='local'?'':`&network=${encodeURIComponent(ctx.currentChain())}`;
       const base=ctx.mode==='local'?'tokens':'public/tokens';
-      const rows=await ctx.api(`${base}/${token.address}/candles?interval=${pref.interval}${net}`);
+      let rows=await ctx.api(`${base}/${token.address}/candles?interval=${pref.interval}${net}`);
+      // A bucket wider than the whole history draws a single dot. If the range yields almost nothing, ask for the
+      // finest bucket and keep whichever view has more to show.
+      if(rows.length<=3&&pref.interval>60){
+        const finer=await ctx.api(`${base}/${token.address}/candles?interval=60${net}`);
+        if(finer.length>rows.length)rows=finer;
+      }
       if(request!==revision||!panel.isConnected)return;
       const signature=JSON.stringify(rows.slice(-3))+rows.length+pref.basis+pref.range;
       if(quiet&&signature===lastSignature&&chart)return;
