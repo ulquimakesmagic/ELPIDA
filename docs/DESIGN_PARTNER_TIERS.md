@@ -72,11 +72,14 @@ The fee splitter splits LP fees the same three ways:
 - **Token side:** the burn share of the token-side fees is sent to the dead address when fees are collected.
 - **Quote side:** the burn share of ETH or USDC fees is held for buyback. Anyone can call `buyback()`, which swaps it
   for the token through the pool and burns what it receives.
-- **Protecting that swap:**
-  - the swap's price limit is the pool's **30-minute time-weighted average price** plus 1%;
-  - the adapter starts the pool's price history at graduation (`increaseObservationCardinalityNext`);
-  - a pool moved within the last 30 minutes cannot be pushed past that limit, so a sandwich gains nothing;
-  - each call spends at most a fixed fraction of what is pending.
+- **Protecting that swap** (changed during implementation, 26 October 2026; this replaces the earlier TWAP plan):
+  - each call spends at most **1% of the pool's quote balance**; a larger queue takes several calls;
+  - with the 1% pool fee, an attacker who moves the price before and after a buyback that small pays more in fees
+    than the buyback's price impact gives back, so a sandwich loses money;
+  - only the pool can call the swap callback, only during the splitter's own buyback, and only for at most the
+    queued amount.
+  - Why not a TWAP: it would add gas to every fee collection and a price-history dependency, for no extra safety at
+    this size.
 
 ### 2.4 Solana
 
@@ -117,14 +120,14 @@ The same in the Anchor program, in one upgrade:
 
 ## 5. Delivery, in order
 
-1. **EVM contracts**, in two PRs: (a) the registry and the curve buyback; (b) the LP-fee buyback with the TWAP
-   limit. Unit tests and invariants:
+1. **EVM contracts**, in two PRs: (a) the registry and the curve buyback (#105); (b) the LP-fee buyback with the 1%
+   depth cap. Unit tests and invariants:
    - the split sums exactly for 0, 1000 and 2000;
    - burned tokens go to the dead address and never complete the curve;
    - expiry is enforced at the launch block;
    - only the treasury can register;
    - a tier change does not touch launched tokens;
-   - the splitter burns the token side, and a quote-side buyback cannot fill past the TWAP limit;
+   - the splitter burns the token side, and each quote-side buyback spends at most 1% of the pool's quote balance;
    - both fuzz campaigns run with partner launches too.
 2. **Solana program** changes with tests.
 3. **Server:** applications store and APIs; admin review and transaction preparation; indexer and API expose each
