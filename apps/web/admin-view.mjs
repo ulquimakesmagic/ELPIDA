@@ -3,8 +3,9 @@ import { chainIcon } from './chain-ui.mjs';
 import { withWalletTimeout } from './wallet.mjs';
 import { renderPartners } from './admin-partners.mjs';
 
-// Operator panel (#/admin). The Operations tab is read-only: health, treasury balances, activity, indexers, the price
-// relay, graduation and backups. The Partners tab (#/admin?tab=partners) reviews early-partner applications; see
+// Operator panel (#/monkey; deliberately not #/admin, the first path scanners try). The Operations tab is read-only:
+// health, treasury balances, activity, indexers, the price
+// relay, graduation and backups. The Partners tab (#/monkey?tab=partners) reviews early-partner applications; see
 // admin-partners.mjs. Sign-in is a wallet signature checked by the server against the factory treasuries and
 // ELPIDA_ADMIN_ADDRESSES; the session is an HttpOnly cookie the page never sees. Nothing here sends a transaction.
 
@@ -137,8 +138,8 @@ export function renderAdmin(ctx, { connect }) {
       if (!session.signedIn) { root.replaceChildren(signInView()); return; }
       const tab = /(?:^|[?&])tab=partners(?:&|$)/.test(location.hash.split('?')[1] ?? '') ? 'partners' : 'ops';
       const tabs = h('nav.op-tabs', { 'aria-label': 'Admin sections' },
-        h('a', { href: '#/admin', 'aria-current': tab === 'ops' ? 'page' : undefined }, 'Operations'),
-        h('a', { href: '#/admin?tab=partners', 'aria-current': tab === 'partners' ? 'page' : undefined }, 'Partners'));
+        h('a', { href: '#/monkey', 'aria-current': tab === 'ops' ? 'page' : undefined }, 'Operations'),
+        h('a', { href: '#/monkey?tab=partners', 'aria-current': tab === 'partners' ? 'page' : undefined }, 'Partners'));
       if (tab === 'partners') { root.replaceChildren(tabs, renderPartners(ctx, { getJson })); return; }
       const data = await getJson('admin/overview');
       if (!root.isConnected) return;

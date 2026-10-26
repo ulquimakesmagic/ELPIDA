@@ -196,7 +196,7 @@ function parseRoute() {
   if (doc) return { name: 'docs', section: doc[1] };
   const token = hash.match(/^\/token\/([A-Za-z0-9]{32,64})$/);
   if (token) return { name: 'token', address: token[1],network:new URLSearchParams(query).get('network') };
-  return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/docs': 'docs', '/admin': 'admin', '/partners': 'partners' }[hash] ?? 'notfound' };
+  return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/docs': 'docs', '/monkey': 'admin', '/partners': 'partners' }[hash] ?? 'notfound' };
 }
 function route() {
   const next = parseRoute(); const changed = next.name !== currentRoute.name || next.address !== currentRoute.address;
