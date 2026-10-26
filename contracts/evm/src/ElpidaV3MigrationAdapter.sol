@@ -106,8 +106,15 @@ contract ElpidaV3MigrationAdapter {
         require((actual>expected?actual-expected:expected-actual)<=uint256(expected)/1_000_000,"pool price mismatch");
         return (x,y);
     }
+    /// The calling curve's partner burn share for LP fees (`buybackBps`), or 0 for curves without one. A caller can only
+    /// set the share of the splitter created for its own migration.
+    function _buybackOf(address curve) private view returns(uint256){
+        (bool ok,bytes memory data)=curve.staticcall(abi.encodeWithSignature("buybackBps()"));
+        uint256 share=ok&&data.length==32?abi.decode(data,(uint256)):0;
+        return share==1000||share==2000?share:0;
+    }
     function _mint(Request calldata r,Result memory result,address a,address b,uint256 x,uint256 y) private returns(Result memory) {
-        ElpidaV3FeeLocker locker=new ElpidaV3FeeLocker(address(manager),address(this),a,b,fee,IV3MigrationFactory(dexFactory).feeAmountTickSpacing(fee),r.treasury,r.creator);
+        ElpidaV3FeeLocker locker=new ElpidaV3FeeLocker(address(manager),address(this),a,b,fee,IV3MigrationFactory(dexFactory).feeAmountTickSpacing(fee),r.treasury,r.creator,r.token,result.pool,_buybackOf(msg.sender));
         result.locker=address(locker);result.splitter=address(locker.splitter());
         _approve(a,x);_approve(b,y);
         uint256 used0;uint256 used1;

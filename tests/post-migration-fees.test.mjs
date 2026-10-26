@@ -15,7 +15,7 @@ test('permanent v3 locker collects only fees and splitter pays fixed beneficiari
  const f=await setup(t),mock=compiled['tests/fixtures/MockUSDC.sol'].MockUSDC;
  const tokens=[await f.deploy(mock),await f.deploy(mock)];tokens.sort((a,b)=>BigInt(a.target)<BigInt(b.target)?-1:1);
  const [a,b]=tokens,manager=await f.deploy(compiled['tests/fixtures/MockPositionManager.sol'].MockPositionManager,a.target,b.target);
- const locker=await f.deploy(art('ElpidaV3FeeLocker'),manager.target,f.addresses[0],a.target,b.target,3000,60,f.addresses[2],f.addresses[3]);
+ const locker=await f.deploy(art('ElpidaV3FeeLocker'),manager.target,f.addresses[0],a.target,b.target,3000,60,f.addresses[2],f.addresses[3],a.target,ZeroAddress,0);
  await assert.rejects(manager.connect(f.signers[1]).deliver.staticCall(locker.target,-887220,887220),/position source/);
  await assert.rejects(manager.deliver.staticCall(locker.target,-600,600),/position config/);
  await mined(manager.deliver(locker.target,-887220,887220));assert.equal(await locker.locked(),true);
@@ -36,10 +36,10 @@ test('permanent v3 locker collects only fees and splitter pays fixed beneficiari
 });
 test('native fee claims isolate a rejecting recipient and same-wallet split remains backed',async t=>{
  const f=await setup(t),reject=await f.deploy(compiled['tests/fixtures/MockPositionManager.sol'].RejectNativeFees);
- const splitter=await f.deploy(art('ElpidaFeeSplitter'),f.addresses[2],reject.target);
+ const splitter=await f.deploy(art('ElpidaFeeSplitter'),f.addresses[2],reject.target,ZeroAddress,ZeroAddress,0);
  await mined(splitter.depositNative({value:101n}));await assert.rejects(splitter.claim.staticCall(ZeroAddress,reject.target),/native payout/);
  await mined(splitter.connect(f.signers[1]).claim(ZeroAddress,f.addresses[2]));assert.equal(await f.provider.getBalance(splitter.target),51n);
- const same=await f.deploy(art('ElpidaFeeSplitter'),f.addresses[3],f.addresses[3]);await mined(same.depositNative({value:101n}));
+ const same=await f.deploy(art('ElpidaFeeSplitter'),f.addresses[3],f.addresses[3],ZeroAddress,ZeroAddress,0);await mined(same.depositNative({value:101n}));
  assert.equal(await same.claimable(ZeroAddress,f.addresses[3]),101n);await mined(same.claim(ZeroAddress,f.addresses[3]));assert.equal(await f.provider.getBalance(same.target),0n);
 });
 
