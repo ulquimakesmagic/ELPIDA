@@ -20,10 +20,11 @@ import { portfolioView } from './portfolio-view.mjs';
 import { circleFundingPanel } from './circle-funding.mjs';
 import { initShell, renderLastSale, syncSearch } from './shell.mjs';
 import { startResilience } from './resilience.mjs';
+import { connectTradeStream, mergeTrades } from './live-trades.mjs';
 
 let config, evmWallet, solWallet, wallet;
 let mode = 'local', account = '0', state = null, busy = false, refreshRevision = 0, progressHook = null;
-let allTokens = [], discoveryErrors = [], chainControls = [], connecting=false, recentBuys = [];
+let allTokens = [], discoveryErrors = [], chainControls = [], connecting=false, recentBuys = [], liveTrades = null, stripDelay = 8000;
 
 async function api(path, body, renewed = false) {
   const response = await fetch(`/api/${path}`, body ? { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': config.csrf }, body: JSON.stringify({ ...body, account }) } : {signal:AbortSignal.timeout(15000)});
@@ -335,7 +336,19 @@ async function connectCurrent() { openWalletDialog(wallet.net); }
 /* ---------- Last sale strip ---------- */
 // Recent buys feed the top bar strip (public networks only) and the Explore Live feed (the simulation's
 // own buys in the simulation).
+function syncLiveStream() {
+  if (mode === 'testnet' && !liveTrades) {
+    liveTrades = connectTradeStream({
+      onOpen: () => { stripDelay = 30000; },
+      onError: () => { stripDelay = 8000; },
+      onTrades: trades => applyLiveTrades(trades),
+    });
+  } else if (mode !== 'testnet' && liveTrades) {
+    liveTrades.close(); liveTrades = null; stripDelay = 8000;
+  }
+}
 async function refreshLastSale() {
+  syncLiveStream();
   const local = mode !== 'testnet', asked = mode;
   if (local) renderLastSale([], { href: () => '#/' });
   let trades = [];
@@ -343,6 +356,15 @@ async function refreshLastSale() {
   if (mode !== asked) return;
   recentBuys = Array.isArray(trades) ? trades : [];
   if (!local) renderLastSale(recentBuys, { href: t => `#/token/${t.address}?network=${encodeURIComponent(t.network)}` });
+  exploreView?.setTrades(recentBuys);
+}
+/** Inserts streamed trades into the strip and the live feed, newest first, without duplicates. */
+function applyLiveTrades(trades) {
+  if(!Array.isArray(trades)||!trades.length)return;
+  const merged=mergeTrades(recentBuys,trades);
+  if(!merged.added)return;
+  recentBuys=merged.trades;
+  renderLastSale(recentBuys,{ href: t => `#/token/${t.address}?network=${encodeURIComponent(t.network)}` });
   exploreView?.setTrades(recentBuys);
 }
 async function openTools() {
@@ -409,8 +431,11 @@ async function init() {
   const backgroundRefresh=()=>{if(!busy&&document.visibilityState==='visible'&&!(currentRoute.name==='rewards'&&document.activeElement?.closest('form')))refresh({preserveInput:true}).catch(()=>{});};
   setInterval(backgroundRefresh,60000);
   document.addEventListener('visibilitychange',backgroundRefresh);
-  // The trade strip polls faster than the full refresh: it is one small request, and it is what a trader watches.
-  setInterval(()=>{if(document.visibilityState==='visible')refreshLastSale();},8000);
+  // The trade strip is fed by the live stream. The poll stays as a fallback and slows down while the stream is up,
+  // so a trade no longer waits for the next poll.
+  const stripLoop=()=>{setTimeout(()=>{if(document.visibilityState==='visible')refreshLastSale();stripLoop();},stripDelay);};
+  stripLoop();
+  document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')liveTrades?.resume();else liveTrades?.pause();});
   if (config.solana?.mainnet) {
     $('#footer-note').textContent = 'Solana mainnet beta: real funds, new contracts. Other networks are test networks with no monetary value.';
     $('#how-network-note').textContent = 'Solana runs as a mainnet beta with real funds and new, unaudited contracts; launching is invite-only while the beta gate is on. The other networks are test networks.';

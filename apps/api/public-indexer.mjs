@@ -9,7 +9,7 @@ import { testnetDexes } from '../../packages/core/uniswap.mjs';
 // A read-only worker per configured deployment. Never accepts user RPCs or private keys.
 // How often the public indexes poll, and how many networks sync at once. A trade is visible to the API once the
 // network that carries it has been read, so the interval is the freshness of every trade endpoint.
-const TICK_MS=Math.max(2000,Math.min(60000,Number(process.env.ELPIDA_INDEX_INTERVAL_MS)||8000));
+const TICK_MS=Math.max(2000,Math.min(60000,Number(process.env.ELPIDA_INDEX_INTERVAL_MS)||5000));
 const TICK_CONCURRENCY=Math.max(1,Math.min(8,Number(process.env.ELPIDA_INDEX_CONCURRENCY)||3));
 // One token's inline data: image made every listing 1.1 MB. A listing ships the URL instead; the bytes are
 // served once by /api/wallet-logo and cached by the browser.
@@ -20,9 +20,9 @@ export const publicMetadata=(entry,token)=>{
   return INLINE_IMAGE.test(image)?{...metadata,image:`/api/wallet-logo/${entry.net.key}/${token.address}`,imageInline:true}:metadata;
 };
 export class PublicIndexer {
-  constructor({networks,contracts,dataDir,metadataStore,providerFactory=rpc=>new JsonRpcProvider(rpc,undefined,{cacheTimeout:-1,batchMaxCount:1}),log=console.log}){
+  constructor({networks,contracts,dataDir,metadataStore,onTrades,providerFactory=rpc=>new JsonRpcProvider(rpc,undefined,{cacheTimeout:-1,batchMaxCount:1}),log=console.log}){
     this.entries=new Map();this.legacy=new Map();this.metadataStore=metadataStore;this.log=log;this.stopping=false;
-    this.providerFactory=providerFactory;this.rpcs=new Map();
+    this.providerFactory=providerFactory;this.rpcs=new Map();this.onTrades=onTrades??null;
     for(const net of networks.filter(n=>n.shared?.factory)){
       // An operator override is used alone; otherwise the network's RPC, then its server-side fallbacks.
       const override=process.env['ELPIDA_RPC_'+net.chainId],list=override?[override]:[net.rpcUrl,...(net.rpcFallbacks??[])];
@@ -52,6 +52,7 @@ export class PublicIndexer {
       try{
         if(!e.validated){const d=deploymentOf(e),chain=Number((await e.provider.getNetwork()).chainId),v=Number(await new Contract(d.factory,['function MODEL_VERSION() view returns(uint256)'],e.provider).MODEL_VERSION());if(chain!==e.net.chainId||v!==MODEL_VERSIONS[d.model])throw new Error('Deployment identity mismatch');e.validated=true;}
         await e.index.sync();e.error=null;e.errorCode=null;e.lastSuccess=new Date().toISOString();
+        this.publishFresh(e);
         if(!e.legacy){const r=this.rpcs?.get(e.net.key);if(r)r.failures=0;}
         for(const t of e.index.tokens())if(t.metadataURI){
           // Only factory events synchronized by the validated chain index authorize retention.
@@ -64,6 +65,20 @@ export class PublicIndexer {
         if(!e.legacy)this.failover(e.net.key);
       }
     });}finally{this.running=false;}
+  }
+  /**
+   * Hands the trades this pass added to the live feed. The first pass after a restart only records the tip, so a
+   * deploy does not replay the whole history to every open stream.
+   */
+  publishFresh(e){
+    if(!this.onTrades)return;
+    const tip=e.index.tip()?.height;
+    if(tip==null)return;
+    if(e.pushedHeight==null||tip<e.pushedHeight){e.pushedHeight=tip;return;}
+    if(tip===e.pushedHeight)return;
+    const fresh=e.index.tradesSince(e.pushedHeight);
+    e.pushedHeight=tip;
+    if(fresh.length)this.onTrades(e.net.key,fresh);
   }
   /**
    * After repeated failures on one public RPC (a node that refuses the server's address, rate-limits it or has pruned

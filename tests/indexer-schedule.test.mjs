@@ -65,3 +65,45 @@ test('one failing network does not stop the others, and is reported as a code', 
   assert.ok(indexer.entries.get('slow').lastSuccess, 'the healthy networks still synced');
   assert.ok(indexer.entries.get('after').lastSuccess);
 });
+
+/** An entry whose index reports a tip and the trades above a height, like the real one. */
+function feedEntry(key, { height = 10, trades = [] } = {}) {
+  const state = { height, trades, asked: null };
+  return {
+    net: { key },
+    validated: true,
+    metadata: new Map(),
+    index: {
+      tip: () => ({ height: state.height }),
+      tradesSince: height => { state.asked = height; return state.trades; },
+      sync: async () => {},
+      status: () => ({ indexedBlock: state.height }),
+      tokens: () => [],
+    },
+    set(next) { Object.assign(state, next); },
+    get asked() { return state.asked; },
+  };
+}
+
+test('the feed gets only the trades a pass added, and never a replay of history', () => {
+  const published = [];
+  const indexer = new PublicIndexer({ networks: [], contracts: {}, dataDir: '.', metadataStore: {}, onTrades: (net, trades) => published.push([net, trades]), log: () => {} });
+  const entry = feedEntry('base-sepolia');
+
+  indexer.publishFresh(entry);
+  assert.equal(published.length, 0, 'the first pass only records the tip');
+
+  entry.set({ height: 12, trades: [{ tx: '0xa', height: 11 }, { tx: '0xb', height: 12 }] });
+  indexer.publishFresh(entry);
+  assert.equal(entry.asked, 10, 'it asks for what came after the last published height');
+  assert.equal(published.length, 1);
+  assert.equal(published[0][0], 'base-sepolia');
+  assert.equal(published[0][1].length, 2);
+
+  indexer.publishFresh(entry);
+  assert.equal(published.length, 1, 'an unchanged tip publishes nothing');
+
+  entry.set({ height: 9, trades: [] });
+  indexer.publishFresh(entry);
+  assert.equal(published.length, 1, 'a rollback publishes nothing and it resynchronises from the new tip');
+});

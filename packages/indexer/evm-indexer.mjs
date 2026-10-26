@@ -64,6 +64,7 @@ export class EvmIndexer {
     this.db.exec(`
       CREATE INDEX IF NOT EXISTS trades_address ON trades(address,height DESC,idx DESC);
       CREATE INDEX IF NOT EXISTS trades_recent ON trades(timestamp DESC,height DESC,idx DESC);
+      CREATE INDEX IF NOT EXISTS trades_height ON trades(height,idx);
       CREATE INDEX IF NOT EXISTS events_address ON events(address,height,idx);
       CREATE INDEX IF NOT EXISTS events_sender ON events(sender,height,idx);
       CREATE INDEX IF NOT EXISTS events_recipient ON events(recipient,height,idx);
@@ -251,6 +252,8 @@ export class EvmIndexer {
   }
   /** Latest trades across every token of this index, newest first (the "Last sale" strip). */
   recentTrades(limit=20){return this.db.prepare('SELECT timestamp,data FROM trades ORDER BY timestamp DESC,height DESC,idx DESC LIMIT ?').all(Math.max(1,Math.min(100,limit))).map(r=>({...decode(r.data),timestamp:r.timestamp}));}
+  /** Trades above a height, oldest first: what a live feed needs to publish exactly the new ones. */
+  tradesSince(height,limit=200){return this.db.prepare('SELECT data FROM trades WHERE height>? ORDER BY height,idx LIMIT ?').all(Number(height)||0,Math.max(1,Math.min(500,limit))).map(r=>decode(r.data));}
   trades(address,limit=100){return this.db.prepare('SELECT data FROM trades WHERE address=? ORDER BY height DESC,idx DESC LIMIT ?').all(address.toLowerCase(),Math.max(1,Math.min(500,limit))).map(r=>decode(r.data));}
   holders(address,limit=50){return this.cached(`holders:${String(address).toLowerCase()}:${limit}`,()=>this.computeHolders(address,limit));}
   computeHolders(address,limit=50){
