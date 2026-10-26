@@ -106,6 +106,8 @@ contract ElpidaV3MigrationAdapter {
         require((actual>expected?actual-expected:expected-actual)<=uint256(expected)/1_000_000,"pool price mismatch");
         return (x,y);
     }
+    /// Lets a deployer tell this adapter from one that predates partner tiers before reusing it.
+    function PARTNER_TIERS_VERSION() external pure returns(uint256){return 1;}
     /// The calling curve's partner burn share for LP fees (`buybackBps`), or 0 for curves without one. A caller can only
     /// set the share of the splitter created for its own migration.
     function _buybackOf(address curve) private view returns(uint256){

@@ -6,7 +6,7 @@ will run on mainnet. **Nothing here is audited yet.** Commit to audit: the `main
 
 ## 1. Scope
 
-**EVM, in scope: 9 files, 718 source lines** (Solidity 0.8.24, optimizer on with 1 run, `shanghai`). Everything that
+**EVM, in scope: 9 files, 719 source lines** (Solidity 0.8.24, optimizer on with 1 run, `shanghai`). Everything that
 `ElpidaAtomicDexFactory` deploys or calls:
 
 | File | SLOC | Role |
@@ -15,7 +15,7 @@ will run on mainnet. **Nothing here is audited yet.** Commit to audit: the `main
 | `contracts/evm/src/ElpidaDexFactory.sol` | 125 | Launch (native or approved-asset pair), $10 fee, metadata URI once, curve deployer, partner-tier registry |
 | `contracts/evm/src/ElpidaUsdPricing.sol` | 63 | Chainlink-compatible USD pricing, configured once, staleness checks |
 | `contracts/evm/src/ElpidaDexCurve.sol` | 212 | Virtual constant-product curve, anti-snipe fee, fees, partner buyback and burn, completion, graduation, reopen |
-| `contracts/evm/src/ElpidaV3MigrationAdapter.sol` | 127 | Uniswap v3 / PancakeSwap v3 pool creation, repricing a pre-created pool, full-range mint, passes the curve's buyback share to the locker |
+| `contracts/evm/src/ElpidaV3MigrationAdapter.sol` | 128 | Uniswap v3 / PancakeSwap v3 pool creation, repricing a pre-created pool, full-range mint, passes the curve's buyback share to the locker |
 | `contracts/evm/src/ElpidaV3FeeLocker.sol` | 53 | Holds the LP position forever; anyone can collect fees into the splitter |
 | `contracts/evm/src/ElpidaFeeSplitter.sol` | 83 | Pool fees: 50% to the creator; for partner tokens a fixed share bought back and burned; the rest to the treasury |
 | `contracts/evm/src/ElpidaToken.sol` | 40 | Fixed-supply ERC-20 (1B, no mint, no owner, no hooks) |
