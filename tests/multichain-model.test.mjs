@@ -39,9 +39,11 @@ test('an older beta launchpad saved in this browser does not block setting up th
 
 test('Ethereum Sepolia uses the pinned team launchpad, which takes precedence over a launchpad saved in this browser', () => {
   const eth = walletOn('ethereum-sepolia');
-  localStorage.setItem(`elpida:${DEX_MODEL}:deployment:11155111`, JSON.stringify({ factory: '0x' + '3'.repeat(40), model: DEX_MODEL, launchFeaturesVersion: 1 }));
+  localStorage.setItem(`elpida:${DEX_MODEL}:deployment:11155111`, JSON.stringify({ factory: '0x' + '3'.repeat(40), model: DEX_MODEL, launchFeaturesVersion: 1, partnerTiersVersion: 1 }));
   const d = eth.deployment;
-  assert.equal(d.factory, '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2'); assert.equal(d.shared, true); assert.equal(d.block, 11972040); assert.equal(d.model, DEX_MODEL);
+  assert.equal(d.factory, '0x5aA283B8B12786314e76ac4E977B1E9275b407f6'); assert.equal(d.shared, true); assert.equal(d.block, 12000324); assert.equal(d.model, DEX_MODEL);
+  assert.equal(d.partnerTiersVersion, 1, 'the pinned launchpad has the partner registry');
+  assert.deepEqual(eth.net.legacy.map(l => l.factory), ['0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2'], 'the earlier launchpad stays indexed');
 });
 
 test('BNB tokens are labelled PancakeSwap v3 wherever the DEX is named (indexer and wallet)', async () => {
@@ -54,9 +56,19 @@ test('BNB tokens are labelled PancakeSwap v3 wherever the DEX is named (indexer 
   assert.equal(walletOn('bnb-testnet').dex.name, 'PancakeSwap v3');
 });
 
-test('BNB Testnet uses its pinned team launchpad (atomic, requires token details) through publicnode', () => {
+test('BNB Testnet uses its pinned partner-tier launchpad through publicnode; the earlier one stays indexed', () => {
   const bnb = walletOn('bnb-testnet');
-  assert.equal(bnb.deployment.factory, '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE'); assert.equal(bnb.deployment.shared, true);
-  assert.equal(bnb.deployment.block, 138485798); assert.equal(bnb.deployment.model, DEX_MODEL);
+  assert.equal(bnb.deployment.factory, '0x5795b25C7fA37638eEacd29848522f8Cd48a1156'); assert.equal(bnb.deployment.shared, true);
+  assert.equal(bnb.deployment.block, 139102664); assert.equal(bnb.deployment.model, DEX_MODEL);
+  assert.deepEqual(bnb.net.legacy.map(l => l.factory), ['0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE'], 'the earlier launchpad stays indexed');
   assert.equal(bnb.net.rpcUrl, 'https://bsc-testnet-rpc.publicnode.com');
+});
+
+test('every EVM testnet pins a partner-tier launchpad and keeps the earlier ones indexed', async () => {
+  const { testnets } = await import('../packages/core/networks.mjs');
+  for (const n of testnets.filter(n => n.kind === 'evm' && n.shared)) {
+    assert.equal(n.shared.partnerTiersVersion, 1, n.key);
+    assert.ok((n.legacy ?? []).length >= 1, `${n.key} keeps its earlier launchpad indexed`);
+    assert.ok(!(n.legacy ?? []).some(l => l.factory.toLowerCase() === n.shared.factory.toLowerCase()), `${n.key}: shared is not also legacy`);
+  }
 });
