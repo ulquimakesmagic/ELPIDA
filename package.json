@@ -21,6 +21,7 @@
     "test:ui": "node --test tests/api.test.mjs",
     "test:solana": "node --test tests/solana.test.mjs",
     "solana:deploy": "node scripts/solana-deploy.mjs",
+    "solana:partner": "node scripts/solana-partner.mjs",
     "indexer": "node scripts/indexer.mjs",
     "testnet:check": "node scripts/testnet-readiness.mjs",
     "test:base-fork": "node scripts/base-fork-lifecycle.mjs",

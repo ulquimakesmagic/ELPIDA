@@ -25,8 +25,10 @@ will run on mainnet. **Nothing here is audited yet.** Commit to audit: the `main
 epochs; none is deployed on mainnet); OpenZeppelin `Math`; Uniswap v3 and PancakeSwap v3; Chainlink; the web app
 and server.
 
-**Solana (separate engagement):** `contracts/solana/programs/elpida_launchpad/src/lib.rs`, 1,223 source lines
-(Anchor, 28 instructions). It has the same curve as the EVM. The test-only instructions refuse to run off test
+**Solana (separate engagement):** `contracts/solana/programs/elpida_launchpad/src/lib.rs`, 1,381 source lines
+(Anchor, 20 instructions). It has the same curve as the EVM, and the same early-partner tiers: `set_partner` (the SOL
+pair's treasury only), the share fixed in each pool at launch, the curve buy-and-burn on every trade, and the burn
+or queue of the share at each LP-fee harvest. The test-only instructions refuse to run off test
 clusters (`test_networks_only`, checklist B4).
 
 ## 2. How it works

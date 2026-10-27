@@ -3,7 +3,7 @@
 //! constant-product invariant never decreases, prices move the right way, rounding never favours the
 //! trader, the final buy fills the remaining supply exactly with the minimal charge, the anti-snipe
 //! schedule, fee splits, LP-fee harvests never touch the principal, and the oracle conversion rounds up.
-use ::elpida_launchpad::{current_fee_bps, fees, harvestable_lp, isqrt, liquidity_units, quote_buy, quote_sell, usd_to_quote, CurveConfig, CurvePool, OraclePrice, PumpState, TradeQuote, STATUS_GRADUATED, STATUS_TRADING};
+use ::elpida_launchpad::{apply_buy, partner_buyback, split_fee, PoolExt, current_fee_bps, fees, harvestable_lp, isqrt, liquidity_units, quote_buy, quote_sell, usd_to_quote, CurveConfig, CurvePool, OraclePrice, PumpState, TradeQuote, STATUS_GRADUATED, STATUS_TRADING};
 use proptest::prelude::*;
 
 const VT: u64 = 1_111_111_111_111_111; // 1B x 10/9, 6 decimals
@@ -196,3 +196,70 @@ proptest! {
         prop_assert!((r + 1).checked_mul(r + 1).map_or(true, |sq| sq > n));
     }
 }
+
+proptest! {
+    #![proptest_config(ProptestConfig { cases: std::env::var("PROPTEST_CASES").ok().and_then(|v| v.parse().ok()).unwrap_or(2_000), ..ProptestConfig::default() })]
+
+    /// Early-partner tiers, with the program's own bookkeeping (`apply_buy`, `split_fee`, `partner_buyback`): the
+    /// creator always gets the larger half of the base fee, the burn share is exactly `tier` of it and comes out of
+    /// the protocol half, every quote unit stays accounted for, a buyback never completes the curve, and holders
+    /// (sold minus burned) can always sell everything back.
+    #[test]
+    fn partner_buybacks_are_exact_solvent_and_never_complete_the_curve(vq in vq(), ops in ops(), tier in prop::sample::select(vec![0u16, 1_000, 2_000])) {
+        let mut pool = fresh(vq);
+        let (mut paid_in, mut paid_out, mut burned) = (0u128, 0u128, 0u128);
+        for (buy, amount, bps) in ops {
+            if pool.status != STATUS_TRADING { break; }
+            let (c0, p0) = (pool.creator_fees, pool.protocol_fees);
+            let (base, burn, out) = if buy {
+                // Small buys relative to the curve, so a sequence makes many trades before completing it.
+                let amount = amount % (vq / 8 + 2) + 1;
+                let Ok(t) = quote_buy(&pool, amount, bps, 125) else { continue };
+                let burn = apply_buy(&mut pool, &t, 0, tier).unwrap();
+                let (graduated, sold) = (pool.status == STATUS_GRADUATED, pool.sold);
+                let out = partner_buyback(&mut pool, burn).unwrap();
+                if graduated { prop_assert_eq!(out, 0); prop_assert_eq!(pool.sold, sold, "no buyback after the completing trade"); }
+                paid_in += t.gross as u128;
+                (t.base_fee, burn, out)
+            } else {
+                let held = pool.sold as u128 - burned;
+                if held == 0 { continue; }
+                let tokens = (1 + amount as u128 % held) as u64;
+                let Ok(t) = quote_sell(&pool, tokens, bps, 125) else { continue };
+                pool.real_quote -= t.gross; pool.sold -= tokens;
+                let burn = split_fee(&mut pool, &t, tier).unwrap();
+                let out = partner_buyback(&mut pool, burn).unwrap();
+                paid_out += t.net as u128;
+                (t.base_fee, burn, out)
+            };
+            burned += out as u128;
+            prop_assert_eq!(pool.creator_fees - c0, base - base / 2, "the creator keeps the larger half");
+            prop_assert_eq!(burn as u128, base as u128 * tier as u128 / 10_000);
+            prop_assert_eq!(pool.protocol_fees - p0 + burn, base / 2, "the burn share comes out of the protocol half");
+            prop_assert!(pool.sold <= pool.curve_supply);
+            prop_assert!(pool.status == STATUS_TRADING || pool.sold == pool.curve_supply, "only a trade completes the curve");
+            let vault = pool.real_quote as u128 + pool.liquidity_bonus as u128 + pool.protocol_fees as u128 + pool.creator_fees as u128;
+            prop_assert_eq!(vault, paid_in - paid_out, "every quote unit is accounted for");
+            let held = pool.sold as u128 - burned;
+            if held > 0 && pool.status == STATUS_TRADING {
+                if let Err(e) = quote_sell(&pool, held as u64, 125, 125) {
+                    prop_assert!(format!("{e:?}").contains("SellTooSmall"), "holders cannot sell everything: {e:?}");
+                }
+            }
+        }
+    }
+
+    /// The pool extension round-trips, and older 260-byte pools (no extension) read as standard.
+    #[test]
+    fn pool_extension_round_trips(bps in prop::sample::select(vec![0u16, 1_000, 2_000]), burned in any::<u64>(), spent in any::<u64>()) {
+        let base = 8 + <CurvePool as anchor_lang::Space>::INIT_SPACE;
+        let mut data = vec![7u8; base + 32];
+        let ext = PoolExt { buyback_bps: bps, burned, quote_spent: spent };
+        ext.write(&mut data).unwrap();
+        prop_assert_eq!(PoolExt::read(&data), ext);
+        prop_assert_eq!(&data[..base], &vec![7u8; base][..], "the fixed layout is untouched");
+        prop_assert_eq!(PoolExt::read(&data[..base]), PoolExt::default());
+        prop_assert!(PoolExt::default().write(&mut vec![0u8; base]).is_err(), "never written past an older pool's end");
+    }
+}
+

@@ -46,6 +46,31 @@ Nameservers moved from Vercel to Cloudflare; DNS, SSL and the `elpida-fallback` 
 deploy logs for `backup_disabled`; if present, production has no off-site backups and that must be fixed before mainnet.
 Search Console sitemap: Google's live test fetches it; the "Couldn't fetch" row is waiting on Google's refresh.
 
+## Solana partner tiers: devnet program upgrade, 26 October 2026
+
+`contracts/solana/build/*.so` were rebuilt with early-partner tiers (Solana CLI 2.3.13, reproduced byte for byte).
+New SHA256: test build `331765ca50908c188126cd167ec7b3a1f93c5c0dd046bc22dc0cf041c0471b4e`, mainnet build
+`f469dde710b5d1d6c303cf88af3cdbe4735b8e17471948f1b0325ca7ea5bca1e`. Devnet only; nothing on mainnet.
+
+1. From `elpida-fork`, `git pull`, then check the build:
+   `certutil -hashfile contracts\solana\build\elpida_launchpad.so SHA256` must print
+   `331765ca50908c188126cd167ec7b3a1f93c5c0dd046bc22dc0cf041c0471b4e`.
+2. Make sure the deployer `FeUWF…KaH8` holds about **6 devnet SOL** (faucet.solana.com). The program grows by about
+   41 KB, so the upgrade extends it (about 0.3 SOL of rent, kept); the rest is a buffer refunded after the upgrade.
+3. Run `npm.cmd run solana:deploy -- --upgrade --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`.
+   It stops before uploading anything if the key is not the upgrade authority.
+4. Send Claude the output. The site detects the new program by itself (`partner_tiers_version`): launches then pass the
+   creator's partner record, and the Partners tab shows Solana as available.
+5. Registering a Solana partner needs the SOL pair's treasury, which on devnet is that same deploy key. Either connect
+   it in Phantom (import the key) and press "Register with treasury" in the Partners tab, or run the command the tab
+   shows, for example:
+   `npm.cmd run solana:partner -- --creator <wallet> --bps 2000 --days 60 --keypair "<path to solana-deployer.json>"`
+   (`--status` reads a wallet's tier; `--bps 0 --expires 0` ends one).
+
+Not in this upgrade: spending the quote side of a partner pool's LP-fee share on a PumpSwap buyback. Harvests already
+burn the token side and keep the quote side with the pool's LP authority, recorded as `pending_buyback`; the capped
+buyback instruction comes next and is checked on devnet, because the local validator lacks pump's fee program.
+
 ## Solana binaries rebuilt, 19 October 2026
 
 `contracts/solana/build/*.so` were rebuilt from current source (optional creator buy) with Solana CLI 2.3.13. New SHA256: test build `89d96d53856ba206a8a3a96b0b971d503d6fcfb0dd028587cf654fbc5f6d0b88`, mainnet build `1a1db96d0654a10ffc321e01cd055bd4c807d5ff1ad243bdabe04e02a25f865a`. The hash quoted in item 3 below (`4e96…9623`) belongs to the earlier build. The devnet program has not been upgraded from these yet; that is the next Solana step. See `MAINNET_CHECKLIST_2026-10-19.md`.

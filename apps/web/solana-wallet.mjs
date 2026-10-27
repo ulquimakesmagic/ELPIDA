@@ -231,7 +231,7 @@ export class SolanaWallet {
     const launchConfig = await this.loadConfig();
     await this.loadPrice().catch(() => { this.price = { status: 'unavailable', source: 'Pyth SOL/USD (on-chain)' }; });
     if(!readOnly)await this.loadBeta();
-    const accounts = await this.connection.getProgramAccounts(this.client.programId, { filters: [{ dataSize: POOL_SIZE }] });
+    const accounts = await this.client.poolAccounts(this.connection);
     const pools = accounts.filter(({ account }) => this.client.isPool(account.data)).map(({ pubkey, account }) => ({ pubkey, ...this.client.decodePool(account.data) })).filter(pool => this.configOf(pool));
     const holdings = !readOnly&&pools.length ? await this.connection.getMultipleAccountsInfo(pools.map(pool => this.client.ata(this.publicKey, pool.mint))) : [];
     this.launches.clear();
@@ -379,6 +379,11 @@ export class SolanaWallet {
    * simulating `reopen_curve` on an empty pool address: an upgraded program fails on the missing account,
    * an older one with InstructionFallbackNotFound (101).
    */
+  /** Whether the program has early-partner tiers (then launches pass the creator's `partner` account). */
+  async supportsPartnerTiers() {
+    this._partnerSupport ??= await this.client.supportsPartnerTiers(this.connection, this.publicKey);
+    return this._partnerSupport;
+  }
   async supportsMetadata() {
     this._metadataSupport ??= await this.client.supportsMetadata(this.connection, this.publicKey);
     return this._metadataSupport;
@@ -501,7 +506,7 @@ export class SolanaWallet {
       // Token details are published first: the program writes this IPFS URI into immutable Metaplex
       // metadata in the launch transaction (D11), so wallets and explorers show the name and image.
       // A program not yet upgraded to metadata support keeps the earlier launch (details in this browser).
-      const withMetadata = await this.supportsMetadata();
+      const withMetadata = await this.supportsMetadata(), partnerTiers = withMetadata && await this.supportsPartnerTiers();
       // Token details are always written in the launch transaction, never afterwards.
       if (!withMetadata) throw new Error(`The ${this.net.name} program does not write token details at launch yet, and Elpida launches only with details included. The team upgrades it with the Solana deploy script. Nothing was submitted.`);
       let published = { metadata, storage: null };
@@ -518,7 +523,7 @@ export class SolanaWallet {
       const signature = await this.sendInstructions([
         this.client.computeBudget(),
         ...await this.wrapFor(config, q.gross),
-        this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, legacy: !withMetadata, priceUpdate: terms.priceFeed, maxFee, usdc }),
+        this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, legacy: !withMetadata, partnerTiers, priceUpdate: terms.priceFeed, maxFee, usdc }),
         ...(config.wsol ? [this.client.unwrapSol(this.publicKey)] : []),
       ], remote ? [] : [mint], `Confirm your token launch in your wallet ($10 fee: ${inUsdc ? `${formatAmount(terms.usdcFee, 6)} USDC` : `${formatAmount(terms.fee, 9)} SOL, at most ${formatAmount(maxFee, 9)} SOL`})…`, remote ? [remote] : []);
       await writeMetadataCache(metadataKey(this.deployment.programId,mint.publicKey.toBase58()),published.metadata??metadata);

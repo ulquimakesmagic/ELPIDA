@@ -3,7 +3,8 @@ import { indexedChange, indexedActivity, activityOf } from '../web/discovery.mjs
 import { protocolAnalytics } from './protocol-analytics.mjs';
 import { AdminAuth, parseAdminAddresses, sessionCookie, clearCookie } from './admin-auth.mjs';
 import { readTreasuries, operatorAddresses, cachedLoader } from './admin-overview.mjs';
-import { PartnerApplications, registryStatus, registrationCall } from './partner-applications.mjs';
+import { PartnerApplications, registryStatus, registrationCall, solanaPartnerStatus } from './partner-applications.mjs';
+import { createElpidaSolana } from '../../packages/solana/client.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
 import {configuredGraduationKeeper} from './graduation-keeper.mjs';
 import { FeedRelay } from './feed-relay.mjs';
@@ -332,7 +333,13 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           try{registry=await partnerRegistry(applications,url.searchParams.get('fresh')==='1');}catch(error){registryError=String(error.message).slice(0,160);}
           let treasury=[];try{treasury=await treasuries();}catch{}
           const networks=registryNetworks().map(n=>({key:n.key,name:n.name,explorer:n.explorer,factory:n.factory,treasury:treasury.find(t=>t.network===n.key)?.treasury??null,kind:'evm'}));
-          networks.push({key:solanaNet.key,name:solanaNet.name,kind:'solana',supported:false,reason:'Solana partner registration arrives with the program upgrade.'});
+          // Solana: the SOL pair's treasury signs set_partner; the browser builds it, so only the terms travel.
+          const solDeployment=solanaNet.deployment,solTreasury=solDeployment?.treasury??null;
+          let solana={supported:solanaIndex?false:'Solana indexing is off on this server.',records:{}};registry={...registry};
+          if(solanaIndex&&solDeployment?.programId&&solTreasury){try{solana=await solanaPartnerStatus(applications,{connection:solanaIndex.connection,web3:solanaWeb3,client:createElpidaSolana(solanaWeb3,solDeployment.programId),treasury:solTreasury});}catch(error){solana={supported:String(error.message).slice(0,120),records:{}};}}
+          networks.push({key:solanaNet.key,name:solanaNet.name,kind:'solana',programId:solDeployment?.programId??null,treasury:solTreasury,explorer:solanaNet.explorer,cluster:solanaNet.cluster,
+            supported:solana.supported===true,reason:solana.supported===true?'':solana.supported===false?'The deployed Solana program predates partner tiers; upgrade it first.':!solDeployment?'No Solana deployment configured.':`Solana status unavailable: ${solana.supported}`});
+          for(const [id,record] of Object.entries(solana.records))registry[id]={...(registry[id]??{}),[solanaNet.key]:record};
           const calls=Object.fromEntries(applications.filter(a=>a.approved&&a.evm&&['approved','ended'].includes(a.status)).map(a=>[a.id,Object.fromEntries(networks.filter(n=>n.kind==='evm'&&n.factory&&a.approved.chains.includes(n.key)).map(n=>[n.key,a.status==='approved'?registrationCall(n.factory,a.evm,a.approved.buybackBps,a.approved.expiresAt):registrationCall(n.factory,a.evm,0,0)]))]));
           return send(200,{operator:s.address,generatedAt:Date.now(),counts:partnerApps.counts(),applications,networks,registry,registryError,calls});
         }

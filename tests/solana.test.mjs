@@ -96,7 +96,10 @@ test.before(async () => {
   await send(f.connection, f.authority, await spl.createMintIxs(f.connection, f.authority.publicKey, quote.publicKey, 6, f.authority.publicKey), [quote]);
   for (const owner of [f.creator.publicKey, f.trader.publicKey]) await send(f.connection, f.authority, [f.client.createAtaIdempotent(f.authority.publicKey, owner, quote.publicKey), spl.mintTo(quote.publicKey, f.client.ata(owner, quote.publicKey), f.authority.publicKey, 100_000n * USDC)]);
   f.quoteMint = quote.publicKey;
-  f.treasury = Keypair.generate().publicKey;
+  f.spl = spl;
+  // The treasury signs partner registrations (set_partner), so the suite keeps its keypair.
+  f.treasuryKeypair = Keypair.generate();
+  f.treasury = f.treasuryKeypair.publicKey;
   f.config = { address: f.client.configFor(f.quoteMint), quoteMint: f.quoteMint, treasury: f.treasury };
 });
 test.after(() => {
@@ -466,8 +469,8 @@ const pumpState = async (mint) => {
 const migration = async mint => f.client.decodeMigration((await f.connection.getAccountInfo(f.client.migrationPda(mint))).data);
 const migrate = (who, mint) => send(f.connection, who, [f.client.computeBudget(MIGRATE_COMPUTE_UNITS), f.client.migrateToPumpswap({ payer: who.publicKey, config: f.config, mint })], [], 1);
 const harvest = (who, mint) => send(f.connection, who, [f.client.computeBudget(HARVEST_COMPUTE_UNITS), ...f.client.harvestLpFees({ payer: who.publicKey, config: f.config, mint, reward: f.rewardWallet.publicKey })], [], 1);
-async function completedCurve(symbol) {
-  const { mint } = await launch({ symbol });
+async function completedCurve(symbol, creator = f.creator) {
+  const { mint } = await launch({ symbol, creator });
   await buy(f.trader, mint, 1_000n * USDC, 1n); // inside the snipe window: adds a locked bonus
   await afterSnipeWindow(mint);
   await buy(f.trader, mint, 20_000n * USDC, 1n);
@@ -996,3 +999,115 @@ test('Solana public indexer: pools, launch/buy/sell trades, candles and holders 
     assert.equal(index.status().error, null);
   } finally { index.close(); }
 });
+
+// Early-partner tiers (docs/DESIGN_PARTNER_TIERS.md): the SOL pair's treasury registers a creator wallet; its pools
+// fix the share at launch, keep the creator's half, burn the share of every base fee through a curve buyback, and
+// after migration burn the token side of each harvest share and queue the quote side.
+test('Solana partner tiers: treasury-only registry, burn on every trade, creator keeps half, tier fixed at launch', { skip: pumpSkip }, async () => {
+  const sol = new PublicKey(WSOL_MINT);
+  assert.ok(await f.connection.getAccountInfo(f.client.configFor(sol)), 'the SOL pair config exists (its treasury is the partner authority)');
+  const partner = Keypair.generate(), now = async () => f.connection.getBlockTime(await f.connection.getSlot('confirmed'));
+  await airdrop(f.connection, partner.publicKey, 5 * web3.LAMPORTS_PER_SOL);
+  await airdrop(f.connection, f.treasury, 2 * web3.LAMPORTS_PER_SOL);
+  await send(f.connection, f.authority, [f.client.createAtaIdempotent(f.authority.publicKey, partner.publicKey, f.quoteMint), f.spl.mintTo(f.quoteMint, f.client.ata(partner.publicKey, f.quoteMint), f.authority.publicKey, 50_000n * USDC)]);
+  const setPartner = (who, bps, expiresAt) => send(f.connection, who, [f.client.setPartner({ authority: who.publicKey, creator: partner.publicKey, buybackBps: bps, expiresAt })], [], 1);
+  const record = async () => f.client.decodePartner((await f.connection.getAccountInfo(f.client.partnerPda(partner.publicKey)))?.data, await now());
+
+  // Only the SOL pair's treasury, only 10% or 20%, only up to 180 days ahead; (0, 0) ends a tier.
+  await failsWith(setPartner(f.outsider, 2000, (await now()) + 86_400), /0x1770/);
+  for (const [bps, ahead] of [[1500, 86_400], [3000, 86_400], [2000, -10], [2000, 181 * 86_400]]) await failsWith(setPartner(f.treasuryKeypair, bps, (await now()) + ahead), /0x1790/);
+  await failsWith(setPartner(f.treasuryKeypair, 0, 5), /0x1790/);
+  const expiresAt = (await now()) + 30 * 86_400;
+  const set = await setPartner(f.treasuryKeypair, 2000, expiresAt);
+  assert.deepEqual({ ...(await record()), creator: undefined }, { creator: undefined, buybackBps: 2000, expiresAt, live: true });
+  const setEvent = (await eventsOf(set)).find(e => e.name === 'PartnerSet');
+  assert.equal(setEvent.buybackBps, 2000); assert.equal(setEvent.expiresAt, BigInt(expiresAt));
+
+  // The partner's pool fixes 20% at launch; anyone else is standard.
+  const elite = await launch({ symbol: 'ELITE', creator: partner });
+  const standard = await launch({ symbol: 'STDRD' });
+  assert.equal((await pool(elite.mint)).buybackBps, 2000);
+  assert.equal((await pool(standard.mint)).buybackBps, 0);
+  assert.equal((await f.connection.getAccountInfo(f.client.poolPda(elite.mint))).data.length, 292, 'partner-era pools carry the extension');
+  const launched = await eventsOf(elite.signature);
+  assert.equal(launched.find(e => e.name === 'PartnerPoolLaunched')?.buybackBps, 2000);
+  // Its creator buy burns too: tokens sold to the creator plus tokens burned equal the pool's sold amount.
+  const burnedAtLaunch = launched.find(e => e.name === 'PartnerBuyback')?.tokensBurned ?? 0n;
+  assert.ok(burnedAtLaunch > 0n, 'the launch buy burned tokens');
+  assert.equal((await pool(elite.mint)).sold, elite.expected.tokens + burnedAtLaunch);
+  // Ending the tier does not change the pool already launched.
+  await setPartner(f.treasuryKeypair, 0, 0);
+  assert.equal((await record()).live, false);
+  assert.equal((await pool(elite.mint)).buybackBps, 2000);
+
+  await afterSnipeWindow(elite.mint);
+  const supply = async () => BigInt((await f.connection.getTokenSupply(elite.mint)).value.amount);
+  for (const [side, amount] of [['buy', 300n * USDC], ['buy', 1_200n * USDC], ['sell', 2_000_000n * 1_000_000n], ['buy', 50n * USDC]]) {
+    const before = await pool(elite.mint), supplyBefore = await supply();
+    const signature = side === 'buy' ? await buy(f.trader, elite.mint, amount, 1n) : await sell(f.trader, elite.mint, amount, 1n);
+    const after = await pool(elite.mint), events = await eventsOf(signature);
+    const trade = events.find(e => e.name === (side === 'buy' ? 'CurveBought' : 'CurveSold'));
+    const base = trade.fee, burnQuote = base * 2000n / 10_000n, buyback = events.find(e => e.name === 'PartnerBuyback');
+    assert.equal(trade.antiSnipeFee, 0n, 'after the window the whole fee is the base fee');
+    assert.equal(after.creatorFees - before.creatorFees, base - base / 2n, `${side}: the creator keeps half`);
+    assert.equal(after.protocolFees - before.protocolFees, base / 2n - burnQuote, `${side}: the burn share comes out of the protocol half`);
+    assert.ok(buyback, `${side}: a buyback happened`);
+    assert.equal(buyback.quoteIn, burnQuote);
+    assert.equal(supplyBefore - await supply(), buyback.tokensBurned, `${side}: bought tokens are burned`);
+    assert.equal(after.buybackBurned - before.buybackBurned, buyback.tokensBurned);
+    assert.equal(after.buybackQuoteSpent - before.buybackQuoteSpent, burnQuote);
+    await invariant(elite.mint);
+  }
+  assert.equal(TOKEN_SUPPLY - await supply(), (await pool(elite.mint)).buybackBurned, 'every burned token is gone from the supply');
+
+  // A standard pool is unchanged: 50/50, no burn, no extension writes.
+  await afterSnipeWindow(standard.mint);
+  const s0 = await pool(standard.mint), plain = await eventsOf(await buy(f.trader, standard.mint, 300n * USDC, 1n));
+  const s1 = await pool(standard.mint), fee = plain.find(e => e.name === 'CurveBought').fee;
+  assert.equal(s1.protocolFees - s0.protocolFees, fee / 2n); assert.equal(s1.creatorFees - s0.creatorFees, fee - fee / 2n);
+  assert.equal(plain.some(e => e.name === 'PartnerBuyback'), false);
+
+  // An expired tier is standard at launch.
+  await setPartner(f.treasuryKeypair, 1000, (await now()) + 2);
+  await sleep(4000);
+  assert.equal((await pool((await launch({ symbol: 'LATE', creator: partner })).mint)).buybackBps, 0, 'expired before the launch');
+});
+
+test('Solana partner tiers: a buyback never completes the curve, and after migration the harvest share is burned or queued', { skip: pumpSkip }, async () => {
+  const partner = Keypair.generate(), now = async () => f.connection.getBlockTime(await f.connection.getSlot('confirmed'));
+  await airdrop(f.connection, partner.publicKey, 5 * web3.LAMPORTS_PER_SOL);
+  await send(f.connection, f.authority, [f.client.createAtaIdempotent(f.authority.publicKey, partner.publicKey, f.quoteMint), f.spl.mintTo(f.quoteMint, f.client.ata(partner.publicKey, f.quoteMint), f.authority.publicKey, 50_000n * USDC)]);
+  await send(f.connection, f.treasuryKeypair, [f.client.setPartner({ authority: f.treasury, creator: partner.publicKey, buybackBps: 1000, expiresAt: (await now()) + 86_400 })], [], 1);
+  // Completing buy: the curve sells exactly its supply, and that trade's burn share is locked as liquidity instead.
+  const mint = await completedCurve('PCOMP', partner);
+  const done = await pool(mint);
+  assert.equal(done.buybackBps, 1000);
+  assert.equal(done.status, STATUS_GRADUATED);
+  assert.equal(done.sold, done.curveSupply, 'exactly the curve supply: the buyback did not complete it');
+  assert.equal(TOKEN_SUPPLY - BigInt((await f.connection.getTokenSupply(mint)).value.amount), done.buybackBurned);
+  await invariant(mint);
+
+  await migrate(f.outsider, mint);
+  const m0 = await migration(mint);
+  assert.equal(m0.pendingBuyback, 0n);
+  const p = f.client.pumpAccounts(mint, f.quoteMint);
+  const transferIx = (from, to, amount) => new web3.TransactionInstruction({ programId: f.client.tokenProgram, keys: [{ pubkey: from, isSigner: false, isWritable: true }, { pubkey: to, isSigner: false, isWritable: true }, { pubkey: f.trader.publicKey, isSigner: true, isWritable: false }], data: Buffer.from([3, ...new Uint8Array(new BigUint64Array([amount]).buffer)]) });
+  await send(f.connection, f.trader, [transferIx(f.client.ata(f.trader.publicKey, f.quoteMint), p.poolQuote, 1_200n * USDC)]);
+  const state = await pumpState(mint), lp = harvestNow(m0.lpLocked, m0.principal, state), out = withdrawOut(lp, state);
+  const burnBase = out.base * 1000n / 10_000n, queueQuote = out.quote * 1000n / 10_000n;
+  const balances = async () => Promise.all([f.client.ata(f.treasury, mint), f.client.ata(f.treasury, f.quoteMint), f.client.ata(f.rewardWallet.publicKey, mint), f.client.ata(f.rewardWallet.publicKey, f.quoteMint), p.authorityQuote].map(balance));
+  const [tb0, tq0, rb0, rq0, aq0] = await balances(), supply0 = BigInt((await f.connection.getTokenSupply(mint)).value.amount);
+  const signature = await harvest(f.outsider, mint);
+  const [tb1, tq1, rb1, rq1, aq1] = await balances();
+  assert.equal(rb1 - rb0, out.base - out.base / 2n, 'creator half of the token side');
+  assert.equal(rq1 - rq0, out.quote - out.quote / 2n, 'creator half of the quote side');
+  assert.equal(tb1 - tb0, out.base / 2n - burnBase); assert.equal(tq1 - tq0, out.quote / 2n - queueQuote);
+  assert.equal(supply0 - BigInt((await f.connection.getTokenSupply(mint)).value.amount), burnBase, 'the token-side share is burned');
+  assert.equal(aq1 - aq0, queueQuote, 'the quote-side share stays with the LP authority');
+  const m1 = await migration(mint);
+  assert.equal(m1.pendingBuyback, queueQuote); assert.equal(m1.baseBurned, burnBase);
+  const ev = (await eventsOf(signature)).find(e => e.name === 'PartnerHarvest');
+  assert.equal(ev.baseBurned, burnBase); assert.equal(ev.quoteQueued, queueQuote); assert.equal(ev.pendingBuyback, queueQuote);
+  assert.ok(liquidityUnits(m1.lpLocked, await pumpState(mint)) >= m0.principal, 'principal liquidity stays locked');
+});
+
