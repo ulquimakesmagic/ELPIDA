@@ -42,6 +42,8 @@ export const PRICE_UPDATE_SIZE = 134;
 /** USD launch economics: $10 fee (SOL or USDC) and a $5,000 starting FDV for SOL pairs, 6-decimal USD. */
 export const USD_PRICING = { feeUsdE6: 10_000_000n, startFdvUsdE6: 5_000_000_000n, maxAgeSecs: 120, maxConfBps: 200 };
 export const MIGRATE_COMPUTE_UNITS = 600_000;
+export const RAYDIUM_MIGRATE_COMPUTE_UNITS = 400_000;
+export const RAYDIUM_SWAP_COMPUTE_UNITS = 200_000;
 export const HARVEST_COMPUTE_UNITS = 400_000;
 /** A PumpSwap buy or sell with SOL wrapping, token-account creation and fee-program calls. */
 export const PUMPSWAP_COMPUTE_UNITS = 300_000;
@@ -51,6 +53,27 @@ export const PUMP_AMM_PROGRAM = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
 export const PUMP_GLOBAL_CONFIG = 'ADyA8hdefvWN2dbGGWFotbzWxrAvLW83WG6QCVXvJKqw';
 export const PUMP_EVENT_AUTHORITY = 'GS4CU59F31iL7aR2Q8zVS8DRrcRnXX1yjQ66TqNVQnaR';
 export const TOKEN_2022_PROGRAM = 'TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb';
+// Raydium CPMM: SOL pairs graduate here (1% fee tier); other pairs keep PumpSwap. The test build of the program (devnet,
+// localnet) uses Raydium's devnet deployment, the mainnet build mainnet. Pass `{ cluster: 'mainnet' }` to the client.
+export const RAYDIUM = {
+  devnet: { program: 'DRaycpLY18LhpbydsBWbVJtxpNv9oXPgjRSfpF2bWpYb', ammConfig: 'EsTevfacYXpuho5VBuzBjDZi8dtWidGnXoSYAr8krTvz', createPoolFee: '3oE58BKVt8KuYkGxx8zBojugnymWmBiyafWgMrnb6eYy', authority: 'CXniRufdq5xL8t8jZAPxsPZDpuudwuJSPWnbcD5Y5Nxq' },
+  mainnet: { program: 'CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C', ammConfig: 'G95xxie3XbkCqtE39GgQ9Ggc7xBC8Uceve7HFDEFApkc', createPoolFee: 'DNXgeM9EiiaAbaWvwjHj9fQQLAX5ZsfHyvmYUNRAdNC8', authority: 'GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL' },
+};
+export const RAYDIUM_TRADE_FEE_RATE = 10_000n; // millionths: 1%
+export const RAYDIUM_CREATE_POOL_FEE = 150_000_000n;
+export const RAYDIUM_POOL_SIZE = 637;
+export const MEMO_PROGRAM = 'MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr';
+export const VENUE_PUMPSWAP = 0;
+export const VENUE_RAYDIUM = 1;
+/** Mirrors `raydium_creation_cost`: Raydium's pool-creation fee plus rent for the six accounts it opens (default rent). */
+export const raydiumCreationCost = (createPoolFee = RAYDIUM_CREATE_POOL_FEE) => [637, 4075, 82, 165, 165, 165].reduce((sum, len) => sum + BigInt((128 + len) * 6960), BigInt(createPoolFee));
+/** Raydium CPMM `swap_base_input` output: the 1% fee (rounded up) comes off the input, then x·y = k (rounded down). */
+export function raydiumQuote(amountIn, reserveIn, reserveOut, feeRate = RAYDIUM_TRADE_FEE_RATE) {
+  const input = BigInt(amountIn), fee = (input * BigInt(feeRate) + 999_999n) / 1_000_000n, net = input - fee;
+  return { fee, out: net * BigInt(reserveOut) / (BigInt(reserveIn) + net) };
+}
+/** Mirrors `buyback_amount`: queued SOL, at most 1% of the pool's SOL depth per call. */
+export const raydiumBuybackAmount = (pending, quoteReserve) => { const cap = BigInt(quoteReserve) / 100n; return BigInt(pending) < cap ? BigInt(pending) : cap; };
 /** Fees PumpSwap charges on pools it did not create itself: 0.25% to LP holders, 0.05% to pump. */
 export const PUMPSWAP_FEES = { lpFeeBps: 25, protocolFeeBps: 5, creatorFeeBps: 0 };
 export const LAUNCH_COMPUTE_UNITS = 400_000;
@@ -101,6 +124,11 @@ export const DISCRIMINATORS = {
   setPartner: [177, 250, 113, 16, 75, 175, 141, 136],
   partnerTiersVersion: [189, 128, 102, 138, 53, 239, 157, 14],
   PartnerConfig: [212, 110, 106, 253, 66, 131, 77, 96],
+  migrateToRaydium: [116, 139, 75, 192, 86, 63, 121, 169],
+  harvestRaydiumFees: [42, 107, 33, 167, 140, 59, 120, 243],
+  raydiumBuyback: [126, 209, 249, 126, 8, 105, 62, 28],
+  RaydiumPoolState: [247, 237, 227, 245, 215, 195, 222, 70],
+  raydiumSwapBaseInput: [143, 190, 90, 218, 196, 30, 51, 222],
 };
 
 // sha256("event:<Name>")[0..8] and field layouts (32-byte keys or little-endian u64s after the
@@ -127,6 +155,9 @@ export const EVENTS = {
   PartnerPoolLaunched: { discriminator: [33, 177, 188, 7, 46, 3, 61, 253], fields: [['pool', 'key'], ['mint', 'key'], ['creator', 'key'], ['buybackBps', 'u16']] },
   PartnerBuyback: { discriminator: [74, 130, 136, 217, 209, 39, 171, 220], fields: [['pool', 'key'], ['quoteIn', 'u64'], ['tokensBurned', 'u64'], ['totalBurned', 'u64']] },
   PartnerHarvest: { discriminator: [115, 237, 236, 148, 151, 13, 153, 2], fields: [['pool', 'key'], ['baseBurned', 'u64'], ['quoteQueued', 'u64'], ['pendingBuyback', 'u64']] },
+  // SOL pairs: graduation into Raydium CPMM (CurveMigrated is emitted too, with the Raydium pool as pumpPool).
+  RaydiumMigrated: { discriminator: [208, 19, 236, 186, 149, 156, 226, 92], fields: [['pool', 'key'], ['rayPool', 'key'], ['lpMint', 'key'], ['raised', 'u64'], ['creationCost', 'u64'], ['repaid', 'u64']] },
+  PartnerLpBuyback: { discriminator: [48, 42, 185, 144, 180, 81, 42, 219], fields: [['pool', 'key'], ['quoteIn', 'u64'], ['tokensBurned', 'u64'], ['pendingBuyback', 'u64'], ['totalBurned', 'u64']] },
 };
 
 // Events of the first deployed program version (locked-pool model), still present in devnet history.
@@ -187,12 +218,12 @@ export const PROGRAM_ERRORS = [
   'Invalid sell amount.',
   'Sell is too small.',
   'Sell exceeds what the curve holds.',
-  'This curve is complete. Trading continues on PumpSwap after migration.',
+  'This curve is complete. Trading continues on Raydium (SOL pairs) or PumpSwap after migration.',
   'The creator first buy exceeds the allowed share of supply.',
   'This pool belongs to a different config.',
   'Math overflow.',
   'The curve is not complete yet.',
-  'This token has not migrated to PumpSwap yet.',
+  'This token has not migrated to its DEX pool yet.',
   'No trading fees to harvest yet.',
   'Unexpected PumpSwap account.',
   'Harvest would reduce the locked liquidity.',
@@ -208,6 +239,9 @@ export const PROGRAM_ERRORS = [
   'Token details must be published to IPFS first (an ipfs:// link of at most 200 characters). No launch was submitted.',
   'This curve can be reopened only 24 hours after it completed without migrating.',
   'Partner tiers are 10% or 20% with an expiry at most 180 days ahead, or (0, 0) to end one.',
+  'SOL pairs graduate to Raydium; other pairs graduate to PumpSwap.',
+  'Unexpected Raydium account.',
+  'No queued partner buyback to spend yet.',
 ];
 
 /** Turns a Solana/Anchor error into a readable message. */
@@ -402,7 +436,8 @@ export function concat(...parts) {
 const sameBytes = (data, expected) => expected.every((byte, i) => data[i] === byte);
 export const encodeCurveParams = p => concat(u64(p.virtualQuote), u64(p.virtualToken), u64(p.curveSupply), u16(p.baseFeeBps), u16(p.snipeStartBps), u32(p.snipeWindowSecs), u16(p.maxCreatorBuyBps), u64(p.launchFee ?? 0n));
 
-export function createElpidaSolana(web3, programIdInput) {
+/** `cluster: 'mainnet'` selects Raydium's mainnet accounts (the mainnet build); anything else its devnet ones (the test build). */
+export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } = {}) {
   const { PublicKey, TransactionInstruction, SystemProgram, ComputeBudgetProgram, Transaction, Keypair } = web3;
   const programId = new PublicKey(programIdInput);
   const tokenProgram = new PublicKey(TOKEN_PROGRAM);
@@ -450,6 +485,28 @@ export function createElpidaSolana(web3, programIdInput) {
       authorityBase: ata(authority, mint), authorityQuote: ata(authority, quoteMint, quoteProgram), authorityLp: ataWith(authority, lpMint, token2022),
     };
   };
+  const ray = RAYDIUM[cluster === 'mainnet' ? 'mainnet' : 'devnet'];
+  const rayProgram = new PublicKey(ray.program);
+  const rayPda = (...seeds) => PublicKey.findProgramAddressSync(seeds, rayProgram)[0];
+  /**
+   * Raydium CPMM accounts for the pool Elpida creates for a SOL-pair `mint`: the pool sits at Elpida's PDA
+   * ["ray-pool", mint]; Raydium orders the two mints by address (token 0 < token 1).
+   */
+  const raydiumAccounts = mint => {
+    const authority = lpAuthorityPda(mint), m = key(mint);
+    const pool = PublicKey.findProgramAddressSync([enc('ray-pool'), m.toBytes()], programId)[0];
+    const lpMint = rayPda(enc('pool_lp_mint'), pool.toBytes());
+    const a = m.toBytes(), b = wsol.toBytes(), diff = a.findIndex((byte, i) => byte !== b[i]);
+    const baseIs0 = diff >= 0 && a[diff] < b[diff];
+    const [mint0, mint1] = baseIs0 ? [m, wsol] : [wsol, m];
+    const vault0 = rayPda(enc('pool_vault'), pool.toBytes(), mint0.toBytes()), vault1 = rayPda(enc('pool_vault'), pool.toBytes(), mint1.toBytes());
+    return {
+      program: rayProgram, ammConfig: new PublicKey(ray.ammConfig), authority: new PublicKey(ray.authority), createPoolFee: new PublicKey(ray.createPoolFee),
+      lpAuthority: authority, pool, lpMint, baseIs0, mint0, mint1, vault0, vault1, baseVault: baseIs0 ? vault0 : vault1, quoteVault: baseIs0 ? vault1 : vault0,
+      observation: rayPda(enc('observation'), pool.toBytes()),
+      authorityBase: ata(authority, m), authorityQuote: ata(authority, wsol), authorityLp: ata(authority, lpMint),
+    };
+  };
   const pumpFixed = [meta(PUMP_EVENT_AUTHORITY), meta(pumpProgram)];
   const trade = (trader, config, mint, bytes) => {
     const pool = poolPda(mint);
@@ -458,7 +515,7 @@ export function createElpidaSolana(web3, programIdInput) {
   };
 
   return {
-    programId, configPda, configFor, partnerPda, betaGatePda, metadataPda, betaCreatorPda, pricingPda, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, wsol,
+    programId, configPda, configFor, partnerPda, betaGatePda, metadataPda, betaCreatorPda, pricingPda, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, raydiumAccounts, raydium: ray, wsol,
     computeBudget: (units = LAUNCH_COMPUTE_UNITS) => ComputeBudgetProgram.setComputeUnitLimit({ units }),
     createAtaIdempotent(payer, owner, mint, program = tokenProgram) {
       return new TransactionInstruction({ programId: ataProgram, data: data([1]), keys: [meta(payer, true, true), meta(ata(owner, mint, program), true), meta(owner), meta(mint), meta(SystemProgram.programId), meta(program)] });
@@ -636,6 +693,80 @@ export function createElpidaSolana(web3, programIdInput) {
         ], DISCRIMINATORS.harvestLpFees),
       ];
     },
+    /**
+     * SOL pairs, permissionless once the curve is complete: graduates into a Raydium CPMM pool (1% tier). The payer
+     * lends ~0.192 SOL (Raydium's 0.15 SOL fee plus rent) for the instruction and gets all of it back from the raised SOL.
+     */
+    migrateToRaydium({ payer, config, mint }) {
+      const pool = poolPda(mint), r = raydiumAccounts(mint);
+      return ix([
+        meta(payer, true, true), meta(config.address ?? configFor(wsol)), meta(wsol), meta(mint), meta(pool, true), meta(ata(pool, mint), true), meta(ata(pool, wsol), true),
+        meta(r.lpAuthority, true), meta(r.authorityBase, true), meta(r.authorityQuote, true), meta(r.authorityLp, true), meta(migrationPda(mint), true),
+        meta(r.pool, true), meta(r.ammConfig), meta(r.authority), meta(r.lpMint, true), meta(r.vault0, true), meta(r.vault1, true), meta(r.createPoolFee, true), meta(r.observation, true),
+        meta(r.program), meta(tokenProgram), meta(ataProgram), meta(SystemProgram.programId), meta(SYSVAR_RENT),
+      ], DISCRIMINATORS.migrateToRaydium);
+    },
+    /** Raydium harvest: idempotent ATAs (destinations and the LP authority's wrapped-SOL account), then the harvest. */
+    harvestRaydiumFees({ payer, config, mint, reward }) {
+      const pool = poolPda(mint), r = raydiumAccounts(mint), treasury = config.treasury;
+      return [
+        this.createAtaIdempotent(payer, treasury, mint), this.createAtaIdempotent(payer, reward, mint), this.createAtaIdempotent(payer, reward, wsol),
+        this.createAtaIdempotent(payer, treasury, wsol), this.createAtaIdempotent(payer, r.lpAuthority, wsol),
+        ix([
+          meta(payer, true, true), meta(config.address ?? configFor(wsol)), meta(wsol), meta(mint, true), meta(pool), meta(migrationPda(mint), true), meta(r.lpAuthority),
+          meta(r.authorityBase, true), meta(r.authorityQuote, true), meta(r.authorityLp, true), meta(r.pool, true), meta(r.authority), meta(r.lpMint, true),
+          meta(r.vault0, true), meta(r.vault1, true), meta(treasury), meta(reward),
+          meta(ata(treasury, mint), true), meta(ata(treasury, wsol), true), meta(ata(reward, mint), true), meta(ata(reward, wsol), true),
+          meta(r.program), meta(MEMO_PROGRAM), meta(tokenProgram), meta(token2022),
+        ], DISCRIMINATORS.harvestRaydiumFees),
+      ];
+    },
+    /** Partner pools on Raydium: spends queued SOL (at most 1% of the pool's SOL depth) on the token and burns it. */
+    raydiumBuyback({ mint }) {
+      const r = raydiumAccounts(mint);
+      return ix([
+        meta(mint, true), meta(wsol), meta(poolPda(mint)), meta(migrationPda(mint), true), meta(r.lpAuthority), meta(r.authorityBase, true), meta(r.authorityQuote, true),
+        meta(r.pool, true), meta(r.authority), meta(r.ammConfig), meta(r.vault0, true), meta(r.vault1, true), meta(r.observation, true), meta(r.program), meta(tokenProgram),
+      ], DISCRIMINATORS.raydiumBuyback);
+    },
+    /**
+     * A trade on a graduated SOL-pair token's Raydium pool, straight from the user's wallet: wraps SOL for a buy,
+     * swaps with `swap_base_input`, and unwraps the user's wrapped SOL afterwards. `amountIn` is lamports (buy) or
+     * token units (sell); `minOut` comes from `raydiumQuote` less slippage.
+     */
+    raydiumSwap({ user, mint, side, amountIn, minOut }) {
+      const r = raydiumAccounts(mint), buy = side === 'buy';
+      const [input, output] = buy ? [ata(user, wsol), ata(user, mint)] : [ata(user, mint), ata(user, wsol)];
+      const [inVault, outVault] = buy ? [r.quoteVault, r.baseVault] : [r.baseVault, r.quoteVault];
+      const [inMint, outMint] = buy ? [wsol, key(mint)] : [key(mint), wsol];
+      const swap = new TransactionInstruction({ programId: r.program, data: data(concat(DISCRIMINATORS.raydiumSwapBaseInput, u64(amountIn), u64(minOut))), keys: [
+        meta(user, false, true), meta(r.authority), meta(r.ammConfig), meta(r.pool, true), meta(input, true), meta(output, true), meta(inVault, true), meta(outVault, true),
+        meta(tokenProgram), meta(tokenProgram), meta(inMint), meta(outMint), meta(r.observation, true),
+      ] });
+      return [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: RAYDIUM_SWAP_COMPUTE_UNITS }),
+        ...(buy ? [...this.wrapSol(user, amountIn), this.createAtaIdempotent(user, user, mint)] : [this.createAtaIdempotent(user, user, wsol)]),
+        swap, this.unwrapSol(user),
+      ];
+    },
+    /** Raydium `PoolState` fields Elpida needs, or null when the bytes are not one. */
+    decodeRaydiumPool(raw) {
+      const bytes = raw ? new Uint8Array(raw) : null;
+      if (!bytes || bytes.length < RAYDIUM_POOL_SIZE || !sameBytes(bytes, DISCRIMINATORS.RaydiumPoolState)) return null;
+      const k = o => new PublicKey(bytes.subarray(o, o + 32));
+      return {
+        ammConfig: k(8), creator: k(40), vault0: k(72), vault1: k(104), lpMint: k(136), mint0: k(168), mint1: k(200), observation: k(296), status: bytes[329],
+        lpSupply: readU64(bytes, 333), fees0: readU64(bytes, 341) + readU64(bytes, 357) + readU64(bytes, 397), fees1: readU64(bytes, 349) + readU64(bytes, 365) + readU64(bytes, 405),
+        openTime: readU64(bytes, 373),
+      };
+    },
+    /** Mirrors `read_raydium`: LP supply and reserves (vaults less kept fees) as base (the token) and quote (SOL). */
+    raydiumState(poolRaw, vault0Raw, vault1Raw, mint) {
+      const pool = this.decodeRaydiumPool(poolRaw);
+      if (!pool) throw new Error('Not a Raydium CPMM pool.');
+      const r0 = this.tokenAmount(vault0Raw) - pool.fees0, r1 = this.tokenAmount(vault1Raw) - pool.fees1, baseIs0 = pool.mint0.equals(key(mint));
+      return { lpSupply: pool.lpSupply, base: baseIs0 ? r0 : r1, quote: baseIs0 ? r1 : r0, baseIs0, openTime: pool.openTime };
+    },
     decodeMigration(raw) {
       const bytes = new Uint8Array(raw);
       if (bytes.length < MIGRATION_SIZE || !sameBytes(bytes, DISCRIMINATORS.PumpMigration)) throw new Error('Not an Elpida migration account.');
@@ -643,10 +774,11 @@ export function createElpidaSolana(web3, programIdInput) {
         curvePool: new PublicKey(bytes.subarray(8, 40)), mint: new PublicKey(bytes.subarray(40, 72)), pumpPool: new PublicKey(bytes.subarray(72, 104)), lpMint: new PublicKey(bytes.subarray(104, 136)),
         lpLocked: readU64(bytes, 136), principal: readU128(bytes, 144), baseMigrated: readU64(bytes, 160), quoteMigrated: readU64(bytes, 168),
         harvestedLp: readU64(bytes, 176), harvestedBase: readU64(bytes, 184), harvestedQuote: readU64(bytes, 192), migratedAt: readI64(bytes, 200),
-        // Migrations by the partner-tier program: quote queued for buyback and partner burns (0 otherwise).
+        // Migrations by the partner-tier program: quote queued for buyback and partner burns (0 otherwise), and the venue
+        // (VENUE_RAYDIUM for SOL pairs from the Raydium build; `pumpPool` is then the Raydium pool).
         ...(bytes.length >= MIGRATION_SIZE + MIGRATION_EXT_LEN && bytes[MIGRATION_SIZE] === 1
-          ? { pendingBuyback: readU64(bytes, MIGRATION_SIZE + 1), baseBurned: readU64(bytes, MIGRATION_SIZE + 9), buybackQuoteSpent: readU64(bytes, MIGRATION_SIZE + 17), buybackBurned: readU64(bytes, MIGRATION_SIZE + 25) }
-          : { pendingBuyback: 0n, baseBurned: 0n, buybackQuoteSpent: 0n, buybackBurned: 0n }),
+          ? { pendingBuyback: readU64(bytes, MIGRATION_SIZE + 1), baseBurned: readU64(bytes, MIGRATION_SIZE + 9), buybackQuoteSpent: readU64(bytes, MIGRATION_SIZE + 17), buybackBurned: readU64(bytes, MIGRATION_SIZE + 25), venue: bytes[MIGRATION_SIZE + 33] }
+          : { pendingBuyback: 0n, baseBurned: 0n, buybackQuoteSpent: 0n, buybackBurned: 0n, venue: VENUE_PUMPSWAP }),
       };
     },
     /** PumpSwap `Pool` fields Elpida needs (trailing fields read as 0 when absent). */

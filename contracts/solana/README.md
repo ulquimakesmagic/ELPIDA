@@ -1,6 +1,6 @@
 # Elpida Solana program
 
-Anchor program `elpida_launchpad` (program ID `ANkA5pytoVkiKQbjzd5NdPWKgmwfsihNJvSfg3vtKLNz`), model 3: a virtual-reserve bonding curve, one config per trading pair (SOL or another approved token), that graduates into a PumpSwap pool. Pricing is native: every launch pays its creation fee in SOL (see `docs/NATIVE_PRICING.md`). Test prototype, **not audited**.
+Anchor program `elpida_launchpad` (program ID `ANkA5pytoVkiKQbjzd5NdPWKgmwfsihNJvSfg3vtKLNz`), model 3: a virtual-reserve bonding curve, one config per trading pair (SOL or another approved token), that graduates into a DEX pool: **Raydium CPMM (1% fee tier) for the SOL pair**, PumpSwap for every other pair. Pricing is native: every launch pays its creation fee in SOL (see `docs/NATIVE_PRICING.md`). Test prototype, **not audited**.
 
 ## Trading pairs
 
@@ -19,7 +19,12 @@ The SOL pair's fee and curve come from `config/native-pricing.json`. On test net
    - During the first 60 s, an anti-snipe fee decays from 90% to the base fee. The surplus above the base fee is locked as liquidity.
    - The creator's first buy pays only the base fee.
 2. **Completion.** The buy that empties the curve is filled only up to the remaining supply. Trading then stops (`status = 1`).
-3. **Migration.** Anyone can call `migrate_to_pumpswap`. It moves the remaining 240.3M tokens and all raised quote into a new PumpSwap pool (`status = 2`).
+3. **Migration.** Anyone can migrate a completed curve (`status = 2`). Both venues move the remaining 240.3M tokens and all raised quote into a new pool whose LP the program keeps forever.
+   - **SOL pair: `migrate_to_raydium`** (27 October 2026). The pool is a Raydium CPMM pool on the pinned 1% AmmConfig (devnet index 3 `EsTevf…rTvz`, mainnet index 1 `G95x…Apkc`; the test build uses Raydium's devnet program `DRaycp…pYb`, the mainnet build `CPMMoo…P1C`).
+     - It lives at Elpida's own PDA `["ray-pool", mint]`: Raydium accepts a non-canonical pool address that signs, and only this program can sign for it, so nobody can create the pool first.
+     - Raydium charges 0.15 SOL to create a pool plus rent for six accounts (0.192 SOL in all, `raydium_creation_cost`). **The raised SOL pays it:** the caller lends that amount to the LP authority for the instruction; the LP authority creates the pool with the raised SOL less that amount, then closes its wrapped-SOL account (holding exactly that amount) and repays the caller everything it holds. The caller pays only two account rents and the network fee.
+     - The pool opens one second after creation (Raydium's `open_time`). `migrate_to_pumpswap` refuses the SOL pair (6033 `WrongVenue`).
+   - **Other pairs: `migrate_to_pumpswap`.** PumpSwap pool, created by the same LP authority.
    - The quote moved includes the curve reserve and the anti-snipe bonus.
    - The pool opens at the final curve price, raised slightly by the bonus.
    - The pool is created by the data-less PDA `["pump-lp", mint]`, which keeps the LP tokens forever. Only PumpSwap's 100-unit minimum stays in the pool unowned.
@@ -28,9 +33,10 @@ The SOL pair's fee and curve come from `config/native-pricing.json`. On test net
    - A pool launched by that wallet before the expiry fixes the share at launch, in bytes appended after the pool's fixed layout (pools are 292 bytes from this version; older 260-byte pools read as standard). Changing or ending a tier never affects a launched pool.
    - On every trade the creator still gets the larger half of the base fee. The share comes out of the protocol half and buys tokens from the curve at its current price, with no fee, in the same instruction; those tokens are burned (SPL burn, so the supply falls). The quote joins the real reserve.
    - A buyback never completes the curve: if it would reach the curve supply, buys nothing, or follows the completing buy, its quote is locked as liquidity bonus instead.
-   - After migration, `harvest_lp_fees` burns the share of the token side at once and keeps the share of the quote side with the LP authority, recorded as `pending_buyback` in the migration record. Spending it on a capped PumpSwap buyback is the next program step; until then it stays there, accounted for.
-6. **LP fees.** PumpSwap charges pools it did not create itself 0.25% to LPs and 0.05% to pump. It pays no coin-creator fee on these pools.
-   - Anyone can call `harvest_lp_fees`. It withdraws only the LP tokens that represent fee growth, and splits the base and quote 50/50 between the treasury and the creator reward wallet.
+   - After migration, each harvest burns the share of the token side at once and keeps the share of the quote side with the LP authority, recorded as `pending_buyback` in the migration record.
+   - Raydium pools: anyone can call `raydium_buyback`, which spends the queue on the token through the pool (at most 1% of the pool's SOL depth per call) and burns every token it buys. With the 1% fee on both legs, moving the price around a buyback that small costs more than it returns. PumpSwap pools keep the queue accounted for (no PumpSwap buyback).
+6. **LP fees.** Raydium's 1% tier keeps 84% of the fee in the pool for LPs (12% protocol, 4% fund). PumpSwap charges pools it did not create itself 0.25% to LPs and 0.05% to pump. Neither pays a creator fee on these pools.
+   - Anyone can call `harvest_raydium_fees` or `harvest_lp_fees` (PumpSwap). It withdraws only the LP tokens that represent fee growth, and splits the base and quote 50/50 between the treasury and the creator reward wallet.
    - Fee growth is measured in liquidity units (`lp / lp_supply × √(base × quote)`). The position never drops below its migrated units, and the program checks this after every harvest.
    - A harvest must be at least 0.01% of the locked LP.
 
@@ -43,7 +49,8 @@ The SOL pair's fee and curve come from `config/native-pricing.json`. On test net
 | `reopen_curve` | Anyone, 24 h after completion without migration | D7 escape hatch: sets a completed, unmigrated curve back to trading; reserves, bonus and owed fees unchanged; emits `CurveReopened`. Earlier: 6031 `GraceNotOver` |
 | `buy(gross_in, min_tokens_out)` / `sell(tokens_in, min_quote_out)` | Anyone | Curve trades at the current fee (anti-snipe schedule, then 1.25%) |
 | `withdraw_fees` | Anyone | Pays accrued curve fees 50/50 to the treasury and the creator reward wallet; works before and after migration |
-| `migrate_to_pumpswap` | Anyone, once the curve is complete | Creates the PumpSwap pool. The caller advances 0.05 SOL; about 0.017 SOL is used for rent and the rest is refunded in the same transaction |
+| `migrate_to_raydium` | Anyone, once a SOL-pair curve is complete | Creates the Raydium CPMM pool (1% tier) at `["ray-pool", mint]`. The caller lends Raydium's fee and rent (0.192 SOL) and is repaid in full from the raised SOL in the same instruction. Emits `CurveMigrated` and `RaydiumMigrated` |
+| `migrate_to_pumpswap` | Anyone, once a curve of another pair is complete | Creates the PumpSwap pool. The caller advances 0.05 SOL; about 0.017 SOL is used for rent and the rest is refunded in the same transaction. Refuses the SOL pair (6033) |
 | `update_curve_config(params)` | Program upgrade authority | Reprices an existing config for future launches: curve sizing, creation fee and creator-buy cap. The fee schedule must stay the same (6024 `FeeScheduleFixed`), because live pools read it. Emits `CurveConfigUpdated` |
 | `add_curve_config(params)` | Program upgrade authority | A trading pair: an extra config for another quote mint (classic SPL or Token-2022) at `["curve-config", quote_mint]`; unsupported token extensions are rejected; pools always trade through the config they launched with |
 | `test_usdc_faucet(amount)` | Anyone | **Test networks only.** Mints any test asset whose mint authority is the faucet PDA (TEST-MEME), up to 10,000,000 whole units per call, so paired curves can be completed on devnet. (`create_test_usdc` remains in the program but deployments no longer create tUSDC.) |
@@ -51,6 +58,8 @@ The SOL pair's fee and curve come from `config/native-pricing.json`. On test net
 | `allow_beta_creator(creator)` / `revoke_beta_creator` | Beta admin | Adds or removes a creator (PDA `["beta-creator", creator]`) |
 | `test_build_check` | Anyone | Succeeds only on the test build; lets scripts confirm a cluster runs the mainnet build |
 | `harvest_lp_fees` | Anyone, after migration | Withdraws LP fee growth and splits it 50/50; destination token accounts must exist (the client adds idempotent creation). Partner pools: the share of the token side is burned (the mint must be passed writable) and the share of the quote side is queued |
+| `harvest_raydium_fees` | Anyone, after a Raydium migration | The Raydium counterpart of `harvest_lp_fees`: withdraws LP fee growth only, same split, burn and queue. The LP authority's wrapped-SOL account must exist (the client creates it) |
+| `raydium_buyback` | Anyone | Partner pools on Raydium: spends queued SOL (at most 1% of the pool's SOL depth) on the token and burns it. Emits `PartnerLpBuyback`; 6035 when nothing is queued |
 | `set_partner(creator, buyback_bps, expires_at)` | Treasury of the SOL pair (`["curve-config", wSOL]`) | Early-partner tier for a creator wallet at PDA `["partner", creator]`: 1000 or 2000 with an expiry at most 180 days ahead, or (0, 0) to end it. Future launches only. Error 6032 `PartnerTerms`. `npm run solana:partner` sends it from the deploy key |
 | `partner_tiers_version` | Anyone | Empty; lets clients detect this version (launch takes the creator's `partner` account in place of the rent sysvar, trades pass the mint writable) |
 
@@ -59,7 +68,7 @@ The SOL pair's fee and curve come from `config/native-pricing.json`. On test net
 **Accounts:**
 - One `CurveConfig` PDA `["curve-config", quote_mint]` per pair (the SOL pair uses the wrapped-SOL mint).
 - One `CurvePool` PDA `["curve", mint]` per token. Its associated token accounts hold the unsold supply and the quote.
-- One `PumpMigration` PDA `["pump-migration", mint]` per migrated token. It records the PumpSwap pool, the locked LP and the principal (and, from this version, 48 appended bytes: the quote queued for buyback and the partner burns).
+- One `PumpMigration` PDA `["pump-migration", mint]` per migrated token (both venues). It records the DEX pool, the locked LP and the principal, and 48 appended bytes: the quote queued for buyback, the partner burns and the venue byte (offset 243: 0 PumpSwap, 1 Raydium).
 - One `PartnerConfig` PDA `["partner", creator]` per registered creator wallet: the share, the expiry and the bump.
 
 There is no admin, rescue or reserve withdrawal. Error codes 6000+ are listed in `packages/solana/client.mjs`.
@@ -101,6 +110,7 @@ The previous devnet build (`319e2ffe…`, before metadata and reopen) is kept as
 - `npm run solana:deploy -- --upgrade` (or double-click `solana-upgrade.cmd` in the ELPIDA folder) upgrades the deployed program to `build/elpida_launchpad.so`. Uploads resume if interrupted, and stale buffers from older builds are closed first.
 - `npm run test:solana` runs the program against a throwaway `solana-test-validator`. Without the private program keypair the validator preloads the build at the program ID as an upgradeable program, so the suite runs anywhere the Solana CLI is installed. It also loads, from `fixtures/`:
   - the real PumpSwap program and its GlobalConfig (refresh with `solana-pumpswap-fixtures.cmd` or `node scripts/solana-pumpswap-fixtures.mjs`);
+  - Raydium CPMM's devnet program (`node scripts/solana-raydium-fixtures.mjs` dumps it into `fixtures/raydium_cpmm.so`, with its 1% AmmConfig); the suite writes the AmmConfig and the fee receiver itself when the dump has no config. The Raydium tests are skipped while the program fixture is missing;
   - Metaplex Token Metadata, built from its mainnet source tag (see `fixtures/SOURCE.txt`).
 - `npm run test:solana-host` runs `host-tests/`, a separate Cargo workspace: the 24 h reopen in LiteSVM (the clock moves) and property tests of the curve math (`PROPTEST_CASES=200000` for a deeper run): solvency through any trade sequence, k never decreasing, price direction, rounding in the pool's favour, round trips never profitable, the exact final fill (overcharge at most `floor(10000/(10000-fee))+1` base units, kept by the pool), fee split, the anti-snipe schedule, LP harvests never touching the principal, oracle rounding and `isqrt`.
 
@@ -114,7 +124,8 @@ The previous devnet build (`319e2ffe…`, before metadata and reopen) is kept as
 
   Price is `virtual_quote ÷ token_reserve`.
 - `CurveGraduated` marks completion.
-- `CurveMigrated` records the PumpSwap pool and the locked LP.
+- `CurveMigrated` records the DEX pool (Raydium or PumpSwap) and the locked LP; `RaydiumMigrated` adds the raised SOL, the creation cost paid from it and what the caller was repaid.
+- `PartnerLpBuyback` records each Raydium buyback (SOL spent, tokens burned, what remains queued).
 - `LpFeesHarvested` records each harvest.
 - `CurveReopened` records a D7 reopen (graduated and reopened times, reserve and bonus).
 
@@ -123,4 +134,4 @@ The previous devnet build (`319e2ffe…`, before metadata and reopen) is kept as
 ## Vanity mint addresses (D9)
 
 The mint is a fresh signer keypair, so the program needs nothing for vanity addresses. The server (`apps/api/vanity-mints.mjs`) keeps a small pool of keypairs whose address ends in `hope`, ground in a worker thread (about 9 minutes per key per core) and sealed with AES-256-GCM under `ELPIDA_VANITY_KEY`. A launch reserves one key for one wallet; the key leaves the pool at once, the server co-signs only an Elpida `launch` by that wallet with that mint, and the secret is destroyed after that one signature or on expiry. Without the key, with an empty pool or over the rate limit, launches use a random mint and say so. Secret keys are never logged or stored in plaintext.
-- In-app PumpSwap trading after migration. Migrated tokens trade on PumpSwap or through aggregators.
+- In-app DEX trading after migration: SOL pairs trade on their Raydium pool (`raydiumSwap`), other pairs on PumpSwap, or through aggregators.

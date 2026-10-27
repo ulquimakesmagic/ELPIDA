@@ -49,7 +49,7 @@ function feesSection(ctx, mine) {
     table.append(h('div.fee-row',
       h('a.token-card-head', { href: `#/token/${token.address}` }, avatar(token), h('div', h('h3', token.name), h('span.sym.muted.small', token.tax?'Fixed creator allocations':token.rewardVault ? 'Reward treasury' : `Creator wallet ${short(token.reward)}`))),
       h('div.figure', h('span', token.tax?'Your creator allocation':'Creator share'), h('strong', token.tax?`${amount(token.creatorAllocationFees,q)} + ${amount(token.creatorTokenFees,token.symbol)}`:amount(token.creatorFees, q))),
-      h('div.figure', h('span', harvest ? 'PumpSwap LP fees ready' : 'Elpida share'), h('strong', harvest ? `${number(token.harvestableQuote, 4)} ${q} + ${number(token.harvestableTokens, 0)} ${token.symbol}` : amount(token.protocolFees, q))),
+      h('div.figure', h('span', harvest ? `${token.venue ?? 'DEX'} LP fees ready` : 'Elpida share'), h('strong', harvest ? `${number(token.harvestableQuote, 4)} ${q} + ${number(token.harvestableTokens, 0)} ${token.symbol}` : amount(token.protocolFees, q))),
       h('div', h('button.btn.btn-secondary.btn-sm', { type: 'button', 'data-busy-disable': '', disabled: nothing, on: { click: async () => { error.textContent = ''; try { await ctx.run('withdraw', { token: token.address }); } catch (e) { error.textContent = errorText(e); } } } }, 'Claim fees'), error)));
   }
   section.append(table);

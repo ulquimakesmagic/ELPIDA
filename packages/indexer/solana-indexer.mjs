@@ -12,7 +12,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { SOLANA_GENESIS } from '../solana/rpc-config.mjs';
-import { createElpidaSolana, decodeEvents, poolStats, quoteBuy, formatAmount, TOKEN_DECIMALS, TOKEN_SUPPLY, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, WSOL_MINT, TOKEN_PROGRAM, GRADUATION_GRACE_SECS } from '../solana/client.mjs';
+import { createElpidaSolana, decodeEvents, poolStats, quoteBuy, formatAmount, TOKEN_DECIMALS, TOKEN_SUPPLY, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, WSOL_MINT, TOKEN_PROGRAM, GRADUATION_GRACE_SECS, VENUE_RAYDIUM, RAYDIUM } from '../solana/client.mjs';
 import { supplyPercent } from '../core/curve-model.mjs';
 
 const MAX_U64 = (1n << 64n) - 1n;
@@ -56,6 +56,9 @@ const PUMP_SWAPS = [
   [[43, 100, 73, 19, 233, 246, 111, 148], 0], [[105, 68, 6, 175, 0, 7, 35, 162], 1],
 ];
 const PUMP_AMM = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
+// Raydium CPMM swaps (swap_base_input, swap_base_output); the trader is account 0 (payer), the pool account 3.
+const RAYDIUM_SWAPS = [[[143, 190, 90, 218, 196, 30, 51, 222], 0], [[55, 217, 98, 86, 163, 74, 180, 173], 0]];
+const RAYDIUM_PROGRAMS = [RAYDIUM.devnet.program, RAYDIUM.mainnet.program];
 
 /**
  * A PumpSwap swap on one Elpida pool from a confirmed transaction, or null. Amounts come from the pool
@@ -68,14 +71,21 @@ const PUMP_AMM = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
  * The trader is the swap instruction's user account.
  */
 export function pumpSwapTrade(tx, { pool, poolBase, poolQuote }) {
+  return dexSwapTrade(tx, { pool, poolBase, poolQuote, programs: [PUMP_AMM], kinds: PUMP_SWAPS });
+}
+/** The same checks for a Raydium CPMM swap on an Elpida pool (`poolBase` / `poolQuote` are its token and SOL vaults). */
+export function raydiumSwapTrade(tx, { pool, poolBase, poolQuote }) {
+  return dexSwapTrade(tx, { pool, poolBase, poolQuote, programs: RAYDIUM_PROGRAMS, kinds: RAYDIUM_SWAPS });
+}
+function dexSwapTrade(tx, { pool, poolBase, poolQuote, programs, kinds }) {
   const message = tx?.transaction?.message ?? {};
   const keys = (message.staticAccountKeys ?? message.accountKeys ?? []).map(k => (k.pubkey ?? k).toBase58?.() ?? String(k.pubkey ?? k));
   const loaded = [...(tx?.meta?.loadedAddresses?.writable ?? []), ...(tx?.meta?.loadedAddresses?.readonly ?? [])].map(k => k.toBase58?.() ?? String(k));
   const all = [...keys, ...loaded];
   const top = (message.compiledInstructions ?? message.instructions ?? []).map(ix => ({ program: all[ix.programIdIndex], accounts: (ix.accountKeyIndexes ?? ix.accounts ?? []).map(i => all[i]), data: base58Bytes(ix.data) }));
   const inner = (tx?.meta?.innerInstructions ?? []).flatMap(group => group.instructions.map(ix => ({ program: all[ix.programIdIndex], accounts: (ix.accounts ?? []).map(i => all[i]), data: base58Bytes(ix.data) })));
-  const swaps = [...top, ...inner].filter(ix => ix.program === PUMP_AMM && ix.accounts.includes(pool)).flatMap(ix => {
-    const kind = PUMP_SWAPS.find(([disc]) => disc.every((b, i) => ix.data[i] === b));
+  const swaps = [...top, ...inner].filter(ix => programs.includes(ix.program) && ix.accounts.includes(pool)).flatMap(ix => {
+    const kind = kinds.find(([disc]) => disc.every((b, i) => ix.data[i] === b));
     return kind ? [{ trader: ix.accounts[kind[1]] }] : [];
   });
   if (swaps.length !== 1) return null;
@@ -102,7 +112,7 @@ export class SolanaIndexer {
   constructor({ web3, connection, deployment, network, path = ':memory:', backfill = 1500, spacingMs = 120, metadataStore = null, pumpPerTick = 200 }) {
     if (path !== ':memory:') mkdirSync(dirname(path), { recursive: true });
     this.web3 = web3; this.connection = connection; this.network = network; this.deployment = deployment;
-    this.client = createElpidaSolana(web3, new web3.PublicKey(deployment.programId));
+    this.client = createElpidaSolana(web3, new web3.PublicKey(deployment.programId), { cluster: network?.mainnet ? 'mainnet' : 'devnet' });
     this.pairs = new Map((deployment.pairs ?? []).map(p => [p.config, p]));
     this.backfill = backfill; this.spacingMs = spacingMs; this.holderCache = new Map(); this.lastError = null; this.lastSuccess = null; this.metadataStore = metadataStore; this.pumpPerTick = pumpPerTick; this.holderLookups = new Map();
     this.db = new DatabaseSync(path);
@@ -144,19 +154,20 @@ export class SolanaIndexer {
         const mint = pool.mint.toBase58();
         const remaining = complete ? 0n : quoteBuy(pool, MAX_U64, cfg.baseFeeBps, cfg.baseFeeBps).gross;
         const x = extra.get(mint) ?? {}, migrated = pool.status === STATUS_MIGRATED;
-        // After migration the curve is empty: price, market cap and liquidity come from the PumpSwap pool.
+        // After migration the curve is empty: price, market cap and liquidity come from the DEX pool (Raydium or PumpSwap).
         const pumpPrice = migrated && x.pumpBase > 0n ? Number(x.pumpQuote) / 10 ** d / (Number(x.pumpBase) / 10 ** TOKEN_DECIMALS) : null;
         const price = pumpPrice ?? stats.price;
         upsert.run(mint, Number(pool.createdAt), json({
           address: mint, pool: pool.pubkey.toBase58(), config: key, name: pool.name, symbol: pool.symbol, creator: pool.creator.toBase58(), reward: pool.reward.toBase58(),
-          created: Number(pool.createdAt) * 1000, pair: quote.kind, quoteSymbol: quote.symbol, quoteDecimals: d, decimals: TOKEN_DECIMALS, dex: 'PumpSwap',
+          created: Number(pool.createdAt) * 1000, pair: quote.kind, quoteSymbol: quote.symbol, quoteDecimals: d, decimals: TOKEN_DECIMALS, dex: x.venue ?? (cfg.quoteMint.toBase58() === WSOL_MINT ? 'Raydium' : 'PumpSwap'),
           reserve: formatAmount(pool.realQuote, d), liquidityBonus: formatAmount(pool.liquidityBonus, d), sold: formatAmount(pool.sold, TOKEN_DECIMALS),
           circulatingSupply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS), saleCap: formatAmount(pool.curveSupply, TOKEN_DECIMALS), supply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS),
           spotPrice: price, marketCap: pumpPrice !== null ? pumpPrice * Number(TOKEN_SUPPLY) / 10 ** TOKEN_DECIMALS : stats.marketCap, progress: stats.progress, remainingBuy: formatAmount(remaining, d),
           complete, graduated: migrated, completedAt: Number(pool.graduatedAt), liquidityLocked: true,
           // D7: a completed curve that has not migrated can be reopened by anyone after the grace period.
           reopenableAt: pool.status === STATUS_GRADUATED && pool.graduatedAt > 0n ? Number(pool.graduatedAt) + GRADUATION_GRACE_SECS : null,
-          ...(migrated ? { pumpPool: x.pumpPool, liquidity: x.pumpQuote !== undefined ? formatAmount(x.pumpQuote, d) : undefined } : {}),
+          ...(migrated ? { pumpPool: x.pumpPool, venue: x.venue, dexBase: x.dexBase, dexQuote: x.dexQuote, liquidity: x.pumpQuote !== undefined ? formatAmount(x.pumpQuote, d) : undefined,
+            ...(x.buybackBurned !== undefined ? { buybackBurned: formatAmount(x.buybackBurned, TOKEN_DECIMALS), pendingBuyback: formatAmount(x.pendingBuyback, d) } : {}) } : {}),
           protocolFees: formatAmount(pool.protocolFees, d), creatorFees: formatAmount(pool.creatorFees, d),
           virtualQuote: pool.virtualQuote.toString(), virtualToken: pool.virtualToken.toString(),
           // Creator transparency (D6): the launch buy and the creator wallet's live holding, % of supply.
@@ -204,13 +215,20 @@ export class SolanaIndexer {
     const unknownMints = [...new Set(migrated.map(p => configs.get(p.config.toBase58()).quoteMint.toBase58()))].filter(m => !this.quotePrograms.has(m));
     if (unknownMints.length) (await batch(unknownMints.map(m => new PublicKey(m)))).forEach((info, i) => { if (info) this.quotePrograms.set(unknownMints[i], info.owner); });
     if (migrated.length) {
-      const accounts = migrated.map(p => { const cfg = configs.get(p.config.toBase58()); return this.client.pumpAccounts(p.mint, cfg.quoteMint, this.quoteProgramOf(cfg)); });
-      const infos = await batch(accounts.flatMap(a => [a.pool, a.poolBase, a.poolQuote]));
+      // The migration record names the venue: Raydium CPMM (SOL pairs from the Raydium build) or PumpSwap.
+      const records = (await batch(migrated.map(p => this.client.migrationPda(p.mint)))).map(info => { try { return info ? this.client.decodeMigration(info.data) : null; } catch { return null; } });
+      const accounts = migrated.map((p, i) => {
+        if (records[i]?.venue === VENUE_RAYDIUM) { const r = this.client.raydiumAccounts(p.mint); return { venue: 'Raydium', pool: r.pool, keys: [r.pool, r.vault0, r.vault1], base: r.baseVault, quote: r.quoteVault }; }
+        const cfg = configs.get(p.config.toBase58()), a = this.client.pumpAccounts(p.mint, cfg.quoteMint, this.quoteProgramOf(cfg));
+        return { venue: 'PumpSwap', pool: a.pool, keys: [a.pool, a.poolBase, a.poolQuote], base: a.poolBase, quote: a.poolQuote };
+      });
+      const infos = await batch(accounts.flatMap(a => a.keys));
       migrated.forEach((p, i) => {
-        const [poolInfo, baseInfo, quoteInfo] = infos.slice(i * 3, i * 3 + 3), x = out.get(p.mint.toBase58());
-        if (!poolInfo || !baseInfo || !quoteInfo) return;
-        const state = this.client.pumpState(poolInfo.data, baseInfo.data, quoteInfo.data);
-        Object.assign(x, { pumpPool: accounts[i].pool.toBase58(), pumpBase: state.base, pumpQuote: state.quote });
+        const [poolInfo, first, second] = infos.slice(i * 3, i * 3 + 3), x = out.get(p.mint.toBase58()), a = accounts[i];
+        if (!poolInfo || !first || !second) return;
+        const state = a.venue === 'Raydium' ? this.client.raydiumState(poolInfo.data, first.data, second.data, p.mint) : this.client.pumpState(poolInfo.data, first.data, second.data);
+        Object.assign(x, { pumpPool: a.pool.toBase58(), venue: a.venue, dexBase: a.base.toBase58(), dexQuote: a.quote.toBase58(), pumpBase: state.base, pumpQuote: state.quote });
+        if (records[i]) Object.assign(x, { buybackBurned: records[i].baseBurned + records[i].buybackBurned, pendingBuyback: records[i].pendingBuyback });
       });
     }
     return out;
@@ -224,7 +242,7 @@ export class SolanaIndexer {
     return new this.web3.PublicKey(pair?.tokenProgram ?? pair?.quoteTokenProgram ?? TOKEN_PROGRAM);
   }
 
-  /** PumpSwap swaps on migrated Elpida pools, one durable cursor per pool (oldest first). */
+  /** DEX swaps (PumpSwap or Raydium) on migrated Elpida pools, one durable cursor per pool (oldest first). */
   async syncPumpTrades() {
     const tokens = this.tokens().filter(t => t.graduated && t.pumpPool);
     if (!tokens.length) return 0;
@@ -235,7 +253,9 @@ export class SolanaIndexer {
     for (const token of tokens) {
       const cfg = this.configs?.get(token.config);
       if (!cfg) continue;
-      const a = this.client.pumpAccounts(new this.web3.PublicKey(token.address), cfg.quoteMint, this.quoteProgramOf(cfg));
+      const raydium = token.venue === 'Raydium' && token.dexBase && token.dexQuote;
+      const a = raydium ? { pool: new this.web3.PublicKey(token.pumpPool), poolBase: new this.web3.PublicKey(token.dexBase), poolQuote: new this.web3.PublicKey(token.dexQuote) }
+        : this.client.pumpAccounts(new this.web3.PublicKey(token.address), cfg.quoteMint, this.quoteProgramOf(cfg));
       const cursor = cursorOf.get(token.pumpPool)?.signature;
       const fresh = [];
       let before;
@@ -251,14 +271,14 @@ export class SolanaIndexer {
         if (!sig.err) {
           tx = await this.connection.getTransaction(sig.signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
           if (!tx?.meta) { const error = new Error('Transaction details not available yet.'); error.code = 'TRANSACTION_PENDING'; throw error; }
-          if (!tx.meta.err) trade = pumpSwapTrade(tx, { pool: a.pool.toBase58(), poolBase: a.poolBase.toBase58(), poolQuote: a.poolQuote.toBase58() });
+          if (!tx.meta.err) trade = (raydium ? raydiumSwapTrade : pumpSwapTrade)(tx, { pool: a.pool.toBase58(), poolBase: a.poolBase.toBase58(), poolQuote: a.poolQuote.toBase58() });
         }
         this.db.exec('BEGIN');
         try {
           if (trade) {
             const d = token.quoteDecimals, timestamp = tx?.blockTime ?? sig.blockTime ?? 0;
             added += Number(insert.run(sig.signature, 0, token.address, sig.slot, timestamp, json({
-              hash: sig.signature, token: token.address, side: trade.side, account: trade.account, venue: 'PumpSwap',
+              hash: sig.signature, token: token.address, side: trade.side, account: trade.account, venue: raydium ? 'Raydium' : 'PumpSwap',
               quoteRaw: trade.quoteRaw, tokenRaw: trade.tokenRaw, quoteAmount: formatAmount(trade.quoteRaw, d), tokenAmount: formatAmount(trade.tokenRaw, TOKEN_DECIMALS),
               priceQuote: Number(trade.quoteRaw) / 10 ** d / (Number(trade.tokenRaw) / 10 ** TOKEN_DECIMALS), launch: false, timestamp, slot: sig.slot,
             })).changes);

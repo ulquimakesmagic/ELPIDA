@@ -12,7 +12,7 @@ Elpida charges and prices every launch in each chain's own coin: SOL on Solana, 
 |---|---|
 | `launchFee` | Creation fee the creator pays to the treasury on every launch, whatever the trading pair. |
 | `startFdv` | Fully diluted value of a new token at launch (price × 1B supply). |
-| `endFdv` | Solana only. The FDV at which the curve completes and migrates to PumpSwap. Legacy model 8 EVM curves have a fixed shape and complete at 16 × `startFdv`; model 10 completes at 10 × its USD start. |
+| `endFdv` | Solana only. The FDV at which the curve completes and migrates (the SOL pair to Raydium CPMM, other pairs to PumpSwap). Raydium's 0.192 SOL creation cost comes out of the raised SOL, so a test-sized curve (5 SOL end FDV, 1.2 SOL raised) gives about 16% of its liquidity to it, while a 300 SOL end FDV (72 SOL raised) gives 0.27%. Legacy model 8 EVM curves have a fixed shape and complete at 16 × `startFdv`; model 10 completes at 10 × its USD start. |
 
 The mainnet values in the file are examples. Set them from the current coin price before deploying. For instance, at SOL = $150, a $5k → $50k curve is about 33 → 333 SOL, and a $7.50 fee is 0.05 SOL.
 

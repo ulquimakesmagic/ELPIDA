@@ -158,7 +158,7 @@ export function renderToken(ctx, address) {
     h('dt', 'Token address'), h('dd', token.address),
     token.curve ? [h('dt', 'Bonding curve'), h('dd', token.curve)] : null,
     token.pool && !/^0x0+$/.test(token.pool) ? [h('dt', 'Pool'), h('dd', token.pool)] : null,
-    token.pumpPool ? [h('dt', 'PumpSwap pool'), h('dd', token.pumpPool)] : null,
+    token.pumpPool ? [h('dt', `${token.venue ?? 'DEX'} pool`), h('dd', token.pumpPool)] : null,
     token.quoteAddress && !/^0x0+$/.test(token.quoteAddress) ? [h('dt', `${q} address`), h('dd', token.quoteAddress)] : null,
     h('dt', 'Creator'), h('dd', token.creator ?? '—'), h('dt', 'Creator fee wallet'), h('dd', token.reward ?? '—'),
     h('dt', 'Trading reserve'), h('dd', `${number(token.reserve, 6)} ${q}`),
@@ -256,16 +256,16 @@ function marketActivity(ctx,token,q,{addressUrl,isCreator,me,info,onCounts,onHol
 function tradePanel(ctx, token, { dex, solana }) {
   const q = token.quoteSymbol ?? ctx.state?.nativeSymbol ?? 'ETH';
   if(ctx.state.disconnected && !(token.complete && !token.graduated))return h('section.panel.trade-panel',h('h2','Trade'),h('p.muted',ctx.state.walletReadError?'Your wallet connection could not read this network. Reconnect to trade; indexed market data is still available.':`Connect your wallet on ${ctx.wallet.net.name} to buy or sell ${token.symbol}. Market data remains available without connecting.`),ctx.walletButtons(ctx.wallet.net,{onDone:()=>ctx.refresh(),onError:e=>toast(errorText(e),{kind:'error'})}));
-  // A migrated Solana token trades here too, through its locked PumpSwap pool (solana-wallet pumpSwapTrade).
+  // A migrated Solana token trades here too, through its locked Raydium (SOL pairs) or PumpSwap pool (solana-wallet).
   if (token.complete && !token.graduated) {
     const error = h('p.error-text', { role: 'alert' });
-    const label = token.dex === 'PumpSwap' ? 'Migrate to PumpSwap' : `Graduate to ${dex === 'test' ? 'a locked test pool' : dex}`;
+    const label = solana && token.dex ? `Migrate to ${token.dex}` : `Graduate to ${dex === 'test' ? 'a locked test pool' : dex}`;
     // Model 10 escape hatch: if graduation keeps failing for 24 h, anyone can reopen the curve for trading.
     const reopenAt = Number(token.reopenableAt) || null, canReopen = reopenAt && nowSeconds() >= reopenAt;
     const reopenNote = reopenAt ? h('p.small.muted', canReopen ? 'Graduation has not happened within 24 hours of completion, so anyone can reopen the curve and every holder can trade again.' : `If graduation keeps failing, anyone can reopen the curve for trading from ${new Date(reopenAt * 1000).toLocaleString([], { dateStyle: 'medium', timeStyle: 'short' })}.`) : null;
     const reopen = canReopen ? h('button.btn.btn-secondary.btn-block', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await ctx.run('reopen', { token: token.address }); } catch (e) { error.textContent = errorText(e); } } } }, 'Reopen curve trading') : null;
     const automatic = token.network === 'base-sepolia';
-    const progress = h('p.muted', {role:'status'}, automatic ? 'Checking automatic graduation…' : `Curve trading has stopped. ${label} to open the DEX pool. ${solana ? 'You advance about 0.05 SOL of account rent; the unused part is refunded in the same transaction.' : 'You pay the network fee.'}`);
+    const progress = h('p.muted', {role:'status'}, automatic ? 'Checking automatic graduation…' : `Curve trading has stopped. ${label} to open the DEX pool. ${solana ? token.dex === 'Raydium' ? 'You lend about 0.19 SOL for Raydium\'s pool fee and rent; the raised SOL repays all of it in the same transaction.' : 'You advance about 0.05 SOL of account rent; the unused part is refunded in the same transaction.' : 'You pay the network fee.'}`);
     if(automatic)fetch('/api/graduation/status').then(r=>{if(!r.ok)throw new Error();return r.json();}).then(s=>{
       progress.textContent = token.factory && s.factory && token.factory.toLowerCase() !== s.factory.toLowerCase() ? 'This legacy token is outside the automatic graduation service. Manual graduation remains available below.' : !s.enabled ? 'Automatic graduation is awaiting operator setup. No further purchase is needed.' : s.reason === 'needs_gas' || s.reason === 'daily_budget' ? 'Graduation is waiting for the operator to replenish its gas budget. No payment is required from you.' : s.state === 'retrying' || s.reason ? 'Automatic graduation encountered a delay. The operator will retry; no payment is required from you.' : 'Graduation is processed automatically. Elpida pays the network fee; no action is required from you.';
     }).catch(()=>{progress.textContent='Graduation status is temporarily unavailable. No further purchase is needed.';});

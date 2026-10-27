@@ -3,7 +3,7 @@
 //! constant-product invariant never decreases, prices move the right way, rounding never favours the
 //! trader, the final buy fills the remaining supply exactly with the minimal charge, the anti-snipe
 //! schedule, fee splits, LP-fee harvests never touch the principal, and the oracle conversion rounds up.
-use ::elpida_launchpad::{apply_buy, partner_buyback, split_fee, PoolExt, current_fee_bps, fees, harvestable_lp, isqrt, liquidity_units, quote_buy, quote_sell, usd_to_quote, CurveConfig, CurvePool, OraclePrice, PumpState, TradeQuote, STATUS_GRADUATED, STATUS_TRADING};
+use ::elpida_launchpad::{buyback_amount, raydium_creation_cost, MigrationExt, PumpMigration, MIGRATION_EXT_LEN, VENUE_RAYDIUM, BUYBACK_DEPTH_DIVISOR, apply_buy, partner_buyback, split_fee, PoolExt, current_fee_bps, fees, harvestable_lp, isqrt, liquidity_units, quote_buy, quote_sell, usd_to_quote, CurveConfig, CurvePool, OraclePrice, PumpState, TradeQuote, STATUS_GRADUATED, STATUS_TRADING};
 use proptest::prelude::*;
 
 const VT: u64 = 1_111_111_111_111_111; // 1B x 10/9, 6 decimals
@@ -261,5 +261,36 @@ proptest! {
         prop_assert_eq!(PoolExt::read(&data[..base]), PoolExt::default());
         prop_assert!(PoolExt::default().write(&mut vec![0u8; base]).is_err(), "never written past an older pool's end");
     }
+
+    /// Migration records keep their fixed layout; the extension (with the venue byte) round-trips.
+    #[test]
+    fn migration_extension_round_trips(pending in any::<u64>(), burned in any::<u64>(), spent in any::<u64>(), bought in any::<u64>(), venue in 0u8..=1) {
+        let base = 8 + <PumpMigration as anchor_lang::Space>::INIT_SPACE;
+        let mut data = vec![9u8; base + MIGRATION_EXT_LEN];
+        let ext = MigrationExt { pending_buyback: pending, base_burned: burned, quote_spent: spent, bought_burned: bought, venue };
+        ext.write(&mut data).unwrap();
+        prop_assert_eq!(MigrationExt::read(&data), Some(ext));
+        prop_assert_eq!(&data[..base], &vec![9u8; base][..]);
+        prop_assert_eq!(MigrationExt::read(&data[..base]), None);
+    }
+
+    /// A partner buyback never spends more than is queued or more than 1% of the pool's SOL depth.
+    #[test]
+    fn buyback_is_capped(pending in any::<u64>(), depth in any::<u64>()) {
+        let spend = buyback_amount(pending, depth);
+        prop_assert!(spend <= pending && spend <= depth / BUYBACK_DEPTH_DIVISOR);
+        prop_assert!(spend == pending || spend == depth / BUYBACK_DEPTH_DIVISOR);
+    }
 }
 
+/// Raydium's creation cost: its 0.15 SOL fee plus rent for pool (637 B), observation (4,075 B), LP mint (82 B) and
+/// three token accounts (165 B), about 0.192 SOL at the default rent.
+#[test]
+fn raydium_creation_cost_matches_rent() {
+    let rent = anchor_lang::prelude::Rent::default();
+    let cost = raydium_creation_cost(150_000_000, &rent).unwrap();
+    let r = |len: u64| (128 + len) * 3_480 * 2;
+    assert_eq!(cost, 150_000_000 + r(637) + r(4_075) + r(82) + 3 * r(165));
+    assert_eq!(cost, 192_156_720);
+    assert_eq!(VENUE_RAYDIUM, 1);
+}

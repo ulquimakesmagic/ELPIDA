@@ -18,6 +18,7 @@ import {
   createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, curveParams, poolStats, encodeCurveParams,
   DISCRIMINATORS, EVENTS, LEGACY_EVENTS, TOKEN_SUPPLY, STATUS_GRADUATED, STATUS_MIGRATED, BPS, explainError, decodeEvents,
   harvestableLp, harvestNow, MPL_TOKEN_METADATA, MAX_LAUNCH_URI, GRADUATION_GRACE_SECS, validMetadataUri, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint, PYTH_RECEIVER, SOL_USD_FEED_ID, SOL_USD_PRICE_ACCOUNT, parsePriceUpdate, usdToQuote, virtualQuoteForFdv,
+  RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, VENUE_RAYDIUM, raydiumCreationCost, raydiumQuote, raydiumBuybackAmount,
 } from '../packages/solana/client.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
@@ -39,6 +40,28 @@ const PROGRAM_ID = 'ANkA5pytoVkiKQbjzd5NdPWKgmwfsihNJvSfg3vtKLNz';
 const preload = !existsSync(keyPath);
 const fixtures = `${root}contracts/solana/fixtures/`;
 const pumpSkip = skip || (!existsSync(`${fixtures}pump_amm.so`) || !existsSync(`${fixtures}pumpswap_global_config.json`) ? 'PumpSwap fixtures missing (run solana-pumpswap-fixtures.cmd or node scripts/solana-pumpswap-fixtures.mjs).' : false);
+// SOL pairs graduate into Raydium CPMM: its devnet program (node scripts/solana-raydium-fixtures.mjs). The 1% AmmConfig and the
+// pool-creation fee receiver (a wrapped-SOL account) are written here when the dumped config is absent.
+const raySkip = pumpSkip || (!existsSync(`${fixtures}raydium_cpmm.so`) ? 'Raydium CPMM fixture missing (run node scripts/solana-raydium-fixtures.mjs).' : false);
+
+/** solana-test-validator --account files for Raydium's 1% AmmConfig and its pool-creation fee receiver. */
+function raydiumAccounts(dir) {
+  const ray = RAYDIUM.devnet, files = [];
+  const config = existsSync(`${fixtures}raydium_amm_config_1pct.json`) ? JSON.parse(readFileSync(`${fixtures}raydium_amm_config_1pct.json`, 'utf8')) : null;
+  if (config && config.pubkey !== ray.ammConfig) throw new Error(`raydium_amm_config_1pct.json is ${config.pubkey}, expected ${ray.ammConfig}`);
+  const configData = Buffer.alloc(236);
+  Buffer.from(createHash('sha256').update('account:AmmConfig').digest().subarray(0, 8)).copy(configData);
+  configData.writeUInt16LE(3, 10);
+  for (const [offset, value] of [[12, 10_000n], [20, 120_000n], [28, 40_000n], [36, 150_000_000n]]) configData.writeBigUInt64LE(value, offset);
+  const fee = Buffer.alloc(165);
+  new PublicKey(WSOL_MINT).toBuffer().copy(fee, 0); Keypair.generate().publicKey.toBuffer().copy(fee, 32);
+  fee[108] = 1; fee.writeUInt32LE(1, 109); fee.writeBigUInt64LE(2_039_280n, 113);
+  for (const [pubkey, account] of [
+    [ray.ammConfig, config?.account ?? { lamports: 2_533_440, data: [configData.toString('base64'), 'base64'], owner: ray.program, executable: false, rentEpoch: 0, space: 236 }],
+    [ray.createPoolFee, { lamports: 2_039_280, data: [fee.toString('base64'), 'base64'], owner: TOKEN_PROGRAM, executable: false, rentEpoch: 0, space: 165 }],
+  ]) { const file = join(dir, `${pubkey}.json`); writeFileSync(file, JSON.stringify({ pubkey, account })); files.push('--account', pubkey, file); }
+  return ['--bpf-program', ray.program, `${fixtures}raydium_cpmm.so`, ...files];
+}
 
 const { Keypair, PublicKey } = web3;
 const USDC = 1_000_000n; // one whole unit of the 6-decimal test quote token
@@ -76,6 +99,7 @@ test.before(async () => {
   }).flatMap(([name, account]) => { const file = join(f.oracleDir, `${name}.json`); writeFileSync(file, JSON.stringify({ pubkey: f.oracles[name].toBase58(), account })); return ['--account', f.oracles[name].toBase58(), file]; });
   f.validator = spawn(validatorBin, [...oracleArgs, '--reset', '--quiet', '--ledger', f.ledger, '--rpc-port', String(port), '--faucet-port', String(port + 2), '--dynamic-port-range', `${port + 10}-${port + 60}`, '--gossip-port', String(port + 3),
     ...(pumpSkip ? [] : ['--bpf-program', PUMP_AMM_PROGRAM, `${fixtures}pump_amm.so`, '--account', PUMP_GLOBAL_CONFIG, `${fixtures}pumpswap_global_config.json`]),
+    ...(raySkip ? [] : raydiumAccounts(f.oracleDir)),
     '--bpf-program', MPL_TOKEN_METADATA, mplFixture,
     ...(preload ? ['--upgradeable-program', PROGRAM_ID, elfPath, f.authority.publicKey.toBase58()] : [])], { stdio: 'ignore' });
   f.connection = new web3.Connection(`http://127.0.0.1:${port}`, 'confirmed');
@@ -677,7 +701,7 @@ test('Solana native repricing: only the upgrade authority, fee schedule fixed, l
   assert.equal(f.client.decodeConfig((await f.connection.getAccountInfo(f.config.address)).data).virtualQuote, PARAMS.virtualQuote);
 });
 
-test('Solana pairs: SOL, a paired token and a Token-2022 token each launch, trade, complete, migrate and harvest', { skip: pumpSkip }, async () => {
+test('Solana pairs: SOL, a paired token and a Token-2022 token each launch, trade and complete; SOL graduates to Raydium, the others to PumpSwap and harvest', { skip: pumpSkip }, async () => {
   const programId = f.programId;
   // Token-2022 pair assets without blocked extensions work end to end (PumpSwap included).
   const native = solanaPricing('localnet');
@@ -744,7 +768,19 @@ test('Solana pairs: SOL, a paired token and a Token-2022 token each launch, trad
     const done = await pool(mint.publicKey);
     assert.equal(done.status, STATUS_GRADUATED, `${pair.symbol} curve completes`);
     assert.ok(Math.abs(poolStats(done, pair.decimals).marketCap / Number(template.endFdv) - 1) < 1e-6, `${pair.symbol} graduates at ${template.endFdv} ${pair.symbol} FDV`);
-    await send(f.connection, user, [f.client.computeBudget(MIGRATE_COMPUTE_UNITS), f.client.migrateToPumpswap({ payer: user.publicKey, config: cfg, mint: mint.publicKey })], [], 1);
+    const toPump = () => send(f.connection, user, [f.client.computeBudget(MIGRATE_COMPUTE_UNITS), f.client.migrateToPumpswap({ payer: user.publicKey, config: cfg, mint: mint.publicKey })], [], 1);
+    if (pair.wsol) {
+      // SOL pairs graduate into Raydium CPMM only (lifecycle in the Raydium tests below).
+      await failsWith(toPump(), /0x1791/);
+      if (!raySkip) {
+        await send(f.connection, user, [f.client.computeBudget(RAYDIUM_MIGRATE_COMPUTE_UNITS), f.client.migrateToRaydium({ payer: user.publicKey, config: cfg, mint: mint.publicKey })], [], 1);
+        assert.equal((await pool(mint.publicKey)).status, STATUS_MIGRATED);
+        assert.equal((await migration(mint.publicKey)).venue, VENUE_RAYDIUM);
+      }
+      continue;
+    }
+    await failsWith(send(f.connection, user, [f.client.computeBudget(MIGRATE_COMPUTE_UNITS), f.client.migrateToRaydium({ payer: user.publicKey, config: cfg, mint: mint.publicKey })], [], 1), /0x1791|0x7d1|0xbc4/);
+    await toPump();
     assert.equal((await pool(mint.publicKey)).status, STATUS_MIGRATED);
     const pp = f.client.pumpAccounts(mint.publicKey, cfg.quoteMint, cfg.quoteTokenProgram);
     const pumpPool = f.client.decodePumpPool((await f.connection.getAccountInfo(pp.pool)).data);
@@ -764,6 +800,170 @@ test('Solana pairs: SOL, a paired token and a Token-2022 token each launch, trad
     assert.ok(m1.harvestedQuote > 0n && m1.lpLocked < m0.lpLocked, `${pair.symbol} harvest`);
     assert.equal(await amountOf(user.publicKey, cfg) - rewardBefore, m1.harvestedQuote - m1.harvestedQuote / 2n, 'creator half of the quote');
   }
+});
+
+// ---- Raydium CPMM (SOL pairs) --------------------------------------------------------------------
+// Runs after the pairs test created the SOL pair (4-second snipe window) and before USD pricing is switched on for it.
+const solCfg = () => ({ address: f.client.configFor(new PublicKey(WSOL_MINT)), quoteMint: new PublicKey(WSOL_MINT), treasury: f.treasury });
+const SOL = BigInt(web3.LAMPORTS_PER_SOL);
+const wsolOf = owner => balance(f.client.ata(owner, new PublicKey(WSOL_MINT)));
+const rayState = async mint => {
+  const r = f.client.raydiumAccounts(mint);
+  const [poolInfo, v0, v1] = await f.connection.getMultipleAccountsInfo([r.pool, r.vault0, r.vault1]);
+  return f.client.raydiumState(poolInfo.data, v0.data, v1.data, mint);
+};
+const rayMigrate = (who, mint) => send(f.connection, who, [f.client.computeBudget(RAYDIUM_MIGRATE_COMPUTE_UNITS), f.client.migrateToRaydium({ payer: who.publicKey, config: solCfg(), mint })], [], 1);
+const rayHarvest = (who, mint, reward) => send(f.connection, who, [f.client.computeBudget(HARVEST_COMPUTE_UNITS), ...f.client.harvestRaydiumFees({ payer: who.publicKey, config: solCfg(), mint, reward })], [], 1);
+const raySwap = async (who, mint, side, amountIn) => {
+  const st = await rayState(mint);
+  const { out } = side === 'buy' ? raydiumQuote(amountIn, st.quote, st.base) : raydiumQuote(amountIn, st.base, st.quote);
+  await send(f.connection, who, f.client.raydiumSwap({ user: who.publicKey, mint, side, amountIn, minOut: out }), [], 1);
+  return out;
+};
+/** A SOL-pair curve launched by `creator` and completed by `buyer` (both funded with SOL), still waiting for migration. */
+async function completedSolCurve(symbol, creator, buyer = creator, { migrateWith = null } = {}) {
+  const mint = Keypair.generate(), cfg = solCfg();
+  await send(f.connection, creator, [f.client.computeBudget(), ...f.client.wrapSol(creator.publicKey, SOL / 100n), f.client.launch({ uri: TEST_URI, creator: creator.publicKey, config: cfg, mint: mint.publicKey, name: `Ray ${symbol}`, symbol, firstBuy: SOL / 100n, minTokensOut: 1n, reward: creator.publicKey }), f.client.unwrapSol(creator.publicKey)], [mint], 1);
+  await afterSnipeWindow(mint.publicKey);
+  const ixs = [f.client.computeBudget(RAYDIUM_MIGRATE_COMPUTE_UNITS + 200_000), ...f.client.wrapSol(buyer.publicKey, 6n * SOL), f.client.buy({ buyer: buyer.publicKey, config: cfg, mint: mint.publicKey, grossIn: 6n * SOL, minTokensOut: 1n }),
+    ...(migrateWith ? [f.client.migrateToRaydium({ payer: buyer.publicKey, config: cfg, mint: mint.publicKey })] : []), f.client.unwrapSol(buyer.publicKey)];
+  await send(f.connection, buyer, ixs, [], 1);
+  return mint.publicKey;
+}
+const waitOpen = async mint => { const { openTime } = await rayState(mint); for (;;) { const now = await f.connection.getBlockTime(await f.connection.getSlot('confirmed')); if (BigInt(now ?? 0) > openTime) return; await sleep(500); } };
+
+test('Solana SOL pairs graduate into Raydium CPMM (1%): all liquidity locked, fee and rent paid from the raised SOL, the caller repaid', { skip: raySkip }, async () => {
+  const user = Keypair.generate();
+  await airdrop(f.connection, user.publicKey, 20 * web3.LAMPORTS_PER_SOL);
+  const mint = await completedSolCurve('RAYG', user);
+  const before = await pool(mint);
+  assert.equal(before.status, STATUS_GRADUATED);
+  await failsWith(send(f.connection, user, [f.client.computeBudget(MIGRATE_COMPUTE_UNITS), f.client.migrateToPumpswap({ payer: user.publicKey, config: solCfg(), mint })], [], 1), /0x1791/);
+  const r = f.client.raydiumAccounts(mint), cost = raydiumCreationCost();
+  const lamports0 = await f.connection.getBalance(f.outsider.publicKey), feeReceiver0 = await f.connection.getBalance(r.createPoolFee);
+  const signature = await rayMigrate(f.outsider, mint);
+
+  const after = await pool(mint), m = await migration(mint), raised = before.realQuote + before.liquidityBonus;
+  assert.equal(after.status, STATUS_MIGRATED); assert.equal(after.realQuote, 0n); assert.equal(after.liquidityBonus, 0n);
+  assert.equal(await balance(f.client.ata(f.client.poolPda(mint), mint)), 0n);
+  assert.equal(await wsolOf(f.client.poolPda(mint)), after.protocolFees + after.creatorFees, 'the curve keeps only the fees it owes');
+  assert.equal(m.venue, VENUE_RAYDIUM); assert.equal(m.pumpPool.toBase58(), r.pool.toBase58()); assert.equal(m.lpMint.toBase58(), r.lpMint.toBase58());
+  assert.equal(m.baseMigrated, TOKEN_SUPPLY - before.sold);
+  assert.equal(m.quoteMigrated, raised - cost, 'Raydium\'s 0.15 SOL fee and the new accounts\' rent come out of the raised SOL');
+  assert.equal(cost, 192_156_720n);
+  const rp = f.client.decodeRaydiumPool((await f.connection.getAccountInfo(r.pool)).data);
+  assert.equal((await f.connection.getAccountInfo(r.pool)).owner.toBase58(), RAYDIUM.devnet.program);
+  assert.equal(rp.creator.toBase58(), r.lpAuthority.toBase58()); assert.equal(rp.ammConfig.toBase58(), RAYDIUM.devnet.ammConfig);
+  assert.equal(rp.mint0.toBase58(), r.mint0.toBase58()); assert.equal(rp.vault0.toBase58(), r.vault0.toBase58());
+  assert.equal(await balance(r.baseVault), m.baseMigrated); assert.equal(await balance(r.quoteVault), m.quoteMigrated);
+  assert.equal(rp.lpSupply, isqrt(m.baseMigrated * m.quoteMigrated));
+  const lp = await balance(r.authorityLp);
+  assert.equal(lp, m.lpLocked); assert.equal(lp, rp.lpSupply - 100n, 'all LP except Raydium\'s 100-unit lock is held by Elpida');
+  assert.equal(m.principal, liquidityUnits(lp, await rayState(mint)));
+  // Opening price = graduation price, plus the locked anti-snipe bonus, less the creation cost.
+  const curvePrice = Number(before.virtualQuote + before.realQuote) / Number(before.virtualToken - before.sold), rayPrice = Number(m.quoteMigrated) / Number(m.baseMigrated);
+  assert.ok(rayPrice > curvePrice * (1 - Number(cost) / Number(before.realQuote) - 1e-6) && rayPrice < curvePrice * (1 + Number(before.liquidityBonus) / Number(before.realQuote) + 1e-6), `${rayPrice} vs ${curvePrice}`);
+  assert.equal(BigInt(await f.connection.getBalance(r.createPoolFee) - feeReceiver0), 150_000_000n, 'Raydium received its pool-creation fee');
+  assert.equal(await f.connection.getBalance(r.lpAuthority), 0, 'the LP authority keeps no SOL');
+  assert.equal(await f.connection.getAccountInfo(r.authorityQuote), null, 'its wrapped-SOL account was closed to repay the caller');
+  const spent = lamports0 - await f.connection.getBalance(f.outsider.publicKey);
+  assert.ok(spent > 0 && spent < 0.006 * web3.LAMPORTS_PER_SOL, `the caller pays only two account rents and the network fee (${spent})`);
+  const ev = (await eventsOf(signature)).find(e => e.name === 'RaydiumMigrated');
+  assert.equal(ev.rayPool, r.pool.toBase58()); assert.equal(ev.raised, raised); assert.equal(ev.creationCost, cost); assert.ok(ev.repaid >= cost);
+  assert.equal((await eventsOf(signature)).find(e => e.name === 'CurveMigrated').pumpPool, r.pool.toBase58());
+
+  // No second migration, no curve trading, nothing to harvest or buy back yet.
+  await failsWith(rayMigrate(f.outsider, mint), /0x177c|0x1780|already in use/);
+  await failsWith(send(f.connection, user, [...f.client.wrapSol(user.publicKey, SOL / 10n), f.client.buy({ buyer: user.publicKey, config: solCfg(), mint, grossIn: SOL / 10n, minTokensOut: 1n })]), /0x177c/);
+  await failsWith(rayHarvest(f.outsider, mint, user.publicKey), /0x1782/);
+  await failsWith(send(f.connection, f.outsider, [f.client.raydiumBuyback({ mint })]), /0x1793/);
+  await failsWith(send(f.connection, f.outsider, [f.client.computeBudget(HARVEST_COMPUTE_UNITS), ...f.client.harvestLpFees({ payer: f.outsider.publicKey, config: solCfg(), mint, reward: user.publicKey })], [], 1), /0x7d1|0x1783|0x1792/);
+
+  // Trading on Raydium from the wallet: quotes match the pool exactly.
+  await waitOpen(mint);
+  const trader = Keypair.generate();
+  await airdrop(f.connection, trader.publicKey, 10 * web3.LAMPORTS_PER_SOL);
+  const bought = await raySwap(trader, mint, 'buy', SOL / 2n);
+  assert.equal(await balance(f.client.ata(trader.publicKey, mint)), bought);
+  const solBefore = await f.connection.getBalance(trader.publicKey);
+  const proceeds = await raySwap(trader, mint, 'sell', bought);
+  assert.equal(await balance(f.client.ata(trader.publicKey, mint)), 0n);
+  assert.ok(await f.connection.getBalance(trader.publicKey) > solBefore, 'the sale returns SOL to the wallet (wrapped account closed)');
+  assert.ok(proceeds < SOL / 2n, 'a round trip pays the 1% fee twice');
+  for (let i = 0; i < 4; i++) await raySwap(trader, mint, 'buy', SOL / 2n).then(out => raySwap(trader, mint, 'sell', out));
+
+  // Harvest: only the fee growth, split 50/50, principal intact.
+  const m0 = await migration(mint), state = await rayState(mint);
+  const h = harvestNow(m0.lpLocked, m0.principal, state), out = withdrawOut(h, state);
+  assert.ok(h > 0n, 'the 1% fee grew the locked position');
+  const reward = user.publicKey, treasury = f.treasury;
+  await send(f.connection, f.outsider, [f.client.createAtaIdempotent(f.outsider.publicKey, treasury, new PublicKey(WSOL_MINT))]);
+  const balances = () => Promise.all([f.client.ata(treasury, mint), f.client.ata(reward, mint)].map(balance).concat([wsolOf(treasury), wsolOf(reward)]));
+  const [tb0, rb0, tq0, rq0] = await balances();
+  await rayHarvest(f.outsider, mint, reward);
+  const [tb1, rb1, tq1, rq1] = await balances(), m1 = await migration(mint);
+  assert.equal(m1.harvestedLp, h); assert.equal(m1.harvestedBase, out.base); assert.equal(m1.harvestedQuote, out.quote);
+  assert.equal(tb1 - tb0, out.base / 2n); assert.equal(rb1 - rb0, out.base - out.base / 2n);
+  assert.equal(tq1 - tq0, out.quote / 2n); assert.equal(rq1 - rq0, out.quote - out.quote / 2n);
+  assert.ok(liquidityUnits(m1.lpLocked, await rayState(mint)) >= m0.principal, 'principal liquidity stays locked');
+  await failsWith(rayHarvest(f.outsider, mint, reward), /0x1782/);
+});
+
+test('Solana completing SOL buy and Raydium migration in ONE transaction', { skip: raySkip }, async () => {
+  const user = Keypair.generate();
+  await airdrop(f.connection, user.publicKey, 20 * web3.LAMPORTS_PER_SOL);
+  // Size: the wallet's flow (wrap SOL, buy, migrate, unwrap) must fit one legacy transaction.
+  const probeMint = Keypair.generate().publicKey, cfg = solCfg();
+  const { blockhash } = await f.connection.getLatestBlockhash('confirmed');
+  const tx = new web3.Transaction({ feePayer: user.publicKey, recentBlockhash: blockhash }).add(f.client.computeBudget(RAYDIUM_MIGRATE_COMPUTE_UNITS + 200_000), ...f.client.wrapSol(user.publicKey, SOL),
+    f.client.buy({ buyer: user.publicKey, config: cfg, mint: probeMint, grossIn: SOL, minTokensOut: 1n }), f.client.migrateToRaydium({ payer: user.publicKey, config: cfg, mint: probeMint }), f.client.unwrapSol(user.publicKey));
+  const bytes = tx.serializeMessage().length + 1 + 64;
+  assert.ok(bytes <= 1232, `fits one transaction (${bytes} bytes)`);
+  const mint = await completedSolCurve('RATOM', user, user, { migrateWith: true });
+  assert.equal((await pool(mint)).status, STATUS_MIGRATED, 'completed and on Raydium in the same transaction');
+  assert.equal((await migration(mint)).venue, VENUE_RAYDIUM);
+});
+
+test('Solana partner tiers on Raydium: the harvest share is burned or queued, and queued SOL buys back and burns at most 1% of depth per call', { skip: raySkip }, async () => {
+  const partner = Keypair.generate(), now = async () => f.connection.getBlockTime(await f.connection.getSlot('confirmed'));
+  await airdrop(f.connection, partner.publicKey, 20 * web3.LAMPORTS_PER_SOL);
+  await airdrop(f.connection, f.treasury, web3.LAMPORTS_PER_SOL);
+  await send(f.connection, f.treasuryKeypair, [f.client.setPartner({ authority: f.treasury, creator: partner.publicKey, buybackBps: 2000, expiresAt: (await now()) + 86_400 })], [], 1);
+  const mint = await completedSolCurve('RPART', partner);
+  assert.equal((await pool(mint)).buybackBps, 2000);
+  await rayMigrate(f.outsider, mint);
+  await waitOpen(mint);
+  const trader = Keypair.generate();
+  await airdrop(f.connection, trader.publicKey, 20 * web3.LAMPORTS_PER_SOL);
+  for (let i = 0; i < 6; i++) await raySwap(trader, mint, 'buy', SOL).then(out => raySwap(trader, mint, 'sell', out));
+  const supply = async () => BigInt((await f.connection.getTokenSupply(mint)).value.amount);
+  const r = f.client.raydiumAccounts(mint), m0 = await migration(mint), state = await rayState(mint);
+  const h = harvestNow(m0.lpLocked, m0.principal, state), out = withdrawOut(h, state);
+  const burnBase = out.base * 2000n / 10_000n, queueQuote = out.quote * 2000n / 10_000n;
+  const supply0 = await supply(), tq0 = await wsolOf(f.treasury);
+  const signature = await rayHarvest(f.outsider, mint, partner.publicKey);
+  assert.equal(supply0 - await supply(), burnBase, 'the token-side share is burned');
+  assert.equal(await wsolOf(f.treasury) - tq0, out.quote / 2n - queueQuote, 'the treasury half less the queued share');
+  assert.equal(await wsolOf(r.lpAuthority), queueQuote, 'the quote-side share waits with the LP authority');
+  const m1 = await migration(mint);
+  assert.equal(m1.pendingBuyback, queueQuote); assert.equal(m1.baseBurned, burnBase);
+  assert.equal((await eventsOf(signature)).find(e => e.name === 'PartnerHarvest').quoteQueued, queueQuote);
+
+  // Buybacks: each spends the queue, at most 1% of the pool's SOL depth, and burns every token it buys.
+  let pending = m1.pendingBuyback, burnedTotal = 0n;
+  for (let i = 0; pending > 0n && i < 5; i++) {
+    const st = await rayState(mint), spend = raydiumBuybackAmount(pending, st.quote), expected = raydiumQuote(spend, st.quote, st.base).out;
+    const s0 = await supply(), sig = await send(f.connection, f.outsider, [f.client.raydiumBuyback({ mint })]);
+    assert.equal(s0 - await supply(), expected, 'bought at the pool price and burned');
+    assert.equal(await balance(r.authorityBase), 0n);
+    const ev = (await eventsOf(sig)).find(e => e.name === 'PartnerLpBuyback');
+    pending -= spend; burnedTotal += expected;
+    assert.equal(ev.quoteIn, spend); assert.equal(ev.tokensBurned, expected); assert.equal(ev.pendingBuyback, pending); assert.equal(ev.totalBurned, burnedTotal);
+  }
+  const m2 = await migration(mint);
+  assert.equal(m2.pendingBuyback, pending); assert.equal(m2.buybackBurned, burnedTotal); assert.equal(m2.buybackQuoteSpent, m1.pendingBuyback - pending);
+  assert.ok(liquidityUnits(m2.lpLocked, await rayState(mint)) >= m0.principal, 'buybacks never touch the locked liquidity');
+  if (pending === 0n) await failsWith(send(f.connection, f.outsider, [f.client.raydiumBuyback({ mint })]), /0x1793/);
 });
 
 test('Solana USD pricing: Pyth-verified $10 fee in SOL or USDC and a $5,000 starting FDV', { skip: pumpSkip }, async () => {

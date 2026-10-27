@@ -28,7 +28,7 @@ export const FAQ = [
   ['Is Elpida live with real money?', 'No. Elpida is in testnet. Its contracts have not been audited. Do not treat any testnet token as having value, and do not send funds you cannot afford to lose to any contract that has not been audited.'],
   ['How much does it cost to launch a token?', 'The launch fee is $10, paid at the on-chain price in the network\'s native coin, or 10 USDC. Network gas is paid separately in the native coin. On testnets the amounts use test funds.'],
   ['How does the bonding curve work?', 'Every token has a fixed supply of one billion and starts on a curve that begins at a $5,000 fully diluted value and completes at $50,000, a tenfold rise. The price moves with every buy and sell, there is no private allocation, and anyone can sell back into the curve while it is open.'],
-  ['What happens when the curve completes?', 'The curve\'s liquidity moves to a decentralized exchange. On EVM networks it becomes a Uniswap v3 full-range position that is locked permanently, and its trading fees are split between the protocol and the creator. On Solana it moves to PumpSwap with the liquidity locked in a program-controlled account.'],
+  ['What happens when the curve completes?', 'The curve\'s liquidity moves to a decentralized exchange. On EVM networks it becomes a Uniswap v3 full-range position that is locked permanently, and its trading fees are split between the protocol and the creator. On Solana, SOL pairs move to a Raydium CPMM pool (1% fee tier) and other pairs to PumpSwap, with the liquidity locked in a program-controlled account.'],
   ['What if graduation fails?', 'If a completed curve has not moved to its pool within 24 hours, anyone can reopen it for trading. Every holder can then sell, and completing the curve restarts the timer.'],
   ['What are the trading fees?', 'The curve charges 1.25% per trade, split evenly between the protocol and the creator. For the first minute after launch an anti-snipe fee starts at 90% and falls to 1.25%; the surplus above 1.25% is locked into the graduation liquidity and is never paid out as revenue.'],
   ['Can anyone change a token after launch?', 'No. Supply is fixed, the token metadata is set once in the launch transaction and has no setter, and the curve parameters are immutable.'],
@@ -41,7 +41,7 @@ const HOW_STEPS = [
   ['Describe the token and set rewards', 'Add a name, symbol, image and links. Metadata is written once in the launch transaction. Creators choose where their share of trading fees goes.'],
   ['Launch in one transaction', 'Pay the $10 launch fee (native coin at the on-chain price, or 10 USDC). A creator can make an optional first buy in the same transaction, charged only the base fee and shown publicly as "Dev" on the token page.'],
   ['Trade on the bonding curve', 'The token starts at a $5,000 fully diluted value. Price rises with each buy and falls with each sell along a fixed curve that finishes at $50,000. On testnets the sizes are scaled down to $50 and $500 with the same shape.'],
-  ['Graduate to a decentralized exchange', 'When the supply for sale is gone, liquidity moves to Uniswap v3 on EVM networks or PumpSwap on Solana, with the position locked permanently.'],
+  ['Graduate to a decentralized exchange', 'When the supply for sale is gone, liquidity moves to Uniswap v3 on EVM networks or Raydium (SOL pairs) and PumpSwap on Solana, with the position locked permanently.'],
 ];
 
 const FEE_ROWS = [

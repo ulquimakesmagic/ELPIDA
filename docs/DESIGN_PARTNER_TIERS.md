@@ -90,11 +90,14 @@ The same in the Anchor program (built 26 October 2026; devnet upgrade by Malik):
 - the share is fixed at launch in bytes appended to the pool (older pools read as standard);
 - curve trades buy and burn in the same instruction (an SPL burn, so the supply falls); a buyback never completes the
   curve;
-- PumpSwap LP-fee harvests burn the token side of the share at once and keep the SOL side with the LP authority as
+- LP-fee harvests burn the token side of the share at once and keep the SOL side with the LP authority as
   `pending_buyback`;
-- **next:** a permissionless, capped PumpSwap buyback of that queue (at most 0.5% of the pool's quote reserve per call,
-  below PumpSwap's 0.30% fee × 2 sandwich threshold). It is checked on devnet, because the local validator lacks pump's
-  fee program.
+- SOL pairs graduate into Raydium CPMM's 1% tier (27 October 2026), so the queue is spent like the EVM splitter's:
+  `raydium_buyback`, permissionless, swaps at most 1% of the pool's SOL depth per call through the pool and burns
+  everything it buys. With the 1% fee on both legs a sandwich around a buyback that small loses money. Tested against
+  the real Raydium program on the local validator.
+- Other Solana pairs still graduate to PumpSwap; their queue stays accounted for with the LP authority (no PumpSwap
+  buyback, which the local validator cannot test).
 
 ## 3. Site, server and admin panel
 
