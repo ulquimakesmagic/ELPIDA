@@ -48,7 +48,7 @@ The initial public archive endpoints returned HTTP 403. Subsequent real Ethereum
 
 28 focused registry/discovery/accounting tests, 10 API integration tests and three local EVM lifecycle tests pass (41 total, no skips). Lifecycle coverage includes legacy 6-decimal quotes and atomic graduation with zero creator buy at both 6 and 18 decimals. The 18-decimal check caught a missing quoteDust term in the rehearsal balance assertion; conservation now includes separately recorded migration dust without changing any production contract.
 
-The earlier broad suite finished with 534 passes, 30 environmental skips and no failures, before the cached-runner changes. The current focused strict gate passes 37 tests with no skips, covering RPC cache behavior, discovery, provider isolation and mock lifecycle checks. A new broad run is in progress; its result must be assessed separately. Issuer-control, oracle and eligibility checks remain open.
+The earlier broad suite finished with 534 passes, 30 environmental skips and no failures, before the cached-runner changes. The current focused strict gate passes 37 tests with no skips, covering RPC cache behavior, discovery, provider isolation and mock lifecycle checks. The cached-runner broad suite subsequently completed with 552 passes, zero failures and 33 missing-Solana-validator skips on Windows; the skips do not establish Solana execution coverage. Issuer-control, oracle and eligibility checks remain open.
 
 ## Real NVDAon fork result and repeatable runs
 

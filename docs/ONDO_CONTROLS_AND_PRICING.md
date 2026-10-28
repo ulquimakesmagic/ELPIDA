@@ -39,7 +39,7 @@ Before activation, obtain verified source/ABI and audit the beacon and administr
 
 ## Validation and sources
 
-The expanded strict focused gate passes **51 tests with zero skips**, including the new valuation/control tests, existing cache/registry checks and evidence/documentation checks. The real inspector matched all three asset identities at the pinned block, while retaining `issuerControlsVerified: false`. The broader suite for PR #120 remains a separate pending run.
+The expanded strict focused gate passes **51 tests with zero skips**, including the new valuation/control tests, existing cache/registry checks and evidence/documentation checks. The real inspector matched all three asset identities at the pinned block, while retaining `issuerControlsVerified: false`. The separate broader run for PR #120 completed with 552 passes, zero failures and 33 skips reporting a missing Solana validator on Windows. These skips are not Solana execution evidence.
 
 - https://docs.ondo.finance/ondo-stocks/token-and-quote-pricing
 - https://docs.ondo.finance/ondo-stocks/corporate-actions
