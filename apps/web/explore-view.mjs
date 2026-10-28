@@ -8,6 +8,7 @@ import { assetIcon, chainIcon } from './chain-ui.mjs';
 import { nowSeconds } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
 import { PAIR_LIMITS } from '/pairs.mjs';
+import { partnerChip } from './partner-labels.mjs';
 import { exploreModel, pageOf, pageButtons, trendingTokens, topCreators, feedRows, exploreStateFromHash, exploreHash, PER_PAGE, PER_PAGE_WIDE } from './discovery.mjs';
 
 const store = {
@@ -81,6 +82,11 @@ function devBadge(token) {
   const pct = Number(token.devHoldingPct ?? token.devBoughtPct);
   return h('span.dev-badge', { 'data-level': pct > 10 ? 'high' : 'ok', title: devLabel(token.devBoughtPct, token.devHoldingPct) }, `Dev ${number(pct, 1)}%`);
 }
+/** Partner tokens: the share of trading fees that buys back and burns the token, fixed at launch. */
+function burnBadge(token) {
+  const chip = partnerChip(token);
+  return chip ? h('span.burn-badge', { 'data-tier': chip.tier.toLowerCase(), title: chip.title, 'aria-label': chip.title }, icon('flame', 'icon-xs'), chip.text) : null;
+}
 /** A scroller with prev/next buttons and edge fades that only show while there is more to scroll. */
 function scroller(track, prev, next) {
   const sync = () => {
@@ -98,7 +104,7 @@ function scroller(track, prev, next) {
 /* ---------- Cards ---------- */
 // Values roll only between two figures in the same unit (dollars, or the same pair asset).
 const sameUnit = (a, b) => a.startsWith('$') === b.startsWith('$');
-function staticSignature(t) { return JSON.stringify([t.name, t.symbol, t.metadata?.image ?? t.image ?? '', t.network, t.pair, t.quoteSymbol, !!t.graduated, !!t.complete, t.devBoughtPct, t.devHoldingPct, t.created, t.creator]); }
+function staticSignature(t) { return JSON.stringify([t.name, t.symbol, t.metadata?.image ?? t.image ?? '', t.network, t.pair, t.quoteSymbol, !!t.graduated, !!t.complete, t.devBoughtPct, t.devHoldingPct, t.created, t.creator, t.buybackBps, t.burned]); }
 
 function listCard(token, ctx) {
   const f = figures(token), href = ctx.tokenHref(token), name = token.metadata?.name ?? token.name, symbol = token.metadata?.symbol ?? token.symbol;
@@ -109,7 +115,7 @@ function listCard(token, ctx) {
     h('div.lc-media', avatar(token, 'lc-avatar'), isNew ? h('span.new-chip', 'New') : null),
     h('div.lc-body',
       h('div.lc-top', h('h3.lc-name', h('a.lc-link', { href }, name)), icon('arrow-up-right', 'icon-sm lc-go')),
-      h('div.lc-meta', h('span.lc-ticker', `$${symbol}`), h('span.sep', { 'aria-hidden': 'true' }, '·'), pairStack(token, ctx.nativeSymbol(token), ctx.networkName(token)), token.created ? [h('span.sep', { 'aria-hidden': 'true' }, '·'), timeNode('time.lc-age', Math.floor(token.created / 1000), 'age')] : null, devBadge(token)),
+      h('div.lc-meta', h('span.lc-ticker', `$${symbol}`), h('span.sep', { 'aria-hidden': 'true' }, '·'), pairStack(token, ctx.nativeSymbol(token), ctx.networkName(token)), token.created ? [h('span.sep', { 'aria-hidden': 'true' }, '·'), timeNode('time.lc-age', Math.floor(token.created / 1000), 'age')] : null, devBadge(token), burnBadge(token)),
       h('div.lc-figures',
         h('div', h('span.lc-label', 'Market cap'), cap),
         h('div.lc-right', h('span.lc-label', '24h volume'), volume)),

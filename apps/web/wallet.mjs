@@ -630,6 +630,12 @@ export class TestnetWallet {
     const pricing = { verified:true,price:this.price,launchFee: this.launchFee===undefined?'Unavailable':formatUnits(this.launchFee, 18), startFdv: this.nativeVirtualQuote===undefined?'Unavailable':formatUnits(this.model===DEX_MODEL?this.nativeVirtualQuote * 9n / 10n:this.nativeVirtualQuote * 15n / 16n, 18), symbol: native, matches:true, owner: treasury.toLowerCase() === this.address.toLowerCase() };
     return { wallet: this.address, balance, balanceSymbol: native, pairBalances, nativeBalance: balance, nativeSymbol: native, wrappedNativeBalance:this.dex?formatUnits(await new Contract(this.dex.weth,this.config.contracts.quote.abi,this.provider).balanceOf(this.address),18):undefined, tokens, activity: [], pricing, treasuryBalance: formatUnits(await this.provider.getBalance(treasury), 18) };
   }
+  /** The connected wallet's early-partner registration in this network's factory ({ buybackBps, expiresAt }), or null. */
+  async partnerTier(){
+    if(!this.deployment?.factory||!this.address)return null;
+    try{const [bps,expiresAt]=await new Contract(this.deployment.factory,['function partners(address) view returns(uint16,uint64)'],this.provider).partners(this.address);return Number(bps)?{buybackBps:Number(bps),expiresAt:Number(expiresAt)}:null;}
+    catch(e){if(['CALL_EXCEPTION','BAD_DATA'].includes(e.code))return null;throw e;}
+  }
   async publicTokens(){
     const response=await fetch('/api/public/tokens?network='+encodeURIComponent(this.net.key));if(!response.ok)throw new Error('Public token discovery is unavailable.');
     const entries=await response.json();return Promise.all(entries.map(async item=>({...item,metadata:this.deployment&&!item.metadataURI?await readMetadataCache(metadataKey(this.net.chainId,item.factory??this.deployment.factory,item.address))??item.metadata:item.metadata})));

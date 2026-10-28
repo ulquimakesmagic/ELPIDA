@@ -14,6 +14,7 @@ import {holderChat} from './holder-chat.mjs';
 import {filterTrades} from './trade-filter.mjs';
 import {odometer} from './odometer.mjs';
 import {filterByWho,topTraders,safetyChecks,quickAmounts,walletHolders} from './token-insights.mjs';
+import {partnerChip} from './partner-labels.mjs';
 export { exceedsRemaining };
 
 const metadataRequests = new Map();
@@ -120,7 +121,8 @@ export function renderToken(ctx, address) {
           token.creator ? h('a.tk-tag.tk-creator', { href: addressUrl(token.creator) ?? '#', target: '_blank', rel: 'noopener noreferrer', title: `Creator: ${token.creator}` }, 'by ', h('span.mono', short(token.creator)), h('span.badge-dev', 'Dev')) : null,
           h('span.tk-tag.tk-addr', { title: token.address }, short(token.address), copyButton(token.address, '')),
           h('span.tk-tag', { title: 'Copy a link that shows a preview card on X, Telegram and Discord' }, 'Share', copyButton(`${location.origin}/token/${encodeURIComponent(token.network ?? ctx.wallet.net.key)}/${token.address}`, '')),
-          token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null)),
+          token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null,
+          (chip => chip ? h('span.tk-tag.tk-tag-burn', { 'data-tier': chip.tier.toLowerCase(), title: chip.title }, icon('flame', 'icon-xs'), `${chip.tier} · ${chip.text}`) : null)(partnerChip(token)))),
         h('div.tk-sub', h('div.tk-about', descText, descMore),
           h('div.tk-links', ...linkPills, explorerHref ? h('a.tk-pill.tk-pill-end', { href: explorerHref, target: '_blank', rel: 'noopener noreferrer', title: 'Open in explorer' }, 'Explorer', icon('arrow-up-right', 'icon-sm')) : null, txUrl(launchHash) ? h('a.tk-pill', { href: txUrl(launchHash), target: '_blank', rel: 'noopener noreferrer', title: 'The transaction that created this token' }, 'Launch transaction', icon('arrow-up-right', 'icon-sm')) : null)))));
   const chart = terminalChart(ctx, token, q);
@@ -175,8 +177,7 @@ export function renderToken(ctx, address) {
   const info = h('div.tk-info.stack', details, addresses, about, tech);
   const activity = marketActivity(ctx, token, q, { addressUrl, isCreator, me, info,
     onCounts: ({ holders }) => { holdersValue.textContent = holders ?? '—'; },
-    onHolders: rows => drawSafety(rows),
-    onTrades: rows => { markerRows = rows; } });
+    onHolders: rows => drawSafety(rows) });
   const desk=holderTerminal(ctx,token,{onVolume:v=>volumeValue.textContent=fmtValue(v,token)});
   const trade = tradePanel(ctx, token, { dex, solana });
   const sideButton = s => h(`button.btn.btn-lg.${s === 'buy' ? 'btn-buy' : 'btn-sell'}`, { type: 'button', on: { click: () => { trade.selectSide?.(s); trade.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' }); } } }, s === 'buy' ? `Buy ${token.symbol}` : 'Sell');

@@ -266,6 +266,8 @@ export class SolanaWallet {
         // `complete`: the curve sold out; `graduated`: its liquidity is now in the locked PumpSwap pool.
         complete, graduated: pool.status === STATUS_MIGRATED, completedAt: Number(pool.graduatedAt),
         protocolFees: formatAmount(pool.protocolFees, d), creatorFees: formatAmount(pool.creatorFees, d), liquidityLocked: true,
+        // Early-partner tier fixed at launch, and tokens its buybacks burned on the curve (LP-fee burns added below).
+        buybackBps: pool.buybackBps, burned: formatAmount(pool.buybackBurned, TOKEN_DECIMALS),
       };
       const m = migrated.get(address);
       if (m) {
@@ -273,7 +275,7 @@ export class SolanaWallet {
         const out = withdrawOut(m.harvestable, m.state);
         Object.assign(token, {
           venue: m.venue, dex: m.venue, pumpPool: m.pumpPool, dexPool: m.pumpPool, dexUrl: this.dexUrl(m.pumpPool, m.venue, address), lpFeeBps: m.venue === 'Raydium' ? 84 : PUMPSWAP_FEES.lpFeeBps,
-          tradeFeeBps: m.venue === 'Raydium' ? 100 : null, pendingBuyback: formatAmount(m.migration.pendingBuyback, d), buybackBurned: formatAmount(m.migration.baseBurned + m.migration.buybackBurned, TOKEN_DECIMALS),
+          tradeFeeBps: m.venue === 'Raydium' ? 100 : null, pendingBuyback: formatAmount(m.migration.pendingBuyback, d), burned: formatAmount(pool.buybackBurned + m.migration.baseBurned + m.migration.buybackBurned, TOKEN_DECIMALS),
           spotPrice: priceQ / priceT, marketCap: priceQ / priceT * Number(TOKEN_SUPPLY) / 10 ** TOKEN_DECIMALS,
           reserve: formatAmount(m.state.quote, d), lockedLiquidity: formatAmount(m.migration.quoteMigrated, d),
           lpLocked: m.migration.lpLocked.toString(), harvestableQuote: formatAmount(out.quote, d), harvestableTokens: formatAmount(out.base, TOKEN_DECIMALS),
@@ -437,6 +439,14 @@ export class SolanaWallet {
   async supportsPartnerTiers() {
     this._partnerSupport ??= await this.client.supportsPartnerTiers(this.connection, this.publicKey);
     return this._partnerSupport;
+  }
+  /** The connected wallet's early-partner registration on this cluster ({ buybackBps, expiresAt }), or null. */
+  async partnerTier() {
+    if (!this.deployment || !this.publicKey) return null;
+    const info = await this.connection.getAccountInfo(this.client.partnerPda(this.publicKey));
+    if (!info?.owner.equals(this.client.programId)) return null;
+    const p = this.client.decodePartner(info.data);
+    return p && p.buybackBps ? { buybackBps: p.buybackBps, expiresAt: p.expiresAt } : null;
   }
   async supportsMetadata() {
     this._metadataSupport ??= await this.client.supportsMetadata(this.connection, this.publicKey);
