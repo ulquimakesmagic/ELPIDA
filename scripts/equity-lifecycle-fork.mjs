@@ -19,7 +19,7 @@ const ERC = ['function symbol() view returns(string)', 'function decimals() view
  * Runs the whole lifecycle with `stockAddress` as the approved quote. `fund(signers)` must give signers 0 and 1 a
  * balance of the quote asset. Returns { checks, steps } and throws on the first failed assertion.
  */
-export async function runLifecycle({ provider, stockAddress, fund, virtualQuote, firstBuy, tradeBuy, log = () => {} }) {
+export async function runLifecycle({ provider, stockAddress, fund, virtualQuote, firstBuy, tradeBuy, atomic = false, log = () => {} }) {
   const compiled = compileContracts({ includeMocks: true });
   const art = n => compiled['contracts/evm/src/' + n + '.sol'][n];
   const fixture = n => compiled['tests/fixtures/' + n + '.sol'][n];
@@ -40,7 +40,7 @@ export async function runLifecycle({ provider, stockAddress, fund, virtualQuote,
   // Same deployment as the production launchpad fixture: local Uniswap v3, native adapter, factory, USD feed.
   const dex = await deployLocalV3(signers[0], fixture('LocalWrappedETH'));
   const nativeAdapter = await deploy(art('ElpidaV3MigrationAdapter'), dex.manager.target, dex.weth.target, 10000);
-  const factory = await deploy(art('ElpidaDexFactory'), addresses[2], nativeAdapter.target, 5000, 86400);
+  const factory = await deploy(art(atomic ? 'ElpidaAtomicDexFactory' : 'ElpidaDexFactory'), addresses[2], nativeAdapter.target, 5000, 86400);
   const feed = await deploy(fixture('MockUsdFeed'), 2500n * 10n ** 8n);
   await mined(factory.connect(signers[2]).configureUsdPricing(feed.target, 86400, ZeroAddress));
   const adapter = await deploy(art('ElpidaV3MigrationAdapter'), dex.manager.target, stockAddress, 10000);
@@ -50,13 +50,15 @@ export async function runLifecycle({ provider, stockAddress, fund, virtualQuote,
   // Launch paired with the stock: the factory pulls the first buy with transferFrom and checks the balance delta.
   const FEE = parseEther('0.004');
   await mined(stock.connect(signers[0]).approve(factory.target, firstBuy));
-  const launchReceipt = await mined(factory.connect(signers[0]).launchPaired('Hope', 'HOPE', stockAddress, firstBuy, 0, addresses[0], { value: FEE }));
+  const launchReceipt = await mined(atomic
+    ? factory.connect(signers[0]).launchPairedWithMetadata('Hope', 'HOPE', stockAddress, firstBuy, 0, addresses[0], 'ipfs://bafkreiteststockrehearsal', { value: FEE })
+    : factory.connect(signers[0]).launchPaired('Hope', 'HOPE', stockAddress, firstBuy, 0, addresses[0], { value: FEE }));
   const ev = launchReceipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(e => e?.name === 'Launched');
   assert.ok(ev, 'Launched event');
   const curve = new Contract(ev.args.curve, art('ElpidaDexCurve').abi, signers[0]);
   const token = new Contract(ev.args.token, art('ElpidaToken').abi, signers[0]);
   assert.equal((await curve.quote()).toLowerCase(), stockAddress.toLowerCase());
-  const liabilities = async () => await curve.realReserve() + await curve.protocolFees() + await curve.creatorFees() + await curve.liquidityBonus();
+  const liabilities = async () => await curve.realReserve() + await curve.protocolFees() + await curve.creatorFees() + await curve.liquidityBonus() + await curve.quoteDust();
   assert.equal(await stock.balanceOf(curve.target), await liabilities());
   ok('paired launch with the stock as first buy; curve holds exactly its liabilities', `balance ${await stock.balanceOf(curve.target)}`);
   assert.equal(await stock.allowance(factory.target, curve.target), 0n);
@@ -95,15 +97,23 @@ export async function runLifecycle({ provider, stockAddress, fund, virtualQuote,
 
   // Complete the curve and graduate into Uniswap v3 with the stock as the other side of the pair.
   const gross = await curve.completionQuote();
+  const [, completionFee, completionSpent] = await curve.previewBuy(gross);
+  const terminalQ = await curve.virtualQuote() + await curve.realReserve() + completionSpent - completionFee;
+  const terminalT = await curve.virtualToken() - await curve.SALE_CAP();
   await mined(stock.connect(trader).approve(curve.target, gross));
   assert.ok(await stock.balanceOf(addresses[1]) >= gross, 'signer 1 needs enough quote asset to complete the curve (raise the funding)');
-  await mined(curve.connect(trader).buy(gross, 0));
+  const completionReceipt = await mined(curve.connect(trader).buy(gross, 0, { gasLimit: 15000000 }));
   assert.equal(await curve.complete(), true);
   assert.equal(await stock.balanceOf(curve.target), await liabilities());
   ok('curve completes on a stock-denominated purchase');
-  const terminalQ = await curve.virtualQuote() + await curve.realReserve(), terminalT = await curve.virtualToken() - await curve.sold();
-  await mined(curve.graduate({ gasLimit: 15000000 }));
+  if (atomic) {
+    assert.ok(completionReceipt.logs.some(l => { try { return curve.interface.parseLog(l)?.name === 'Graduated'; } catch { return false; } }));
+    assert.equal(await curve.realReserve(), 0n);
+    ok('final stock purchase graduates in the same transaction');
+  } else await mined(curve.graduate({ gasLimit: 15000000 }));
   const poolAddress = await curve.pool(); assert.notEqual(poolAddress, ZeroAddress);
+  assert.equal(await stock.balanceOf(curve.target), await liabilities(), 'migration leftovers equal pending fees plus separately recorded quote dust');
+  ok('migration preserves raw quote accounting including quote dust', await curve.quoteDust());
   const manager = new Contract(dex.manager.target, v3Artifacts.manager.abi, signers[0]);
   const pool = new Contract(poolAddress, v3Artifacts.pool.abi, provider);
   const lockerAddress = await curve.locker(), positionId = await curve.positionId();
@@ -141,6 +151,7 @@ export async function runLifecycle({ provider, stockAddress, fund, virtualQuote,
 
 async function findHolder({ explorer, address, balanceOf, log }) {
   if (process.env.ELPIDA_EQUITY_HOLDER) return process.env.ELPIDA_EQUITY_HOLDER;
+  assert.ok(explorer, 'Set ELPIDA_EQUITY_HOLDER to an existing funded holder; it will only be impersonated locally.');
   const r = await fetch(`${explorer}/api/v2/tokens/${address}/holders`, { signal: AbortSignal.timeout(30000), headers: { accept: 'application/json', 'user-agent': 'Mozilla/5.0 (compatible; elpida-fork-check)' } });
   if (!r.ok) throw new Error(`explorer HTTP ${r.status}; set ELPIDA_EQUITY_HOLDER=<address>`);
   for (const it of ((await r.json()).items ?? []).slice(0, 10)) { const a = it.address?.hash; if (a && await balanceOf(a) > 0n) { log(`  holder from explorer: ${a}${it.address?.name ? ' (' + it.address.name + ')' : ''}`); return a; } }
@@ -149,26 +160,32 @@ async function findHolder({ explorer, address, balanceOf, log }) {
 
 async function main() {
   const net = process.argv[2], symbol = process.argv[3] ?? 'AAPL';
-  assert.equal(net, 'robinhood', 'Usage: node scripts/equity-lifecycle-fork.mjs robinhood [SYMBOL]  (Base tokens are precompiles and cannot run in a local fork)');
+  const providerId = process.argv[4] ?? config.networks[net]?.provider;
+  assert.ok(net === 'robinhood' || (providerId === 'ondo' && ['ethereum', 'bnb'].includes(net)), 'Usage: node scripts/equity-lifecycle-fork.mjs ethereum NVDAon ondo (or bnb); legacy robinhood remains supported.');
   const def = config.networks[net];
-  const asset = config.assets.find(a => a.network === net && a.symbol === symbol);
+  const asset = config.assets.find(a => a.network === net && a.provider === providerId && a.symbol === symbol);
   assert.ok(asset, `No registry asset ${symbol} on ${net}.`);
   const rpc = process.env[`ELPIDA_EQUITY_FORK_RPC_${net.toUpperCase()}`] ?? process.env.ELPIDA_EQUITY_FORK_RPC ?? def.rpc;
+  assert.ok(rpc, 'Set ELPIDA_EQUITY_FORK_RPC to a read-only archive RPC. No wallet or private key is needed.');
   const remote = async (method, params = []) => { const r = await (await fetch(rpc, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(30000) })).json(); if (r.error) throw new Error(`${method}: ${r.error.message}`); return r.result; };
   assert.equal(Number(BigInt(await remote('eth_chainId'))), def.chainId, `upstream must be chain ${def.chainId}`);
   const head = Number(BigInt(await remote('eth_blockNumber')));
   const balOf = async addr => BigInt(await remote('eth_call', [{ to: asset.address, data: '0x70a08231' + addr.slice(2).toLowerCase().padStart(64, '0') }, '0x' + (head - 5).toString(16)]));
-  const holder = await findHolder({ explorer: (process.env.ELPIDA_EQUITY_EXPLORER ?? def.explorer).replace(/\/$/, ''), address: asset.address, balanceOf: balOf, log: console.log });
+  const holder = await findHolder({ explorer: (process.env.ELPIDA_EQUITY_EXPLORER ?? def.explorer ?? '').replace(/\/$/, ''), address: asset.address, balanceOf: balOf, log: console.log });
   const holderBal = await balOf(holder);
   const connection = await network.create({ network: 'localTest', override: { chainId: 31337, hardfork: 'cancun', forking: { url: rpc, blockNumber: head - 5 } } });
   const provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 }); provider.pollingInterval = 10;
-  const report = { scope: 'LOCAL FORK ONLY: nothing is sent to the public chain', network: net, chainId: def.chainId, block: head - 5, symbol, token: asset.address, holder, results: [] };
+  const report = { scope: 'LOCAL FORK ONLY: nothing is sent to the public chain', provider: providerId, atomic: providerId === 'ondo', source: asset.source, network: net, chainId: def.chainId, block: head - 5, symbol, token: asset.address, holder, results: [] };
   try {
     await provider.send('hardhat_metadata', []);
     await provider.send('evm_mine', []);
+    const identity = new Contract(asset.address, ERC, provider);
+    assert.equal(await identity.symbol(), asset.symbol, 'canonical symbol');
+    assert.equal(Number(await identity.decimals()), asset.decimals, 'canonical decimals');
+    assert.notEqual(await provider.getCode(asset.address), '0x', 'canonical contract bytecode must exist');
     const unit = 10n ** BigInt(asset.decimals ?? 18);
     // Size everything from what the holder has: the virtual quote is 20 whole tokens (test sizing, not a price).
-    const virtualQuote = 20n * unit, firstBuy = unit, tradeBuy = unit;
+    const virtualQuote = 20n * unit, firstBuy = providerId === 'ondo' ? 0n : unit, tradeBuy = unit;
     const need = virtualQuote * 4n;
     assert.ok(holderBal >= need * 2n, `holder ${holder} has too little ${symbol} for the test (needs ${need * 2n}, has ${holderBal}); set ELPIDA_EQUITY_HOLDER`);
     const fund = async signers => {
@@ -177,15 +194,17 @@ async function main() {
       for (const s of signers.slice(0, 2)) await (await h.transfer(await s.getAddress(), need)).wait();
       await provider.send('hardhat_stopImpersonatingAccount', [holder]);
     };
-    const res = await runLifecycle({ provider, stockAddress: asset.address, fund, virtualQuote, firstBuy, tradeBuy, log: console.log });
+    const res = await runLifecycle({ provider, stockAddress: asset.address, fund, virtualQuote, firstBuy, tradeBuy, atomic: providerId === 'ondo', log: console.log });
     report.results = res.checks; report.result = 'PASS';
   } catch (e) {
     report.result = 'FAIL'; report.error = e.shortMessage ?? e.message; console.log(`FAIL  ${report.error}`);
   } finally {
     mkdirSync('backups/equity-fork', { recursive: true });
-    writeFileSync(`backups/equity-fork/${net}-lifecycle-report.json`, JSON.stringify(report, null, 2));
+    const reportPath = `backups/equity-fork/${net}-${providerId}-${symbol}-lifecycle-report.json`;
+    writeFileSync(reportPath, JSON.stringify(report, null, 2));
     provider.destroy(); await connection.close();
-    console.log(`\nResult: ${report.result}. Report: backups/equity-fork/${net}-lifecycle-report.json`);
+    console.log(`\nResult: ${report.result}. Report: ${reportPath}`);
+    if (report.result !== 'PASS') process.exitCode = 1;
   }
 }
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main();

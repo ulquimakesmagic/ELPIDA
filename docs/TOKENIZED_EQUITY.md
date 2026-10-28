@@ -2,7 +2,9 @@
 
 Supersedes the xStocks-versus-Dinari plan. Dinari is not an integration target. This is research plus reversible groundwork. **No live capability is enabled, no contract was deployed, no funded transaction was made, and Elpida has no partnership with any provider.** Sources below were read on 19 Oct 2026; third-party articles are marked and are not treated as canonical.
 
-## Provider mapping (one per network, no substitution)
+## Provider mapping (defaults, no implicit substitution)
+
+Update, 28 October: [Ondo pairing groundwork](ONDO_PAIRING.md) adds Ondo as an explicitly selected additional provider on Ethereum, Solana, BNB and Robinhood. Existing defaults below remain unchanged; bStocks remains excluded. Nine issuer-sourced Ondo records are imported on Ethereum, BNB and Solana; all capabilities remain off. No Robinhood Ondo addresses are imported yet.
 
 | Network | Provider | Balance model |
 |---|---|---|
@@ -12,7 +14,7 @@ Supersedes the xStocks-versus-Dinari plan. Dinari is not an integration target. 
 | BNB Smart Chain | Binance bStocks (BTech Holdings, ADGM) | BEP-20 with a multiplier; BscScan reports the standard as BEP-8056 (see the 20 Oct findings) |
 | Base | Coinbase Tokenized Stocks | B20 precompile; WAD multiplier; Chainlink feeds are total-return (include the multiplier) |
 
-Code: `getAsset(network, provider, address)` throws if the provider is not the designated one.
+Code: `getAsset(network, provider, address)` throws if the provider is not explicitly allowed on that network. An allowed provider never falls back to another provider's assets.
 
 ## Verified capability matrix
 

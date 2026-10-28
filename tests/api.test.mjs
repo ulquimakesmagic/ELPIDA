@@ -10,6 +10,17 @@ test('localhost API exercises launch, trading, fee payout and request protection
   const app = await startServer({ port: 0, seed: false, publicUrl: 'https://elpida-preview.up.railway.app' });
   t.after(() => app.close());
   const base = app.url;
+  await t.test('stock discovery selects Ondo explicitly and exposes no enabled capability', async () => {
+    const response = await fetch(`${base}/api/public/tokenized-equity?network=ethereum&provider=ondo`);
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.provider, 'ondo'); assert.equal(body.live, false); assert.equal(body.assets.length, 3);
+    for (const asset of body.assets) for (const state of Object.values(asset.capabilities)) assert.equal(state.enabled, false);
+    const unsupported = await fetch(`${base}/api/public/tokenized-equity?network=base&provider=ondo`);
+    assert.equal(unsupported.status, 404);
+    const defaults = await (await fetch(`${base}/api/public/tokenized-equity?network=ethereum`)).json();
+    assert.equal(defaults.provider, 'xstocks');
+  });
   const config = await (await fetch(`${base}/api/config`)).json();
   const graduation=await (await fetch(`${base}/api/graduation/status`)).json();
   assert.equal(graduation.enabled,false);
