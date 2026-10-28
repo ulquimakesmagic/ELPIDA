@@ -6,7 +6,7 @@
     "All amounts are whole coins (SOL, ETH, BNB), written as strings.",
     "  launchFee  creation fee paid by the creator to the treasury on every launch, whatever the pair.",
     "  startFdv   fully diluted value of a new token at launch (price x 1B supply).",
-    "  endFdv     Solana only: FDV at which the curve completes and migrates to PumpSwap.",
+    "  endFdv     Solana only: FDV at which the curve completes and migrates (SOL pair: Raydium).",
     "             EVM curves have a fixed shape and complete at 16 x startFdv.",
     "New values apply to launches made after the change. Tokens already launched keep the values they launched with.",
     "Mainnet values are examples: set them from the current coin price before deploying."

@@ -16,7 +16,12 @@ test('discriminators, events and the PartnerTerms error', () => {
   for (const [key, name] of [['setPartner', 'global:set_partner'], ['partnerTiersVersion', 'global:partner_tiers_version'], ['PartnerConfig', 'account:PartnerConfig']]) assert.deepEqual(DISCRIMINATORS[key], disc(name), key);
   for (const name of ['PartnerSet', 'PartnerPoolLaunched', 'PartnerBuyback', 'PartnerHarvest']) assert.deepEqual(EVENTS[name].discriminator, disc(`event:${name}`), name);
   assert.match(explainError(new Error('custom program error: 0x1790')), /10% or 20%/);
-  assert.equal(PROGRAM_ERRORS.length, 33);
+  assert.equal(PROGRAM_ERRORS.length, 36);
+  // Raydium (SOL pairs): instructions, events and errors 6033-6035.
+  for (const [key, name] of [['migrateToRaydium', 'global:migrate_to_raydium'], ['harvestRaydiumFees', 'global:harvest_raydium_fees'], ['raydiumBuyback', 'global:raydium_buyback'], ['raydiumSwapBaseInput', 'global:swap_base_input'], ['RaydiumPoolState', 'account:PoolState']]) assert.deepEqual(DISCRIMINATORS[key], disc(name), key);
+  for (const name of ['RaydiumMigrated', 'PartnerLpBuyback']) assert.deepEqual(EVENTS[name].discriminator, disc(`event:${name}`), name);
+  assert.match(explainError(new Error('custom program error: 0x1791')), /SOL pairs graduate to Raydium/);
+  assert.match(explainError(new Error('custom program error: 0x1793')), /No queued partner buyback/);
   // A u16 field decodes in place, and the fields after it stay aligned.
   const creator = Keypair.generate().publicKey;
   const bytes = Buffer.concat([Buffer.from(EVENTS.PartnerSet.discriminator), creator.toBuffer(), Buffer.from([0xd0, 0x07]), Buffer.from(new BigUint64Array([1_800_000_000n]).buffer)]);

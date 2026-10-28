@@ -217,7 +217,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   async function partnerRegistry(applications,fresh){const key=applications.filter(a=>a.approved).map(a=>`${a.id}:${a.status}`).join(',');if(!fresh&&registryCache.value&&registryCache.key===key&&Date.now()-registryCache.at<30000)return registryCache.value;const value=await registryStatus(applications,registryNetworks());registryCache={at:Date.now(),key,value};return value;}
   const analyticsSources=()=>{
     const sources=evmTestnets.map(net=>({key:net.key,name:net.name,status:publicIndex.status(net.key),tokens:publicIndex.listings(net.key),trades:publicIndex.tradeRows(net.key)}));
-    if(solanaIndex)sources.push({key:solanaIndex.network.key,name:solanaIndex.network.name,status:{enabled:true,...solanaIndex.status(),scope:'Elpida curves and PumpSwap swaps on migrated Elpida pools'},tokens:solanaIndex.listings(),trades:solanaIndex.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()});
+    if(solanaIndex)sources.push({key:solanaIndex.network.key,name:solanaIndex.network.name,status:{enabled:true,...solanaIndex.status(),scope:'Elpida curves and Raydium / PumpSwap swaps on migrated Elpida pools'},tokens:solanaIndex.listings(),trades:solanaIndex.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()});
     if(!solanaIndex)sources.push({key:solanaNet.key,name:solanaNet.name,status:{enabled:false,reason:'No public Solana deployment configured.'},tokens:[],trades:[]});
     for(const source of sources){const rows=source.trades;source.trades=(function*(){for(const row of rows)yield JSON.parse(row.data);})();}
     return sources;

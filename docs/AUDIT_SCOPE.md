@@ -25,10 +25,13 @@ will run on mainnet. **Nothing here is audited yet.** Commit to audit: the `main
 epochs; none is deployed on mainnet); OpenZeppelin `Math`; Uniswap v3 and PancakeSwap v3; Chainlink; the web app
 and server.
 
-**Solana (separate engagement):** `contracts/solana/programs/elpida_launchpad/src/lib.rs`, 1,381 source lines
-(Anchor, 20 instructions). It has the same curve as the EVM, and the same early-partner tiers: `set_partner` (the SOL
+**Solana (separate engagement):** `contracts/solana/programs/elpida_launchpad/src/lib.rs`, 2,194 lines
+(Anchor, 23 instructions). It has the same curve as the EVM, and the same early-partner tiers: `set_partner` (the SOL
 pair's treasury only), the share fixed in each pool at launch, the curve buy-and-burn on every trade, and the burn
-or queue of the share at each LP-fee harvest. The test-only instructions refuse to run off test
+or queue of the share at each LP-fee harvest. SOL pairs graduate into Raydium CPMM's 1% tier through raw CPIs
+(`migrate_to_raydium`, `harvest_raydium_fees`, `raydium_buyback`): the pool at the program's own PDA, Raydium's
+creation fee and rent paid from the raised SOL by a same-instruction loan from the caller, the `PoolState` read at
+fixed offsets, and the buyback capped at 1% of the pool's SOL depth. Other pairs graduate into PumpSwap. The test-only instructions refuse to run off test
 clusters (`test_networks_only`, checklist B4).
 
 ## 2. How it works

@@ -1,5 +1,5 @@
 import { nowSeconds } from './clock.mjs';
-import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut } from '/elpida-solana.mjs';
+import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut, VENUE_RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, raydiumQuote, raydiumCreationCost, raydiumBuybackAmount } from '/elpida-solana.mjs';
 import {normalizeMetadata} from './metadata.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 import { PAIR_LIMITS, usdReferenceFor } from '/pairs.mjs';
@@ -31,8 +31,8 @@ const web3 = globalThis.solanaWeb3;
 // with SOL by default, curves are sized in SOL and every launch pays its creation fee in SOL, at the
 // values the team sets in config/native-pricing.json. The anti-snipe fee starts at 90% and decays to the
 // base fee over the first minute, with the surplus locked into the token's liquidity. A complete curve
-// migrates (anyone can trigger it) into a PumpSwap pool whose LP stays locked by the program; LP fee
-// growth is harvested 50/50 to the treasury and the creator reward wallet. Pools always trade through
+// migrates (anyone can trigger it) into a DEX pool whose LP stays locked by the program: Raydium CPMM (1% fee tier)
+// for SOL pairs, PumpSwap for the others. LP fee growth is harvested 50/50 to the treasury and the creator reward wallet. Pools always trade through
 // the config they were launched with.
 const MAX_U64 = (1n << 64n) - 1n;
 // Quote with a clock two seconds early: a slightly higher anti-snipe fee, so slippage limits stay safe.
@@ -53,7 +53,7 @@ export class SolanaWallet {
   get walletName() { return solanaWallets(this.net.mainnet?'solana:mainnet':'solana:devnet').find(w => w.id === (this.walletId ?? chosenSolanaWallet()))?.name ?? 'your Solana wallet'; }
   get client() {
     if (!this.deployment) throw new Error('The Solana program is not deployed yet. Run npm run solana:deploy once (see docs/LOCALHOST_AND_TESTNET.md).');
-    return (this._client ??= createElpidaSolana(web3, this.deployment.programId));
+    return (this._client ??= createElpidaSolana(web3, this.deployment.programId, { cluster: this.net.mainnet ? 'mainnet' : 'devnet' }));
   }
   txUrl(signature) { return `${this.net.explorer}/tx/${signature}${this.clusterQuery}`; }
   addressUrl(address) { return `${this.net.explorer}/address/${address}${this.clusterQuery}`; }
@@ -200,11 +200,13 @@ export class SolanaWallet {
    * fails with it and the curve keeps trading, so it is never left closed waiting for someone to migrate or reopen it.
    * For SOL pairs, wrapping (and unwrapping) move to their own transactions only if everything does not fit in one.
    */
-  async completeAndMigrate({ config, refs, mint, wrap, buyIx, symbol = null }) {
-    if (BigInt(await this.connection.getBalance(this.publicKey)) < SolanaWallet.MIGRATION_RENT + SolanaWallet.SOL_HEADROOM) throw new Error(`This buy completes the curve and opens its PumpSwap pool in the same transaction, which needs about ${formatAmount(SolanaWallet.MIGRATION_RENT, 9)} SOL of pool rent (most of it comes back). Add SOL and try again. Nothing was sent.`);
-    const core = [this.client.computeBudget(MIGRATE_COMPUTE_UNITS + 200_000), buyIx, this.client.migrateToPumpswap({ payer: this.publicKey, config: refs, mint })];
+  async completeAndMigrate({ config, refs, mint, wrap, buyIx, spend = 0n, symbol = null }) {
+    const dex = this.venueOf(config), lent = this.migrationAdvance(config);
+    const available = config.wsol ? await this.quoteBalance(this.publicKey, config) - spend : BigInt(await this.connection.getBalance(this.publicKey));
+    if (available < lent + SolanaWallet.SOL_HEADROOM) throw new Error(`This buy completes the curve and opens its ${dex} pool in the same transaction, which needs about ${formatAmount(lent, 9)} SOL in your wallet for the moment (${config.wsol ? 'it all comes back in the same transaction: the raised SOL pays Raydium\'s fee and rent' : 'pool rent; most of it comes back'}). Add SOL and try again. Nothing was sent.`);
+    const core = [this.client.computeBudget((config.wsol ? RAYDIUM_MIGRATE_COMPUTE_UNITS : MIGRATE_COMPUTE_UNITS) + 200_000), buyIx, this.migrateIx(config, refs, mint)];
     const unwrap = config.wsol ? [this.client.unwrapSol(this.publicKey)] : [];
-    const message = 'Confirm the final buy. It completes the curve and opens the PumpSwap pool in the same transaction…';
+    const message = `Confirm the final buy. It completes the curve and opens the ${dex} pool in the same transaction…`;
     let signature;
     if (!wrap.length && !unwrap.length) signature = await this.sendInstructions(core, [], message);
     else if (await this.fitsOneTransaction([...wrap, ...core, ...unwrap])) signature = await this.sendInstructions([...wrap, ...core, ...unwrap], [], message);
@@ -214,8 +216,13 @@ export class SolanaWallet {
       if (unwrap.length) await this.sendInstructions(unwrap, [], 'Step 3: confirm returning the unused wrapped SOL…').catch(() => {});
     }
     // Name the launched token, not the pair asset (`config.symbol` is SOL or USDC).
-    return { hash: signature, message: `The curve is complete and ${symbol ?? 'the token'} now trades on PumpSwap. The liquidity is locked for good.` };
+    return { hash: signature, message: `The curve is complete and ${symbol ?? 'the token'} now trades on ${dex}. The liquidity is locked for good.` };
   }
+  /** Where a pair graduates: Raydium CPMM for SOL, PumpSwap for every other pair. */
+  venueOf(config) { return config?.wsol ? 'Raydium' : 'PumpSwap'; }
+  /** SOL the migrating wallet lends for the instruction: Raydium's fee and rent (all repaid), or PumpSwap rent (mostly refunded). */
+  migrationAdvance(config) { return config.wsol ? raydiumCreationCost() + 10_000_000n : SolanaWallet.MIGRATION_RENT; }
+  migrateIx(config, refs, mint) { return config.wsol ? this.client.migrateToRaydium({ payer: this.publicKey, config: refs, mint }) : this.client.migrateToPumpswap({ payer: this.publicKey, config: refs, mint }); }
   /** Rent the PumpSwap migration advances (most of it is refunded in the same transaction). */
   static MIGRATION_RENT = 60_000_000n;
   /** Rent and fees a SOL-pair transaction needs on top of the trade (new accounts, priority-free fee). */
@@ -248,7 +255,7 @@ export class SolanaWallet {
       const remainingBuy = complete ? 0n : quoteBuy(pool, MAX_U64, config.baseFeeBps, config.baseFeeBps).gross;
       const token = {
         address, pool: pool.pubkey.toBase58(), name: pool.name, symbol: pool.symbol, creator: pool.creator.toBase58(), reward: pool.reward.toBase58(),
-        created: Number(pool.createdAt)*1000, metadata:await readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair: config.kind ?? 'native', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: 'PumpSwap', usdReference: config.wsol ? this.price : usdReferenceFor({ pair: config.kind ?? 'native' }, null),
+        created: Number(pool.createdAt)*1000, metadata:await readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair: config.kind ?? 'native', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: this.venueOf(config), usdReference: config.wsol ? this.price : usdReferenceFor({ pair: config.kind ?? 'native' }, null),
         reserve: formatAmount(pool.realQuote, d), liquidityBonus: formatAmount(pool.liquidityBonus, d), lockedLiquidity: formatAmount(stats.lockedLiquidity, d),
         sold: formatAmount(pool.sold, TOKEN_DECIMALS), circulatingSupply: formatAmount(pool.sold, TOKEN_DECIMALS), saleCap: formatAmount(pool.curveSupply, TOKEN_DECIMALS),
         supply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS), balance: formatAmount(this.client.tokenAmount(holdings[index]?.data), TOKEN_DECIMALS),
@@ -265,7 +272,8 @@ export class SolanaWallet {
         const priceQ = Number(m.state.quote) / 10 ** d, priceT = Number(m.state.base) / 10 ** TOKEN_DECIMALS;
         const out = withdrawOut(m.harvestable, m.state);
         Object.assign(token, {
-          venue: 'PumpSwap', pumpPool: m.pumpPool, dexUrl: this.dexUrl(m.pumpPool), lpFeeBps: PUMPSWAP_FEES.lpFeeBps,
+          venue: m.venue, dex: m.venue, pumpPool: m.pumpPool, dexPool: m.pumpPool, dexUrl: this.dexUrl(m.pumpPool, m.venue, address), lpFeeBps: m.venue === 'Raydium' ? 84 : PUMPSWAP_FEES.lpFeeBps,
+          tradeFeeBps: m.venue === 'Raydium' ? 100 : null, pendingBuyback: formatAmount(m.migration.pendingBuyback, d), buybackBurned: formatAmount(m.migration.baseBurned + m.migration.buybackBurned, TOKEN_DECIMALS),
           spotPrice: priceQ / priceT, marketCap: priceQ / priceT * Number(TOKEN_SUPPLY) / 10 ** TOKEN_DECIMALS,
           reserve: formatAmount(m.state.quote, d), lockedLiquidity: formatAmount(m.migration.quoteMigrated, d),
           lpLocked: m.migration.lpLocked.toString(), harvestableQuote: formatAmount(out.quote, d), harvestableTokens: formatAmount(out.base, TOKEN_DECIMALS),
@@ -285,23 +293,62 @@ export class SolanaWallet {
     const pricing = { launchFee: formatAmount(terms.fee, 9), usdPriced: terms.priced, usdcFee: terms.usdcMint ? formatAmount(terms.usdcFee, 6) : null, startFdv: String(poolStats({ ...launchConfig, virtualQuote: terms.virtualQuote, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 }, launchConfig.quoteDecimals).marketCap), symbol: 'SOL', matches: true, owner: false, price: this.price };
     return { wallet: this.address, balance: sol, balanceSymbol: 'SOL', pairBalances, nativeBalance: sol, nativeSymbol: 'SOL', tokens, activity: [], pricing, treasuryBalance: formatAmount(BigInt(treasury), 9) };
   }
-  dexUrl(pumpPool) { return this.net.cluster === 'devnet' || this.net.cluster === 'localnet' ? this.addressUrl(pumpPool) : `https://dexscreener.com/solana/${pumpPool}`; }
-  /** Migration record, PumpSwap reserves and harvestable LP for migrated pools. */
+  dexUrl(pool, venue = 'PumpSwap', mint = null) {
+    if (this.net.cluster === 'devnet' || this.net.cluster === 'localnet') return this.addressUrl(pool);
+    return venue === 'Raydium' && mint ? `https://raydium.io/swap/?inputMint=sol&outputMint=${mint}` : `https://dexscreener.com/solana/${pool}`;
+  }
+  async manyAccounts(keys) {
+    const infos = [];
+    for (let i = 0; i < keys.length; i += 100) infos.push(...await this.connection.getMultipleAccountsInfo(keys.slice(i, i + 100)));
+    return infos;
+  }
+  /**
+   * Migration record, DEX reserves and harvestable LP for migrated pools. The record says where the liquidity went:
+   * Raydium CPMM (SOL pairs from the Raydium build) or PumpSwap (other pairs, and SOL pairs migrated before it).
+   */
   async pumpStates(pools) {
     const result = new Map();
     if (!pools.length) return result;
-    const mints = pools.map(pool => pool.mint);
-    const keys = pools.flatMap(pool => { const cfg = this.configOf(pool); const p = this.client.pumpAccounts(pool.mint, cfg.quoteMint, cfg.quoteTokenProgram); return [this.client.migrationPda(pool.mint), p.pool, p.poolBase, p.poolQuote]; });
-    const infos = [];
-    for (let i = 0; i < keys.length; i += 100) infos.push(...await this.connection.getMultipleAccountsInfo(keys.slice(i, i + 100)));
-    mints.forEach((mint, i) => {
-      const [migration, pumpPool, base, quote] = infos.slice(i * 4, i * 4 + 4);
-      if (!migration || !pumpPool || !base || !quote) return;
-      const record = this.client.decodeMigration(migration.data);
-      const state = this.client.pumpState(pumpPool.data, base.data, quote.data);
-      result.set(mint.toBase58(), { migration: record, state, pumpPool: record.pumpPool.toBase58(), harvestable: harvestNow(record.lpLocked, record.principal, state) });
+    const records = await this.manyAccounts(pools.map(pool => this.client.migrationPda(pool.mint)));
+    const plans = pools.map((pool, i) => {
+      if (!records[i]) return null;
+      const migration = this.client.decodeMigration(records[i].data);
+      if (migration.venue === VENUE_RAYDIUM) { const r = this.client.raydiumAccounts(pool.mint); return { pool, migration, venue: 'Raydium', keys: [r.pool, r.vault0, r.vault1] }; }
+      const cfg = this.configOf(pool), p = this.client.pumpAccounts(pool.mint, cfg.quoteMint, cfg.quoteTokenProgram);
+      return { pool, migration, venue: 'PumpSwap', keys: [p.pool, p.poolBase, p.poolQuote] };
+    }).filter(Boolean);
+    const infos = await this.manyAccounts(plans.flatMap(plan => plan.keys));
+    plans.forEach(({ pool, migration, venue }, i) => {
+      const [dexPool, a, b] = infos.slice(i * 3, i * 3 + 3);
+      if (!dexPool || !a || !b) return;
+      const state = venue === 'Raydium' ? this.client.raydiumState(dexPool.data, a.data, b.data, pool.mint) : this.client.pumpState(dexPool.data, a.data, b.data);
+      result.set(pool.mint.toBase58(), { migration, state, venue, pumpPool: migration.pumpPool.toBase58(), harvestable: harvestNow(migration.lpLocked, migration.principal, state) });
     });
     return result;
+  }
+  /** The migrated token's DEX state (venue, reserves, record), or an error the user can act on. */
+  async dexStateOf(pool) {
+    const [state] = (await this.pumpStates([pool])).values();
+    if (!state) throw new Error('The DEX pool for this token could not be read. Try again in a moment.');
+    return state;
+  }
+  /** Raydium quote from the pool's reserves: what `swap_base_input` pays now, and the 1% fee. */
+  raydiumQuoteFor(state, side, raw) {
+    return side === 'buy' ? raydiumQuote(raw, state.state.quote, state.state.base) : raydiumQuote(raw, state.state.base, state.state.quote);
+  }
+  /** A trade on a graduated SOL-pair token's Raydium pool: wrap, swap and unwrap in one transaction, simulated first. */
+  async raydiumTrade({ pool, config, action, body, state }) {
+    const { raw, slippageBps } = this.pumpSwapInput({ config, side: action, amount: body.amount, slippage: body.slippage });
+    if (BigInt(chainNow()) < state.state.openTime) throw new Error('The Raydium pool opens for trading a few seconds after migration. Try again in a moment.');
+    if (action === 'sell') {
+      const held = this.client.tokenAmount((await this.connection.getAccountInfo(this.client.ata(this.publicKey, pool.mint)))?.data);
+      if (held < raw) throw new Error(`You hold ${formatAmount(held, TOKEN_DECIMALS)} ${pool.symbol}.`);
+    } else if (await this.quoteBalance(this.publicKey, config) < raw + SolanaWallet.SOL_HEADROOM) throw new Error(`Not enough SOL on ${this.net.name}. Keep a little SOL for network fees and new accounts.`);
+    const { out } = this.raydiumQuoteFor(state, action, raw);
+    if (out <= 0n) throw new Error('This amount is too small to trade.');
+    const minOut = out * BigInt(10_000 - slippageBps) / 10_000n;
+    const signature = await this.sendInstructions(this.client.raydiumSwap({ user: this.publicKey, mint: pool.mint, side: action, amountIn: raw, minOut: minOut > 0n ? minOut : 1n }), [], `Confirm the ${action} on Raydium in your wallet…`);
+    return { hash: signature, message: `${action === 'buy' ? 'Bought' : 'Sold'} ${pool.symbol} on Raydium.` };
   }
   async freshPool(token) {
     const mint = new web3.PublicKey(token);
@@ -316,8 +363,8 @@ export class SolanaWallet {
   }
   /** The migrated token's PumpSwap pool address, from its Elpida migration record. */
   async pumpPoolOf(pool) {
-    const [state] = (await this.pumpStates([pool])).values();
-    if (!state?.pumpPool) throw new Error('The PumpSwap pool for this token could not be read. Try again in a moment.');
+    const state = await this.dexStateOf(pool);
+    if (state.venue === 'Raydium') throw new Error('This token trades on Raydium.');
     return new web3.PublicKey(state.pumpPool);
   }
   /** Amount, side and slippage checks shared by the PumpSwap quote and trade. */
@@ -357,6 +404,13 @@ export class SolanaWallet {
     const d = config.quoteDecimals;
     if (pool.status === STATUS_MIGRATED) {
       const { raw, slippageBps } = this.pumpSwapInput({ config, side, amount });
+      const dex = await this.dexStateOf(pool);
+      if (dex.venue === 'Raydium') {
+        const q = this.raydiumQuoteFor(dex, side, raw);
+        return side === 'buy'
+          ? { out: formatAmount(q.out, TOKEN_DECIMALS), fee: formatAmount(q.fee, d), spend: formatAmount(raw, d), minOut: formatAmount(q.out * BigInt(10_000 - slippageBps) / 10_000n, TOKEN_DECIMALS), venue: 'Raydium' }
+          : { out: formatAmount(q.out, d), fee: formatAmount(q.fee * dex.state.quote / (dex.state.base || 1n), d), venue: 'Raydium' };
+      }
       const { pumpSwapQuote } = await this.pumpSwap();
       const q = await pumpSwapQuote({ connection: this.connection, pool: await this.pumpPoolOf(pool), user: this.publicKey ?? web3.PublicKey.default, side, amount: raw, slippageBps });
       // Fees come from PumpSwap's own fee schedule, as its SDK computes them for this pool now.
@@ -541,38 +595,50 @@ export class SolanaWallet {
       return { hash: signature, message: 'The curve is trading again. Holders can sell, and it graduates again once complete.' };
     }
     if (action === 'graduate') {
-      if (pool.status === STATUS_MIGRATED) throw new Error('This token already trades on PumpSwap.');
+      const dex = this.venueOf(config);
+      if (pool.status === STATUS_MIGRATED) throw new Error(`This token already trades on ${(await this.dexStateOf(pool).catch(() => null))?.venue ?? dex}.`);
       if (pool.status !== STATUS_GRADUATED) throw new Error('The curve is not complete yet.');
-      const signature = await this.sendInstructions([this.client.computeBudget(MIGRATE_COMPUTE_UNITS), this.client.migrateToPumpswap({ payer: this.publicKey, config: refs, mint })], [],
-        'Confirm the PumpSwap migration in your wallet (you advance about 0.05 SOL of pool rent; the unused part comes straight back)…');
-      return { hash: signature, message: 'Migrated to PumpSwap. The liquidity is locked for good; LP trading fees can be harvested from Rewards.' };
+      const lent = this.migrationAdvance(config);
+      if (BigInt(await this.connection.getBalance(this.publicKey)) < lent + 10_000_000n) throw new Error(`Migrating needs about ${formatAmount(lent + 10_000_000n, 9)} SOL in your wallet for the moment. Add SOL and try again. Nothing was sent.`);
+      const signature = await this.sendInstructions([this.client.computeBudget(config.wsol ? RAYDIUM_MIGRATE_COMPUTE_UNITS : MIGRATE_COMPUTE_UNITS), this.migrateIx(config, refs, mint)], [],
+        config.wsol ? 'Confirm the Raydium migration in your wallet (you lend about 0.19 SOL for Raydium\'s fee and rent; the raised SOL repays all of it in the same transaction)…'
+          : 'Confirm the PumpSwap migration in your wallet (you advance about 0.05 SOL of pool rent; the unused part comes straight back)…');
+      return { hash: signature, message: `Migrated to ${dex}. The liquidity is locked for good; LP trading fees can be harvested from Rewards.` };
     }
     if (action === 'withdraw') {
       // Curve fees and PumpSwap LP fee growth (both permissionless). When both are due they go in ONE transaction if it
       // fits and simulates; otherwise two, exactly as before. The check signs nothing.
       const hashes = [];
       const curveFees = pool.protocolFees + pool.creatorFees > 0n ? [this.client.withdrawFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward })] : [];
-      let harvest = [];
+      let harvest = [], venue = 'PumpSwap';
       if (pool.status === STATUS_MIGRATED) {
         const [state] = (await this.pumpStates([pool])).values();
-        if (state?.harvestable > 0n) harvest = this.client.harvestLpFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward });
+        venue = state?.venue ?? venue;
+        const raydium = venue === 'Raydium';
+        if (state?.harvestable > 0n) harvest = raydium ? this.client.harvestRaydiumFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward }) : this.client.harvestLpFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward });
+        // Partner pools on Raydium: spend queued SOL (and what this harvest queues) on a buyback and burn, capped at 1% of depth.
+        const queued = state ? state.migration.pendingBuyback + (harvest.length ? withdrawOut(state.harvestable, state.state).quote * BigInt(pool.buybackBps) / 10_000n : 0n) : 0n;
+        if (raydium && raydiumBuybackAmount(queued, state.state.quote) > 0n) harvest = [...harvest, this.client.raydiumBuyback({ mint })];
       }
       const combined = curveFees.length && harvest.length ? [this.client.computeBudget(HARVEST_COMPUTE_UNITS + 100_000), ...curveFees, ...harvest] : null;
       if (combined && await this.fitsOneTransaction(combined)) {
-        hashes.push(await this.sendInstructions(combined, [], 'Confirm the curve fee distribution and PumpSwap LP fee harvest (one transaction) in your wallet…'));
+        hashes.push(await this.sendInstructions(combined, [], `Confirm the curve fee distribution and ${venue} LP fee harvest (one transaction) in your wallet…`));
       } else {
         if (curveFees.length) hashes.push(await this.sendInstructions(curveFees, [], 'Confirm curve fee distribution in your wallet…'));
-        if (harvest.length) hashes.push(await this.sendInstructions([this.client.computeBudget(HARVEST_COMPUTE_UNITS), ...harvest], [], 'Confirm the PumpSwap LP fee harvest in your wallet…'));
+        if (harvest.length) hashes.push(await this.sendInstructions([this.client.computeBudget(HARVEST_COMPUTE_UNITS), ...harvest], [], `Confirm the ${venue} LP fee harvest in your wallet…`));
       }
-      if (!hashes.length) throw new Error('Nothing to distribute yet. LP fees become harvestable once PumpSwap trading has earned at least 0.01% of the locked position.');
+      if (!hashes.length) throw new Error(`Nothing to distribute yet. LP fees become harvestable once ${venue} trading has earned at least 0.01% of the locked position.`);
       return { hash: hashes.at(-1), message: 'Fees distributed 50/50 to the treasury and the creator reward wallet.' };
     }
-    if (pool.status === STATUS_MIGRATED) return this.pumpSwapTrade({ pool, config, action, body });
+    if (pool.status === STATUS_MIGRATED) {
+      const dex = await this.dexStateOf(pool);
+      return dex.venue === 'Raydium' ? this.raydiumTrade({ pool, config, action, body, state: dex }) : this.pumpSwapTrade({ pool, config, action, body });
+    }
     const percent = Number(body.slippage);
     if (!Number.isFinite(percent) || percent < 0.1 || percent > 5) throw new Error('Slippage must be between 0.1% and 5%.');
     const bps = BigInt(Math.round(percent * 100));
     let instruction;
-    if (pool.status === STATUS_GRADUATED) throw new Error('This curve is complete. Migrate it to PumpSwap to continue trading.');
+    if (pool.status === STATUS_GRADUATED) throw new Error(`This curve is complete. Migrate it to ${this.venueOf(config)} to continue trading.`);
     const feeBps = currentFeeBps(config, pool.createdAt, chainNow());
     if (action === 'buy') {
       const grossIn = parseAmount(body.amount, d);
@@ -581,7 +647,7 @@ export class SolanaWallet {
       if (held < q.gross + (config.wsol ? 5_000_000n : 0n)) throw new Error(`Not enough ${config.symbol} on ${this.net.name}.${config.test ? ' Use its test faucet in Network and funds.' : config.wsol ? ' Get devnet SOL at faucet.solana.com.' : ''}`);
       // Only what the trade actually charges is wrapped; a partial final fill leaves the rest unspent.
       const wrap = await this.wrapFor(config, q.gross), buyIx = this.client.buy({ buyer: this.publicKey, config: refs, mint, grossIn: q.gross, minTokensOut: q.tokens * (10000n - bps) / 10000n });
-      if (q.graduates) return this.completeAndMigrate({ config, refs, mint, wrap, buyIx, symbol: pool.symbol });
+      if (q.graduates) return this.completeAndMigrate({ config, refs, mint, wrap, buyIx, spend: q.gross, symbol: pool.symbol });
       instruction = [...wrap, buyIx];
     } else if (action === 'sell') {
       const tokensIn = parseAmount(body.amount, TOKEN_DECIMALS);

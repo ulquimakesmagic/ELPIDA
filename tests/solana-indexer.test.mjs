@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import * as web3 from '@solana/web3.js';
-import { SolanaIndexer, programEventLogs, pumpSwapTrade, metadataUri } from '../packages/indexer/solana-indexer.mjs';
+import { SolanaIndexer, programEventLogs, pumpSwapTrade, raydiumSwapTrade, metadataUri } from '../packages/indexer/solana-indexer.mjs';
 import { EVENTS } from '../packages/solana/client.mjs';
 import { SOLANA_GENESIS, validateSolanaRpc } from '../packages/solana/rpc-config.mjs';
 
@@ -145,6 +145,25 @@ test('PumpSwap swaps: one swap instruction on the pool, consistent price and res
   assert.equal(pumpSwapTrade(tx([swap(BUY)], pre, [bal(1, 1_100_000), bal(2, 2_750_000)]), ids), null);
   // A swap on another pool does not count for this one.
   assert.equal(pumpSwapTrade(tx([{ ...swap(BUY), accountKeyIndexes: [4, 3, 1, 2] }], pre, postBuy), ids), null);
+});
+
+test('Raydium CPMM swaps on graduated SOL-pair pools: the same checks, the trader is the swap payer', () => {
+  const RAY = 'DRaycpLY18LhpbydsBWbVJtxpNv9oXPgjRSfpF2bWpYb', PUMP = 'pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA';
+  const [rayPool, baseVault, quoteVault, trader, payer, other] = Array.from({ length: 6 }, () => web3.Keypair.generate().publicKey.toBase58());
+  const keys = [payer, baseVault, quoteVault, trader, other, rayPool, RAY, PUMP].map(k => new web3.PublicKey(k));
+  const BASE_IN = [143, 190, 90, 218, 196, 30, 51, 222], BASE_OUT = [55, 217, 98, 86, 163, 74, 180, 173];
+  // swap accounts: payer, authority, amm_config, pool_state, input, output, input_vault, output_vault, ...
+  const swap = (disc, user = 3, program = 6) => ({ programIdIndex: program, accountKeyIndexes: [user, 4, 4, 5, 4, 4, 2, 1], data: Uint8Array.from([...disc, ...new Array(16).fill(0)]) });
+  const bal = (accountIndex, amount) => ({ accountIndex, mint: 'm', owner: 'x', uiTokenAmount: { amount: String(amount) } });
+  const tx = (ixs, pre, post) => ({ transaction: { message: { staticAccountKeys: keys, compiledInstructions: ixs } }, meta: { err: null, preTokenBalances: pre, postTokenBalances: post, innerInstructions: [] } });
+  const ids = { pool: rayPool, poolBase: baseVault, poolQuote: quoteVault };
+  const pre = [bal(1, 1_000_000), bal(2, 2_500_000)], postBuy = [bal(1, 999_000), bal(2, 2_502_530)];
+  assert.deepEqual(raydiumSwapTrade(tx([swap(BASE_IN)], pre, postBuy), ids), { side: 'buy', tokenRaw: 1_000n, quoteRaw: 2_530n, account: trader }, 'swap_base_input');
+  assert.equal(raydiumSwapTrade(tx([swap(BASE_IN)], pre, [bal(1, 999_000), bal(2, 2_525_300)]), ids), null, 'a price far outside the pool range is refused');
+  assert.equal(raydiumSwapTrade(tx([swap(BASE_OUT, 4)], pre, [bal(1, 1_000_400), bal(2, 2_499_002)]), ids).account, other, 'swap_base_output');
+  assert.equal(raydiumSwapTrade(tx([swap(BASE_IN), swap(BASE_OUT)], pre, [bal(1, 999_999), bal(2, 2_500_015)]), ids), null, 'two swaps refused');
+  assert.equal(raydiumSwapTrade(tx([swap(BASE_IN, 3, 7)], pre, [bal(1, 999_000), bal(2, 2_502_530)]), ids), null, 'another program does not count');
+  assert.equal(pumpSwapTrade(tx([swap(BASE_IN)], pre, [bal(1, 999_000), bal(2, 2_502_530)]), ids), null, 'nor does a Raydium swap for PumpSwap');
 });
 
 test('Metaplex metadata URI is read from a MetadataV1 account and ignored otherwise', () => {

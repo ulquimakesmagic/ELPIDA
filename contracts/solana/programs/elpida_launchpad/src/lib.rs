@@ -66,6 +66,56 @@ const PUMP_CREATE_POOL: [u8; 8] = [233, 146, 209, 142, 207, 104, 64, 188];
 const PUMP_WITHDRAW: [u8; 8] = [183, 18, 70, 156, 148, 109, 161, 34];
 /// SOL lent to the LP-authority PDA so it can pay PumpSwap's account rent; the rest is refunded.
 pub const MIGRATION_RENT_LAMPORTS: u64 = 50_000_000;
+
+// Raydium CPMM (constant product, no OpenBook). SOL pairs graduate here; other pairs keep PumpSwap. The test build
+// (devnet, localnet) points at Raydium's devnet deployment, the mainnet build at mainnet. Both use the 1% fee tier.
+#[cfg(feature = "testnet")]
+pub mod raydium {
+    use super::*;
+    pub const PROGRAM: Pubkey = pubkey!("DRaycpLY18LhpbydsBWbVJtxpNv9oXPgjRSfpF2bWpYb");
+    /// AmmConfig index 3: 1% trade fee, 0.15 SOL pool-creation fee.
+    pub const AMM_CONFIG: Pubkey = pubkey!("EsTevfacYXpuho5VBuzBjDZi8dtWidGnXoSYAr8krTvz");
+    pub const CREATE_POOL_FEE: Pubkey = pubkey!("3oE58BKVt8KuYkGxx8zBojugnymWmBiyafWgMrnb6eYy");
+    /// PDA ["vault_and_lp_mint_auth_seed"] of the program.
+    pub const AUTHORITY: Pubkey = pubkey!("CXniRufdq5xL8t8jZAPxsPZDpuudwuJSPWnbcD5Y5Nxq");
+}
+#[cfg(not(feature = "testnet"))]
+pub mod raydium {
+    use super::*;
+    pub const PROGRAM: Pubkey = pubkey!("CPMMoo8L3F4NbTegBCKVNunggL7H1ZpdTHKxQB5qKP1C");
+    /// AmmConfig index 1: 1% trade fee, 0.15 SOL pool-creation fee.
+    pub const AMM_CONFIG: Pubkey = pubkey!("G95xxie3XbkCqtE39GgQ9Ggc7xBC8Uceve7HFDEFApkc");
+    pub const CREATE_POOL_FEE: Pubkey = pubkey!("DNXgeM9EiiaAbaWvwjHj9fQQLAX5ZsfHyvmYUNRAdNC8");
+    pub const AUTHORITY: Pubkey = pubkey!("GpMZbSM2GgvTKHJirzeGfMFoaZ8UR2X7F4v8vHTvxFbL");
+}
+pub const MEMO_PROGRAM: Pubkey = pubkey!("MemoSq4gqABAXKb96qnH8TysNcWxMyWCqXgDLGmfcHr");
+const RAY_INITIALIZE: [u8; 8] = [175, 175, 109, 31, 13, 152, 155, 237];
+const RAY_WITHDRAW: [u8; 8] = [183, 18, 70, 156, 148, 109, 161, 34];
+const RAY_SWAP_BASE_INPUT: [u8; 8] = [143, 190, 90, 218, 196, 30, 51, 222];
+const RAY_AMM_CONFIG_DISC: [u8; 8] = [218, 244, 33, 104, 203, 203, 43, 111];
+const RAY_POOL_DISC: [u8; 8] = [247, 237, 227, 245, 215, 195, 222, 70];
+/// The 1% tier, in Raydium's millionths.
+pub const RAYDIUM_TRADE_FEE_RATE: u64 = 10_000;
+/// Account sizes Raydium's `initialize` pays rent for: PoolState, ObservationState, the LP mint, and three token
+/// accounts (two vaults, the creator's LP account). Their rent plus the pool-creation fee is paid from the raised SOL.
+pub const RAY_POOL_LEN: usize = 637;
+pub const RAY_OBSERVATION_LEN: usize = 4075;
+const RAY_MINT_LEN: usize = 82;
+const RAY_TOKEN_ACCOUNT_LEN: usize = 165;
+// Raydium `PoolState` offsets (zero-copy, packed; 8-byte discriminator included).
+const RAY_POOL_VAULT_0: usize = 72;
+const RAY_POOL_VAULT_1: usize = 104;
+const RAY_POOL_MINT_0: usize = 168;
+const RAY_POOL_LP_SUPPLY: usize = 333;
+const RAY_POOL_PROTOCOL_FEES_0: usize = 341;
+const RAY_POOL_FUND_FEES_0: usize = 357;
+const RAY_POOL_CREATOR_FEES_0: usize = 397;
+/// A partner buyback spends at most this fraction of the pool's SOL depth per call (1 / 100 = 1%). With the 1% fee
+/// tier on both legs, pushing the price before a buyback costs more than it can return.
+pub const BUYBACK_DEPTH_DIVISOR: u64 = 100;
+/// Migration venues, stored in the migration record's extension.
+pub const VENUE_PUMPSWAP: u8 = 0;
+pub const VENUE_RAYDIUM: u8 = 1;
 /// Pyth Solana Receiver: owner of verified `PriceUpdateV2` accounts (same ID on mainnet and devnet).
 pub const PYTH_RECEIVER: Pubkey = pubkey!("rec5EKMGg6MxZYaMdyBfgwp4d5rB9T1VQH5pJv5LtFJ");
 /// sha256("account:PriceUpdateV2")[0..8]
@@ -90,7 +140,8 @@ pub const MAX_PARTNER_WINDOW_SECS: i64 = 180 * 86_400;
 /// read as standard): version u8, buyback_bps u16, tokens burned u64, quote spent u64; the rest is reserved.
 pub const POOL_EXT_LEN: usize = 32;
 /// Bytes appended after `PumpMigration` in migrations made by this version: version u8, quote queued for buyback
-/// u64, base burned u64, quote spent on buybacks u64, base bought back and burned u64; the rest is reserved.
+/// u64, base burned u64, quote spent on buybacks u64, base bought back and burned u64, venue u8 (0 PumpSwap,
+/// 1 Raydium CPMM); the rest is reserved.
 pub const MIGRATION_EXT_LEN: usize = 48;
 const EXT_VERSION: u8 = 1;
 // PumpSwap `Pool` layout offsets (8-byte discriminator included).
@@ -499,11 +550,12 @@ pub mod elpida_launchpad {
         Ok(())
     }
 
-    /// Permissionless once the curve is complete: seeds a PumpSwap pool with the remaining supply and
+    /// Permissionless once the curve is complete (pairs other than SOL): seeds a PumpSwap pool with the remaining supply and
     /// all raised quote (curve reserve + locked anti-snipe bonus). The LP tokens stay in a program PDA
     /// forever. The caller pays PumpSwap's account rent (refunded surplus) and the transaction fee.
     pub fn migrate_to_pumpswap(ctx: Context<MigrateToPumpswap>) -> Result<()> {
         require!(ctx.accounts.pool.status == STATUS_GRADUATED, ElpidaError::NotComplete);
+        require_keys_neq!(ctx.accounts.quote_mint.key(), WSOL_MINT, ElpidaError::WrongVenue);
         let pool = &ctx.accounts.pool;
         let base_amount = TOKEN_SUPPLY - pool.sold;
         let quote_amount = pool.real_quote.checked_add(pool.liquidity_bonus).ok_or(ElpidaError::MathOverflow)?;
@@ -652,55 +704,218 @@ pub mod elpida_launchpad {
         )?;
         let base_out = token_amount(&a.authority_base.to_account_info())?.checked_sub(base_before).ok_or(ElpidaError::MathOverflow)?;
         let quote_out = token_amount(&a.authority_quote.to_account_info())?.checked_sub(quote_before).ok_or(ElpidaError::MathOverflow)?;
-        let (half_base, half_quote) = (base_out / 2, quote_out / 2);
         let buyback_bps = PoolExt::read(&a.pool.to_account_info().try_borrow_data()?).buyback_bps as u128;
-        let (burn_base, queue_quote) = ((base_out as u128 * buyback_bps / BPS) as u64, (quote_out as u128 * buyback_bps / BPS) as u64);
-        let (protocol_base, protocol_quote) = (half_base - burn_base, half_quote - queue_quote);
-        if burn_base > 0 {
-            token::burn(
-                CpiContext::new_with_signer(a.token_program.to_account_info(), Burn { mint: a.mint.to_account_info(), from: a.authority_base.to_account_info(), authority: a.lp_authority.to_account_info() }, &[authority_seeds]),
-                burn_base,
-            )?;
-        }
-        for (from, to, amount) in [
-            (a.authority_base.to_account_info(), a.treasury_base.to_account_info(), protocol_base),
-            (a.authority_base.to_account_info(), a.reward_base.to_account_info(), base_out - half_base),
-        ] {
-            if amount > 0 {
-                token::transfer(
-                    CpiContext::new_with_signer(a.token_program.to_account_info(), Transfer { from, to, authority: a.lp_authority.to_account_info() }, &[authority_seeds]),
-                    amount,
-                )?;
-            }
-        }
-        let quote_program = a.quote_program_info();
-        for (to, amount) in [(a.treasury_quote.to_account_info(), protocol_quote), (a.reward_quote.to_account_info(), quote_out - half_quote)] {
-            if amount > 0 {
-                ti::transfer_checked(
-                    CpiContext::new_with_signer(quote_program.clone(), ti::TransferChecked { from: a.authority_quote.to_account_info(), mint: a.quote_mint.to_account_info(), to, authority: a.lp_authority.to_account_info() }, &[authority_seeds]),
-                    amount, a.curve_config.quote_decimals,
-                )?;
-            }
-        }
+        let split = HarvestPayout {
+            token_program: a.token_program.to_account_info(), quote_program: a.quote_program_info(), mint: a.mint.to_account_info(), quote_mint: a.quote_mint.to_account_info(),
+            quote_decimals: a.curve_config.quote_decimals, lp_authority: a.lp_authority.to_account_info(), seeds: authority_seeds,
+            authority_base: a.authority_base.to_account_info(), authority_quote: a.authority_quote.to_account_info(), treasury_base: a.treasury_base.to_account_info(),
+            treasury_quote: a.treasury_quote.to_account_info(), reward_base: a.reward_base.to_account_info(), reward_quote: a.reward_quote.to_account_info(),
+        }.pay(base_out, quote_out, buyback_bps)?;
+        let (protocol_base, protocol_quote) = (split.protocol_base, split.protocol_quote);
         let after = PumpState::read(&a.pump_pool.to_account_info(), &a.pump_pool_base.to_account_info(), &a.pump_pool_quote.to_account_info())?;
         let lp_after = token_amount(&a.authority_lp.to_account_info())?;
         require!(liquidity_units(lp_after, &after)? >= a.migration.principal, ElpidaError::PrincipalBreached);
         let (pool_key, pump_pool) = (a.pool.key(), a.pump_pool.key());
-        if buyback_bps > 0 {
-            let info = ctx.accounts.migration.to_account_info();
-            let mut data = info.try_borrow_mut_data()?;
-            let mut ext = MigrationExt::read(&data).ok_or(ElpidaError::PartnerTerms)?;
-            ext.pending_buyback = ext.pending_buyback.checked_add(queue_quote).ok_or(ElpidaError::MathOverflow)?;
-            ext.base_burned = ext.base_burned.checked_add(burn_base).ok_or(ElpidaError::MathOverflow)?;
-            ext.write(&mut data)?;
-            emit!(PartnerHarvest { pool: pool_key, base_burned: burn_base, quote_queued: queue_quote, pending_buyback: ext.pending_buyback });
-        }
+        if buyback_bps > 0 { split.record(&ctx.accounts.migration.to_account_info(), pool_key)?; }
         let migration = &mut ctx.accounts.migration;
         migration.lp_locked = lp_after;
         migration.harvested_lp = migration.harvested_lp.checked_add(harvest).ok_or(ElpidaError::MathOverflow)?;
         migration.harvested_base = migration.harvested_base.checked_add(base_out).ok_or(ElpidaError::MathOverflow)?;
         migration.harvested_quote = migration.harvested_quote.checked_add(quote_out).ok_or(ElpidaError::MathOverflow)?;
         emit!(LpFeesHarvested { pool: pool_key, pump_pool, lp_burned: harvest, base_out, quote_out, protocol_base, protocol_quote, lp_locked: lp_after });
+        Ok(())
+    }
+
+    /// Permissionless once a SOL-pair curve is complete: seeds a Raydium CPMM pool (1% fee tier) with the remaining
+    /// supply and all raised SOL (curve reserve + locked anti-snipe bonus), less Raydium's pool-creation fee and the
+    /// rent of the accounts it opens, which the raised SOL pays. The pool lives at Elpida's own PDA ["ray-pool", mint]
+    /// (Raydium accepts a signed non-canonical address), so nobody can create it first. The LP authority PDA creates the
+    /// pool and holds its LP tokens forever. The caller lends the fee and rent in lamports for the duration of the
+    /// instruction and is repaid in full from the raised SOL, so graduating costs the caller only the transaction fee.
+    pub fn migrate_to_raydium(ctx: Context<MigrateToRaydium>) -> Result<()> {
+        require!(ctx.accounts.pool.status == STATUS_GRADUATED, ElpidaError::NotComplete);
+        let cost = raydium_creation_cost(raydium_create_fee(&ctx.accounts.amm_config.to_account_info())?, &Rent::get()?)?;
+        let pool = &ctx.accounts.pool;
+        let base_amount = TOKEN_SUPPLY - pool.sold;
+        let raised = pool.real_quote.checked_add(pool.liquidity_bonus).ok_or(ElpidaError::MathOverflow)?;
+        let quote_amount = raised.checked_sub(cost).filter(|q| *q > 0).ok_or(ElpidaError::MathOverflow)?;
+        let (mint_key, pool_bump) = (pool.mint, pool.bump);
+        let a = &ctx.accounts;
+        let curve_seeds: &[&[u8]] = &[b"curve", mint_key.as_ref(), &[pool_bump]];
+        // Move the liquidity from the curve vaults to the LP authority, which deposits it.
+        token::transfer(
+            CpiContext::new_with_signer(a.token_program.to_account_info(), Transfer { from: a.token_vault.to_account_info(), to: a.authority_base.to_account_info(), authority: a.pool.to_account_info() }, &[curve_seeds]),
+            base_amount,
+        )?;
+        token::transfer(
+            CpiContext::new_with_signer(a.token_program.to_account_info(), Transfer { from: a.quote_vault.to_account_info(), to: a.authority_quote.to_account_info(), authority: a.pool.to_account_info() }, &[curve_seeds]),
+            raised,
+        )?;
+        system_program::transfer(
+            CpiContext::new(a.system_program.to_account_info(), system_program::Transfer { from: a.payer.to_account_info(), to: a.lp_authority.to_account_info() }),
+            cost,
+        )?;
+        let authority_bump = ctx.bumps.lp_authority;
+        let authority_seeds: &[&[u8]] = &[b"pump-lp", mint_key.as_ref(), &[authority_bump]];
+        let ray_pool_seeds: &[&[u8]] = &[b"ray-pool", mint_key.as_ref(), &[ctx.bumps.ray_pool]];
+        let base_is_0 = mint_key.to_bytes() < WSOL_MINT.to_bytes();
+        let (amount_0, amount_1) = if base_is_0 { (base_amount, quote_amount) } else { (quote_amount, base_amount) };
+        let (mint_0, mint_1) = if base_is_0 { (a.mint.to_account_info(), a.quote_mint.to_account_info()) } else { (a.quote_mint.to_account_info(), a.mint.to_account_info()) };
+        let (creator_0, creator_1) = if base_is_0 { (a.authority_base.to_account_info(), a.authority_quote.to_account_info()) } else { (a.authority_quote.to_account_info(), a.authority_base.to_account_info()) };
+        let mut data = Vec::with_capacity(32);
+        data.extend_from_slice(&RAY_INITIALIZE);
+        data.extend_from_slice(&amount_0.to_le_bytes());
+        data.extend_from_slice(&amount_1.to_le_bytes());
+        data.extend_from_slice(&0u64.to_le_bytes()); // open_time: Raydium opens trading one second later
+        let infos = [
+            a.lp_authority.to_account_info(), a.amm_config.to_account_info(), a.ray_authority.to_account_info(), a.ray_pool.to_account_info(),
+            mint_0, mint_1, a.lp_mint.to_account_info(), creator_0, creator_1, a.authority_lp.to_account_info(),
+            a.ray_vault_0.to_account_info(), a.ray_vault_1.to_account_info(), a.create_pool_fee.to_account_info(), a.observation.to_account_info(),
+            a.token_program.to_account_info(), a.token_program.to_account_info(), a.token_program.to_account_info(),
+            a.associated_token_program.to_account_info(), a.system_program.to_account_info(), a.rent.to_account_info(),
+        ];
+        // creator, amm_config, authority, pool_state, token_0_mint, token_1_mint, lp_mint, creator_token_0, creator_token_1, creator_lp_token,
+        // token_0_vault, token_1_vault, create_pool_fee, observation_state, token_program, token_0_program, token_1_program,
+        // associated_token_program, system_program, rent
+        const WRITABLE: [bool; 20] = [true, false, false, true, false, false, true, true, true, true, true, true, true, true, false, false, false, false, false, false];
+        let accounts = infos.iter().enumerate().map(|(i, info)| AccountMeta { pubkey: *info.key, is_signer: i == 0 || i == 3, is_writable: WRITABLE[i] }).collect();
+        invoke_signed(&Instruction { program_id: raydium::PROGRAM, accounts, data }, &infos, &[authority_seeds, ray_pool_seeds])?;
+        // Repay the caller: the SOL left with the LP authority (raised minus deposited, = the fee and rent it paid)
+        // unwraps into the LP authority, and everything it holds goes back to the caller.
+        token::close_account(CpiContext::new_with_signer(
+            a.token_program.to_account_info(),
+            token::CloseAccount { account: a.authority_quote.to_account_info(), destination: a.lp_authority.to_account_info(), authority: a.lp_authority.to_account_info() },
+            &[authority_seeds],
+        ))?;
+        let repaid = a.lp_authority.lamports();
+        invoke_signed(
+            &anchor_lang::solana_program::system_instruction::transfer(&a.lp_authority.key(), &a.payer.key(), repaid),
+            &[a.lp_authority.to_account_info(), a.payer.to_account_info(), a.system_program.to_account_info()],
+            &[authority_seeds],
+        )?;
+
+        let lp_locked = token_amount(&a.authority_lp.to_account_info())?;
+        let (state, _) = read_raydium(&a.ray_pool.to_account_info(), &a.ray_vault_0.to_account_info(), &a.ray_vault_1.to_account_info(), &mint_key)?;
+        require!(lp_locked > 0 && state.lp_supply > 0 && state.base == base_amount && state.quote == quote_amount, ElpidaError::RaydiumAccount);
+        let principal = liquidity_units(lp_locked, &state)?;
+        let now = Clock::get()?.unix_timestamp;
+        let (ray_pool, lp_mint, pool_key) = (a.ray_pool.key(), a.lp_mint.key(), a.pool.key());
+        let migration = &mut ctx.accounts.migration;
+        migration.curve_pool = pool_key;
+        migration.mint = mint_key;
+        migration.pump_pool = ray_pool;
+        migration.lp_mint = lp_mint;
+        migration.lp_locked = lp_locked;
+        migration.principal = principal;
+        migration.base_migrated = base_amount;
+        migration.quote_migrated = quote_amount;
+        migration.harvested_lp = 0;
+        migration.harvested_base = 0;
+        migration.harvested_quote = 0;
+        migration.migrated_at = now;
+        migration.bump = ctx.bumps.migration;
+        migration.authority_bump = authority_bump;
+        MigrationExt { venue: VENUE_RAYDIUM, ..Default::default() }.write(&mut ctx.accounts.migration.to_account_info().try_borrow_mut_data()?)?;
+        let pool = &mut ctx.accounts.pool;
+        pool.status = STATUS_MIGRATED;
+        pool.real_quote = 0;
+        pool.liquidity_bonus = 0;
+        emit!(CurveMigrated { pool: pool_key, mint: mint_key, pump_pool: ray_pool, lp_mint, base_amount, quote_amount, lp_locked });
+        emit!(RaydiumMigrated { pool: pool_key, ray_pool, lp_mint, raised, creation_cost: cost, repaid });
+        Ok(())
+    }
+
+    /// Permissionless: the Raydium counterpart of `harvest_lp_fees`. Withdraws only the LP tokens that represent
+    /// trading-fee growth since migration and splits the proceeds the same way; the principal liquidity stays locked.
+    pub fn harvest_raydium_fees(ctx: Context<HarvestRaydiumFees>) -> Result<()> {
+        ctx.accounts.check_token_accounts()?;
+        let a = &ctx.accounts;
+        let mint_key = a.mint.key();
+        let (state, base_is_0) = read_raydium(&a.ray_pool.to_account_info(), &a.ray_vault_0.to_account_info(), &a.ray_vault_1.to_account_info(), &mint_key)?;
+        let lp_locked = token_amount(&a.authority_lp.to_account_info())?;
+        let harvest = harvestable_lp(lp_locked, a.migration.principal, &state)?;
+        require!(harvest > 0 && harvest as u128 * MIN_HARVEST_DIVISOR >= lp_locked as u128, ElpidaError::NothingToHarvest);
+        let authority_seeds: &[&[u8]] = &[b"pump-lp", mint_key.as_ref(), &[a.migration.authority_bump]];
+        let (base_before, quote_before) = (token_amount(&a.authority_base.to_account_info())?, token_amount(&a.authority_quote.to_account_info())?);
+        let mut data = Vec::with_capacity(32);
+        data.extend_from_slice(&RAY_WITHDRAW);
+        data.extend_from_slice(&harvest.to_le_bytes());
+        data.extend_from_slice(&0u64.to_le_bytes());
+        data.extend_from_slice(&0u64.to_le_bytes());
+        let (account_0, account_1) = if base_is_0 { (a.authority_base.to_account_info(), a.authority_quote.to_account_info()) } else { (a.authority_quote.to_account_info(), a.authority_base.to_account_info()) };
+        let (mint_0, mint_1) = if base_is_0 { (a.mint.to_account_info(), a.quote_mint.to_account_info()) } else { (a.quote_mint.to_account_info(), a.mint.to_account_info()) };
+        let infos = [
+            a.lp_authority.to_account_info(), a.ray_authority.to_account_info(), a.ray_pool.to_account_info(), a.authority_lp.to_account_info(),
+            account_0, account_1, a.ray_vault_0.to_account_info(), a.ray_vault_1.to_account_info(),
+            a.token_program.to_account_info(), a.token_2022_program.to_account_info(), mint_0, mint_1, a.lp_mint.to_account_info(), a.memo_program.to_account_info(),
+        ];
+        // owner, authority, pool_state, owner_lp_token, token_0_account, token_1_account, token_0_vault, token_1_vault,
+        // token_program, token_program_2022, vault_0_mint, vault_1_mint, lp_mint, memo_program
+        const WRITABLE: [bool; 14] = [false, false, true, true, true, true, true, true, false, false, false, false, true, false];
+        let accounts = infos.iter().enumerate().map(|(i, info)| AccountMeta { pubkey: *info.key, is_signer: i == 0, is_writable: WRITABLE[i] }).collect();
+        invoke_signed(&Instruction { program_id: raydium::PROGRAM, accounts, data }, &infos, &[authority_seeds])?;
+        let base_out = token_amount(&a.authority_base.to_account_info())?.checked_sub(base_before).ok_or(ElpidaError::MathOverflow)?;
+        let quote_out = token_amount(&a.authority_quote.to_account_info())?.checked_sub(quote_before).ok_or(ElpidaError::MathOverflow)?;
+        let buyback_bps = PoolExt::read(&a.pool.to_account_info().try_borrow_data()?).buyback_bps as u128;
+        let split = HarvestPayout {
+            token_program: a.token_program.to_account_info(), quote_program: a.token_program.to_account_info(), mint: a.mint.to_account_info(), quote_mint: a.quote_mint.to_account_info(),
+            quote_decimals: a.curve_config.quote_decimals, lp_authority: a.lp_authority.to_account_info(), seeds: authority_seeds,
+            authority_base: a.authority_base.to_account_info(), authority_quote: a.authority_quote.to_account_info(), treasury_base: a.treasury_base.to_account_info(),
+            treasury_quote: a.treasury_quote.to_account_info(), reward_base: a.reward_base.to_account_info(), reward_quote: a.reward_quote.to_account_info(),
+        }.pay(base_out, quote_out, buyback_bps)?;
+        let (after, _) = read_raydium(&a.ray_pool.to_account_info(), &a.ray_vault_0.to_account_info(), &a.ray_vault_1.to_account_info(), &mint_key)?;
+        let lp_after = token_amount(&a.authority_lp.to_account_info())?;
+        require!(liquidity_units(lp_after, &after)? >= a.migration.principal, ElpidaError::PrincipalBreached);
+        let (pool_key, ray_pool) = (a.pool.key(), a.ray_pool.key());
+        if buyback_bps > 0 { split.record(&ctx.accounts.migration.to_account_info(), pool_key)?; }
+        let migration = &mut ctx.accounts.migration;
+        migration.lp_locked = lp_after;
+        migration.harvested_lp = migration.harvested_lp.checked_add(harvest).ok_or(ElpidaError::MathOverflow)?;
+        migration.harvested_base = migration.harvested_base.checked_add(base_out).ok_or(ElpidaError::MathOverflow)?;
+        migration.harvested_quote = migration.harvested_quote.checked_add(quote_out).ok_or(ElpidaError::MathOverflow)?;
+        emit!(LpFeesHarvested { pool: pool_key, pump_pool: ray_pool, lp_burned: harvest, base_out, quote_out, protocol_base: split.protocol_base, protocol_quote: split.protocol_quote, lp_locked: lp_after });
+        Ok(())
+    }
+
+    /// Permissionless: spends a partner pool's queued SOL (the quote side of its harvests) on its own token through the
+    /// Raydium pool and burns what it buys. One call spends at most 1% of the pool's SOL depth.
+    pub fn raydium_buyback(ctx: Context<RaydiumBuyback>) -> Result<()> {
+        let a = &ctx.accounts;
+        let mint_key = a.mint.key();
+        let mut ext = MigrationExt::read(&a.migration.to_account_info().try_borrow_data()?).ok_or(ElpidaError::NothingToBuyBack)?;
+        require!(ext.venue == VENUE_RAYDIUM, ElpidaError::WrongVenue);
+        // Nothing queued yet (the LP authority's wrapped-SOL account may not even exist again until a harvest).
+        require!(ext.pending_buyback > 0, ElpidaError::NothingToBuyBack);
+        let (state, base_is_0) = read_raydium(&a.ray_pool.to_account_info(), &a.ray_vault_0.to_account_info(), &a.ray_vault_1.to_account_info(), &mint_key)?;
+        let amount_in = buyback_amount(ext.pending_buyback.min(token_amount(&a.authority_quote.to_account_info())?), state.quote);
+        require!(amount_in > 0, ElpidaError::NothingToBuyBack);
+        let authority_seeds: &[&[u8]] = &[b"pump-lp", mint_key.as_ref(), &[a.migration.authority_bump]];
+        let base_before = token_amount(&a.authority_base.to_account_info())?;
+        let mut data = Vec::with_capacity(24);
+        data.extend_from_slice(&RAY_SWAP_BASE_INPUT);
+        data.extend_from_slice(&amount_in.to_le_bytes());
+        data.extend_from_slice(&1u64.to_le_bytes());
+        let (input_vault, output_vault) = if base_is_0 { (a.ray_vault_1.to_account_info(), a.ray_vault_0.to_account_info()) } else { (a.ray_vault_0.to_account_info(), a.ray_vault_1.to_account_info()) };
+        let infos = [
+            a.lp_authority.to_account_info(), a.ray_authority.to_account_info(), a.amm_config.to_account_info(), a.ray_pool.to_account_info(),
+            a.authority_quote.to_account_info(), a.authority_base.to_account_info(), input_vault, output_vault,
+            a.token_program.to_account_info(), a.token_program.to_account_info(), a.quote_mint.to_account_info(), a.mint.to_account_info(), a.observation.to_account_info(),
+        ];
+        // payer, authority, amm_config, pool_state, input_token_account, output_token_account, input_vault, output_vault,
+        // input_token_program, output_token_program, input_token_mint, output_token_mint, observation_state
+        const WRITABLE: [bool; 13] = [false, false, false, true, true, true, true, true, false, false, false, false, true];
+        let accounts = infos.iter().enumerate().map(|(i, info)| AccountMeta { pubkey: *info.key, is_signer: i == 0, is_writable: WRITABLE[i] }).collect();
+        invoke_signed(&Instruction { program_id: raydium::PROGRAM, accounts, data }, &infos, &[authority_seeds])?;
+        let bought = token_amount(&a.authority_base.to_account_info())?.checked_sub(base_before).ok_or(ElpidaError::MathOverflow)?;
+        token::burn(
+            CpiContext::new_with_signer(a.token_program.to_account_info(), Burn { mint: a.mint.to_account_info(), from: a.authority_base.to_account_info(), authority: a.lp_authority.to_account_info() }, &[authority_seeds]),
+            bought,
+        )?;
+        ext.pending_buyback -= amount_in;
+        ext.quote_spent = ext.quote_spent.checked_add(amount_in).ok_or(ElpidaError::MathOverflow)?;
+        ext.bought_burned = ext.bought_burned.checked_add(bought).ok_or(ElpidaError::MathOverflow)?;
+        ext.write(&mut ctx.accounts.migration.to_account_info().try_borrow_mut_data()?)?;
+        emit!(PartnerLpBuyback { pool: ctx.accounts.pool.key(), quote_in: amount_in, tokens_burned: bought, pending_buyback: ext.pending_buyback, total_burned: ext.bought_burned });
         Ok(())
     }
 }
@@ -722,6 +937,100 @@ impl PumpState {
         Ok(PumpState { lp_supply, base, quote })
     }
 }
+
+/// Raydium CPMM pool state, in the same terms as `PumpState`: LP supply and the reserves a withdrawal pays from (vault
+/// balances less the protocol, fund and creator fees Raydium keeps in them), mapped to base (the curve's token) and
+/// quote (SOL). Also returns whether the token is Raydium's token 0 (mints are ordered by address).
+pub fn read_raydium(pool: &AccountInfo, vault_0: &AccountInfo, vault_1: &AccountInfo, mint: &Pubkey) -> Result<(PumpState, bool)> {
+    require_keys_eq!(*pool.owner, raydium::PROGRAM, ElpidaError::RaydiumAccount);
+    let data = pool.try_borrow_data()?;
+    require!(data.len() >= RAY_POOL_LEN && data[..8] == RAY_POOL_DISC, ElpidaError::RaydiumAccount);
+    require!(data[RAY_POOL_VAULT_0..RAY_POOL_VAULT_0 + 32] == vault_0.key.to_bytes() && data[RAY_POOL_VAULT_1..RAY_POOL_VAULT_1 + 32] == vault_1.key.to_bytes(), ElpidaError::RaydiumAccount);
+    let base_is_0 = data[RAY_POOL_MINT_0..RAY_POOL_MINT_0 + 32] == mint.to_bytes();
+    require!(base_is_0 || data[RAY_POOL_MINT_0 + 32..RAY_POOL_MINT_0 + 64] == mint.to_bytes(), ElpidaError::RaydiumAccount);
+    let read = |offset: usize| u64::from_le_bytes(data[offset..offset + 8].try_into().unwrap());
+    let fees = |side: usize| -> Result<u64> {
+        read(RAY_POOL_PROTOCOL_FEES_0 + 8 * side).checked_add(read(RAY_POOL_FUND_FEES_0 + 8 * side)).and_then(|f| f.checked_add(read(RAY_POOL_CREATOR_FEES_0 + 8 * side))).ok_or(error!(ElpidaError::MathOverflow))
+    };
+    let r0 = token_amount(vault_0)?.checked_sub(fees(0)?).ok_or(ElpidaError::MathOverflow)?;
+    let r1 = token_amount(vault_1)?.checked_sub(fees(1)?).ok_or(ElpidaError::MathOverflow)?;
+    let (base, quote) = if base_is_0 { (r0, r1) } else { (r1, r0) };
+    Ok((PumpState { lp_supply: read(RAY_POOL_LP_SUPPLY), base, quote }, base_is_0))
+}
+
+/// Lamports Raydium's `initialize` takes from the pool creator: the pool-creation fee plus rent for the accounts it
+/// opens (pool, observation, LP mint, two vaults, the creator's LP account).
+pub fn raydium_creation_cost(create_pool_fee: u64, rent: &Rent) -> Result<u64> {
+    let rent_total = [RAY_POOL_LEN, RAY_OBSERVATION_LEN, RAY_MINT_LEN, RAY_TOKEN_ACCOUNT_LEN, RAY_TOKEN_ACCOUNT_LEN, RAY_TOKEN_ACCOUNT_LEN]
+        .iter().try_fold(0u64, |sum, len| sum.checked_add(rent.minimum_balance(*len)));
+    rent_total.and_then(|r| r.checked_add(create_pool_fee)).ok_or(error!(ElpidaError::MathOverflow))
+}
+
+/// Reads the pinned 1% AmmConfig and returns its pool-creation fee.
+fn raydium_create_fee(amm_config: &AccountInfo) -> Result<u64> {
+    require_keys_eq!(*amm_config.owner, raydium::PROGRAM, ElpidaError::RaydiumAccount);
+    let data = amm_config.try_borrow_data()?;
+    require!(data.len() >= 44 && data[..8] == RAY_AMM_CONFIG_DISC && data[9] == 0, ElpidaError::RaydiumAccount);
+    require!(u64::from_le_bytes(data[12..20].try_into().unwrap()) == RAYDIUM_TRADE_FEE_RATE, ElpidaError::RaydiumAccount);
+    Ok(u64::from_le_bytes(data[36..44].try_into().unwrap()))
+}
+
+/// Pays out one LP-fee harvest that the LP authority has just received: the creator's half of each side goes to the
+/// reward wallet; the protocol half goes to the treasury, less a partner pool's share, whose token side is burned and
+/// whose quote side stays with the LP authority for buybacks.
+struct HarvestPayout<'a, 'info> {
+    token_program: AccountInfo<'info>, quote_program: AccountInfo<'info>, mint: AccountInfo<'info>, quote_mint: AccountInfo<'info>, quote_decimals: u8,
+    lp_authority: AccountInfo<'info>, seeds: &'a [&'a [u8]],
+    authority_base: AccountInfo<'info>, authority_quote: AccountInfo<'info>,
+    treasury_base: AccountInfo<'info>, treasury_quote: AccountInfo<'info>, reward_base: AccountInfo<'info>, reward_quote: AccountInfo<'info>,
+}
+struct HarvestSplit { protocol_base: u64, protocol_quote: u64, burn_base: u64, queue_quote: u64 }
+impl<'a, 'info> HarvestPayout<'a, 'info> {
+    #[inline(never)]
+    fn pay(&self, base_out: u64, quote_out: u64, buyback_bps: u128) -> Result<HarvestSplit> {
+        let (half_base, half_quote) = (base_out / 2, quote_out / 2);
+        let (burn_base, queue_quote) = ((base_out as u128 * buyback_bps / BPS) as u64, (quote_out as u128 * buyback_bps / BPS) as u64);
+        let (protocol_base, protocol_quote) = (half_base - burn_base, half_quote - queue_quote);
+        if burn_base > 0 {
+            token::burn(
+                CpiContext::new_with_signer(self.token_program.clone(), Burn { mint: self.mint.clone(), from: self.authority_base.clone(), authority: self.lp_authority.clone() }, &[self.seeds]),
+                burn_base,
+            )?;
+        }
+        for (to, amount) in [(self.treasury_base.clone(), protocol_base), (self.reward_base.clone(), base_out - half_base)] {
+            if amount > 0 {
+                token::transfer(
+                    CpiContext::new_with_signer(self.token_program.clone(), Transfer { from: self.authority_base.clone(), to, authority: self.lp_authority.clone() }, &[self.seeds]),
+                    amount,
+                )?;
+            }
+        }
+        for (to, amount) in [(self.treasury_quote.clone(), protocol_quote), (self.reward_quote.clone(), quote_out - half_quote)] {
+            if amount > 0 {
+                ti::transfer_checked(
+                    CpiContext::new_with_signer(self.quote_program.clone(), ti::TransferChecked { from: self.authority_quote.clone(), mint: self.quote_mint.clone(), to, authority: self.lp_authority.clone() }, &[self.seeds]),
+                    amount, self.quote_decimals,
+                )?;
+            }
+        }
+        Ok(HarvestSplit { protocol_base, protocol_quote, burn_base, queue_quote })
+    }
+}
+impl HarvestSplit {
+    /// Partner pools: adds the burned token side and the queued quote side to the migration record's extension.
+    fn record(&self, migration: &AccountInfo, pool: Pubkey) -> Result<()> {
+        let mut data = migration.try_borrow_mut_data()?;
+        let mut ext = MigrationExt::read(&data).ok_or(ElpidaError::PartnerTerms)?;
+        ext.pending_buyback = ext.pending_buyback.checked_add(self.queue_quote).ok_or(ElpidaError::MathOverflow)?;
+        ext.base_burned = ext.base_burned.checked_add(self.burn_base).ok_or(ElpidaError::MathOverflow)?;
+        ext.write(&mut data)?;
+        emit!(PartnerHarvest { pool, base_burned: self.burn_base, quote_queued: self.queue_quote, pending_buyback: ext.pending_buyback });
+        Ok(())
+    }
+}
+
+/// Largest partner buyback one call may spend: the queued SOL, at most 1% of the pool's SOL depth.
+pub fn buyback_amount(pending: u64, quote_reserve: u64) -> u64 { pending.min(quote_reserve / BUYBACK_DEPTH_DIVISOR) }
 
 fn token_amount(account: &AccountInfo) -> Result<u64> {
     let data = account.try_borrow_data()?;
@@ -1038,17 +1347,17 @@ fn partner_share(info: &AccountInfo, creator: &Pubkey, now: i64) -> Result<u16> 
     Ok(if PARTNER_BPS.contains(&p.buyback_bps) && p.expires_at > now { p.buyback_bps } else { 0 })
 }
 
-/// Partner-tier fields stored after a migration record (`MIGRATION_EXT_LEN` bytes, written by `migrate_to_pumpswap`
-/// of this version): quote queued for buyback, base burned at harvests, and buyback totals.
+/// Partner-tier fields stored after a migration record (`MIGRATION_EXT_LEN` bytes, written by the migrations of this
+/// version): quote queued for buyback, base burned at harvests, buyback totals, and the venue (PumpSwap or Raydium).
 #[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
-pub struct MigrationExt { pub pending_buyback: u64, pub base_burned: u64, pub quote_spent: u64, pub bought_burned: u64 }
+pub struct MigrationExt { pub pending_buyback: u64, pub base_burned: u64, pub quote_spent: u64, pub bought_burned: u64, pub venue: u8 }
 pub fn migration_ext_offset() -> usize { 8 + PumpMigration::INIT_SPACE }
 impl MigrationExt {
     pub fn read(data: &[u8]) -> Option<MigrationExt> {
         let o = migration_ext_offset();
         if data.len() < o + MIGRATION_EXT_LEN || data[o] != EXT_VERSION { return None; }
         let u64_at = |i: usize| u64::from_le_bytes(data[i..i + 8].try_into().unwrap());
-        Some(MigrationExt { pending_buyback: u64_at(o + 1), base_burned: u64_at(o + 9), quote_spent: u64_at(o + 17), bought_burned: u64_at(o + 25) })
+        Some(MigrationExt { pending_buyback: u64_at(o + 1), base_burned: u64_at(o + 9), quote_spent: u64_at(o + 17), bought_burned: u64_at(o + 25), venue: data[o + 33] })
     }
     pub fn write(&self, data: &mut [u8]) -> Result<()> {
         let o = migration_ext_offset();
@@ -1057,6 +1366,7 @@ impl MigrationExt {
         for (i, v) in [self.pending_buyback, self.base_burned, self.quote_spent, self.bought_burned].into_iter().enumerate() {
             data[o + 1 + i * 8..o + 9 + i * 8].copy_from_slice(&v.to_le_bytes());
         }
+        data[o + 33] = self.venue;
         Ok(())
     }
 }
@@ -1587,6 +1897,198 @@ pub struct HarvestLpFees<'info> {
     pub token_2022_program: Program<'info, Token2022>,
 }
 
+#[derive(Accounts)]
+pub struct MigrateToRaydium<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(has_one = quote_mint)]
+    pub curve_config: Box<Account<'info, CurveConfig>>,
+    /// The SOL pair only.
+    #[account(address = WSOL_MINT @ ElpidaError::WrongVenue)]
+    pub quote_mint: Box<Account<'info, Mint>>,
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(mut, seeds = [b"curve", mint.key().as_ref()], bump = pool.bump, has_one = mint, constraint = pool.config == curve_config.key() @ ElpidaError::WrongConfig)]
+    pub pool: Box<Account<'info, CurvePool>>,
+    #[account(mut, associated_token::mint = mint, associated_token::authority = pool)]
+    pub token_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = pool)]
+    pub quote_vault: Box<Account<'info, TokenAccount>>,
+    /// Data-less PDA that creates the Raydium pool and owns its LP tokens forever (the same PDA as for PumpSwap).
+    #[account(mut, seeds = [b"pump-lp", mint.key().as_ref()], bump)]
+    pub lp_authority: SystemAccount<'info>,
+    #[account(init_if_needed, payer = payer, associated_token::mint = mint, associated_token::authority = lp_authority)]
+    pub authority_base: Box<Account<'info, TokenAccount>>,
+    /// Closed again in the same instruction (it repays the caller); harvests recreate it.
+    #[account(init_if_needed, payer = payer, associated_token::mint = quote_mint, associated_token::authority = lp_authority)]
+    pub authority_quote: Box<Account<'info, TokenAccount>>,
+    /// CHECK: the LP authority's LP account (SPL Token), created by Raydium.
+    #[account(mut, address = get_associated_token_address_with_program_id(&lp_authority.key(), &lp_mint.key(), &token_program.key()) @ ElpidaError::RaydiumAccount)]
+    pub authority_lp: UncheckedAccount<'info>,
+    #[account(init, payer = payer, space = 8 + PumpMigration::INIT_SPACE + MIGRATION_EXT_LEN, seeds = [b"pump-migration", mint.key().as_ref()], bump)]
+    pub migration: Box<Account<'info, PumpMigration>>,
+    /// CHECK: Elpida's PDA for this token's Raydium pool; Raydium creates it (it signs, so nobody can take it first).
+    #[account(mut, seeds = [b"ray-pool", mint.key().as_ref()], bump)]
+    pub ray_pool: UncheckedAccount<'info>,
+    /// CHECK: fixed address (1% tier); owner, discriminator and fee rate checked when read.
+    #[account(address = raydium::AMM_CONFIG @ ElpidaError::RaydiumAccount)]
+    pub amm_config: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = raydium::AUTHORITY @ ElpidaError::RaydiumAccount)]
+    pub ray_authority: UncheckedAccount<'info>,
+    /// CHECK: Raydium LP mint PDA; created and seed-checked by Raydium.
+    #[account(mut)]
+    pub lp_mint: UncheckedAccount<'info>,
+    /// CHECK: Raydium vault PDA for token 0 (mints ordered by address); created and seed-checked by Raydium.
+    #[account(mut)]
+    pub ray_vault_0: UncheckedAccount<'info>,
+    /// CHECK: Raydium vault PDA for token 1; created and seed-checked by Raydium.
+    #[account(mut)]
+    pub ray_vault_1: UncheckedAccount<'info>,
+    /// CHECK: fixed address; Raydium's pool-creation fee receiver.
+    #[account(mut, address = raydium::CREATE_POOL_FEE @ ElpidaError::RaydiumAccount)]
+    pub create_pool_fee: UncheckedAccount<'info>,
+    /// CHECK: Raydium observation PDA; created and seed-checked by Raydium.
+    #[account(mut)]
+    pub observation: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = raydium::PROGRAM @ ElpidaError::RaydiumAccount)]
+    pub raydium_program: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+    pub rent: Sysvar<'info, Rent>,
+}
+
+#[derive(Accounts)]
+pub struct HarvestRaydiumFees<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(has_one = quote_mint, has_one = treasury)]
+    pub curve_config: Box<Account<'info, CurveConfig>>,
+    /// CHECK: matched against curve_config.quote_mint (wrapped SOL; the pool owner check rejects anything else).
+    pub quote_mint: UncheckedAccount<'info>,
+    /// CHECK: matched against pool.mint.
+    pub mint: UncheckedAccount<'info>,
+    #[account(seeds = [b"curve", mint.key().as_ref()], bump = pool.bump, has_one = mint, has_one = reward, constraint = pool.config == curve_config.key() @ ElpidaError::WrongConfig, constraint = pool.status == STATUS_MIGRATED @ ElpidaError::NotMigrated)]
+    pub pool: Box<Account<'info, CurvePool>>,
+    #[account(mut, seeds = [b"pump-migration", mint.key().as_ref()], bump = migration.bump, has_one = lp_mint, constraint = migration.pump_pool == ray_pool.key() @ ElpidaError::RaydiumAccount)]
+    pub migration: Box<Account<'info, PumpMigration>>,
+    /// CHECK: PDA signer only.
+    #[account(seeds = [b"pump-lp", mint.key().as_ref()], bump = migration.authority_bump)]
+    pub lp_authority: UncheckedAccount<'info>,
+    // Token accounts below are checked in the handler (associated-token addresses). Destinations must already exist.
+    /// CHECK: ATA(lp_authority, mint).
+    #[account(mut)]
+    pub authority_base: UncheckedAccount<'info>,
+    /// CHECK: ATA(lp_authority, quote_mint).
+    #[account(mut)]
+    pub authority_quote: UncheckedAccount<'info>,
+    /// CHECK: ATA(lp_authority, lp_mint).
+    #[account(mut)]
+    pub authority_lp: UncheckedAccount<'info>,
+    /// CHECK: matched against the migration record; owner checked when read.
+    #[account(mut)]
+    pub ray_pool: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = raydium::AUTHORITY @ ElpidaError::RaydiumAccount)]
+    pub ray_authority: UncheckedAccount<'info>,
+    /// CHECK: matched against the migration record.
+    #[account(mut)]
+    pub lp_mint: UncheckedAccount<'info>,
+    /// CHECK: matched against the Raydium pool's stored vault.
+    #[account(mut)]
+    pub ray_vault_0: UncheckedAccount<'info>,
+    /// CHECK: matched against the Raydium pool's stored vault.
+    #[account(mut)]
+    pub ray_vault_1: UncheckedAccount<'info>,
+    /// CHECK: verified against curve_config.treasury.
+    pub treasury: UncheckedAccount<'info>,
+    /// CHECK: verified against pool.reward.
+    pub reward: UncheckedAccount<'info>,
+    /// CHECK: ATA(treasury, mint).
+    #[account(mut)]
+    pub treasury_base: UncheckedAccount<'info>,
+    /// CHECK: ATA(treasury, quote_mint).
+    #[account(mut)]
+    pub treasury_quote: UncheckedAccount<'info>,
+    /// CHECK: ATA(reward, mint).
+    #[account(mut)]
+    pub reward_base: UncheckedAccount<'info>,
+    /// CHECK: ATA(reward, quote_mint).
+    #[account(mut)]
+    pub reward_quote: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = raydium::PROGRAM @ ElpidaError::RaydiumAccount)]
+    pub raydium_program: UncheckedAccount<'info>,
+    /// CHECK: fixed address (Raydium's withdraw takes the memo program).
+    #[account(address = MEMO_PROGRAM)]
+    pub memo_program: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    pub token_2022_program: Program<'info, Token2022>,
+}
+
+impl<'info> HarvestRaydiumFees<'info> {
+    #[inline(never)]
+    fn check_token_accounts(&self) -> Result<()> {
+        let spl = self.token_program.key();
+        let (mint, quote, lp) = (self.mint.key(), self.quote_mint.key(), self.lp_mint.key());
+        let (authority, treasury, reward) = (self.lp_authority.key(), self.treasury.key(), self.reward.key());
+        for (account, owner, account_mint) in [
+            (&self.authority_base, authority, mint), (&self.authority_quote, authority, quote), (&self.authority_lp, authority, lp),
+            (&self.treasury_base, treasury, mint), (&self.treasury_quote, treasury, quote),
+            (&self.reward_base, reward, mint), (&self.reward_quote, reward, quote),
+        ] {
+            require_keys_eq!(account.key(), get_associated_token_address_with_program_id(&owner, &account_mint, &spl), ElpidaError::RaydiumAccount);
+        }
+        Ok(())
+    }
+}
+
+#[derive(Accounts)]
+pub struct RaydiumBuyback<'info> {
+    /// CHECK: matched against pool.mint; burned from, so writable.
+    #[account(mut)]
+    pub mint: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = WSOL_MINT @ ElpidaError::WrongVenue)]
+    pub quote_mint: UncheckedAccount<'info>,
+    #[account(seeds = [b"curve", mint.key().as_ref()], bump = pool.bump, has_one = mint, constraint = pool.status == STATUS_MIGRATED @ ElpidaError::NotMigrated)]
+    pub pool: Box<Account<'info, CurvePool>>,
+    #[account(mut, seeds = [b"pump-migration", mint.key().as_ref()], bump = migration.bump, constraint = migration.pump_pool == ray_pool.key() @ ElpidaError::RaydiumAccount)]
+    pub migration: Box<Account<'info, PumpMigration>>,
+    /// CHECK: PDA signer only.
+    #[account(seeds = [b"pump-lp", mint.key().as_ref()], bump = migration.authority_bump)]
+    pub lp_authority: UncheckedAccount<'info>,
+    /// CHECK: ATA(lp_authority, mint); receives the bought tokens, which are burned.
+    #[account(mut, address = get_associated_token_address_with_program_id(&lp_authority.key(), &mint.key(), &token_program.key()) @ ElpidaError::RaydiumAccount)]
+    pub authority_base: UncheckedAccount<'info>,
+    /// CHECK: ATA(lp_authority, wrapped SOL); holds the queued SOL.
+    #[account(mut, address = get_associated_token_address_with_program_id(&lp_authority.key(), &WSOL_MINT, &token_program.key()) @ ElpidaError::RaydiumAccount)]
+    pub authority_quote: UncheckedAccount<'info>,
+    /// CHECK: matched against the migration record; owner checked when read.
+    #[account(mut)]
+    pub ray_pool: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = raydium::AUTHORITY @ ElpidaError::RaydiumAccount)]
+    pub ray_authority: UncheckedAccount<'info>,
+    /// CHECK: fixed address; Raydium checks it is the pool's config.
+    #[account(address = raydium::AMM_CONFIG @ ElpidaError::RaydiumAccount)]
+    pub amm_config: UncheckedAccount<'info>,
+    /// CHECK: matched against the Raydium pool's stored vault.
+    #[account(mut)]
+    pub ray_vault_0: UncheckedAccount<'info>,
+    /// CHECK: matched against the Raydium pool's stored vault.
+    #[account(mut)]
+    pub ray_vault_1: UncheckedAccount<'info>,
+    /// CHECK: Raydium checks it is the pool's observation account.
+    #[account(mut)]
+    pub observation: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = raydium::PROGRAM @ ElpidaError::RaydiumAccount)]
+    pub raydium_program: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+}
+
 impl<'info> HarvestLpFees<'info> {
     /// The quote mint's token program account (the quote mint is owned by SPL Token or Token-2022).
     fn quote_program_info(&self) -> AccountInfo<'info> {
@@ -1645,6 +2147,10 @@ pub struct PartnerBuyback { pub pool: Pubkey, pub quote_in: u64, pub tokens_burn
 #[event]
 pub struct PartnerHarvest { pub pool: Pubkey, pub base_burned: u64, pub quote_queued: u64, pub pending_buyback: u64 }
 #[event]
+pub struct RaydiumMigrated { pub pool: Pubkey, pub ray_pool: Pubkey, pub lp_mint: Pubkey, pub raised: u64, pub creation_cost: u64, pub repaid: u64 }
+#[event]
+pub struct PartnerLpBuyback { pub pool: Pubkey, pub quote_in: u64, pub tokens_burned: u64, pub pending_buyback: u64, pub total_burned: u64 }
+#[event]
 pub struct LpFeesHarvested { pub pool: Pubkey, pub pump_pool: Pubkey, pub lp_burned: u64, pub base_out: u64, pub quote_out: u64, pub protocol_base: u64, pub protocol_quote: u64, pub lp_locked: u64 }
 
 #[error_code]
@@ -1682,4 +2188,7 @@ pub enum ElpidaError {
     #[msg("Token metadata must be an ipfs:// URI of at most 200 printable characters")] InvalidUri,
     #[msg("The curve can be reopened only 24 hours after it completed without migrating")] GraceNotOver,
     #[msg("Partner tiers are 10% or 20% with an expiry at most 180 days ahead, or (0, 0) to end one")] PartnerTerms,
+    #[msg("SOL pairs graduate to Raydium; other pairs to PumpSwap")] WrongVenue,
+    #[msg("Unexpected Raydium account")] RaydiumAccount,
+    #[msg("No queued partner buyback to spend")] NothingToBuyBack,
 }

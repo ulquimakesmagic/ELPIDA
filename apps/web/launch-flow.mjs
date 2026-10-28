@@ -93,7 +93,7 @@ export function renderLaunch(ctx) {
   const priceNote = () => {const p=launchPrice();return freshPrice(p)?`1 ${nativeSymbol()} ≈ USD ${number(p.usd,2)} · ${p.source} · Updated ${new Date(p.updatedAt*1000).toLocaleTimeString()}`:'Price feed unavailable or stale. Refresh before launching.';};
   const usdcAvailable = () => draft.chain==='local'||(connected()&&!!ctx.wallet.feeUsdc&&!/^0x0{40}$/.test(ctx.wallet.feeUsdc));
   const assetDecimals = () => selectedAsset()?.decimals ?? 18;
-  const dexName = () => !draft.chain ? 'DEX' : solana() ? 'PumpSwap' : draft.chain === 'local' ? (ctx.config.dex ? 'Uniswap v3' : 'test') : draft.chain === 'base-sepolia' ? 'Uniswap v3' : ctx.config.publicDexes?.[draft.chain]?.name ?? 'test';
+  const dexName = () => !draft.chain ? 'DEX' : solana() ? (draft.pair === 'native' ? 'Raydium' : 'PumpSwap') : draft.chain === 'local' ? (ctx.config.dex ? 'Uniswap v3' : 'test') : draft.chain === 'base-sepolia' ? 'Uniswap v3' : ctx.config.publicDexes?.[draft.chain]?.name ?? 'test';
 
   async function loadRewards() {
     if (rewardData || ctx.mode !== 'local') return;

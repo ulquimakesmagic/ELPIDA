@@ -46,6 +46,29 @@ Nameservers moved from Vercel to Cloudflare; DNS, SSL and the `elpida-fallback` 
 deploy logs for `backup_disabled`; if present, production has no off-site backups and that must be fixed before mainnet.
 Search Console sitemap: Google's live test fetches it; the "Couldn't fetch" row is waiting on Google's refresh.
 
+## Solana SOL pairs graduate to Raydium: devnet program upgrade, 28 October 2026
+
+SOL pairs now graduate into a Raydium CPMM pool on the 1% fee tier; USDC and token pairs keep PumpSwap. Raydium's
+pool-creation fee and rent (0.192 SOL) come out of the raised SOL. Tokens already on PumpSwap stay there. Tested on the
+local validator against Raydium's real devnet program (`fixtures/raydium_cpmm.so`, sha256 `30a9273d…d8d1`, dumped by
+Malik on 27 October). Devnet only; nothing on mainnet.
+
+New SHA256 (Solana CLI 2.3.13, reproduced byte for byte from a fresh target): test build
+`5134736605be538111c05991af495028debcc77f2ed536b33ef869c768a45a0d`, mainnet build
+`363e69c68ca88466ae09acd37a33ca50eccc925840470d0f7dbdeed8eeb8c7f4`.
+
+1. From `elpida-fork`, `git pull`, then check the build:
+   `certutil -hashfile contracts\solana\build\elpida_launchpad.so SHA256` must print
+   `5134736605be538111c05991af495028debcc77f2ed536b33ef869c768a45a0d`.
+2. Make sure the deployer `FeUWF…KaH8` holds about **7.5 devnet SOL** (faucet.solana.com; it may take more than one
+   request). The program grows by about 123 KB, so the upgrade extends it (about 0.86 SOL of rent, kept); about 6 SOL
+   is an upload buffer refunded after the upgrade.
+3. Run `npm.cmd run solana:deploy -- --upgrade --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`.
+4. Send Claude the output. Do not commit `deployments/solana-devnet.json` if the script rewrites it
+   (`git checkout -- deployments/solana-devnet.json`).
+5. A first devnet graduation on Raydium: the SOL pair is priced from $5,000 starting FDV, so completing a curve takes
+   roughly 60–70 devnet SOL of buys at today's price. Spread over a few wallets, or ask Claude to size a cheaper test.
+
 ## Solana partner tiers: devnet program upgrade, 26 October 2026
 
 `contracts/solana/build/*.so` were rebuilt with early-partner tiers (Solana CLI 2.3.13, reproduced byte for byte).
