@@ -9,6 +9,7 @@ import { PriceKeeper } from './price-keeper.mjs';
 import {configuredGraduationKeeper} from './graduation-keeper.mjs';
 import { FeedRelay } from './feed-relay.mjs';
 import { testDexArtifacts } from './test-dex-artifacts.mjs';
+import { createStaticAssets, contentVersion } from './static-assets.mjs';
 import { PublicIndexer, recentTrade, feedTrades } from './public-indexer.mjs';
 import { TradeFeed } from './trade-feed.mjs';
 import { SolanaIndexer } from '../../packages/indexer/solana-indexer.mjs';
@@ -111,6 +112,10 @@ const vendorFiles = new Map([
   ['/curve-model.mjs', fileURLToPath(new URL('../../packages/core/curve-model.mjs', import.meta.url))],
 ]);
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const IMMUTABLE = 'public, max-age=31536000, immutable';
+// Every served script and stylesheet, for versioned URLs and the modulepreload list (apps/api/static-assets.mjs).
+const staticFiles = new Map([...[...resources].filter(([, [, type]]) => type !== 'text/html').map(([path, [name]]) => [path, resolve(webRoot, name)]), ...vendorFiles]);
+const staticAssets = createStaticAssets({ files: staticFiles, version: process.env.ELPIDA_STATIC_CACHE === 'off' ? null : process.env.RAILWAY_ENVIRONMENT_NAME || process.env.NODE_ENV === 'production' || process.env.ELPIDA_STATIC_CACHE === 'on' ? contentVersion(staticFiles) : null });
 const SOLANA_TICK_MS = Math.max(1500, Math.min(60000, Number(process.env.ELPIDA_SOLANA_INDEX_INTERVAL_MS) || 3000));
 
 // Solana Devnet by default; ELPIDA_SOLANA_CLUSTER=localnet targets a local solana-test-validator.
@@ -419,7 +424,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if (url.pathname === '/api/state') return send(200, await runtime.state(url.searchParams.get('account') ?? '0'));
         // Simulation buys for the Explore live feed: the same public shape as /api/public/recent-trades.
         if (url.pathname === '/api/recent-trades') { const limit=Math.max(1,Math.min(50,Number(url.searchParams.get('limit'))||20)),tokens=new Map(runtime.listings().map(t=>[t.address.toLowerCase(),t])); return send(200, runtime.indexer.recentTrades(limit).flatMap(trade=>{const t=tokens.get(String(trade.token).toLowerCase());return t?[recentTrade('local',t,trade)]:[];})); }
-        if (vendorFiles.has(url.pathname)) { res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800' }); return res.end(await readFile(vendorFiles.get(url.pathname))); }
+        if (vendorFiles.has(url.pathname)) { const out = staticAssets.serve(url.pathname, url.searchParams.get('v')); res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': out.immutable ? IMMUTABLE : 'no-cache' }); return res.end(out.body); }
         const seoOrigin = canonicalOrigin(), seoPage = PAGES.find(p => p.path === url.pathname);
         const seoBody = url.pathname === '/robots.txt' ? [renderRobots(seoOrigin), 'text/plain'] : url.pathname === '/sitemap.xml' ? [renderSitemap(seoOrigin), 'application/xml'] : url.pathname === '/llms.txt' ? [renderLlms(seoOrigin), 'text/plain'] : seoPage ? [renderPage(seoPage, seoOrigin), 'text/html'] : null;
         if (seoBody) { res.setHeader('Cache-Control', 'public, max-age=3600'); res.writeHead(200, { 'Content-Type': `${seoBody[1]}; charset=utf-8` }); return res.end(seoBody[0]); }
@@ -439,8 +444,13 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         }
         function publicErrorCode(error){return String(error?.code??error?.name??'LOOKUP_FAILED').replace(/[^a-zA-Z0-9_]/g,'').slice(0,64)||'LOOKUP_FAILED';}
         const resource = resources.get(url.pathname);
-        if (resource) { const content = await readFile(resolve(webRoot, resource[0])); res.writeHead(200, { 'Content-Type': `${resource[1]}; charset=utf-8`, // App modules change with every deploy; a cached copy would run old client code against a new server.
-      'Cache-Control': 'no-cache' }); return res.end(content); }
+        if (resource) {
+          // App code changes with every deploy: unversioned URLs are revalidated, versioned ones (?v=<build>, which
+          // index.html and every import use) are immutable because a deploy changes the build id.
+          if (resource[1] === 'text/html') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); return res.end(staticAssets.html(await readFile(resolve(webRoot, resource[0]), 'utf8'))); }
+          const out = staticAssets.serve(url.pathname, url.searchParams.get('v'));
+          res.writeHead(200, { 'Content-Type': `${resource[1]}; charset=utf-8`, 'Cache-Control': out.immutable ? IMMUTABLE : 'no-cache' }); return res.end(out.body);
+        }
         if (url.pathname.startsWith('/assets/')) {
           const file = resolve(assetRoot, '.' + decodeURIComponent(url.pathname.slice('/assets'.length)));
           const type = assetTypes[file.slice(file.lastIndexOf('.'))];
