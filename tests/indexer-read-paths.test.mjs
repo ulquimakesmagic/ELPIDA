@@ -109,3 +109,14 @@ test('a history outside the requested window does not change the last buckets', 
   assert.equal(wide.length, 1);
   assert.equal(wide[0].trades, 40);
 });
+
+test('a token stored with a checksummed address is still found by a lowercase lookup', () => {
+  // A listing hands the stored casing back to a page that looks the token up in lowercase; older rows can be
+  // checksummed, and that mismatch used to 404 the whole token page.
+  const mixed = '0x' + 'AbCd'.repeat(10);
+  index.db.prepare('INSERT INTO tokens VALUES(?,?,?)').run(mixed, 1, JSON.stringify({ address: mixed, symbol: 'MIX', name: 'Mixed case' }));
+
+  assert.equal(index.tokenAt(mixed.toLowerCase())?.symbol, 'MIX', 'lowercase lookup finds a checksummed row');
+  assert.equal(index.tokenAt(mixed)?.symbol, 'MIX', 'the stored casing still works');
+  assert.equal(index.tokenAt('0x' + '11'.repeat(20))?.symbol, 'LEG', 'exact matches keep working');
+});

@@ -393,7 +393,12 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           return send(200,{owner:owner.toLowerCase(),balances,networks});
         }
         const publicMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?)?$/);
-        if(publicMatch){const key=url.searchParams.get('network')??'base-sepolia';if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown public network.'});if(!publicMatch[1]){const activity=new Map();return send(200,publicIndex.listings(key,(e,t)=>{if(!activity.has(e))activity.set(e,indexedActivity(e.index.db));return {priceChange24h:indexedChange(e.index.db,t),...activityOf(activity.get(e),t.address)};}));}const data=publicIndex.detail(key,publicMatch[1],publicMatch[2],Number(url.searchParams.get('interval')??60));return data===null?send(404,{error:'Token not indexed yet. Check indexer status and retry.'}):send(200,data);}
+        if(publicMatch){const key=url.searchParams.get('network')??'base-sepolia';if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown public network.'});if(!publicMatch[1]){const activity=new Map();return send(200,publicIndex.listings(key,(e,t)=>{if(!activity.has(e))activity.set(e,indexedActivity(e.index.db));return {priceChange24h:indexedChange(e.index.db,t),...activityOf(activity.get(e),t.address)};}));}let data=null,failure=null;
+            try{data=publicIndex.detail(key,publicMatch[1],publicMatch[2],Number(url.searchParams.get('interval')??60));}
+            catch(error){failure=publicErrorCode(error);}
+            // A missing token and a failed lookup are different problems; say which one this was.
+            if(data===null){if(failure)console.error(JSON.stringify({event:'public_token_lookup_failed',requestId,network:key,kind:publicMatch[2]??'token',code:failure}));return send(failure?503:404,{error:failure?'Indexer unavailable for this token. Retry shortly.':'Token not indexed yet. Check indexer status and retry.',...(failure?{code:failure}:{})});}
+            return send(200,data);}
         // Bytecode for the labelled test DEX and relay feed, fetched only when the launchpad owner deploys them.
         if (url.pathname === '/api/test-dex-artifacts') return send(200, testDexArtifacts());
         if (url.pathname === '/api/config') return send(200, { ...runtime.config, serverTime: Date.now()/1000, vanity: vanity.status(), circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), relay: feedRelay.publicConfig(), csrf });
@@ -424,6 +429,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           res.writeHead(token ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' });
           return res.end(token ? renderTokenPage({ token, network: key, networkName: nets.get(key), origin: canonicalOrigin(), testnet: key !== 'solana-mainnet' }) : renderTokenNotFound({ origin: canonicalOrigin() }));
         }
+        function publicErrorCode(error){return String(error?.code??error?.name??'LOOKUP_FAILED').replace(/[^a-zA-Z0-9_]/g,'').slice(0,64)||'LOOKUP_FAILED';}
         const resource = resources.get(url.pathname);
         if (resource) { const content = await readFile(resolve(webRoot, resource[0])); res.writeHead(200, { 'Content-Type': `${resource[1]}; charset=utf-8`, // App modules change with every deploy; a cached copy would run old client code against a new server.
       'Cache-Control': 'no-cache' }); return res.end(content); }
