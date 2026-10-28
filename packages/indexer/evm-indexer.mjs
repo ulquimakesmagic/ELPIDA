@@ -23,6 +23,10 @@ export function ratio(numerator, denominator, digits = 24) {
 }
 
 /** Durable Elpida EVM indexer. Protocol adapters currently cover curves and custom test pools only. */
+// Early-partner tiers (docs/DESIGN_PARTNER_TIERS.md): read with minimal ABIs so curves and splitters that predate them
+// simply report no tier.
+const PARTNER_ABI=['function buybackBps() view returns(uint256)','function buybackBurned() view returns(uint256)'];
+const SPLITTER_PARTNER_ABI=['function burned() view returns(uint256)','function pendingBuyback(address) view returns(uint256)'];
 export class EvmIndexer {
   constructor({provider, factory, contracts, path = ':memory:', chainId = 31337, fromBlock = 0, confirmations = 0, nativeSymbol = 'ETH', batchSize = 1, dexName = 'Uniswap v3'}) {
     if (path !== ':memory:') mkdirSync(dirname(path), {recursive:true});
@@ -213,6 +217,22 @@ export class EvmIndexer {
     }catch(e){this.db.exec('ROLLBACK');throw e;}
   }
   parse(kind,log){try{return this.interfaces[kind].parseLog(log);}catch{return null;}}
+  /** A partner curve's burn share (immutable, read once per curve): 1000 or 2000, else 0 (also for curves that predate tiers). */
+  async buybackBpsOf(r,call){
+    this.partnerBps??=new Map();
+    if(r.buybackBps!==undefined)return r.buybackBps;
+    if(!this.partnerBps.has(r.curve)){let bps=0;try{bps=Number(await new Contract(r.curve,PARTNER_ABI,this.provider).buybackBps(call));}catch(e){if(!['CALL_EXCEPTION','BAD_DATA'].includes(e.code))throw e;/* the curve predates partner tiers */}this.partnerBps.set(r.curve,bps===1000||bps===2000?bps:0);}
+    return this.partnerBps.get(r.curve);
+  }
+  /** Tokens a partner token's buybacks burned: on the curve, plus LP fees after graduation (token share burned, queue bought). */
+  async partnerSnapshot(r,call,{graduated,splitter,quoteAsset}={}){
+    const buybackBps=await this.buybackBpsOf(r,call);
+    if(!buybackBps)return {buybackBps:0};
+    const curveBurned=await new Contract(r.curve,PARTNER_ABI,this.provider).buybackBurned(call);
+    let lpBurned=0n,pending=0n;
+    if(graduated&&splitter){const fees=new Contract(splitter,SPLITTER_PARTNER_ABI,this.provider);try{lpBurned=await fees.burned(call);if(quoteAsset)pending=await fees.pendingBuyback(quoteAsset,call);}catch(e){if(!['CALL_EXCEPTION','BAD_DATA'].includes(e.code))throw e;/* the splitter predates partner tiers */}}
+    return {buybackBps,burned:formatUnits(curveBurned+lpBurned,18),...(graduated?{pendingBuyback:formatUnits(pending,r.quoteDecimals)}:{})};
+  }
   async readSnapshot(r,height,block) {
     const call={blockTag:height},c=new Contract(r.curve,this.contracts.curve.abi,this.provider),t=new Contract(r.address,this.contracts.token.abi,this.provider);
     const [pool,sold,complete,supply,deadBalance,devHolding] = await Promise.all([c.pool(call),c.sold(call),c.complete(call),t.totalSupply(call),t.balanceOf(dead,call),t.balanceOf(r.creator,call)]);
@@ -226,7 +246,8 @@ export class EvmIndexer {
     const soldOut=!complete&&!graduated&&r.saleCapRaw!=null&&sold>=BigInt(r.saleCapRaw);
     dev.soldOut=soldOut;
     if(graduated && this.contracts.tax)return {...await this.readV2Snapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance}),...dev};
-    if(graduated && this.contracts.dexPool)return {...await this.readDexSnapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance}),...dev};
+    if(graduated && this.contracts.dexPool){const snap=await this.readDexSnapshot(r,height,block,{c,t,pool,sold,complete,supply,deadBalance});return {...snap,...dev,...await this.partnerSnapshot(r,call,{graduated:true,splitter:snap.feeSplitter,quoteAsset:snap.quoteAsset})};}
+    if(!graduated)Object.assign(dev,await this.partnerSnapshot(r,call));
     const [reserve,cp,cc] = await Promise.all([m.realReserve(call),c.protocolFees(call),c.creatorFees(call)]);
     const poolTokens=graduated?await m.tokenReserve(call):0n;
     const q=graduated?reserve:BigInt(r.virtualQuote)+reserve,base=graduated?poolTokens:BigInt(r.virtualToken)-sold,d=r.quoteDecimals;

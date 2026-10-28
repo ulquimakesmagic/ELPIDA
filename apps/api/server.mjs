@@ -54,6 +54,7 @@ resources.set('/chat-signature.mjs',['chat-signature.mjs','text/javascript']);
 resources.set('/holder-chat.mjs',['holder-chat.mjs','text/javascript']);
 resources.set('/trade-filter.mjs',['trade-filter.mjs','text/javascript']);
 resources.set('/token-insights.mjs',['token-insights.mjs','text/javascript']);
+resources.set('/partner-labels.mjs',['partner-labels.mjs','text/javascript']);
 resources.set('/portfolio-view.mjs',['portfolio-view.mjs','text/javascript']);
 resources.set('/portfolio-model.mjs',['portfolio-model.mjs','text/javascript']);
 resources.set('/admin-view.mjs',['admin-view.mjs','text/javascript']);

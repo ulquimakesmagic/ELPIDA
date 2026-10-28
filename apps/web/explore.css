@@ -187,6 +187,12 @@
 .dev-badge { padding: 1px 6px; border-radius: 6px; background: rgba(255, 255, 255, .05); color: var(--ink-2); font: 600 9.5px/1.6 var(--font-sans); white-space: nowrap; }
 [data-theme="light"] .dev-badge { background: var(--panel-2); }
 .dev-badge[data-level="high"] { background: rgba(255, 186, 73, .13); color: #ffc46b; }
+/* Partner tokens: fixed share of trading fees that buys back and burns the token. */
+.burn-badge { display: inline-flex; align-items: center; gap: 3px; padding: 1px 6px; border-radius: 6px; background: rgba(255, 122, 69, .13); color: #ff9a6b; font: 600 9.5px/1.6 var(--font-sans); white-space: nowrap; }
+.burn-badge .icon-xs { width: 10px; height: 10px; }
+.burn-badge[data-tier="elite"] { background: rgba(255, 92, 92, .15); color: #ff8080; }
+[data-theme="light"] .burn-badge { background: rgba(220, 90, 30, .12); color: #a8410f; }
+[data-theme="light"] .burn-badge[data-tier="elite"] { background: rgba(200, 40, 40, .12); color: #a61b1b; }
 [data-theme="light"] .dev-badge[data-level="high"] { background: rgba(230, 150, 20, .14); color: #8a5200; }
 .lc-figures { display: flex; align-items: flex-end; justify-content: space-between; gap: 10px; min-width: 0; }
 .lc-figures > div { display: grid; gap: 2px; min-width: 0; }
