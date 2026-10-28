@@ -8,7 +8,7 @@ import { assetIcon, chainIcon } from './chain-ui.mjs';
 import { nowSeconds } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
 import { PAIR_LIMITS } from '/pairs.mjs';
-import { exploreModel, pageOf, pageButtons, trendingTokens, topCreators, feedRows, exploreStateFromHash, exploreHash, PER_PAGE } from './discovery.mjs';
+import { exploreModel, pageOf, pageButtons, trendingTokens, topCreators, feedRows, exploreStateFromHash, exploreHash, PER_PAGE, PER_PAGE_WIDE } from './discovery.mjs';
 
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
@@ -268,7 +268,9 @@ export function createExplore(source) {
     feed.hidden = !open; feedToggle.setAttribute('aria-pressed', String(open));
     listSection.querySelector('.explore-body').dataset.feed = String(open);
     if (!open && feed.contains(document.activeElement)) feedToggle.focus();
+    draw(); // the page size follows the layout: 8 beside the feed, 12 across the full width
   }
+  function perPage() { return state.feed ? PER_PAGE : PER_PAGE_WIDE; }
 
   function drawTrending(tokens) {
     const list = trendingTokens(tokens, 10);
@@ -308,7 +310,7 @@ export function createExplore(source) {
     pager.hidden = false;
     const go = page => () => { set({ page }); jumpToList(); };
     pager.replaceChildren(
-      h('span.pager-note', `Showing ${number(view.from, 0)}–${number(view.to, 0)} of ${number(view.total, 0)} tokens`, h('small', `${PER_PAGE} per page`)),
+      h('span.pager-note', `Showing ${number(view.from, 0)}–${number(view.to, 0)} of ${number(view.total, 0)} tokens`, h('small', `${perPage()} per page`)),
       h('div.pager-buttons',
         h('button.page-button', { type: 'button', 'aria-label': 'Previous page', disabled: view.page <= 1, on: { click: go(view.page - 1) } }, icon('chevron-left', 'icon-sm')),
         pageButtons(view.page, view.pages).map(p => p === '…' ? h('span.page-gap', { 'aria-hidden': 'true' }, '…') : h('button.page-button', { type: 'button', 'aria-label': `Page ${p}`, 'aria-current': p === view.page ? 'page' : undefined, on: { click: go(p) } }, String(p))),
@@ -346,7 +348,7 @@ export function createExplore(source) {
     launched.textContent = `· ${number(tokens.length, 0)} launched`;
     tabs.querySelectorAll('[data-tab]').forEach(b => { const on = b.dataset.tab === state.tab; b.setAttribute('aria-pressed', String(on)); b.classList.toggle('is-active', on); });
     const model = exploreModel(tokens, state);
-    const view = { ...pageOf(model.items, state.page), total: model.items.length };
+    const view = { ...pageOf(model.items, state.page, perPage()), total: model.items.length };
     if (view.page !== state.page) { state.page = view.page; writeUrl(); }
     drawTrending(tokens);
     drawCreators(tokens);

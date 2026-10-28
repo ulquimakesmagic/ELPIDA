@@ -208,6 +208,11 @@ export function terminalChart(ctx,token,q){
   panel.debug=()=>({basis:pref.basis,range:pref.range,interval:pref.interval,magnitude,points:current.points.length,series:chart?1:0,crosshair:lastCrosshair,tip:!tip.hidden});
 
   draw();overlay.hidden=true;load();
-  timer=setInterval(()=>{if(panel.isConnected&&!document.hidden)load(true);},15000);
+  // Only the chart that is actually on screen may keep polling. A view that was replaced without being
+  // disconnected kept fetching the previous token every 15 s, which is what the request log showed.
+  timer=setInterval(()=>{
+    if(!panel.isConnected||document.querySelector('.price-history')!==panel){clearInterval(timer);cleanup();return;}
+    if(!document.hidden)load(true);
+  },15000);
   return panel;
 }

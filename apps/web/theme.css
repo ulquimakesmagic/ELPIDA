@@ -224,7 +224,11 @@ dialog::backdrop { background: var(--scrim); backdrop-filter: blur(6px); }
 /* Dock: collapsed to icons, widens on hover or focus, or stays open when pinned. */
 .dock { position: sticky; top: 8px; z-index: 30; margin: 8px 0 8px 8px; width: var(--dock-w); height: calc(100vh - 16px); height: calc(100dvh - 16px);
   display: flex; flex-direction: column; padding: 18px 12px 12px; border-radius: 25px; background: var(--dock-bg); border: .67px solid var(--line);
-  box-shadow: inset 0 1px 0 var(--highlight); transition: width 220ms var(--ease); }
+  box-shadow: inset 0 1px 0 var(--highlight); transition: width 220ms var(--ease);
+  /* Zoomed in or in a short window the dock is shorter than its content: it scrolls inside its own frame instead
+     of running off the bottom of the screen. The chain menu is fixed, so the scroll area never clips it. */
+  overflow: hidden auto; overscroll-behavior: contain; scrollbar-width: none; }
+.dock::-webkit-scrollbar { display: none; }
 .dock-brand { display: flex; align-items: center; height: 40px; padding-left: 11px; overflow: hidden; flex: none; }
 .dock-mark { width: 34px; height: 34px; flex: none; }
 .dock-wordmark { height: 30px; width: auto; display: none; }
@@ -281,7 +285,7 @@ dialog::backdrop { background: var(--scrim); backdrop-filter: blur(6px); }
 .chain-selector { position: relative; }
 .chain-options { position: absolute; z-index: 70; min-width: 290px; max-width: calc(100vw - 32px); padding: 8px; border: .67px solid var(--line); border-radius: 20px;
   background: linear-gradient(160deg, var(--panel-hi), var(--panel-lo) 85%); box-shadow: var(--shadow-pop); max-height: calc(100dvh - 80px); overflow-y: auto; }
-.dock .chain-options { left: calc(100% + 14px); right: auto; top: auto; bottom: 0; width: 300px; }
+.dock .chain-options { position: fixed; left: calc(var(--dock-w) + 30px); right: auto; top: auto; bottom: 8px; width: 300px; }
 .mobile-chain .chain-options { left: auto; right: 0; bottom: auto; top: calc(100% + 10px); width: min(300px, calc(100vw - 24px)); }
 .chain-option { width: 100%; display: flex; align-items: center; gap: 12px; padding: 11px 12px; min-height: 46px; background: transparent; color: var(--ink); border: 0; border-radius: 14px; text-align: left; cursor: pointer; font: 500 13px/1.2 var(--font-sans); }
 .chain-option small { margin-left: auto; color: var(--muted); font-size: 10.5px; }
@@ -392,6 +396,28 @@ main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; 
 .not-found { display: grid; place-items: center; text-align: center; gap: 22px; padding: clamp(60px, 14vh, 140px) 16px; }
 .not-found h1 { font-size: clamp(32px, 5vw, 44px); font-weight: 600; letter-spacing: -.04em; }
 .not-found p { color: var(--muted); max-width: 40ch; }
+
+/* Short viewports (a zoomed page or a small laptop): tighten the dock so everything fits before it has to scroll. */
+@media (max-height: 820px) {
+  .dock { padding-top: 14px; padding-bottom: 10px; }
+  .dock-nav { margin-top: 14px; gap: 2px; }
+  .dock-link { height: 40px; }
+  .dock-launch { margin-top: 10px; height: 40px; }
+  .dock-tools { margin-top: 6px; gap: 0; }
+  .dock-tool { width: 36px; height: 36px; }
+}
+@media (max-height: 680px) {
+  .dock-brand { height: 34px; }
+  .dock-mark { width: 30px; height: 30px; }
+  .dock-nav { margin-top: 10px; }
+  .dock-link { height: 36px; }
+  .dock-launch { height: 38px; margin-top: 8px; }
+  .app-shell:not([data-dock="open"]) .dock-env { width: 40px; height: 40px; min-height: 40px; }
+  .dock-env { min-height: 40px; }
+  /* "How it works" is already in the menu above; keep one. */
+  .dock-tool[data-open-how] { display: none; }
+  .dock-tool { width: 34px; height: 34px; }
+}
 
 /* ---------- Responsive ---------- */
 @media (max-width: 1000px) {

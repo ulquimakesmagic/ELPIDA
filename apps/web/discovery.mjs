@@ -48,6 +48,8 @@ export function activityOf(map, address) { return { ...(map.get(address) ?? map.
 export const EXPLORE_TABS = ['trending', 'marketcap', 'new', 'lastsale', 'graduating'];
 export const PAIR_FILTERS = ['all', 'native', 'usdc', 'xstock', 'token'];
 export const PER_PAGE = 8;
+/** With the Live feed hidden the list shows up to four compact cards per row: three full rows. */
+export const PER_PAGE_WIDE = 12;
 const identityOf = t => `${t.network ?? 'local'}:${t.address}`;
 const capQuote = t => Number(t.spotPrice ?? 0) * Number(t.supply ?? 0);
 const progress = t => { const cap = Number(t.saleCap ?? t.supply); return cap > 0 ? Math.min(1, Number(t.sold ?? 0) / cap) : 0; };

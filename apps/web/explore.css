@@ -147,7 +147,12 @@
 .explore-list { container: list / inline-size; min-width: 0; }
 .list-meta { display: flex; justify-content: space-between; gap: 12px; margin: 2px 2px 10px; font-size: 11px; color: var(--muted); }
 .list-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
-@container list (max-width: 620px) { .list-grid { grid-template-columns: minmax(0, 1fr); } }
+/* With the Live feed hidden the list takes the full width: up to four compact cards per row, fewer as the column
+   narrows (zoomed in, a pinned dock, smaller windows). */
+.explore-body[data-feed="false"] .list-grid { grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+@container list (max-width: 1060px) { .explore-body[data-feed="false"] .list-grid { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+@container list (max-width: 800px) { .explore-body[data-feed="false"] .list-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@container list (max-width: 620px) { .list-grid, .explore-body[data-feed="false"] .list-grid { grid-template-columns: minmax(0, 1fr); } }
 @container explore (max-width: 980px) {
   .explore-layout { grid-template-columns: minmax(0, 1fr); }
   .live-feed { position: static; max-height: none; }
@@ -197,6 +202,28 @@
 .list-empty .empty { border-style: solid; border-color: var(--line); }
 .empty-compact { padding: 34px 20px; }
 .list-skeleton { min-height: 176px; border-radius: 23px; }
+
+/* Compact card for the four-per-row grid. The body's rows join the card's own grid: the avatar sits beside the name
+   and the ticker line, and the figures and curve use the card's full width, so every card in a row lines up. The
+   launch age is left out here (the footer still says when it was last bought) so the ticker line fits on one row. */
+.explore-body[data-feed="false"] .list-card { grid-template-columns: 52px minmax(0, 1fr); align-content: start; gap: 8px 10px; padding: 12px; border-radius: 20px; }
+.explore-body[data-feed="false"] .lc-body { display: contents; }
+.explore-body[data-feed="false"] .lc-media { grid-row: 1 / span 2; align-self: center; }
+.explore-body[data-feed="false"] .lc-top, .explore-body[data-feed="false"] .lc-meta { grid-column: 2; }
+.explore-body[data-feed="false"] .lc-top { align-self: end; }
+.explore-body[data-feed="false"] .lc-meta { align-self: start; flex-wrap: nowrap; overflow: hidden; }
+.explore-body[data-feed="false"] .lc-meta .lc-age, .explore-body[data-feed="false"] .lc-meta .sep:has(+ .lc-age) { display: none; }
+.explore-body[data-feed="false"] .lc-figures, .explore-body[data-feed="false"] .curve-line, .explore-body[data-feed="false"] .curve-done { grid-column: 1 / -1; }
+.explore-body[data-feed="false"] .lc-figures { margin-top: 4px; }
+.explore-body[data-feed="false"] .lc-media, .explore-body[data-feed="false"] .avatar.lc-avatar { width: 52px; height: 52px; }
+.explore-body[data-feed="false"] .avatar.lc-avatar { border-radius: 14px; }
+.explore-body[data-feed="false"] .avatar.lc-avatar .initials { font-size: 20px; }
+.explore-body[data-feed="false"] .new-chip { top: -5px; left: -5px; padding: 2px 6px; font-size: 8.5px; }
+.explore-body[data-feed="false"] .lc-name { font-size: 13.5px; }
+.explore-body[data-feed="false"] .lc-cap { font-size: 17px; letter-spacing: -.45px; }
+.explore-body[data-feed="false"] .lc-volume { font-size: 13px; }
+.explore-body[data-feed="false"] .lc-foot { padding-top: 9px; font-size: 10px; }
+.explore-body[data-feed="false"] .list-skeleton { min-height: 150px; border-radius: 20px; }
 
 /* ---------- Live feed ---------- */
 .live-feed { position: sticky; top: 84px; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto auto; gap: 10px; max-height: calc(100vh - 100px); max-height: calc(100dvh - 100px);
