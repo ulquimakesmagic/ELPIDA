@@ -9,7 +9,7 @@ import { PriceKeeper } from './price-keeper.mjs';
 import {configuredGraduationKeeper} from './graduation-keeper.mjs';
 import { FeedRelay } from './feed-relay.mjs';
 import { testDexArtifacts } from './test-dex-artifacts.mjs';
-import { PublicIndexer, recentTrade } from './public-indexer.mjs';
+import { PublicIndexer, recentTrade, feedTrades } from './public-indexer.mjs';
 import { TradeFeed } from './trade-feed.mjs';
 import { SolanaIndexer } from '../../packages/indexer/solana-indexer.mjs';
 import { validateSolanaRpc } from '../../packages/solana/rpc-config.mjs';
@@ -111,6 +111,7 @@ const vendorFiles = new Map([
   ['/curve-model.mjs', fileURLToPath(new URL('../../packages/core/curve-model.mjs', import.meta.url))],
 ]);
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const SOLANA_TICK_MS = Math.max(1500, Math.min(60000, Number(process.env.ELPIDA_SOLANA_INDEX_INTERVAL_MS) || 3000));
 
 // Solana Devnet by default; ELPIDA_SOLANA_CLUSTER=localnet targets a local solana-test-validator.
 // The deployment comes from networks.mjs `shared`, else from `npm run solana:deploy` output.
@@ -176,7 +177,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:dataFile('token-metadata.json'), dex:port!==0, indexerPath:":memory:", journalPath:port===0?null:dataFile('simulation-journal-v2.jsonl'), log:console.log });
   bootPhase('runtime_ready');
   const tradeFeed=new TradeFeed({log:line=>console.log(line)});
-  const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore,onTrades:(network,trades)=>tradeFeed.publish(network,trades)}).start();
+  const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore,onTrades:(network,trades)=>tradeFeed.publish(network,feedTrades(network,trades,publicIndex.listings(network)))}).start();
   bootPhase('indexers_ready');
   // Testnet-only price relay for test chains without a Chainlink feed (Robinhood testnet). Idle without its key.
   const feedRelay=soft('feedRelay',()=>new FeedRelay({networks:port===0?[]:evmTestnets,env:port===0?{}:process.env}).start(),()=>new FeedRelay({networks:[],env:{}}).start());
@@ -186,12 +187,17 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // D9: pre-ground Solana mint addresses ending in "hope" (encrypted at rest; random mint fallback).
   const vanity=soft('vanity',()=>new VanityMintPool({path:port===0?null:dataFile('solana-vanity-mints.json'),key:vanityKey(process.env.ELPIDA_VANITY_KEY),programId:solanaNet.deployment?.programId,suffix:process.env.ELPIDA_VANITY_SUFFIX||'hope',target:Number(process.env.ELPIDA_VANITY_TARGET??3),workers:Number(process.env.ELPIDA_VANITY_WORKERS??1)}),()=>new VanityMintPool({path:null,key:null,programId:solanaNet.deployment?.programId,suffix:'hope',target:0,workers:0}));
   if(process.env.ELPIDA_VANITY_KEY&&!vanity.enabled)console.log(JSON.stringify({event:'vanity_mints_disabled',reason:'ELPIDA_VANITY_KEY must be 32 bytes (64 hex characters or base64), with a Solana deployment configured.'}));
-  let solanaIndex=null,solanaTimer=null;
+  let solanaIndex=null,solanaTimer=null,solanaTick=null;
   if(port!==0&&solanaNet.deployment&&solanaRpc&&process.env.ELPIDA_SOLANA_INDEXER!=='off'){
     try{
       solanaIndex=new SolanaIndexer({web3:solanaWeb3,connection:new solanaWeb3.Connection(validateSolanaRpc(solanaRpc),'confirmed'),deployment:solanaNet.deployment,network:solanaNet,metadataStore,path:dataFile(`public-solana-${solanaNet.cluster}-${solanaNet.deployment.programId}.sqlite`)});
-      const tick=()=>solanaIndex.sync().then(()=>console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}))).catch(()=>console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,message:'Indexing unavailable; retrying.'})));
-      tick();solanaTimer=setInterval(tick,20000);solanaTimer.unref();
+      const fullTick=()=>solanaIndex.sync().then(()=>console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}))).catch(()=>console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,message:'Indexing unavailable; retrying.'})));
+      // Fast pass every few seconds (new transactions, then pools only if something traded), full pass every 30 s.
+      // New trades go to the live feed; the first pass after a restart only records where history ends.
+      let fedRow=null,lastFull=0;
+      const feed=()=>{if(fedRow===null){fedRow=solanaIndex.lastTradeRow();return;}const {trades,last}=solanaIndex.tradesAfter(fedRow);fedRow=last;if(trades.length)tradeFeed.publish(solanaNet.key,feedTrades(solanaNet.key,trades,solanaIndex.listings()));};
+      solanaTick=()=>{const full=Date.now()-lastFull>=30000;if(full)lastFull=Date.now();return (full?fullTick():solanaIndex.syncRecent().catch(()=>console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,message:'Indexing unavailable; retrying.'})))).then(feed,feed);};
+      solanaTick();solanaTimer=setInterval(solanaTick,SOLANA_TICK_MS);solanaTimer.unref();
     }catch(error){console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:String(error.name??'INIT').slice(0,40),message:error.message.slice(0,120)}));}
   }
   console.log(JSON.stringify({event:'storage_ready',durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),dataDir,publicNetworks:[...publicIndex.entries.keys()],simulation:runtime.config.simulation?.durable?`journal replay: ${runtime.config.simulation.replayed} actions restored, ${runtime.config.simulation.skipped} skipped`:'resets on process restart'}));
@@ -237,6 +243,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const chatLimit=write=>{if(Date.now()-chatWindow>=60000){chatWindow=Date.now();chatReads=0;chatWrites=0;}return write?++chatWrites>120:++chatReads>600;};
   // The routes below await a chain sync per request, so without a window one client can force unbounded RPC work.
   let syncWindow=Date.now(),syncReads=0;
+  let nudgeWindow=0,nudges=0;const lastNudge=new Map();
   const syncLimit=()=>{if(Date.now()-syncWindow>=60000){syncWindow=Date.now();syncReads=0;}return ++syncReads>240;};
   let terminalWindow=Date.now(),terminalCount=0,thesisCount=0;
   const uploadAdmission=new UploadAdmission({path:port===0?':memory:':dataFile('metadata-admission.sqlite')});
@@ -476,6 +483,18 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if(action==='partners/challenge'||action==='partners/apply'){
         if(partnerLimit(action==='partners/apply'))return send(429,{error:'Applications are busy. Try again in a minute.'});
         try{return send(200,action==='partners/challenge'?partnerApps.challenge(body):partnerApps.apply(body));}catch(error){return send(error.status??400,{error:error.message});}
+      }
+      // A wallet just confirmed a trade, launch or migration: index that network now instead of at the next tick, so
+      // the trade reaches every open page within a second or two. Coalesced per network and capped; nothing is signed.
+      if(action==='index-now'){
+        const key=String(body.network??''),now=Date.now();
+        if(Date.now()-nudgeWindow>=60000){nudgeWindow=now;nudges=0;}
+        if(++nudges>120||now-(lastNudge.get(key)??0)<1000)return send(202,{queued:false});
+        lastNudge.set(key,now);
+        if(solanaIndex&&key===solanaNet.key)solanaTick?.();
+        else if(publicIndex.entries.has(key))publicIndex.tick(key);
+        else return send(404,{error:'Unknown network.'});
+        return send(202,{queued:true});
       }
       if(action==='admin/logout'){adminAuth.signOut(req.headers.cookie);res.setHeader('Set-Cookie',clearCookie({secure:!!publicUrl}));return send(200,{signedIn:false});}
       if(['chat/report/prepare','chat/report/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat reporting is busy. Retry shortly.'});return send(200,action==='chat/report/prepare'?await chat.prepareReport(body):await chat.saveReport(body));}

@@ -18,6 +18,7 @@ import { supplyPercent } from '../core/curve-model.mjs';
 const MAX_U64 = (1n << 64n) - 1n;
 const json = value => JSON.stringify(value, (_, v) => typeof v === 'bigint' ? v.toString() : v);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
+const CURVE_TRADES = ['CurveLaunched', 'CurveBought', 'CurveSold'];
 
 // Only trust events emitted by our program, including when invoked through a router.
 // Other instructions in the same transaction can emit identical event bytes.
@@ -318,7 +319,7 @@ export class SolanaIndexer {
     }
     if (!fresh.length) return 0;
     const insert = this.db.prepare('INSERT OR IGNORE INTO trades(signature, idx, mint, slot, timestamp, data) VALUES(?,?,?,?,?,?)');
-    const tokens = new Map(this.tokens().map(t => [t.pool, t]));
+    let tokens = new Map(this.tokens().map(t => [t.pool, t])), refreshed = false;
     let added = 0;
     for (const sig of fresh.reverse()) {
       let transactionAdded = 0;
@@ -334,10 +335,17 @@ export class SolanaIndexer {
         }
         if (!tx.meta.err) events = decodeEvents(programEventLogs(tx.meta.logMessages, this.deployment.programId), this.web3.PublicKey);
       }
+      // A launch newer than the last pool snapshot (the fast tick reads trades first): load the pools once, so its
+      // trades are not skipped past.
+      if (!refreshed && events.some(e => CURVE_TRADES.includes(e.name) && !tokens.has(e.pool))) {
+        refreshed = true;
+        await this.syncPools();
+        tokens = new Map(this.tokens().map(t => [t.pool, t]));
+      }
       this.db.exec('BEGIN');
       try {
         events.forEach((e, idx) => {
-          if (!['CurveLaunched', 'CurveBought', 'CurveSold'].includes(e.name)) return;
+          if (!CURVE_TRADES.includes(e.name)) return;
           const token = tokens.get(e.pool);
           if (!token) return;
           const d = token.quoteDecimals, buy = e.name !== 'CurveSold';
@@ -361,6 +369,37 @@ export class SolanaIndexer {
     }
     return added;
   }
+
+  /**
+   * The fast tick, every few seconds: new program transactions first (the pools are reloaded only when a trade
+   * happened or a new launch appears), then swaps on migrated pools. `sync()` remains the full pass.
+   */
+  async syncRecent() {
+    if (this.running) return this.running;
+    if (!this.networkValidated || !this.lastSuccess) return this.sync();
+    this.running = (async () => {
+      let phase = 'transaction_history';
+      try {
+        let added = await this.syncTrades();
+        try { added += await this.syncPumpTrades(); } catch (error) { this.phaseErrors = { ...this.phaseErrors, pumpswap_history: String(error.code ?? error.name ?? 'INDEX_ERROR').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 64) }; }
+        phase = 'pool_refresh';
+        // Prices, market caps and DEX reserves move only with trades.
+        if (added) await this.syncPools();
+        this.lastError = null; this.lastErrorPhase = null; this.lastSuccess = new Date().toISOString();
+      }
+      catch (error) { this.lastErrorPhase = phase; this.lastError = String(error.code ?? error.name ?? 'INDEX_ERROR').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 64); throw error; }
+      finally { this.running = null; }
+    })();
+    return this.running;
+  }
+
+  /** Trades stored after row `rowid` (oldest first), for the live feed: { trades, last }. */
+  tradesAfter(rowid, limit = 200) {
+    const rows = this.db.prepare('SELECT rowid, timestamp, idx, data FROM trades WHERE rowid > ? ORDER BY rowid LIMIT ?').all(Number(rowid) || 0, limit);
+    return { trades: rows.map(r => ({ ...JSON.parse(r.data), timestamp: r.timestamp, idx: r.idx })), last: rows.length ? rows.at(-1).rowid : Number(rowid) || 0 };
+  }
+  /** The newest stored trade row, so a restarted server does not replay history to open streams. */
+  lastTradeRow() { return this.db.prepare('SELECT MAX(rowid) AS id FROM trades').get()?.id ?? 0; }
 
   async sync() {
     if (this.running) return this.running;
@@ -399,7 +438,7 @@ export class SolanaIndexer {
   }
   token(mint) { return this.listings().find(t => t.address === mint) ?? null; }
   /** Latest trades across every pool of this index, newest first (the "Last sale" strip). */
-  recentTrades(limit = 20) { return this.db.prepare('SELECT timestamp, data FROM trades ORDER BY timestamp DESC, slot DESC, idx DESC LIMIT ?').all(Math.max(1, Math.min(100, limit))).map(r => ({ ...JSON.parse(r.data), timestamp: r.timestamp })); }
+  recentTrades(limit = 20) { return this.db.prepare('SELECT timestamp, idx, data FROM trades ORDER BY timestamp DESC, slot DESC, idx DESC LIMIT ?').all(Math.max(1, Math.min(100, limit))).map(r => ({ ...JSON.parse(r.data), timestamp: r.timestamp, idx: r.idx })); }
   trades(mint, limit = 100) { return this.db.prepare('SELECT data FROM trades WHERE mint=? ORDER BY slot DESC, idx DESC LIMIT ?').all(mint, Math.max(1, Math.min(500, limit))).map(r => JSON.parse(r.data)); }
   candles(mint, interval = 60, limit = 100) {
     if (![60, 300, 900, 3600, 14400, 86400].includes(interval)) throw new Error('Unsupported candle interval.');

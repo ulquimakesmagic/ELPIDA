@@ -48,9 +48,17 @@ export class PublicIndexer {
     const entries=this.all(key);if(entries.length<2)return entries[0]?.index.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()??[];
     return entries.flatMap(e=>e.index.db.prepare('SELECT timestamp,data FROM trades').all()).sort((a,b)=>a.timestamp-b.timestamp);
   }
-  async tick(){
-    if(this.running||this.stopping)return;this.running=true;
-    try{await mapLimit([...this.entries.keys()].flatMap(key=>this.all(key)),TICK_CONCURRENCY,async e=>{
+  /**
+   * One pass over every deployment (or only network `only`). Each deployment has its own in-flight flag, so a slow or
+   * failing network never holds the others back: the next pass starts whatever is idle.
+   */
+  async tick(only=null){
+    if(this.stopping)return;
+    const due=[...this.entries.keys()].filter(key=>!only||key===only).flatMap(key=>this.all(key)).filter(e=>!e.busy);
+    if(!due.length)return;
+    for(const e of due)e.busy=true;
+    this.inFlight=(this.inFlight??0)+due.length;
+    try{await mapLimit(due,TICK_CONCURRENCY,async e=>{
       try{
         if(!e.validated){const d=deploymentOf(e),chain=Number((await e.provider.getNetwork()).chainId),v=Number(await new Contract(d.factory,['function MODEL_VERSION() view returns(uint256)'],e.provider).MODEL_VERSION());if(chain!==e.net.chainId||v!==MODEL_VERSIONS[d.model])throw new Error('Deployment identity mismatch');e.validated=true;}
         await e.index.sync();e.error=null;e.errorCode=null;e.lastSuccess=new Date().toISOString();
@@ -65,9 +73,10 @@ export class PublicIndexer {
         e.error='Indexing unavailable; retrying.';e.errorCode=errorCode(error);
         this.log(JSON.stringify({event:'public_indexer_error',network:e.net.key,...(e.legacy?{factory:deploymentOf(e).factory}:{}),code:e.errorCode,rpc:rpcHost(this.rpcs?.get(e.net.key)),message:e.error}));
         if(!e.legacy)this.failover(e.net.key);
-      }
-    });}finally{this.running=false;}
+      }finally{e.busy=false;this.inFlight--;}
+    });}catch{/* each deployment reports its own error above */}
   }
+  get running(){return (this.inFlight??0)>0;}
   /**
    * Hands the trades this pass added to the live feed. The first pass after a restart only records the tip, so a
    * deploy does not replay the whole history to every open stream.
@@ -125,11 +134,23 @@ const errorCode=error=>String(error?.code??error?.name??'INDEX_ERROR').replace(/
 /** The RPC host in use, without path or query, so keys in operator-supplied URLs never leak. */
 const rpcHost=r=>{try{return new URL(r.list[r.index]).host;}catch{return null;}};
 /** A trade for public display: no amounts or accounts, only what the "Last sale" strip shows. */
-export const recentTrade=(network,token,trade)=>({network,address:token.address,name:token.metadata?.name??token.name,symbol:token.metadata?.symbol??token.symbol,image:token.metadata?.image??null,side:trade.side,timestamp:Number(trade.timestamp)});
+export const recentTrade=(network,token,trade)=>({network,address:token.address,name:token.metadata?.name??token.name,symbol:token.metadata?.symbol??token.symbol,image:token.metadata?.image??null,side:trade.side,timestamp:Number(trade.timestamp),tx:trade.hash??trade.tx??null,height:Number(trade.blockNumber??trade.slot??trade.height??0)||null,index:Number(trade.index??trade.idx??0)});
+/**
+ * A trade row from either index (EVM: hash, index, blockNumber; Solana: hash, idx, slot) in the live feed's shape:
+ * what the strip, the Explore feed and the token page's trades table render. Rows of unknown tokens are dropped.
+ */
+export function feedTrades(network,rows,listings){
+  const tokens=new Map((listings??[]).map(t=>[String(t.address).toLowerCase(),t]));
+  return (rows??[]).flatMap(row=>{
+    const token=tokens.get(String(row?.token??'').toLowerCase());
+    if(!token||!(row.hash??row.tx))return [];
+    return [{...recentTrade(network,token,row),priceQuote:Number(row.priceQuote)||null,quoteSymbol:token.quoteSymbol??row.quoteSymbol??null,quoteAmount:row.quoteAmount??null,tokenAmount:row.tokenAmount??null,account:row.account??null,venue:row.venue??null,launch:Boolean(row.launch)}];
+  });
+}
 function openEntry({net,deployment,provider,contracts,dataDir,legacy=false}){
   const tax=deployment.model==='curve-tax-v10',dex=isDexModel(deployment.model)||tax,factory=deployment.factory.toLowerCase();
   const taxPair={abi:['function token0() view returns(address)','function token1() view returns(address)','function getReserves() view returns(uint112,uint112,uint32)','function totalSupply() view returns(uint256)','function balanceOf(address) view returns(uint256)','event Swap(address indexed sender,uint256 amount0In,uint256 amount1In,uint256 amount0Out,uint256 amount1Out,address indexed to)']};
-  const index=new EvmIndexer({provider,factory:deployment.factory,contracts:{...contracts,factory:tax?contracts.taxFactory:dex?contracts.dexFactory:contracts.legacyFactory,curve:tax?contracts.taxCurve:dex?contracts.dexCurve:contracts.legacyCurve,...(!dex?{dexPool:undefined}:{}),...(tax?{tax:true,token:contracts.taxToken,dexPool:taxPair,pool:taxPair}:{})},path:join(dataDir,`public-${net.chainId}-${factory}.sqlite`),chainId:net.chainId,fromBlock:deployment.block,confirmations:2,nativeSymbol:net.nativeCurrency.symbol,batchSize:100,dexName:testnetDexes[net.key]?.name??'Uniswap v3'});
+  const index=new EvmIndexer({provider,factory:deployment.factory,contracts:{...contracts,factory:tax?contracts.taxFactory:dex?contracts.dexFactory:contracts.legacyFactory,curve:tax?contracts.taxCurve:dex?contracts.dexCurve:contracts.legacyCurve,...(!dex?{dexPool:undefined}:{}),...(tax?{tax:true,token:contracts.taxToken,dexPool:taxPair,pool:taxPair}:{})},path:join(dataDir,`public-${net.chainId}-${factory}.sqlite`),chainId:net.chainId,fromBlock:deployment.block,confirmations:1,nativeSymbol:net.nativeCurrency.symbol,batchSize:100,dexName:testnetDexes[net.key]?.name??'Uniswap v3',fullRefreshMs:60000});
   const metadataPath=join(dataDir,`public-metadata-${net.chainId}-${factory}.json`);
   const metadata=new Map(existsSync(metadataPath)?Object.entries(JSON.parse(readFileSync(metadataPath,'utf8'))):[]);
   return {net,deployment,legacy,index,provider,metadata,metadataPath,validated:false,error:null,lastSuccess:null};
