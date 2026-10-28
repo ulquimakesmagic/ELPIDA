@@ -3,7 +3,7 @@
 // The data lives in config/tokenized-equity-registry.json and is passed in.
 //
 // Rules this file enforces:
-//  - One designated provider per network. A lookup never falls back to another provider.
+//  - Explicit providers per network, with a legacy default. A lookup never falls back.
 //  - An asset is identified by network + provider + canonical address, never by ticker.
 //  - Each capability is tracked separately and is OFF until a verification record exists for it AND
 //    operator flags are set. Simulated fixtures are the only assets enabled without evidence.
@@ -43,9 +43,11 @@ export function sandboxFixtures() {
 export function createTokenizedEquity(config, { env = {}, fixtures = false } = {}) {
   const providers = config.providers ?? {};
   const networkToProvider = new Map();
+  const networkProviders = new Map();
   const networkAlias = new Map();
   for (const [net, def] of Object.entries(config.networks ?? {})) {
     networkToProvider.set(net, def.provider);
+    networkProviders.set(net, [...new Set([def.provider, ...(def.additionalProviders ?? [])])].filter(p => providers[p]));
     networkAlias.set(net, net);
     for (const t of def.testnets ?? []) networkAlias.set(t, net);
     for (const k of def.networkKeys ?? []) networkAlias.set(k, net);
@@ -61,12 +63,14 @@ export function createTokenizedEquity(config, { env = {}, fixtures = false } = {
   const mainnetFor = key => networkAlias.get(key) ?? null;
   /** Designated provider for a network (mainnet or testnet key). Never substitutes. */
   const providerForNetwork = key => { const n = mainnetFor(key); return n ? networkToProvider.get(n) ?? null : null; };
+  const providersForNetwork = key => [...(networkProviders.get(mainnetFor(key)) ?? [])];
 
   /** Canonical lookup. Throws when the address is malformed, unknown, or belongs to a different provider. */
   function getAsset(network, provider, address) {
     const net = mainnetFor(network) ?? network, designated = net === 'fixture' ? provider : networkToProvider.get(net);
     if (!designated) throw new Error(`No tokenized-equity provider is designated for ${network}.`);
-    if (provider !== designated) throw new Error(`${network} uses ${providers[designated]?.name ?? designated}; ${provider} is not an accepted substitute.`);
+    if (net !== 'fixture' && !providersForNetwork(network).includes(provider)) throw new Error(`${network} uses ${providers[designated]?.name ?? designated}; ${provider} is not an accepted substitute.`);
+    if (provider === 'ondo' && network !== net) throw new Error('Ondo mainnet assets cannot be substituted on a testnet or network alias.');
     const n = normalizeAddress(net === 'fixture' ? 'ethereum' : net, address);
     if (!n) throw new Error('Not a valid token address for this network.');
     const found = assets.get(assetKey(net, provider, n));
@@ -105,17 +109,17 @@ export function createTokenizedEquity(config, { env = {}, fixtures = false } = {
   }
 
   /** What the interface shows: provider identity, requirements, per-capability state, unresolved questions. */
-  function describeNetwork(key) {
-    const net = mainnetFor(key), pid = net ? networkToProvider.get(net) : null, p = pid ? providers[pid] : null;
+  function describeNetwork(key, selectedProvider = null) {
+    const net = mainnetFor(key), pid = selectedProvider ?? (net ? networkToProvider.get(net) : null), p = providersForNetwork(key).includes(pid) ? providers[pid] : null;
     if (!p) return null;
     return {
-      network: net, provider: pid, providerName: p.name, issuer: p.issuer, eligibility: p.eligibility.summary, nigeria: p.eligibility.nigeria,
+      network: net, provider: pid, availableProviders: providersForNetwork(key), providerName: p.name, issuer: p.issuer, eligibility: p.eligibility.summary, nigeria: p.eligibility.nigeria,
       excluded: p.excluded ? { since: p.excluded.since, reason: p.excluded.reason } : null,
       marketHours: p.marketHours, balanceSemantics: p.balanceSemantics[net], unresolved: p.unresolved, sources: p.sources,
-      assets: [...assets.values()].filter(a => a.network === net).map(a => ({ symbol: a.symbol, underlying: a.underlying, address: a.address, capabilities: capabilities(a) })),
+      assets: [...assets.values()].filter(a => a.network === net && a.provider === pid).map(a => ({ symbol: a.symbol, underlying: a.underlying, address: a.address, capabilities: capabilities(a) })),
     };
   }
-  return { providerForNetwork, mainnetFor, getAsset, capabilityState, capabilities, evaluateEligibility, describeNetwork, assets: () => [...assets.values()] };
+  return { providerForNetwork, providersForNetwork, mainnetFor, getAsset, capabilityState, capabilities, evaluateEligibility, describeNetwork, assets: () => [...assets.values()] };
 }
 
 // ---------- balances, multipliers and valuation ----------

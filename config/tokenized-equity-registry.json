@@ -1,6 +1,6 @@
 {
   "_note": "Provider-aware registry for tokenized stocks and ETFs. Every capability is disabled until a verification record (evidence) is added for it. Nothing here is an official partnership. Addresses come only from the issuer's own pages; where none could be retrieved the list is empty. Never add an address from a ticker match, an explorer search or a third-party article.",
-  "accessed": "2026-10-19",
+  "accessed": "2026-10-28",
   "providers": {
     "xstocks": {
       "name": "xStocks",
@@ -251,6 +251,75 @@
         "sampleHolders": "All five sampled holders of NVDAc were smart contracts; none was blocked in the reads made, but the policy ID was not read so isAuthorized was not tested.",
         "notTested": "isAuthorized/policy for our contracts; transfers; pause flags (paused() reverts with the standard Pausable selector error, so per-function pause state was not read)."
       }
+    },
+    "ondo": {
+      "name": "Ondo Stocks",
+      "issuer": "Ondo Global Markets (BVI) Limited",
+      "networks": [
+        "ethereum",
+        "bnb",
+        "solana",
+        "robinhood"
+      ],
+      "balanceSemantics": {
+        "ethereum": {
+          "model": null,
+          "feedIncludesMultiplier": null,
+          "note": "Unverified for ELPIDA. Confirm raw balance, total-return pricing and corporate-action behavior per canonical contract before pairing."
+        },
+        "bnb": {
+          "model": null,
+          "feedIncludesMultiplier": null,
+          "note": "Unverified for ELPIDA. Confirm raw balance, total-return pricing and corporate-action behavior per canonical contract before pairing."
+        },
+        "solana": {
+          "model": null,
+          "feedIncludesMultiplier": null,
+          "note": "Unverified for ELPIDA. Confirm raw balance, total-return pricing and corporate-action behavior per canonical contract before pairing."
+        },
+        "robinhood": {
+          "model": null,
+          "feedIncludesMultiplier": null,
+          "note": "Unverified for ELPIDA. Confirm raw balance, total-return pricing and corporate-action behavior per canonical contract before pairing."
+        }
+      },
+      "eligibility": {
+        "usPersons": "excluded",
+        "nigeria": "unconfirmed",
+        "confirmedCountries": [],
+        "summary": "Primary issuance requires onboarding. Secondary acquisition remains subject to issuer eligibility restrictions; no country is approved for ELPIDA yet.",
+        "kyc": "Direct issuance/redemption requires issuer onboarding; secondary eligibility must be reviewed separately."
+      },
+      "marketHours": "Transfer availability, executable liquidity and issuer mint/redemption hours differ. Corporate actions and material news can pause issuance; no always-open price assumption.",
+      "sources": [
+        {
+          "url": "https://docs.ondo.finance/ondo-stocks/technical",
+          "accessed": "2026-10-28",
+          "used": "Ethereum, BNB and Solana; selected bridged assets on Robinhood"
+        },
+        {
+          "url": "https://docs.ondo.finance/ondo-stocks/corporate-actions",
+          "accessed": "2026-10-28",
+          "used": "Reinvested dividends, display scaling and pauses"
+        },
+        {
+          "url": "https://docs.ondo.finance/ondo-stocks/eligibility",
+          "accessed": "2026-10-28",
+          "used": "Primary and secondary restrictions"
+        },
+        {
+          "url": "https://docs.ondo.finance/ondo-stocks/secondary-market-restrictions",
+          "accessed": "2026-10-28",
+          "used": "Secondary acquisition does not bypass eligibility"
+        }
+      ],
+      "unresolved": [
+        "Issuer pages supplied nine canonical records on 2026-10-28; current bytecode, issuer controls and transfer behavior remain unverified.",
+        "Pool compatibility, exact-transfer semantics, issuer pause/freeze controls and upgrades.",
+        "Fresh total-return oracle and executable liquidity, including market closures and corporate actions.",
+        "ELPIDA eligibility, contract custody and end-user jurisdiction policy.",
+        "Actual ELPIDA curve and graduation lifecycle against canonical assets; mock tests are insufficient."
+      ]
     }
   },
   "networks": {
@@ -259,6 +328,9 @@
       "chainId": 1,
       "testnets": [
         "ethereum-sepolia"
+      ],
+      "additionalProviders": [
+        "ondo"
       ]
     },
     "solana": {
@@ -270,6 +342,9 @@
       ],
       "networkKeys": [
         "solana-mainnet"
+      ],
+      "additionalProviders": [
+        "ondo"
       ]
     },
     "robinhood": {
@@ -279,13 +354,19 @@
         "robinhood-testnet"
       ],
       "rpc": "https://rpc.mainnet.chain.robinhood.com",
-      "explorer": "https://robinhoodchain.blockscout.com"
+      "explorer": "https://robinhoodchain.blockscout.com",
+      "additionalProviders": [
+        "ondo"
+      ]
     },
     "bnb": {
       "provider": "bstocks",
       "chainId": 56,
       "testnets": [
         "bnb-testnet"
+      ],
+      "additionalProviders": [
+        "ondo"
       ]
     },
     "base": {
@@ -2357,6 +2438,132 @@
       "decimals": 18,
       "feed": null,
       "source": "https://docs.robinhood.com/chain/contracts"
+    },
+    {
+      "network": "ethereum",
+      "provider": "ondo",
+      "symbol": "NVDAon",
+      "underlying": "NVIDIA Corporation Common Stock",
+      "address": "0x2d1f7226bd1f780af6b9a49dcc0ae00e8df4bdee",
+      "decimals": 18,
+      "source": "https://app.ondo.finance/assets/nvdaon",
+      "accessed": "2026-10-28",
+      "model": null,
+      "feedIncludesMultiplier": null,
+      "balanceOfKind": null,
+      "verified": false
+    },
+    {
+      "network": "bnb",
+      "provider": "ondo",
+      "symbol": "NVDAon",
+      "underlying": "NVIDIA Corporation Common Stock",
+      "address": "0xa9ee28c80f960b889dfbd1902055218cba016f75",
+      "decimals": 18,
+      "source": "https://app.ondo.finance/assets/nvdaon",
+      "accessed": "2026-10-28",
+      "model": null,
+      "feedIncludesMultiplier": null,
+      "balanceOfKind": null,
+      "verified": false
+    },
+    {
+      "network": "solana",
+      "provider": "ondo",
+      "symbol": "NVDAon",
+      "underlying": "NVIDIA Corporation Common Stock",
+      "address": "gEGtLTPNQ7jcg25zTetkbmF7teoDLcrfTnQfmn2ondo",
+      "decimals": 9,
+      "source": "https://app.ondo.finance/assets/nvdaon",
+      "accessed": "2026-10-28",
+      "model": null,
+      "feedIncludesMultiplier": null,
+      "balanceOfKind": null,
+      "verified": false
+    },
+    {
+      "network": "ethereum",
+      "provider": "ondo",
+      "symbol": "TSLAon",
+      "underlying": "Tesla, Inc. Common Stock",
+      "address": "0xf6b1117ec07684d3958cad8beb1b302bfd21103f",
+      "decimals": 18,
+      "source": "https://app.ondo.finance/assets/tslaon",
+      "accessed": "2026-10-28",
+      "model": null,
+      "feedIncludesMultiplier": null,
+      "balanceOfKind": null,
+      "verified": false
+    },
+    {
+      "network": "bnb",
+      "provider": "ondo",
+      "symbol": "TSLAon",
+      "underlying": "Tesla, Inc. Common Stock",
+      "address": "0x2494b603319d4d9f9715c9f4496d9e0364b59d93",
+      "decimals": 18,
+      "source": "https://app.ondo.finance/assets/tslaon",
+      "accessed": "2026-10-28",
+      "model": null,
+      "feedIncludesMultiplier": null,
+      "balanceOfKind": null,
+      "verified": false
+    },
+    {
+      "network": "solana",
+      "provider": "ondo",
+      "symbol": "TSLAon",
+      "underlying": "Tesla, Inc. Common Stock",
+      "address": "KeGv7bsfR4MheC1CkmnAVceoApjrkvBhHYjWb67ondo",
+      "decimals": 9,
+      "source": "https://app.ondo.finance/assets/tslaon",
+      "accessed": "2026-10-28",
+      "model": null,
+      "feedIncludesMultiplier": null,
+      "balanceOfKind": null,
+      "verified": false
+    },
+    {
+      "network": "ethereum",
+      "provider": "ondo",
+      "symbol": "SPYon",
+      "underlying": "SPDR S&P 500 ETF Trust",
+      "address": "0xfedc5f4a6c38211c1338aa411018dfaf26612c08",
+      "decimals": 18,
+      "source": "https://app.ondo.finance/assets/spyon",
+      "accessed": "2026-10-28",
+      "model": null,
+      "feedIncludesMultiplier": null,
+      "balanceOfKind": null,
+      "verified": false
+    },
+    {
+      "network": "bnb",
+      "provider": "ondo",
+      "symbol": "SPYon",
+      "underlying": "SPDR S&P 500 ETF Trust",
+      "address": "0x6a708ead771238919d85930b5a0f10454e1c331a",
+      "decimals": 18,
+      "source": "https://app.ondo.finance/assets/spyon",
+      "accessed": "2026-10-28",
+      "model": null,
+      "feedIncludesMultiplier": null,
+      "balanceOfKind": null,
+      "verified": false
+    },
+    {
+      "network": "solana",
+      "provider": "ondo",
+      "symbol": "SPYon",
+      "underlying": "SPDR S&P 500 ETF Trust",
+      "address": "k18WJUULWheRkSpSquYGdNNmtuE2Vbw1hpuUi92ondo",
+      "decimals": 9,
+      "source": "https://app.ondo.finance/assets/spyon",
+      "accessed": "2026-10-28",
+      "model": null,
+      "feedIncludesMultiplier": null,
+      "balanceOfKind": null,
+      "verified": false
     }
   ],
   "verification": [],
@@ -2365,6 +2572,10 @@
     "decidedBy": "Malik",
     "decidedOn": "2026-10-21",
     "note": "Stock-paired curves graduate when the Model 10 curve completes, like every other curve, provided the stock's reference price is fresh and agrees with the pool TWAP. Model 10 completes at a $50,000 market cap with about $12,013 of real reserve (virtual quote $5,556 x (sqrt(10) - 1), before fees), so the separate minimums decided on 19 Oct ($50,000 cap and $15,000 real reserve) could never both be met and are retired. No contract change: the curve contracts already graduate on completion.",
-    "supersedes": { "minMarketCapUsd": 50000, "minRealReserveUsd": 15000, "decidedOn": "2026-10-19" }
+    "supersedes": {
+      "minMarketCapUsd": 50000,
+      "minRealReserveUsd": 15000,
+      "decidedOn": "2026-10-19"
+    }
   }
 }

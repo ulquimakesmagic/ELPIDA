@@ -84,7 +84,7 @@ test('eligibility is deny-by-default and never assumes Nigeria', () => {
 test('every provider records its sources, access date, Nigeria status and unresolved questions', () => {
   for (const [id, p] of Object.entries(config.providers)) {
     assert.ok(p.sources.length >= 2, id); assert.ok(p.unresolved.length >= 3, id);
-    for (const s of p.sources) { assert.match(s.url, /^https:\/\//); assert.equal(s.accessed, '2026-10-19'); }
+    for (const s of p.sources) { assert.match(s.url, /^https:\/\//); assert.equal(s.accessed, id === 'ondo' ? '2026-10-28' : '2026-10-19'); }
     assert.equal(p.eligibility.nigeria, 'unconfirmed', id); assert.equal(p.eligibility.usPersons, 'excluded', id);
     for (const net of p.networks) assert.ok(p.balanceSemantics[net], `${id}/${net}`);
   }
