@@ -52,6 +52,8 @@ The earlier broad suite finished with 534 passes, 30 environmental skips and no 
 
 ## Real NVDAon fork result and repeatable runs
 
+The next phase's read-only issuer observations and valuation guard are documented in [ONDO_CONTROLS_AND_PRICING.md](ONDO_CONTROLS_AND_PRICING.md). They do not enable live pairing or configure a production stock feed.
+
 [ondo-ethereum-nvda-lifecycle-2026-10-28.json](evidence/ondo-ethereum-nvda-lifecycle-2026-10-28.json) records 15 passing checks at Ethereum block **26294021**, hash `0xa006d5da3793e8f9b02ba124eb3ec3d918ee764e318220d1d0a2b4d5cef7225c`. The quote is the issuer-listed NVDAon contract `0x2d1f7226bd1f780af6b9a49dcc0ae00e8df4bdee`. It covers zero creator purchase, exact buys/sells and curve fees, atomic graduation, migration dust, price continuity, permanent LP custody, pool swaps, fee collection and exact 50/50 creator/treasury pool-fee claims on both assets.
 
 This is an ELPIDA deployment and a local Uniswap v3 deployment on a mainnet fork. It is not a public deployment or a test of liquidity in an existing public pool. The rehearsal uses 20 stock tokens as a virtual quote reserve and a mock native USD feed; it does not verify a production stock oracle, issuer admin controls, future corporate actions, restricted recipients, partner buyback tiers or legal eligibility. No live verification records were added to the registry.
