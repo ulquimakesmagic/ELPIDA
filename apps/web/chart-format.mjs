@@ -68,3 +68,48 @@ export function tipFields(bar, volume, unit) {
     unit: unit ?? '',
   };
 }
+
+/** Candle sizes the chart offers, in seconds, with their toolbar labels. */
+export const INTERVALS = [[1, '1s'], [15, '15s'], [60, '1m'], [300, '5m'], [900, '15m'], [3600, '1h'], [14400, '4h'], [86400, '1D']];
+
+/**
+ * Buckets without trades are filled with a flat candle at the previous close and no volume, the way trading terminals
+ * draw a quiet market. Skipped when it would add more than `maxBars` candles (a long-idle token at 1s).
+ */
+export function fillGaps(bars, interval, maxBars = 1500) {
+  if (bars.length < 2) return bars;
+  const span = (bars.at(-1).timestamp - bars[0].timestamp) / interval + 1;
+  if (span > maxBars) return bars;
+  const out = [];
+  for (const bar of bars) {
+    const prev = out.at(-1);
+    if (prev) for (let t = prev.timestamp + interval; t < bar.timestamp; t += interval) out.push({ timestamp: t, open: prev.close, high: prev.close, low: prev.close, close: prev.close, quoteVolumeRaw: '0', trades: 0, filled: true });
+    out.push(bar);
+  }
+  return out;
+}
+
+/** The candle size to open with when the reader has not picked one: the finest that fits the history in ~300 candles. */
+export function defaultInterval(firstTimestamp, lastTimestamp) {
+  const span = Math.max(0, Number(lastTimestamp) - Number(firstTimestamp));
+  if (!(span > 0)) return 60;
+  return INTERVALS.find(([seconds]) => span / seconds <= 300)?.[0] ?? 86400;
+}
+
+/**
+ * Chart markers for the creator's and the reader's own trades (every trade would bury the candles), placed on the candle
+ * that holds them. `trades` are indexed rows (timestamp, side, account).
+ */
+export function tradeMarkers(trades, interval, { creator, me } = {}) {
+  const lower = v => String(v ?? '').toLowerCase();
+  const out = [];
+  for (const t of trades ?? []) {
+    const dev = creator && lower(t.account) === lower(creator), mine = me && lower(t.account) === lower(me);
+    if (!dev && !mine) continue;
+    const buy = t.side === 'buy';
+    out.push({ time: Math.floor(Number(t.timestamp) / interval) * interval, position: buy ? 'belowBar' : 'aboveBar', shape: buy ? 'arrowUp' : 'arrowDown', side: t.side, who: mine ? 'You' : 'Dev', text: `${mine ? 'You' : 'Dev'} ${buy ? 'B' : 'S'}` });
+  }
+  // One marker per candle, side and wallet; the library wants them in time order.
+  const seen = new Set();
+  return out.filter(m => { const k = `${m.time}:${m.side}:${m.who}`; if (seen.has(k)) return false; seen.add(k); return true; }).sort((a, b) => a.time - b.time);
+}

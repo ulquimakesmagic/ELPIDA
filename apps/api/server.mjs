@@ -113,6 +113,8 @@ const vendorFiles = new Map([
 ]);
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const IMMUTABLE = 'public, max-age=31536000, immutable';
+/** A list size from ?limit= (trades and candles), 1 to 500. */
+const listLimit = (url, fallback) => Math.max(1, Math.min(500, Number(url.searchParams.get('limit')) || fallback));
 // Every served script and stylesheet, for versioned URLs and the modulepreload list (apps/api/static-assets.mjs).
 const staticFiles = new Map([...[...resources].filter(([, [, type]]) => type !== 'text/html').map(([path, [name]]) => [path, resolve(webRoot, name)]), ...vendorFiles]);
 const staticAssets = createStaticAssets({ files: staticFiles, version: process.env.ELPIDA_STATIC_CACHE === 'off' ? null : process.env.RAILWAY_ENVIRONMENT_NAME || process.env.NODE_ENV === 'production' || process.env.ELPIDA_STATIC_CACHE === 'on' ? contentVersion(staticFiles) : null });
@@ -393,7 +395,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           if(!solanaIndex||url.searchParams.get('network')!==solanaIndex.network.key)return send(404,{error:'No public Solana index for this network.'});
           if(!solanaMatch[1]){const activity=indexedActivity(solanaIndex.db);return send(200,solanaIndex.listings().map(t=>({...t,priceChange24h:indexedChange(solanaIndex.db,t),...activityOf(activity,t.address)})));}
           const token=solanaIndex.token(solanaMatch[1]);if(!token)return send(404,{error:'Token not indexed yet. Check indexer status and retry.'});
-          return send(200,solanaMatch[2]==='trades'?solanaIndex.trades(token.address):solanaMatch[2]==='candles'?solanaIndex.candles(token.address,Number(url.searchParams.get('interval')??60)):solanaMatch[2]==='holders'?await solanaIndex.holders(token.address):token);
+          return send(200,solanaMatch[2]==='trades'?solanaIndex.trades(token.address,listLimit(url,100)):solanaMatch[2]==='candles'?solanaIndex.candles(token.address,Number(url.searchParams.get('interval')??60),listLimit(url,100)):solanaMatch[2]==='holders'?await solanaIndex.holders(token.address):token);
         }
         // One wallet's indexed balances on every EVM testnet, for the cross-chain Portfolio. Balances come from Transfer
         // events, like holders; `networks` says which ones answered and whether their index is fresh.
@@ -407,7 +409,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         }
         const publicMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?)?$/);
         if(publicMatch){const key=url.searchParams.get('network')??'base-sepolia';if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown public network.'});if(!publicMatch[1]){const activity=new Map();return send(200,publicIndex.listings(key,(e,t)=>{if(!activity.has(e))activity.set(e,indexedActivity(e.index.db));return {priceChange24h:indexedChange(e.index.db,t),...activityOf(activity.get(e),t.address)};}));}let data=null,failure=null;
-            try{data=publicIndex.detail(key,publicMatch[1],publicMatch[2],Number(url.searchParams.get('interval')??60));}
+            try{data=publicIndex.detail(key,publicMatch[1],publicMatch[2],Number(url.searchParams.get('interval')??60),listLimit(url,100));}
             catch(error){failure=publicErrorCode(error);}
             // A missing token and a failed lookup are different problems; say which one this was.
             if(data===null){if(failure)console.error(JSON.stringify({event:'public_token_lookup_failed',requestId,network:key,kind:publicMatch[2]??'token',code:failure}));return send(failure?503:404,{error:failure?'Indexer unavailable for this token. Retry shortly.':'Token not indexed yet. Check indexer status and retry.',...(failure?{code:failure}:{})});}
@@ -420,7 +422,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if (url.pathname === '/api/indexer/status') { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); return send(200,runtime.indexer.status()); }
         if (url.pathname === '/api/tokens') { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); return send(200,runtime.listings()); }
         const indexed = url.pathname.match(/^\/api\/tokens\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?$/);
-        if (indexed) { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); const token=runtime.listings().find(t=>t.address===indexed[1].toLowerCase()); if(!token)return send(404,{error:'Token not found.'}); return send(200,indexed[2]==='trades'?runtime.indexer.trades(token.address):indexed[2]==='holders'?runtime.indexer.holders(token.address):indexed[2]==='candles'?runtime.indexer.candles(token.address,Number(url.searchParams.get('interval')??60)):token); }
+        if (indexed) { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); const token=runtime.listings().find(t=>t.address===indexed[1].toLowerCase()); if(!token)return send(404,{error:'Token not found.'}); return send(200,indexed[2]==='trades'?runtime.indexer.trades(token.address,listLimit(url,100)):indexed[2]==='holders'?runtime.indexer.holders(token.address):indexed[2]==='candles'?runtime.indexer.candles(token.address,Number(url.searchParams.get('interval')??60),listLimit(url,100)):token); }
         if (url.pathname === '/api/state') return send(200, await runtime.state(url.searchParams.get('account') ?? '0'));
         // Simulation buys for the Explore live feed: the same public shape as /api/public/recent-trades.
         if (url.pathname === '/api/recent-trades') { const limit=Math.max(1,Math.min(50,Number(url.searchParams.get('limit'))||20)),tokens=new Map(runtime.listings().map(t=>[t.address.toLowerCase(),t])); return send(200, runtime.indexer.recentTrades(limit).flatMap(trade=>{const t=tokens.get(String(trade.token).toLowerCase());return t?[recentTrade('local',t,trade)]:[];})); }

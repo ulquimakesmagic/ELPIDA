@@ -440,17 +440,24 @@ export class SolanaIndexer {
   /** Latest trades across every pool of this index, newest first (the "Last sale" strip). */
   recentTrades(limit = 20) { return this.db.prepare('SELECT timestamp, idx, data FROM trades ORDER BY timestamp DESC, slot DESC, idx DESC LIMIT ?').all(Math.max(1, Math.min(100, limit))).map(r => ({ ...JSON.parse(r.data), timestamp: r.timestamp, idx: r.idx })); }
   trades(mint, limit = 100) { return this.db.prepare('SELECT data FROM trades WHERE mint=? ORDER BY slot DESC, idx DESC LIMIT ?').all(mint, Math.max(1, Math.min(500, limit))).map(r => JSON.parse(r.data)); }
+  /** OHLC and volume per bucket (1s to 1D), oldest first, the last `limit` buckets that had trades. */
   candles(mint, interval = 60, limit = 100) {
-    if (![60, 300, 900, 3600, 14400, 86400].includes(interval)) throw new Error('Unsupported candle interval.');
+    if (![1, 15, 60, 300, 900, 3600, 14400, 86400].includes(interval)) throw new Error('Unsupported candle interval.');
+    const keep = Math.max(1, Math.min(500, limit));
+    const latest = this.db.prepare('SELECT MAX(timestamp) AS t FROM trades WHERE mint=?').get(mint)?.t;
+    if (latest == null) return [];
     const buckets = new Map();
-    for (const row of this.db.prepare('SELECT data FROM trades WHERE mint=? ORDER BY slot, idx').all(mint)) {
+    const raw = value => { try { return BigInt(value ?? 0); } catch { return 0n; } };
+    for (const row of this.db.prepare('SELECT data FROM trades WHERE mint=? AND timestamp>=? ORDER BY slot, idx').all(mint, latest - keep * interval * 2)) {
       const t = JSON.parse(row.data), p = t.priceQuote;
       if (!(p > 0)) continue;
       const time = Math.floor(t.timestamp / interval) * interval;
-      const c = buckets.get(time) ?? { timestamp: time, open: p, high: p, low: p, close: p, trades: 0 };
-      c.high = Math.max(c.high, p); c.low = Math.min(c.low, p); c.close = p; c.trades++; buckets.set(time, c);
+      const c = buckets.get(time) ?? { timestamp: time, open: p, high: p, low: p, close: p, trades: 0, quoteVolumeRaw: 0n, tokenVolumeRaw: 0n };
+      c.high = Math.max(c.high, p); c.low = Math.min(c.low, p); c.close = p; c.trades++;
+      c.quoteVolumeRaw += raw(t.quoteRaw); c.tokenVolumeRaw += raw(t.tokenRaw);
+      buckets.set(time, c);
     }
-    return [...buckets.values()].slice(-Math.max(1, Math.min(500, limit))).map(c => ({ ...c, open: String(c.open), high: String(c.high), low: String(c.low), close: String(c.close) }));
+    return [...buckets.values()].slice(-keep).map(c => ({ ...c, open: String(c.open), high: String(c.high), low: String(c.low), close: String(c.close), quoteVolumeRaw: c.quoteVolumeRaw.toString(), tokenVolumeRaw: c.tokenVolumeRaw.toString() }));
   }
   /**
    * Every wallet holder, largest first (curve vault and PumpSwap pool excluded), cached for a minute.

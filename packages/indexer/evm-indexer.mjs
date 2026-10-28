@@ -23,6 +23,8 @@ export function ratio(numerator, denominator, digits = 24) {
 }
 
 /** Durable Elpida EVM indexer. Protocol adapters currently cover curves and custom test pools only. */
+/** Candle sizes in seconds: 1s, 15s, 1m, 5m, 15m, 1h, 4h, 1D. */
+export const CANDLE_INTERVALS=[1,15,60,300,900,3600,14400,86400];
 // Early-partner tiers (docs/DESIGN_PARTNER_TIERS.md): read with minimal ABIs so curves and splitters that predate them
 // simply report no tier.
 const PARTNER_ABI=['function buybackBps() view returns(uint256)','function buybackBurned() view returns(uint256)'];
@@ -322,7 +324,7 @@ export class EvmIndexer {
 
   candles(address,interval=60,limit=100) {return this.cached(`candles:${String(address).toLowerCase()}:${interval}:${limit}`,()=>this.computeCandles(address,interval,limit));}
   computeCandles(address,interval=60,limit=100) {
-    if(![60,300,900,3600,14400,86400].includes(interval))throw new Error('Unsupported candle interval.');
+    if(!CANDLE_INTERVALS.includes(interval))throw new Error('Unsupported candle interval.');
     const span=Math.max(1,Math.min(500,limit))*interval;
     // The answer is the last `limit` buckets, so history older than that cannot change it.
     const latest=this.db.prepare('SELECT MAX(timestamp) t FROM trades WHERE address=?').get(address.toLowerCase())?.t;
