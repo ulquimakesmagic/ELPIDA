@@ -779,6 +779,13 @@ export class TestnetWallet {
         await approve(coin,totalUsdc,'USDC','Approve exactly '+formatUnits(totalUsdc,6)+' USDC for the launch fee'+(sharedUsdc?' and first purchase':'')+'…');
       }
       await this.oraclePrice();await this.checkNetwork();
+      // A factory that requires metadata reverts with "metadata required" when the URI is empty, and the URI must
+      // be an ipfs:// document. Say so before the wallet is asked to sign, instead of letting the launch fail.
+      if(!published?.uri){
+        let required=false;
+        try{required=await new Contract(factory.target,['function requiresMetadata() view returns(bool)'],this.provider).requiresMetadata();}catch{}
+        if(required)throw new Error('This launchpad requires token details. Add a description or an image, then launch again.');
+      }
       const args=[name,symbol,asset?.address??ZeroAddress,firstBuy,cappedOut*9950n/10000n,reward,published?.uri??'',inUsdc];
       // A separate estimate cannot simulate allowances that only exist inside the atomic batch.
       // The wallet must simulate the entire batch; ordinary launches retain the RPC estimate.
