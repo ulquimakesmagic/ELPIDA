@@ -1,0 +1,4 @@
+Raydium CPMM fixtures fetched from https://api.devnet.solana.com on 27 October 2026 by node scripts/solana-raydium-fixtures.mjs (run by Malik)
+program DRaycpLY18LhpbydsBWbVJtxpNv9oXPgjRSfpF2bWpYb (deployed at slot 515685818), raydium_cpmm.so sha256 30a9273dda17d7b3513889af1dab1185d9facc4756a6edf36c42f30ba228d8d1
+1% AmmConfig EsTevfacYXpuho5VBuzBjDZi8dtWidGnXoSYAr8krTvz (index 3, 0.15 SOL pool-creation fee)
+Source read for the CPI layouts: github.com/raydium-io/raydium-cp-swap (Anchor 1.0.2)

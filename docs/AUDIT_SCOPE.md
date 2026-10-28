@@ -25,7 +25,7 @@ will run on mainnet. **Nothing here is audited yet.** Commit to audit: the `main
 epochs; none is deployed on mainnet); OpenZeppelin `Math`; Uniswap v3 and PancakeSwap v3; Chainlink; the web app
 and server.
 
-**Solana (separate engagement):** `contracts/solana/programs/elpida_launchpad/src/lib.rs`, 2,192 lines
+**Solana (separate engagement):** `contracts/solana/programs/elpida_launchpad/src/lib.rs`, 2,194 lines
 (Anchor, 23 instructions). It has the same curve as the EVM, and the same early-partner tiers: `set_partner` (the SOL
 pair's treasury only), the share fixed in each pool at launch, the curve buy-and-burn on every trade, and the burn
 or queue of the share at each LP-fee harvest. SOL pairs graduate into Raydium CPMM's 1% tier through raw CPIs

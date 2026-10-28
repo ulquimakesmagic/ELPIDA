@@ -884,6 +884,8 @@ pub mod elpida_launchpad {
         let mint_key = a.mint.key();
         let mut ext = MigrationExt::read(&a.migration.to_account_info().try_borrow_data()?).ok_or(ElpidaError::NothingToBuyBack)?;
         require!(ext.venue == VENUE_RAYDIUM, ElpidaError::WrongVenue);
+        // Nothing queued yet (the LP authority's wrapped-SOL account may not even exist again until a harvest).
+        require!(ext.pending_buyback > 0, ElpidaError::NothingToBuyBack);
         let (state, base_is_0) = read_raydium(&a.ray_pool.to_account_info(), &a.ray_vault_0.to_account_info(), &a.ray_vault_1.to_account_info(), &mint_key)?;
         let amount_in = buyback_amount(ext.pending_buyback.min(token_amount(&a.authority_quote.to_account_info())?), state.quote);
         require!(amount_in > 0, ElpidaError::NothingToBuyBack);
