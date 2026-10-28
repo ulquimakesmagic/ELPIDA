@@ -86,7 +86,13 @@ export class EvmIndexer {
   tip() {return this.db.prepare('SELECT * FROM blocks ORDER BY height DESC LIMIT 1').get();}
   tokens() {return this.db.prepare('SELECT data FROM tokens ORDER BY height DESC,address').all().map(r=>decode(r.data));}
   /** One token row by address; `tokens()` decodes every launch to answer the same question. */
-  tokenAt(address) {return decode(this.db.prepare('SELECT data FROM tokens WHERE address=?').get(String(address).toLowerCase())?.data);}
+  tokenAt(address) {
+    const a=String(address).toLowerCase(),exact=this.db.prepare('SELECT data FROM tokens WHERE address=?').get(a);
+    // Rows written by an older build can carry a checksummed address, and a listing then hands that casing back to
+    // a page that looks the token up in lowercase. Fall back to a case-insensitive match instead of 404ing the page.
+    const row=exact??this.db.prepare("SELECT data FROM tokens WHERE lower(address)=? LIMIT 1").get(a);
+    return decode(row?.data);
+  }
   snapshot(address) {return decode(this.db.prepare('SELECT data FROM snapshots WHERE address=? ORDER BY height DESC LIMIT 1').get(address.toLowerCase())?.data);}
   listings() {
     const latest=new Map(this.db.prepare('SELECT address,data FROM snapshots WHERE height=(SELECT MAX(height) FROM snapshots WHERE address=snapshots.address)').all().map(r=>[r.address,decode(r.data)]));
