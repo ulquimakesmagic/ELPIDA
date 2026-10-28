@@ -207,8 +207,24 @@ function marketActivity(ctx,token,q,{addressUrl,isCreator,me,info,onCounts,onHol
   const drawWho=()=>whoGroup.replaceChildren(...Object.keys(WHO_LABELS).map(key=>h('button',{type:'button',title:WHO_TITLES[key],'aria-pressed':String(who===key),disabled:key==='mine'&&!me,on:{click:()=>{who=key;shown=20;load();}}},WHO_LABELS[key])));
   const controls=h('div.activity-controls',whoGroup,sideFilter,total);
   const panel=h('section.tk-card.tk-records',h('div.tk-records-head',tabs,controls),content);
-  const base=ctx.mode==='local'?`tokens/${token.address}`:`public/tokens/${token.address}`,net=ctx.mode==='local'?'':`?network=${encodeURIComponent(ctx.currentChain())}`;
-  const fetchKind=kind=>ctx.api(`${base}/${kind}${net}`);
+  // The token carries the network it was listed on. Using it beats a race: route() hands a deep link's network to
+  // chooseChain() and returns, so the view can render while the switch is still finishing and every request would
+  // then be sent to the chain the reader came from.
+  const tokenNetwork=token.network??ctx.currentChain();
+  const base=ctx.mode==='local'?`tokens/${token.address}`:`public/tokens/${token.address}`,
+    net=ctx.mode==='local'?'':`?network=${encodeURIComponent(tokenNetwork)}`;
+  // What went wrong, in terms a reader can act on: the network, the path and the status or reason.
+  const failedRequest=error=>{
+    const url=error?.requestUrl??'';
+    const network=/[?&]network=([^&]+)/.exec(url)?.[1]??(ctx.mode==='local'?'local':ctx.currentChain());
+    const path=url.split('?')[0]||'';
+    const reason=String(error?.message??error??'').slice(0,120)||'no response';
+    return `Requested ${path} on ${network}: ${reason}`;
+  };
+  const fetchKind=async kind=>{const url=`${base}/${kind}${net}`;try{return await ctx.api(url);}
+    // The reader needs to know which request failed, not just that one did: a token page opened for another
+    // network looks identical to an indexer outage.
+    catch(error){if(error&&typeof error==='object'){error.requestUrl=url;error.kind=kind;}throw error;}};
   const usd=usdRate(token);
   const priceCell=row=>{const price=Number(row.quoteAmount)/Number(row.tokenAmount);return Number.isFinite(price)&&price>0?(usd!==null?formatPrice(price*usd):`${formatPrice(price,'')} ${q}`):'—';};
   const money=v=>{v=Number(v);if(!Number.isFinite(v))return '—';if(usd===null)return `${number(v,Math.abs(v)<0.001?6:3)} ${q}`;const d=v*usd;return d!==0&&Math.abs(d)<0.01?(d<0?'-<$0.01':'<$0.01'):(d<0?'-$':'$')+number(Math.abs(d),2);};
@@ -247,7 +263,7 @@ function marketActivity(ctx,token,q,{addressUrl,isCreator,me,info,onCounts,onHol
         const more=fetched.length>rows.length?h('button.btn.btn-secondary.btn-sm.tk-more',{type:'button',on:{click:()=>{shown+=20;load();}}},'Show more holders'):null;
         content.replaceChildren(...[rows.length?h('div.table-scroll',table):h('p.muted.small.tk-empty','No holders yet.'),more,h('p.meta','Wallets only: the curve, the DEX pool and the burn address are not counted. Shares use the full 1B supply.')].filter(Boolean));
       }
-    }catch{if(current===revision)content.replaceChildren(h('p.muted.small','Trades are still indexing or temporarily unavailable.'),h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:load}},'Retry'));}
+    }catch(error){if(current===revision)content.replaceChildren(h('p.muted.small',`Trades are still indexing or temporarily unavailable. ${failedRequest(error)}`),h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:load}},'Retry'));}
   }
   Promise.allSettled([fetchKind('trades'),fetchKind('holders')]).then(([t,hd])=>{const f=r=>r.status==='fulfilled'?r.value:null,tr=f(t),ho=f(hd);if(tr)onTrades?.(tr);if(ho)onHolders?.(ho);const wallets=ho?walletHolders(ho,token).length:null;counts={trades:tr?`${tr.length}${tr.length>=100?'+':''}`:null,holders:ho?`${wallets}${ho.length>=50?'+':''}`:null};onCounts({trades:counts.trades,holders:counts.holders});if(panel.isConnected)drawTabs();});
   load();return panel;
