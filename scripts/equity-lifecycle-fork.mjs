@@ -19,12 +19,12 @@ const ERC = ['function symbol() view returns(string)', 'function decimals() view
  * Runs the whole lifecycle with `stockAddress` as the approved quote. `fund(signers)` must give signers 0 and 1 a
  * balance of the quote asset. Returns { checks, steps } and throws on the first failed assertion.
  */
-export async function runLifecycle({ provider, stockAddress, fund, virtualQuote, firstBuy, tradeBuy, atomic = false, log = () => {} }) {
+export async function runLifecycle({ provider, stockAddress, fund, virtualQuote, firstBuy, tradeBuy, atomic = false, log = () => {}, onCheck = () => {} }) {
   const compiled = compileContracts({ includeMocks: true });
   const art = n => compiled['contracts/evm/src/' + n + '.sol'][n];
   const fixture = n => compiled['tests/fixtures/' + n + '.sol'][n];
   const checks = [], steps = [];
-  const ok = (name, detail = '') => { checks.push({ name, ok: true, detail: String(detail) }); log(`PASS  ${name}${detail ? '  ' + detail : ''}`); };
+  const ok = (name, detail = '') => { const check = { name, ok: true, detail: String(detail) }; checks.push(check); onCheck(check); log(`PASS  ${name}${detail ? '  ' + detail : ''}`); };
   const mined = async p => { const r = await (await p).wait(); assert.equal(r.status, 1); return r; };
   const signers = await Promise.all([0, 1, 2, 3].map(i => provider.getSigner(i)));
   const addresses = await Promise.all(signers.map(s => s.getAddress()));
@@ -61,6 +61,10 @@ export async function runLifecycle({ provider, stockAddress, fund, virtualQuote,
   const liabilities = async () => await curve.realReserve() + await curve.protocolFees() + await curve.creatorFees() + await curve.liquidityBonus() + await curve.quoteDust();
   assert.equal(await stock.balanceOf(curve.target), await liabilities());
   ok('paired launch with the stock as first buy; curve holds exactly its liabilities', `balance ${await stock.balanceOf(curve.target)}`);
+  if (firstBuy === 0n) {
+    assert.equal(await curve.sold(), 0n); assert.equal(await token.balanceOf(addresses[0]), 0n);
+    ok('zero creator purchase gives no launched-token allocation');
+  }
   assert.equal(await stock.allowance(factory.target, curve.target), 0n);
   ok('factory leaves no approval behind');
 
@@ -146,6 +150,26 @@ export async function runLifecycle({ provider, stockAddress, fund, virtualQuote,
   assert.equal((await manager.positions(positionId)).liquidity, liquidity);
   assert.equal((await manager.ownerOf(positionId)).toLowerCase(), lockerAddress.toLowerCase());
   ok('locked position collects fees in the stock; principal unchanged');
+  const splitter = new Contract(await curve.feeSplitter(), art('ElpidaFeeSplitter').abi, signers[0]);
+  const treasury = await splitter.treasury(), creator = await splitter.creator();
+  assert.notEqual(treasury.toLowerCase(), creator.toLowerCase(), 'this rehearsal uses separate recipients');
+  assert.equal(await splitter.buybackBps(), 0n, 'standard fee allocation');
+  for (const feeAsset of [stock, token]) {
+    const p = await splitter.claimable(feeAsset.target, treasury), c = await splitter.claimable(feeAsset.target, creator);
+    const total = await feeAsset.balanceOf(splitter.target);
+    assert.ok(total > 0n, 'pool swaps must generate fees on each side');
+    assert.equal(p + c, total); assert.equal(p, total / 2n); assert.equal(c, total - total / 2n);
+    for (const recipient of [treasury, creator]) {
+      const owed = await splitter.claimable(feeAsset.target, recipient), before = await feeAsset.balanceOf(recipient);
+      await mined(splitter.claim(feeAsset.target, recipient));
+      assert.equal((await feeAsset.balanceOf(recipient)) - before, owed);
+      assert.equal(await splitter.claimable(feeAsset.target, recipient), 0n);
+    }
+    assert.equal(await feeAsset.balanceOf(splitter.target), 0n);
+  }
+  assert.equal((await manager.positions(positionId)).liquidity, liquidity);
+  assert.equal((await manager.ownerOf(positionId)).toLowerCase(), lockerAddress.toLowerCase());
+  ok('post-graduation creator and treasury claims pay exact 50/50 shares; LP principal stays locked');
   return { checks, steps };
 }
 
@@ -170,12 +194,18 @@ async function main() {
   const remote = async (method, params = []) => { const r = await (await fetch(rpc, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method, params }), signal: AbortSignal.timeout(30000) })).json(); if (r.error) throw new Error(`${method}: ${r.error.message}`); return r.result; };
   assert.equal(Number(BigInt(await remote('eth_chainId'))), def.chainId, `upstream must be chain ${def.chainId}`);
   const head = Number(BigInt(await remote('eth_blockNumber')));
-  const balOf = async addr => BigInt(await remote('eth_call', [{ to: asset.address, data: '0x70a08231' + addr.slice(2).toLowerCase().padStart(64, '0') }, '0x' + (head - 5).toString(16)]));
+  const block = process.env.ELPIDA_EQUITY_FORK_BLOCK == null ? head - 5 : Number(process.env.ELPIDA_EQUITY_FORK_BLOCK);
+  assert.ok(Number.isSafeInteger(block) && block > 0 && block <= head, 'Invalid pinned fork block');
+  const balOf = async addr => BigInt(await remote('eth_call', [{ to: asset.address, data: '0x70a08231' + addr.slice(2).toLowerCase().padStart(64, '0') }, '0x' + block.toString(16)]));
   const holder = await findHolder({ explorer: (process.env.ELPIDA_EQUITY_EXPLORER ?? def.explorer ?? '').replace(/\/$/, ''), address: asset.address, balanceOf: balOf, log: console.log });
   const holderBal = await balOf(holder);
-  const connection = await network.create({ network: 'localTest', override: { chainId: 31337, hardfork: 'cancun', forking: { url: rpc, blockNumber: head - 5 } } });
+  const connection = await network.create({ network: 'localTest', override: { chainId: 31337, hardfork: 'cancun', forking: { url: rpc, blockNumber: block } } });
   const provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 }); provider.pollingInterval = 10;
-  const report = { scope: 'LOCAL FORK ONLY: nothing is sent to the public chain', provider: providerId, atomic: providerId === 'ondo', source: asset.source, network: net, chainId: def.chainId, block: head - 5, symbol, token: asset.address, holder, results: [] };
+  const report = { scope: 'LOCAL FORK ONLY: nothing is sent to the public chain', provider: providerId, atomic: providerId === 'ondo', source: asset.source, network: net, chainId: def.chainId, block, symbol, token: asset.address, holder, result: 'RUNNING', results: [] };
+  const reportPath = `backups/equity-fork/${net}-${providerId}-${symbol}-lifecycle-report.json`;
+  mkdirSync('backups/equity-fork', { recursive: true });
+  const saveReport = () => writeFileSync(reportPath, JSON.stringify(report, null, 2));
+  saveReport();
   try {
     await provider.send('hardhat_metadata', []);
     await provider.send('evm_mine', []);
@@ -194,14 +224,12 @@ async function main() {
       for (const s of signers.slice(0, 2)) await (await h.transfer(await s.getAddress(), need)).wait();
       await provider.send('hardhat_stopImpersonatingAccount', [holder]);
     };
-    const res = await runLifecycle({ provider, stockAddress: asset.address, fund, virtualQuote, firstBuy, tradeBuy, atomic: providerId === 'ondo', log: console.log });
+    const res = await runLifecycle({ provider, stockAddress: asset.address, fund, virtualQuote, firstBuy, tradeBuy, atomic: providerId === 'ondo', log: console.log, onCheck: check => { report.results.push(check); saveReport(); } });
     report.results = res.checks; report.result = 'PASS';
   } catch (e) {
     report.result = 'FAIL'; report.error = e.shortMessage ?? e.message; console.log(`FAIL  ${report.error}`);
   } finally {
-    mkdirSync('backups/equity-fork', { recursive: true });
-    const reportPath = `backups/equity-fork/${net}-${providerId}-${symbol}-lifecycle-report.json`;
-    writeFileSync(reportPath, JSON.stringify(report, null, 2));
+    saveReport();
     provider.destroy(); await connection.close();
     console.log(`\nResult: ${report.result}. Report: ${reportPath}`);
     if (report.result !== 'PASS') process.exitCode = 1;
