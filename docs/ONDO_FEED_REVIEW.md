@@ -1,5 +1,17 @@
 # Ondo feed review and quote-USD observations, 29 October 2026
 
+## Candidate implementation review and observation freshness
+
+The four candidate aggregator addresses returned no records from the queried Sourcify v2 endpoints. Etherscan pages for the TSLAon API and Calculated aggregators displayed **Similar Match**, referencing `0xf1d388ca8f56a936cb758bc81175e1ad2ba85e18`, rather than exact verified source for the queried deployments. That source-family reference must not be represented as an exact deployment audit.
+
+[ondo-ethereum-aggregator-probes-2026-10-29.json](evidence/ondo-ethereum-aggregator-probes-2026-10-29.json) records that all four actual aggregator getters returned `DualAggregator 1.0.0` and the same owner address at the pinned block. These getters do not establish legal control, source identity or offchain report semantics. The similar-match DualAggregator implementation selects stored primary/secondary reports and distinguishes observation and recorded timestamps; it does not by itself explain the feed's offchain total-return calculation or provide corporate-action clearance for these deployments.
+
+The quote-USD reader now conservatively checks both returned startedAt and updatedAt against the reviewed source-age limit and preserves sourceStartedAt. This prevents a recently recorded response with an old observation/round start from passing. Some feed types use different startedAt semantics; review those before approval rather than relaxing this check automatically. The new boundary regression rejects an old observation with a fresh recording timestamp.
+
+The main-integration full suite completed **596 passes, zero failures and 33 missing-Solana-validator skips** (629 total), before this change. The new focused gate passed 65 tests with no failures/skips, including the observation-age boundary and the other agent's partner-label/buyback-keeper tests.
+
+Further semantic approval needs provider or exact-source evidence. [ONDO_PROVIDER_QUESTIONS.md](ONDO_PROVIDER_QUESTIONS.md) contains the concrete questions and proxy identifiers for Malik; no provider message has been sent. Live pairing remains disabled.
+
 ## Ethereum candidate discovery and main-branch reconciliation
 
 PR134 was merged into the old PR133 feature branch after PR133 reached main. Its quote-USD changes therefore still needed a PR targeting main directly. This reconciliation preserves that tested implementation and the other agent's chart and Solana devnet records.

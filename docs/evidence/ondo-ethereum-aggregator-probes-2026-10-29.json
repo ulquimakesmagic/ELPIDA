@@ -1,0 +1,211 @@
+{
+  "network": "ethereum",
+  "chainId": 1,
+  "block": 26294021,
+  "blockHash": "0xa006d5da3793e8f9b02ba124eb3ec3d918ee764e318220d1d0a2b4d5cef7225c",
+  "source": "https://reference-data-directory.vercel.app/feeds-mainnet.json",
+  "assets": [
+    {
+      "token": "0x2d1f7226bd1f780af6b9a49dcc0ae00e8df4bdee",
+      "symbol": "NVDAon",
+      "network": "ethereum",
+      "candidates": [],
+      "semanticsVerified": false,
+      "liveCapabilitiesApproved": false
+    },
+    {
+      "token": "0xf6b1117ec07684d3958cad8beb1b302bfd21103f",
+      "symbol": "TSLAon",
+      "network": "ethereum",
+      "candidates": [
+        {
+          "name": "TSLAon / USD (Ondo API)",
+          "path": "tslaon-usd-shared-svr",
+          "proxy": "0x737401E0D1299D8A85b653Fd52823501f4FE0be0",
+          "secondaryProxy": "0xED4E679adAFA9aBC97a3fA797dEE000d7b0ed247",
+          "heartbeatSec": 86400,
+          "directoryDecimals": 8,
+          "productType": "primaryTokenizedPrice",
+          "semanticsVerified": false,
+          "statusSourceVerified": false,
+          "liveCapabilitiesApproved": false,
+          "observations": {
+            "proxyCodeHash": "0xbd6f524cdc4268b6bd1bb6f77a8821faeea9c52ee9e0afa0b6d948ce82c966c2",
+            "aggregator": [
+              "0x95dC7c293ad1706C80bCde068B609CA61B3FF78C"
+            ],
+            "decimals": [
+              "8"
+            ],
+            "description": [
+              "TSLAon / USD (Ondo API)"
+            ],
+            "latestRoundData": [
+              "36893488147419107461",
+              "40159000000",
+              "1793223016",
+              "1793223035",
+              "36893488147419107461"
+            ]
+          },
+          "aggregatorProbes": {
+            "sourceAuditVerified": false,
+            "typeAndVersion": "DualAggregator 1.0.0",
+            "owner": "0x21f73D42Eb58Ba49dDB685dc29D3bF5c0f0373CA"
+          }
+        },
+        {
+          "name": "TSLAon-USD (Calculated)",
+          "path": "tslaon-usd-calculated-kalman-shared-svr",
+          "proxy": "0x89904B6fcF8dAD1e5DA47dFdF69fC38Ad6be0bd5",
+          "secondaryProxy": "0xC557dcbc32A01a4FBf7b9E3107BAF283f059EDc7",
+          "heartbeatSec": 86400,
+          "directoryDecimals": 8,
+          "productType": "primaryTokenizedPrice",
+          "semanticsVerified": false,
+          "statusSourceVerified": false,
+          "liveCapabilitiesApproved": false,
+          "observations": {
+            "proxyCodeHash": "0xbd6f524cdc4268b6bd1bb6f77a8821faeea9c52ee9e0afa0b6d948ce82c966c2",
+            "aggregator": [
+              "0x9F6B06e826d3DF391285c695749F8f921F6972D9"
+            ],
+            "decimals": [
+              "8"
+            ],
+            "description": [
+              "TSLAon-USD (Calculated)"
+            ],
+            "latestRoundData": [
+              "18446744073709555632",
+              "40090000000",
+              "1793223413",
+              "1793223431",
+              "18446744073709555632"
+            ]
+          },
+          "aggregatorProbes": {
+            "sourceAuditVerified": false,
+            "typeAndVersion": "DualAggregator 1.0.0",
+            "owner": "0x21f73D42Eb58Ba49dDB685dc29D3bF5c0f0373CA"
+          }
+        }
+      ],
+      "semanticsVerified": false,
+      "liveCapabilitiesApproved": false
+    },
+    {
+      "token": "0xfedc5f4a6c38211c1338aa411018dfaf26612c08",
+      "symbol": "SPYon",
+      "network": "ethereum",
+      "candidates": [
+        {
+          "name": "SPYon-USD (Calculated)",
+          "path": "spyon-usd-calculated-kalman-shared-svr",
+          "proxy": "0xd16cC387E87d37350f57421DaDF811968441C1a5",
+          "secondaryProxy": "0x474Cfe8Ac0CF05986E69631DC144f81D10f72FC1",
+          "heartbeatSec": 86400,
+          "directoryDecimals": 8,
+          "productType": "primaryTokenizedPrice",
+          "semanticsVerified": false,
+          "statusSourceVerified": false,
+          "liveCapabilitiesApproved": false,
+          "observations": {
+            "proxyCodeHash": "0xbd6f524cdc4268b6bd1bb6f77a8821faeea9c52ee9e0afa0b6d948ce82c966c2",
+            "aggregator": [
+              "0x2053257478bA1FeDF7F99dEF0C412006753aC9Bf"
+            ],
+            "decimals": [
+              "8"
+            ],
+            "description": [
+              "SPYon-USD (Calculated)"
+            ],
+            "latestRoundData": [
+              "18446744073709552174",
+              "77895989661",
+              "1793190268",
+              "1793190287",
+              "18446744073709552174"
+            ]
+          },
+          "aggregatorProbes": {
+            "sourceAuditVerified": false,
+            "typeAndVersion": "DualAggregator 1.0.0",
+            "owner": "0x21f73D42Eb58Ba49dDB685dc29D3bF5c0f0373CA"
+          }
+        },
+        {
+          "name": "SPYon / USD (Ondo API)",
+          "path": "spyon-usd-shared-svr",
+          "proxy": "0x6EcC1b902dB35eAFE95332443802774Fd1D72576",
+          "secondaryProxy": "0xc9c10271B2B76767C385Ac389C05d77c319DC41C",
+          "heartbeatSec": 86400,
+          "directoryDecimals": 8,
+          "productType": "primaryTokenizedPrice",
+          "semanticsVerified": false,
+          "statusSourceVerified": false,
+          "liveCapabilitiesApproved": false,
+          "observations": {
+            "proxyCodeHash": "0xbd6f524cdc4268b6bd1bb6f77a8821faeea9c52ee9e0afa0b6d948ce82c966c2",
+            "aggregator": [
+              "0x9dDb5fBA9A737860c7ccEd0D9177Af56AB16c183"
+            ],
+            "decimals": [
+              "8"
+            ],
+            "description": [
+              "SPYon / USD (Ondo API)"
+            ],
+            "latestRoundData": [
+              "36893488147419103872",
+              "77731764342",
+              "1793220003",
+              "1793220023",
+              "36893488147419103872"
+            ]
+          },
+          "aggregatorProbes": {
+            "sourceAuditVerified": false,
+            "typeAndVersion": "DualAggregator 1.0.0",
+            "owner": "0x21f73D42Eb58Ba49dDB685dc29D3bF5c0f0373CA"
+          }
+        }
+      ],
+      "semanticsVerified": false,
+      "liveCapabilitiesApproved": false
+    }
+  ],
+  "liveCapabilitiesApproved": false,
+  "note": "Metadata matches and raw getter observations only. Multiple feeds, API labels and calculated variants require source/multiplier/status review. No candidate is selected or approved.",
+  "result": "PASS",
+  "checks": [
+    {
+      "name": "four actual Ethereum candidate aggregator typeAndVersion getters returned DualAggregator 1.0.0",
+      "ok": true
+    },
+    {
+      "name": "owner getters observed without attributing legal identity or approving source",
+      "ok": true
+    },
+    {
+      "name": "source and stock/status semantics remain unverified; no candidate selected",
+      "ok": true
+    }
+  ],
+  "sourceReview": {
+    "sourcifyQueriedAddresses": "no source records returned (HTTP 404)",
+    "explorerStatus": "Similar Match only on inspected TSLAon API and Calculated aggregator pages",
+    "similarMatchAddress": "0xf1d388ca8f56a936cb758bc81175e1ad2ba85e18",
+    "exactDeploymentSourceVerified": false,
+    "explorerUrls": [
+      "https://etherscan.io/address/0x9f6b06e826d3df391285c695749f8f921f6972d9#code",
+      "https://etherscan.io/address/0x95dc7c293ad1706c80bcde068b609ca61b3ff78c#code"
+    ]
+  },
+  "sourceHashEncoding": "SHA256 of UTF-8 source with CRLF normalized to LF",
+  "sourceSha256": {
+    "scripts/ondo-feed-candidates.mjs": "6f0fc37a089d771772ca97b691ac6418dfeeb927d48a05146832324bc3a4a982",
+    "scripts/lib/ondo-quote-usd.mjs": "c1417bdb291dc249de4eab47598ce1671f26829fa00be6c17175da3d26cdf66f"
+  }
+}

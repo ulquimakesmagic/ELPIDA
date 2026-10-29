@@ -18,7 +18,13 @@ const rpc = (changes = {}) => async (method, params) => {
 test('quote USD preserves actual round timestamp and depeg value using exact WAD conversion', async () => {
   const r = await readChainlinkQuoteUsd({ ...input(), request: rpc() });
   assert.equal(r.priceUsdWad, '999000000000000000'); assert.equal(r.updatedAt, 990); assert.equal(r.observedAt, 1000);
+  assert.equal(r.sourceStartedAt, 990);
   assert.equal(r.liveCapabilitiesApproved, false);
+});
+test('a newly recorded round does not freshen a stale source observation', async () => {
+  await assert.rejects(readChainlinkQuoteUsd({ ...input(), request: rpc({ round: [10, 99900000, 939, 999, 10] }) }), /observation is stale/);
+  const boundary = await readChainlinkQuoteUsd({ ...input(), request: rpc({ round: [10, 99900000, 940, 999, 10] }) });
+  assert.equal(boundary.sourceStartedAt, 940); assert.equal(boundary.updatedAt, 999);
 });
 test('stale, future, nonpositive and incomplete rounds have no one-dollar fallback', async () => {
   for (const round of [[10, 1, 900, 939, 10], [10, 1, 1001, 1001, 10], [10, -1, 990, 990, 10], [10, 0, 990, 990, 10], [10, 1, 990, 990, 9], [0, 1, 990, 990, 0], [10, 1, 991, 990, 10], [10, 1, 0, 990, 10]]) {
