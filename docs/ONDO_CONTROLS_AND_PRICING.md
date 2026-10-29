@@ -1,5 +1,7 @@
 # Ondo controls and valuation groundwork, 28 October 2026
 
+The subsequent [issuer restriction rehearsal](ONDO_RESTRICTION_REHEARSAL.md) follows the confirmed compliance path and exercises real issuer methods on a local fork. It does not enable live pairing or close the complete privilege review.
+
 This phase builds on the cached fork runner in PR #120. It adds read-only control observations and a pure valuation guard. It does not install a production feed policy, expose new stock launch options, alter Model 10 or wallet selection, or enable any live capability.
 
 ## Read-only observations

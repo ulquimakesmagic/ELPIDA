@@ -17,7 +17,18 @@ for (const [atomic, decimals] of [[false, 6], [true, 6], [true, 18]]) test(`loca
   const unit = 10n ** BigInt(decimals);
   const fund = async signers => { for (const s of signers.slice(0, 2)) await (await coin.mint(await s.getAddress(), 1000n * unit)).wait(); };
   const progress = [];
-  const res = await runLifecycle({ provider, stockAddress: coin.target, fund, virtualQuote: 20n * unit, firstBuy: atomic ? 0n : unit, tradeBuy: unit, atomic, onCheck: check => progress.push(check) });
+  const stages = [];
+  const beforeOperation = async context => {
+    stages.push(context.name);
+    assert.equal(typeof context.send, 'function');
+    assert.match(context.target, /^0x[0-9a-f]{40}$/i);
+    const snapshot = await context.state();
+    assert.equal(typeof snapshot.curve.reserve, 'bigint');
+    if (context.name === 'curve fees') assert.equal(context.deferred, true);
+    if (context.name.startsWith('pool fee claim')) assert.ok(snapshot.extra.owed > 0n);
+  };
+  const res = await runLifecycle({ provider, stockAddress: coin.target, fund, virtualQuote: 20n * unit, firstBuy: atomic ? 0n : unit, tradeBuy: unit, atomic, beforeOperation, onCheck: check => progress.push(check) });
+  assert.equal(stages.length, 8, 'restriction hooks cover curve buy/sell/fees, completion, pool buy/sell and both quote claims');
   assert.ok(res.checks.length >= 10);
   assert.ok(res.checks.every(c => c.ok));
   assert.deepEqual(progress, res.checks, 'each completed assertion is available to the partial report writer');

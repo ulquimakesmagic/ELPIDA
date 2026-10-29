@@ -24,7 +24,7 @@ export async function main() {
   writeFileSync(pinPath, JSON.stringify({ ...snapshot, token: asset.address }, null, 2));
   console.log(`Local fork: ${net}/${providerId}/${symbol}, block ${snapshot.number}, hash ${snapshot.hash}`);
   const proxy = await createForkRpc({ rpc, snapshot, cacheDir: 'cache/equity-rpc' });
-  const reportPath = `backups/equity-fork/${net}-${providerId}-${symbol}-lifecycle-report.json`;
+  const reportPath = `backups/equity-fork/${net}-${providerId}-${symbol}-${process.env.ELPIDA_EQUITY_RESTRICTIONS === '1' ? 'restrictions' : 'lifecycle'}-report.json`;
   mkdirSync('backups/equity-fork', { recursive: true });
   writeFileSync(reportPath, JSON.stringify({ scope: 'LOCAL FORK ONLY', network: net, provider: providerId, symbol, token: asset.address, block: snapshot.number, blockHash: snapshot.hash, result: 'RUNNING', results: [] }, null, 2));
   let timedOut = false, child;

@@ -1,0 +1,239 @@
+{
+  "scope": "LOCAL FORK ONLY: nothing is sent to the public chain",
+  "provider": "ondo",
+  "atomic": true,
+  "source": "https://app.ondo.finance/assets/nvdaon",
+  "network": "ethereum",
+  "chainId": 1,
+  "block": 26294021,
+  "symbol": "NVDAon",
+  "token": "0x2d1f7226bd1f780af6b9a49dcc0ae00e8df4bdee",
+  "holder": "0x3cd7caa5109d1634b5EA7DC9D469314439981a69",
+  "result": "PASS",
+  "restrictionEvidence": {
+    "token": "0x2d1f7226bd1f780af6b9a49dcc0ae00e8df4bdee",
+    "dependencies": {
+      "token": "0x2d1f7226bd1f780af6b9a49dcc0ae00e8df4bdee",
+      "view": [
+        "0x54a8757c2fef8649830b158a8c19d3a670e80318",
+        "0x335f3aab208de166709d5e39c061921ccc78222f194833c79f27add6e323616a"
+      ],
+      "core": [
+        "0x156f73fc73197555e950743cb2b23f411c751002",
+        "0xe49e4e270adef3495807d4e1a8c3a6d05f6587c85a50a045d11fe3eaaa838b7a"
+      ],
+      "pause": [
+        "0xfd48112e448417ca79305a518c4186df4b0a200a",
+        "0xdf72b8f350fc2891169965c67cb8b2c376f698e1fceb7a17eca645a60fc7b59c"
+      ]
+    },
+    "blocklist": {
+      "address": "0xd8c8174691d936E2C80114EC449037b13421B0a8",
+      "hash": "0xbea1ef7521335cb658b6d194c5e50482b9820ed9b6edd21ee0afbb9296941495",
+      "owner": "0x99ca4f54F6Bb1c36C662e7C404f517D150FD1173"
+    },
+    "pauser": "0x2e55b738F5969Eea10fB67e326BEE5e2fA15A2CC",
+    "unpauser": "0x71A4d411b5f7941Dee020417fca30413712f1646",
+    "scope": "Existing authority accounts impersonated only on the local fork. No role grants, storage patches or public transactions.",
+    "issuerControlsVerified": false
+  },
+  "blockHash": "0xa006d5da3793e8f9b02ba124eb3ec3d918ee764e318220d1d0a2b4d5cef7225c",
+  "rpcCache": {
+    "upstream": 6,
+    "hits": 280,
+    "coalesced": 0,
+    "failures": 0
+  },
+  "checks": [
+    {
+      "name": "test accounts funded with the quote asset (raw units)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "factory approves the stock as a quote asset",
+      "ok": true,
+      "detail": "decimals 18, virtual quote 20000000000000000000"
+    },
+    {
+      "name": "paired launch with the stock as first buy; curve holds exactly its liabilities",
+      "ok": true,
+      "detail": "balance 0"
+    },
+    {
+      "name": "zero creator purchase gives no launched-token allocation",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "factory leaves no approval behind",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "curve buy: paused operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "curve buy: blocked operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "buy with the stock; balance delta equals the amount spent",
+      "ok": true,
+      "detail": "tokens out 52279796174971869565217391"
+    },
+    {
+      "name": "curve sell: paused operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "curve sell: blocked operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "sell back into the stock; payout is exact and the curve stays fully backed",
+      "ok": true,
+      "detail": "paid 499325203949374809"
+    },
+    {
+      "name": "curve fees: paused operation defers payout without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "curve fees: blocked operation defers payout without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "protocol and creator fees paid in the stock, raw amounts exact",
+      "ok": true,
+      "detail": "protocol 9410286100945410, creator 9410286100945410"
+    },
+    {
+      "name": "final buy and atomic graduation: paused operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "final buy and atomic graduation: blocked operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "curve completes on a stock-denominated purchase",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "final stock purchase graduates in the same transaction",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "migration preserves raw quote accounting including quote dust",
+      "ok": true,
+      "detail": "5545"
+    },
+    {
+      "name": "graduation into Uniswap v3 with the stock as the quote side; price continuous; position locked",
+      "ok": true,
+      "detail": "pool 0xcb3D5bd89dCD27fc7A5318Be94ba7542e2921400"
+    },
+    {
+      "name": "pool buy: paused operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "pool buy: blocked operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "pool sell: paused operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "pool sell: blocked operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "post-graduation buy and sell through Uniswap v3 with the stock",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "locked position collects fees in the stock; principal unchanged",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "pool fee claim 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC: paused operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "pool fee claim 0x3C44CdDdB6a900fa2b585dd299e03d12FA4293BC: blocked operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "pool fee claim 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266: paused operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "pool fee claim 0xf39Fd6e51aad88F6F4ce6aB8827279cffFb92266: blocked operation reverts without ledger changes",
+      "ok": true
+    },
+    {
+      "name": "post-graduation creator and treasury claims pay exact 50/50 shares; LP principal stays locked",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "sourceRecords": [
+    {
+      "address": "0xebbcb2cee51c2fee4062c9c1270dcb98b0b22250",
+      "source": "https://sourcify.dev/server/v2/contract/1/0xebbcb2cee51c2fee4062c9c1270dcb98b0b22250?fields=all",
+      "runtimeMatch": "match",
+      "contract": "contracts/globalMarkets/GMToken.sol:GMToken",
+      "compiler": "0.8.16+commit.07a7930e"
+    },
+    {
+      "address": "0x54a8757c2fef8649830b158a8c19d3a670e80318",
+      "source": "https://sourcify.dev/server/v2/contract/1/0x54a8757c2fef8649830b158a8c19d3a670e80318?fields=all",
+      "runtimeMatch": "match",
+      "contract": "contracts/globalMarkets/gmTokenCompliance/OndoComplianceGMView.sol:OndoComplianceGMView",
+      "compiler": "0.8.16+commit.07a7930e"
+    },
+    {
+      "address": "0x156f73fc73197555e950743cb2b23f411c751002",
+      "source": "https://sourcify.dev/server/v2/contract/1/0x156f73fc73197555e950743cb2b23f411c751002?fields=all",
+      "runtimeMatch": "match",
+      "contract": "contracts/xManager/OndoCompliance.sol:OndoCompliance",
+      "compiler": "0.8.16+commit.07a7930e"
+    },
+    {
+      "address": "0xfd48112e448417ca79305a518c4186df4b0a200a",
+      "source": "https://sourcify.dev/server/v2/contract/1/0xfd48112e448417ca79305a518c4186df4b0a200a?fields=all",
+      "runtimeMatch": "match",
+      "contract": "contracts/globalMarkets/tokenPauseManager/TokenPauseManager.sol:TokenPauseManager",
+      "compiler": "0.8.16+commit.07a7930e"
+    },
+    {
+      "address": "0xd8c8174691d936e2c80114ec449037b13421b0a8",
+      "source": "https://sourcify.dev/server/v2/contract/1/0xd8c8174691d936e2c80114ec449037b13421b0a8?fields=all",
+      "runtimeMatch": "exact_match",
+      "contract": "contracts/usdy/blocklist/Blocklist.sol:Blocklist",
+      "compiler": "0.8.16+commit.07a7930e"
+    }
+  ],
+  "sourceHashEncoding": "SHA256 of UTF-8 source with CRLF normalized to LF",
+  "sourceSha256": {
+    "scripts/lib/ondo-restrictions.mjs": "c9a8ebd52d39c453146969dbd0d3c69dfbb1f33726cf98f7047514ef312f0e68",
+    "scripts/equity-lifecycle-fork.mjs": "6dbf561daab3951a14d49e6c98906bcf69bca10e66743c9c3c63e15659838356",
+    "scripts/equity-cached-fork.mjs": "f4ebacfc152f6ca28548e408db380306e0a332e9a1c758d13eda4a970161edd5"
+  },
+  "limits": [
+    "Local fork only; no public transactions",
+    "One historical Ethereum NVDAon snapshot",
+    "Mock native USD feed and test-sized virtual reserves",
+    "No global pause, forced burn, sanctions update or upgrade execution test",
+    "No production eligibility or feed/liquidity approval",
+    "No paused LP fee collection test"
+  ]
+}
