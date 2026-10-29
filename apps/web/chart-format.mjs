@@ -113,3 +113,21 @@ export function tradeMarkers(trades, interval, { creator, me } = {}) {
   const seen = new Set();
   return out.filter(m => { const k = `${m.time}:${m.side}:${m.who}`; if (seen.has(k)) return false; seen.add(k); return true; }).sort((a, b) => a.time - b.time);
 }
+
+/**
+ * Which markers keep their text label: a label is dropped when another label on the same side of the candles sits
+ * fewer than `minBars` candles earlier, so zoomed-out charts don't stack "Dev buy" on "Dev buy". `barTimes` is the
+ * time of every candle in order; markers on a time not in it are left unlabelled.
+ */
+export function spacedLabels(marks, barTimes, minBars) {
+  const index = new Map(barTimes.map((t, i) => [t, i]));
+  const last = new Map();
+  return marks.map(m => {
+    const i = index.get(m.time);
+    if (i === undefined) return { ...m, labelled: false };
+    const prev = last.get(m.position);
+    const labelled = prev === undefined || i - prev >= minBars;
+    if (labelled) last.set(m.position, i);
+    return { ...m, labelled };
+  });
+}

@@ -1,5 +1,5 @@
 import {h,icon,usdRate} from './ui.mjs';
-import {axisLabel,priceText,pctText,tipPosition,INTERVALS,fillGaps,defaultInterval,tradeMarkers} from './chart-format.mjs';
+import {axisLabel,priceText,pctText,tipPosition,INTERVALS,fillGaps,defaultInterval,tradeMarkers,spacedLabels} from './chart-format.mjs';
 
 // Token page chart, the way trading terminals draw one: candles of executed trades with volume bars underneath,
 // 1s to 1D candles, price or market cap, live updates (the token page calls refresh() when a trade of this token
@@ -41,6 +41,7 @@ export function terminalChart(ctx,token,q){
 
   let chart,candles,volume,markers,rate,scale,unit,revision=0,timer,lastSignature='',live=null;
   let current={bars:[],byTime:new Map()};
+  let markRows=[],labelGap=0;
   let lastCrosshair=null;
   // A sub-cent token plots at 5e-7 and the library's tick generator fails on a span that small, so prices are drawn
   // in a scaled domain and divided back in the formatter.
@@ -84,6 +85,23 @@ export function terminalChart(ctx,token,q){
   }
 
   /* ---------- chart ---------- */
+  // Small dots for the reader's own trades, arrows for the creator's; the newest 60 only (30 on a phone). An arrow is
+  // labelled "Dev buy"/"Dev sell" only when the nearest label on the same side is far enough away at the current zoom,
+  // and never on a phone-width plot (the tooltip and the trades table still say who traded).
+  function applyMarkers(){
+    if(!markers||!chart)return;
+    const narrow=plot.clientWidth<480;
+    const ts=chart.timeScale(),range=ts.getVisibleLogicalRange();
+    const spacing=range&&range.to>range.from?ts.width()/(range.to-range.from):8;
+    const gap=narrow?Infinity:Math.max(1,Math.ceil(60/spacing));
+    if(gap===labelGap)return;
+    labelGap=gap;
+    const up=tone('--candle-up','#2fd47f'),down=tone('--candle-down','#f6465d');
+    const dev=spacedLabels(markRows.filter(m=>m.who==='Dev'),current.bars.map(b=>b.timestamp),gap);
+    const rows=[...dev,...markRows.filter(m=>m.who!=='Dev')].sort((a,b)=>a.time-b.time);
+    markers.setMarkers(rows.map(m=>({time:m.time,position:m.position,shape:m.who==='Dev'?m.shape:'circle',size:m.who==='Dev'?(narrow?0.8:1):0.55,
+      color:m.side==='buy'?up:down,text:m.labelled&&gap!==Infinity?`Dev ${m.side==='buy'?'buy':'sell'}`:''})));
+  }
   function build(){
     cleanup();plot.replaceChildren();
     const lib=window.LightweightCharts;
@@ -111,6 +129,8 @@ export function terminalChart(ctx,token,q){
     volume=chart.addSeries(lib.HistogramSeries,{priceScaleId:'volume',priceFormat:{type:'volume'},lastValueVisible:false,priceLineVisible:false});
     chart.priceScale('volume').applyOptions({scaleMargins:{top:.8,bottom:0}});
     markers=typeof lib.createSeriesMarkers==='function'?lib.createSeriesMarkers(candles,[]):null;
+    // Re-space the labels as the reader zooms (bar spacing changes).
+    chart.timeScale().subscribeVisibleLogicalRangeChange(()=>applyMarkers());
     chart.subscribeCrosshairMove(move=>{
       lastCrosshair=move?{time:move.time??null,point:move.point?{x:Math.round(move.point.x),y:Math.round(move.point.y)}:null}:null;
       const bar=move?.time!==undefined?current.byTime.get(move.time):null;
@@ -208,9 +228,8 @@ export function terminalChart(ctx,token,q){
       candles.setData(shaped.priceData);volume.setData(shaped.volumeData);
       // Small dots for the reader's own trades, labelled arrows for the creator's; the newest 60 only. On a phone-width
       // plot the labels would overlap, so the arrows go unlabelled (the tooltip and trades table still say who traded).
-      const narrow=plot.clientWidth<480;
-      markers?.setMarkers(tradeMarkers(recent,interval,{creator:token.creator,me:me()}).filter(m=>shaped.byTime.has(m.time)).slice(narrow?-30:-60).map(m=>({time:m.time,position:m.position,
-        shape:m.who==='Dev'?m.shape:'circle',size:m.who==='Dev'?(narrow?0.8:1):0.55,color:m.side==='buy'?tone('--candle-up','#2fd47f'):tone('--candle-down','#f6465d'),text:m.who==='Dev'&&!narrow?`Dev ${m.side==='buy'?'buy':'sell'}`:''})));
+      markRows=tradeMarkers(recent,interval,{creator:token.creator,me:me()}).filter(m=>shaped.byTime.has(m.time)).slice(plot.clientWidth<480?-30:-60);
+      labelGap=0;applyMarkers();
       if(rebuild||fit){
         // Show the latest ~120 candles, or everything when there are fewer.
         const n=shaped.priceData.length;
