@@ -48,3 +48,27 @@ test('failed ABI probes do not imply absent roles, and mismatched identity is re
   assert.equal(report.proxySlots.implementation.status, 'unverified');
   for (const role of Object.values(report.roles)) assert.equal(role.role.status, 'unverified');
 });
+
+test('confirmed GMToken getters reveal dependencies, pause status and role administrators without approving them', async () => {
+  const api = new Interface(['function symbol() view returns(string)', 'function decimals() view returns(uint8)',
+    'function compliance() view returns(address)', 'function tokenPauseManager() view returns(address)',
+    'function isTokenPaused(address) view returns(bool)', 'function CONFIGURER_ROLE() view returns(bytes32)',
+    'function getRoleAdmin(bytes32) view returns(bytes32)', 'function getRoleMemberCount(bytes32) view returns(uint256)']);
+  const request = async (method, params) => {
+    if (method === 'eth_getCode') return '0x6000';
+    if (method === 'eth_getStorageAt') return toBeHex(0, 32);
+    const call = api.parseTransaction({ data: params[0].data });
+    if (!call) throw new Error();
+    if (call.name === 'isTokenPaused') { assert.equal(params[0].to, beaconAddress); assert.equal(call.args[0].toLowerCase(), token); }
+    const values = { symbol: 'TESTon', decimals: 18, compliance: implementation, tokenPauseManager: beaconAddress,
+      isTokenPaused: true, CONFIGURER_ROLE: toBeHex(1, 32), getRoleAdmin: toBeHex(0, 32), getRoleMemberCount: 0 };
+    return api.encodeFunctionResult(call.fragment, [values[call.name]]);
+  };
+  const report = await inspectOndoControls({ asset, snapshot, request });
+  assert.equal(report.dependencies.compliance.address, implementation);
+  assert.equal(report.dependencies.tokenPauseManager.tokenPaused.value, true);
+  assert.equal(report.roles.CONFIGURER_ROLE.admin.value, toBeHex(0, 32));
+  assert.equal(report.sourceProfile.implementationHashMatches, false);
+  assert.equal(report.sourceProfile.dependencyControlsVerified, false);
+  assert.equal(report.issuerControlsVerified, false);
+});

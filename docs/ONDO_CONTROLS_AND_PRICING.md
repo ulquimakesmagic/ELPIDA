@@ -57,3 +57,15 @@ The expanded strict focused gate passes **51 tests with zero skips**, including 
 - https://docs.ondo.finance/ondo-stocks/corporate-actions
 - https://docs.ondo.finance/ondo-stocks/transferability
 - Canonical asset pages: https://app.ondo.finance/assets/nvdaon, https://app.ondo.finance/assets/tslaon, https://app.ondo.finance/assets/spyon
+
+## Source-confirmed token dependencies, 29 October 2026
+
+The [Sourcify v2 record](https://sourcify.dev/server/v2/contract/1/0xebbcb2cee51c2fee4062c9c1270dcb98b0b22250?fields=all) identifies GMToken, compiled with solc 0.8.16. Its recorded onchain runtime hashes to the observed implementation hash above. Sourcify reports a runtime match with a CBOR metadata transformation; this is not a claim of independently reproduced byte-for-byte compilation.
+
+GMToken's transfer hook checks its external pause manager and compliance contract, including the spender when distinct from both transfer parties. CONFIGURER_ROLE can change those dependencies and token name/symbol. MINTER_ROLE can mint; BURNER_ROLE can burn another account's tokens. Enumerable role administrators must be inspected even if a privileged role currently has zero members. Empty roles are not permanent guarantees.
+
+At Ethereum block **26298737**, read-only NVDAon inspection matched that implementation hash. Compliance points to `0x54a8757c2fef8649830b158a8c19d3a670e80318`; the pause manager points to `0xfd48112e448417ca79305a518c4186df4b0a200a` and returned false for isTokenPaused(NVDAon). CONFIGURER_ROLE and BURNER_ROLE each had zero members; MINTER_ROLE had three. Each reported DEFAULT_ADMIN_ROLE as its administrator. These are snapshot observations, not approval of those authorities.
+
+The inspector and drift comparison now cover those dependency pointers, their runtime hashes, token pause status, CONFIGURER_ROLE, MINTER_ROLE and role-admin identifiers. Their own source, proxy routes and control permissions still require verification; dependency runtime hashes alone do not capture changes behind a proxy. `issuerControlsVerified` and `dependencyControlsVerified` remain false. No capability flags, public deployment, fund transfer or issuer mutation occurred.
+
+The completed pre-PR125 local suite had **566 passes, zero failures and 33 missing-Solana-validator skips** (599 total). This supersedes the previously pending full-suite status for PR124; it does not establish execution of the skipped Solana tests or validate subsequent changes.
