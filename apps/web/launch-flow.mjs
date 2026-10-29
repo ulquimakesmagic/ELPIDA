@@ -11,6 +11,7 @@ import { STRATEGIES } from './rewards-view.mjs';
 import { usdcFunding } from './usdc-funding.mjs';
 import { PAIR_KINDS, PAIR_INFO, EQUITY_PROVIDERS, issuerNotice } from '/pairs.mjs';
 import { curveShape, DEX_MODEL, BETA_MODEL, BASE_FEE_BPS, LOCAL_START_FDV_USD } from '/curve-model.mjs';
+import { launchTierNotice } from './partner-labels.mjs';
 
 const DRAFT_KEY = 'elpida:launch-draft';
 const STEPS = [
@@ -369,7 +370,20 @@ export function renderLaunch(ctx) {
     } };
   }
 
+  // Early-partner tier of the connected wallet on the chosen network, read once per (network, wallet).
+  const tier = { key: null, record: undefined };
+  function loadTier() {
+    if (!connected() || draft.chain === 'local' || typeof ctx.wallet.partnerTier !== 'function') return null;
+    const key = `${draft.chain}:${ctx.wallet.address}`;
+    if (tier.key !== key) {
+      Object.assign(tier, { key, record: undefined });
+      ctx.wallet.partnerTier().then(record => { if (tier.key !== key) return; tier.record = record; if (phase === 'edit' && STEPS[step].key === 'review') draw(); }).catch(() => { if (tier.key === key) tier.record = null; });
+    }
+    return tier.record ? launchTierNotice(tier.record) : null;
+  }
+
   function reviewStep() {
+    const notice = loadTier();
     const policy = (() => { try { return buildPolicy(); } catch { return null; } })();
     const edit = i => h('button.link-button', { type: 'button', on: { click: () => go(i) } }, icon('pencil', 'icon-sm'), 'Edit');
     const block = (title, i, ...rows) => h('section.review-block', h('header', h('h4', title), edit(i)), h('dl.kv', ...rows));
@@ -378,10 +392,11 @@ export function renderLaunch(ctx) {
     return { body: [
       h('div.review',
         block('Token', 0, row('Name', draft.name), row('Symbol', `$${draft.symbol.toUpperCase()}`), row('Description', draft.description), row('Logo', draft.image ? (draft.image.startsWith('data:') ? 'Uploaded image' : draft.image) : '—'), row('Links', ['website', 'twitter', 'telegram', 'discord'].filter(k => draft[k]).map(k => ({ website: 'Website', twitter: 'X', telegram: 'Telegram', discord: 'Discord' })[k]).join(', ') || 'None')),
-        block('Network and trading pair', 1, row('Network', draft.chain === 'local' ? 'Local simulation' : net()?.name ?? '—'), row('Wallet', draft.chain === 'local' ? `Demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()}` : short(ctx.wallet.address)), row('Trading pair', `${PAIR_INFO[draft.pair]?.title ?? ''} · ${pairSymbol()}`), row('Graduates into', `A locked ${dexName()} pool`)),
+        block('Network and trading pair', 1, row('Network', draft.chain === 'local' ? 'Local simulation' : net()?.name ?? '—'), row('Wallet', draft.chain === 'local' ? `Demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()}` : short(ctx.wallet.address)), row('Trading pair', `${PAIR_INFO[draft.pair]?.title ?? ''} · ${pairSymbol()}`), row('Graduates into', `A locked ${dexName()} pool`), notice?.live ? row('Partner tier', `${notice.tier} · ${notice.percent}% of fees buy back and burn`) : null),
         block('Creator rewards', 2, row('Strategy', STRATEGIES[draft.rewardMode].name), ...(['holders', 'paired', 'buyback'].includes(draft.rewardMode) ? [row('Distribution threshold', `${draft.threshold} ${pairSymbol()}`), row('Minimum token holding', `${number(draft.minimumHolding, 0)} ${draft.symbol.toUpperCase()}`)] : [row('Recipients', recipients)]), draft.rewardMode === 'paired' ? row('Reward asset', rewardData?.assets.find(a => a.address === draft.rewardToken)?.symbol ?? '—') : null, draft.rewardMode === 'buyback' ? row('Vesting', `${draft.vestingDays} days`) : null),
         block('Creator purchase and costs', 3, row('Launch fee · $10', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), row('First purchase', `${number(draft.firstBuy, 6)} ${pairSymbol()}`), row('Buy / sell token tax', `${draft.taxBuy||0}% / ${draft.taxSell||0}% · additional to trading fees`), row('Estimated tokens', estimate() ? compact(estimate().tokens) : 'Shown after launch'), row('Conversion',priceNote()),row('Network gas', 'Estimated before signing; paid separately'))),
-      h('section.summary-card', h('h4', 'Fixed after launch'), h('ul.fixed-list', h('li', 'Name, symbol and the 1,000,000,000 fixed supply'), h('li', `Trading pair (${pairSymbol()})`), h('li', 'Creator reward strategy, recipients and percentages'), h('li', `Graduation into a ${dexName()} pool with permanently locked liquidity`))),
+      notice ? callout(notice.live ? '' : 'warn', notice.live ? 'flame' : 'info', notice.text) : null,
+      h('section.summary-card', h('h4', 'Fixed after launch'), h('ul.fixed-list', h('li', 'Name, symbol and the 1,000,000,000 fixed supply'), h('li', `Trading pair (${pairSymbol()})`), h('li', 'Creator reward strategy, recipients and percentages'), h('li', `Graduation into a ${dexName()} pool with permanently locked liquidity`), notice?.live ? h('li', `${notice.tier} tier: ${notice.percent}% of trading fees buy back and burn the token, for life`) : null)),
       ctx.mode!=='local'&&!solana() ? h('p.hint',draft.pair==='native'&&draft.feeCurrency!=='usdc' ? 'One launch confirmation pays the native fee, records supported metadata, creates your token and makes the first purchase. No token spending approval is needed.' : ctx.wallet.atomicLaunch ? 'Your wallet supports one atomic confirmation for payment approval, creation, supported metadata and the first purchase.' : 'Metadata uses the launch confirmation. This wallet may require a separate token payment approval; one-confirmation approval and launch requires an atomic-capable wallet.') : null,
       draft.chain==='base-sepolia'&&!ctx.wallet.needsMetadataUpgrade ? h('p.hint',ctx.config.metadataPublishing?.publicEnabled ? 'Token details are pinned to public IPFS and their reference is included in your launch transaction.' : 'Token details are stored on Elpida’s persistent server and their content reference is included in your launch transaction. Public IPFS pinning is not configured.') : null,
       policy ? null : callout('error', 'circle-alert', 'The reward settings need attention before you can create this token.'),

@@ -112,9 +112,14 @@ The same in the Anchor program (built 26 October 2026; devnet upgrade by Malik):
     holds no keys and sends nothing by itself;
   - a list of active partners with their tier, expiry, chains and the tokens launched under the tier;
   - "End partnership", which also needs the treasury's signature.
-- **Visible to everyone:**
-  - the create page tells a partner wallet its tier and expiry before launch;
-  - the token page shows "Partner · 10% of fees buy back and burn" (or "Elite · 20%") and the total burned so far.
+- **Visible to everyone** (built 28 October 2026, `apps/web/partner-labels.mjs`):
+  - the create page's review step tells a registered wallet its tier and expiry before launch (read from the factory's
+    `partners(wallet)` on EVM, the `["partner", wallet]` record on Solana), or that its tier has ended;
+  - Explore cards show a "Burn 10%" / "Burn 20%" badge; the token page shows "Partner · Burn 10%" (or "Elite · Burn
+    20%") and a Safety line with the total burned so far;
+  - the indexers publish `buybackBps` and `burned` for every token: on EVM the curve's `buybackBurned` plus, after
+    graduation, the fee splitter's `burned` (and `pendingBuyback`); on Solana the pool's burned count plus the
+    migration record's LP-fee burns and buybacks (and the queue).
 - **Partner terms:** the tier, the expiry, future launches only, and that Elpida may end it early (again future
   launches only).
 

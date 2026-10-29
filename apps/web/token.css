@@ -16,6 +16,10 @@
   background: var(--panel-2); font: 500 12px/1 var(--font-sans); color: var(--ink-2); white-space: nowrap; }
 .tk-tag-strong { color: var(--accent-text); border-color: var(--accent-line); background: var(--accent-tint); font-weight: 600; }
 .tk-tag-live { color: var(--up); }
+.tk-tag-burn { color: #ff9a6b; gap: 4px; }
+.tk-tag-burn[data-tier="elite"] { color: #ff8080; }
+[data-theme="light"] .tk-tag-burn { color: #a8410f; }
+[data-theme="light"] .tk-tag-burn[data-tier="elite"] { color: #a61b1b; }
 .tk-addr .copy-btn, .tk-addr button { margin-left: 2px; }
 .tk-pill { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: var(--r-pill); border: .67px solid var(--line); color: var(--ink-2);
   font: 500 12px/1 var(--font-sans); text-decoration: none; background: transparent; }

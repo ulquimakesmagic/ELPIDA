@@ -167,7 +167,9 @@ export class SolanaIndexer {
           // D7: a completed curve that has not migrated can be reopened by anyone after the grace period.
           reopenableAt: pool.status === STATUS_GRADUATED && pool.graduatedAt > 0n ? Number(pool.graduatedAt) + GRADUATION_GRACE_SECS : null,
           ...(migrated ? { pumpPool: x.pumpPool, venue: x.venue, dexBase: x.dexBase, dexQuote: x.dexQuote, liquidity: x.pumpQuote !== undefined ? formatAmount(x.pumpQuote, d) : undefined,
-            ...(x.buybackBurned !== undefined ? { buybackBurned: formatAmount(x.buybackBurned, TOKEN_DECIMALS), pendingBuyback: formatAmount(x.pendingBuyback, d) } : {}) } : {}),
+            ...(x.lpBurned !== undefined ? { pendingBuyback: formatAmount(x.pendingBuyback, d) } : {}) } : {}),
+          // Early-partner tier fixed at launch; tokens burned by its buybacks (curve trades plus LP-fee burns after migration).
+          buybackBps: pool.buybackBps, burned: formatAmount(pool.buybackBurned + (x.lpBurned ?? 0n), TOKEN_DECIMALS),
           protocolFees: formatAmount(pool.protocolFees, d), creatorFees: formatAmount(pool.creatorFees, d),
           virtualQuote: pool.virtualQuote.toString(), virtualToken: pool.virtualToken.toString(),
           // Creator transparency (D6): the launch buy and the creator wallet's live holding, % of supply.
@@ -228,7 +230,7 @@ export class SolanaIndexer {
         if (!poolInfo || !first || !second) return;
         const state = a.venue === 'Raydium' ? this.client.raydiumState(poolInfo.data, first.data, second.data, p.mint) : this.client.pumpState(poolInfo.data, first.data, second.data);
         Object.assign(x, { pumpPool: a.pool.toBase58(), venue: a.venue, dexBase: a.base.toBase58(), dexQuote: a.quote.toBase58(), pumpBase: state.base, pumpQuote: state.quote });
-        if (records[i]) Object.assign(x, { buybackBurned: records[i].baseBurned + records[i].buybackBurned, pendingBuyback: records[i].pendingBuyback });
+        if (records[i]) Object.assign(x, { lpBurned: records[i].baseBurned + records[i].buybackBurned, pendingBuyback: records[i].pendingBuyback });
       });
     }
     return out;

@@ -5,7 +5,7 @@
 // stays accounted for.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Contract, parseEther } from 'ethers';
+import { Contract, parseEther, formatEther } from 'ethers';
 import { createRuntime } from '../apps/api/curve-runtime.mjs';
 
 const DEAD = '0x000000000000000000000000000000000000dEaD';
@@ -100,6 +100,14 @@ test('a partner launch burns on every trade, the creator keeps 50%, and every un
   assert.equal(await standard.curve.buybackBurned(), 0n);
   const sc = await standard.curve.creatorFees(), sp = await standard.curve.protocolFees();
   assert.ok(sc - sp <= 1n && sc >= sp);
+
+  // The public index labels both: the tier fixed at launch and the tokens burned so far.
+  await runtime.indexer.sync();
+  const rows = runtime.indexer.listings(), row = address => rows.find(r => r.address.toLowerCase() === address.toLowerCase());
+  assert.equal(row(elite.token).buybackBps, 2000);
+  assert.equal(row(elite.token).burned, formatEther(await elite.curve.buybackBurned()));
+  assert.equal(row(standard.token).buybackBps, 0);
+  assert.equal(row(standard.token).burned, undefined);
 });
 
 test('a buyback never completes the curve; the completing trade does, and graduation still works', async t => {
@@ -123,4 +131,11 @@ test('a buyback never completes the curve; the completing trade does, and gradua
   if (/^0x0{40}$/i.test(pool)) await runtime.transact('graduate', { token: elite.token, account: '0' });
   assert.notEqual(await elite.curve.pool(), '0x' + '0'.repeat(40), 'graduated into the pool');
   assert.equal(await elite.erc20.balanceOf(await elite.curve.getAddress()), 0n, 'no tokens left on the curve');
+  // After graduation the index adds the LP fee splitter's burns and queue to the curve's.
+  await runtime.indexer.sync();
+  const row = runtime.indexer.listings().find(r => r.address.toLowerCase() === elite.token.toLowerCase());
+  const splitter = new Contract(await elite.curve.feeSplitter(), ['function burned() view returns(uint256)'], runtime.provider);
+  assert.equal(row.graduated, true); assert.equal(row.buybackBps, 2000);
+  assert.equal(row.burned, formatEther(await elite.curve.buybackBurned() + await splitter.burned()));
+  assert.equal(typeof row.pendingBuyback, 'string');
 });
