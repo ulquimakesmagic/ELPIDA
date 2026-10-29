@@ -50,6 +50,61 @@ Status as of today: testnet only. Public site live at elpida.fun.
 | D5 | Legal, terms and risk disclosures reviewed for the launch jurisdiction | **Draft ready (24 Oct)**, not reviewed: `docs/TERMS_AND_RISK_DRAFT.md` (terms outline, plain-language risks, questions for counsel). Nigeria first: the Investments and Securities Act 2025 brings digital assets into the definition of securities, and SEC rules cover digital asset offering platforms (`docs/PRE_MAINNET_PLAN.md` section 3) | Reviewed by a professional | Malik |
 | D6 | Domain: elpida.fun live; `ELPIDA_PUBLIC_URL` set; X redirect URI updated if X verification is used | Mostly done | Site loads on the domain; verification flow tested | Malik |
 | D7 | Public status page and an owner for monitoring and incident response | **Monitors live (24 Oct)**: UptimeRobot (free) checks `https://elpida.fun/health` and `https://elpida.fun/api/operations/status` every 5 minutes, with email alerts to Malik. The operations monitor alerted at once on a real incident (the Ethereum Sepolia index stuck since block 11972106). Open: confirm the first alert email arrived | Alerts reach a person | Malik, Claude |
+| D8 | Mainnet token charts: embed an external chart per token (decided 29 Oct); Elpida's own candle chart stays on testnet and as the fallback | Open: see "Mainnet charts" below | Checked on one graduated and one pre-graduation mainnet token per chain | Claude, Malik |
+
+## Mainnet charts (decided 29 October 2026)
+
+Decision (Malik): on mainnet, token pages embed an external chart. GMGN was named first; DexScreener was raised as an option. The built-in candle chart (#125, #128) is for testnet and stays as the fallback.
+
+**GMGN**
+
+- Documented embed: `https://www.gmgn.cc/kline/{chain}/{token address}?theme=dark&interval=15`, keyed by the token address.
+- Chains in its examples: `sol`, `eth`, `bsc`. Intervals: `1S`, `1`, `5`, `15`, `60`, `240`, `720`, `1D`.
+- Open questions: does Base work, and does a token still on Elpida's own curve show at all? GMGN charts the launchpads it lists, so Elpida may need a listing first.
+
+**DexScreener**
+
+- Embed: `https://dexscreener.com/{chain}/{pool address}?embed=1&theme=dark&trades=0`, keyed by the pool address. Optional: `chartTheme=dark`, `chartType=usd`, `interval=60`.
+- The parameters are observed from DexScreener's embed links and other projects' integrations. They are not a documented API and could change. One integration found that `info=0` leaves the embed stuck on "Loading pair…".
+- Chain slugs include `solana`, `ethereum`, `bsc`, `base` and `robinhood`.
+- Any DEX pool is picked up automatically, so every graduated Elpida pool charts with no listing.
+- A token still on the curve has no pool, so there is no chart for it.
+
+**Rule to implement**
+
+1. Before graduation: Elpida's chart.
+2. After graduation: DexScreener by pool address on every chain, or GMGN on Solana if preferred.
+3. If the embed fails to load: Elpida's chart.
+
+**Work**
+
+- Add the chosen origins to the CSP `frame-src`.
+- Match the iframe theme to the site theme.
+- Lazy-load the iframe.
+
+**Trade-off and fallback**
+
+- Embeds lose Elpida's Dev and own-trade markers and the MCap toggle. The trades table still shows who traded.
+- DEXTools' widget (pool address; it lists `robinhood`) is a further fallback.
+
+Sources:
+
+- GMGN, "Cooperation-API: Integrate GMGN price chart" (docs.gmgn.ai)
+- `dextools-io/chart-widget` (GitHub)
+- PoolPartyLabs `pool-party-v2-frontend` PR #169 and `amnay667/nomadev` PR #7 (GitHub), for the observed DexScreener parameters
+
+## Trade latency on testnet (measured 29 October 2026)
+
+How long after its block a trade appeared on elpida.fun:
+
+| Trade | Before | After |
+|---|---|---|
+| Ethereum Sepolia | 17.5 s (with one confirmation) | 3.9 s at the newest block (#131) |
+| Solana devnet | 18 to 25 s | 2.1 s |
+
+- One Sepolia outlier took 33 s. In the minute of monitoring afterwards, the index stayed level with the head on every check.
+- On Solana, the public devnet RPC itself sometimes lists new signatures 15 to 20 s late. Elpida showed each trade within about a second of the RPC listing it.
+- On mainnet, a paid RPC (already required by the production guard) should keep both chains at a few seconds.
 
 ## Suggested order
 
