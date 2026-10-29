@@ -1,5 +1,29 @@
 # Ondo feed review and quote-USD observations, 29 October 2026
 
+## Reproducible reference-family proof
+
+The earlier explorer Similar Match is now backed by a bounded bytecode comparison, not only an explorer label. Sourcify has a [verified reference deployment](https://sourcify.dev/server/v2/contract/1/0xf1d388ca8f56a936cb758bc81175e1ad2ba85e18?fields=all) for `src/DualAggregator.sol:DualAggregator`, compiler 0.8.24. Its recorded runtime hash `0x8d2bf39f6bc925ed3c6b7a2276f9a3ac37ff0ad96285ae1f1d1f0614c1cb1155` was matched to the reference address on Ethereum at the same pinned block as the candidates.
+
+[ondo-ethereum-feed-runtime-proof-2026-10-29.json](evidence/ondo-ethereum-feed-runtime-proof-2026-10-29.json) records that all four candidate runtimes have the same length and match the reference outside the five compiler-declared immutable groups. No opcode, metadata or arbitrary differing region is ignored. Repeated occurrences of each immutable value must agree. The comparison records candidate hashes and immutable words for review. This establishes a reference implementation-family relationship, not byte-for-byte deployment equality or approval of the instantiated parameters, administrators or offchain report pipeline.
+
+Run `node --env-file=.env.ondo.local scripts/ondo-feed-candidates.mjs`, followed by `node --env-file=.env.ondo.local scripts/ondo-feed-runtime.mjs`. The second command anchors the reference code hash and uses the candidate report's canonical block. Its tool output is incomplete on RPC/source-identity failure and unsuccessful if any candidate differs. The parser's canonical token mapping is still candidate discovery, not an approved oracle binding.
+
+The source-family review supports the observation/recording timestamp distinction documented below. It does not establish whether the API/Calculated reports include the right shares multiplier, their corporate-action synchronization, or a canonical status endpoint. Those remaining questions in [ONDO_PROVIDER_QUESTIONS.md](ONDO_PROVIDER_QUESTIONS.md) need provider methodology/exact product evidence; a matching report-storage implementation cannot answer them.
+
+New strict focused validation: 64 tests passed, zero failed/skipped, including reference anchoring, changed opcode/metadata rejection, inconsistent immutable copies, malformed code, existing gates and the newly merged Explore regression tests. The preceding observation-age full suite finished 606 passes, zero failures and 33 missing-Solana-validator skips (639 total), before this runtime-proof change and the Explore merge. Model 10, wallets and all live stock gates are unchanged.
+
+## Candidate implementation review and observation freshness
+
+The four candidate aggregator addresses returned no records from the queried Sourcify v2 endpoints. Etherscan pages for the TSLAon API and Calculated aggregators displayed **Similar Match**, referencing `0xf1d388ca8f56a936cb758bc81175e1ad2ba85e18`, rather than exact verified source for the queried deployments. That source-family reference must not be represented as an exact deployment audit.
+
+[ondo-ethereum-aggregator-probes-2026-10-29.json](evidence/ondo-ethereum-aggregator-probes-2026-10-29.json) records that all four actual aggregator getters returned `DualAggregator 1.0.0` and the same owner address at the pinned block. These getters do not establish legal control, source identity or offchain report semantics. The similar-match DualAggregator implementation selects stored primary/secondary reports and distinguishes observation and recorded timestamps; it does not by itself explain the feed's offchain total-return calculation or provide corporate-action clearance for these deployments.
+
+The quote-USD reader now conservatively checks both returned startedAt and updatedAt against the reviewed source-age limit and preserves sourceStartedAt. This prevents a recently recorded response with an old observation/round start from passing. Some feed types use different startedAt semantics; review those before approval rather than relaxing this check automatically. The new boundary regression rejects an old observation with a fresh recording timestamp.
+
+The main-integration full suite completed **596 passes, zero failures and 33 missing-Solana-validator skips** (629 total), before this change. The new focused gate passed 65 tests with no failures/skips, including the observation-age boundary and the other agent's partner-label/buyback-keeper tests.
+
+Further semantic approval needs provider or exact-source evidence. [ONDO_PROVIDER_QUESTIONS.md](ONDO_PROVIDER_QUESTIONS.md) contains the concrete questions and proxy identifiers for Malik; no provider message has been sent. Live pairing remains disabled.
+
 ## Ethereum candidate discovery and main-branch reconciliation
 
 PR134 was merged into the old PR133 feature branch after PR133 reached main. Its quote-USD changes therefore still needed a PR targeting main directly. This reconciliation preserves that tested implementation and the other agent's chart and Solana devnet records.

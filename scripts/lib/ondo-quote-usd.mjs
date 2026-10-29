@@ -34,8 +34,11 @@ export async function readChainlinkQuoteUsd({ policy, snapshot, request }) {
   const updatedAt = Number(updated), started = Number(startedAt);
   assert.ok(Number.isSafeInteger(updatedAt) && Number.isSafeInteger(started) && started > 0 && started <= updatedAt);
   assert.ok(updatedAt > 0 && updatedAt <= observedAt && observedAt - updatedAt <= policy.quoteMaxAgeSec, 'quote round stale or future at observation block');
+  // Some OCR-style implementations report an observation timestamp as startedAt and a later
+  // onchain recording timestamp as updatedAt. A recent upload must not freshen old data.
+  assert.ok(observedAt - started <= policy.quoteMaxAgeSec, 'quote observation is stale even if its recording timestamp is fresh');
   return { network: policy.network, token: policy.quoteToken, feedId: policy.quoteFeedId, currency: 'USD', basis: 'per-raw-token',
-    priceUsdWad: (answer * 10n ** BigInt(18 - policy.quoteFeedDecimals)).toString(), updatedAt, observedAt,
+    priceUsdWad: (answer * 10n ** BigInt(18 - policy.quoteFeedDecimals)).toString(), updatedAt, sourceStartedAt: started, observedAt,
     blockNumber: snapshot.number, blockHash: snapshot.hash, roundId: roundId.toString(), aggregator: policy.quoteAggregator,
     liveCapabilitiesApproved: false, note: 'Quote-asset USD round only; not stock total return, corporate-action clearance or a guaranteed peg. Freshness evaluated at pinned block, not current wall clock.' };
 }

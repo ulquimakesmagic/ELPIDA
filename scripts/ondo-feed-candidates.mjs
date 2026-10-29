@@ -31,7 +31,7 @@ export async function main() {
     const snapshot = await forkSnapshot(endpoint, 1, process.env.ELPIDA_EQUITY_FORK_BLOCK);
     rpc = await createForkRpc({ rpc: endpoint, snapshot, cacheDir: 'cache/equity-rpc' });
     const block = { blockHash: snapshot.hash, requireCanonical: true };
-    const abi = new Interface(['function aggregator() view returns(address)', 'function decimals() view returns(uint8)', 'function description() view returns(string)', 'function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)']);
+    const abi = new Interface(['function aggregator() view returns(address)', 'function decimals() view returns(uint8)', 'function description() view returns(string)', 'function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)', 'function typeAndVersion() view returns(string)', 'function owner() view returns(address)']);
     for (const candidate of candidates) {
       candidate.observations = {};
       try { candidate.observations.proxyCodeHash = keccak256(await rpc.request('eth_getCode', [candidate.proxy, block])); }
@@ -39,6 +39,12 @@ export async function main() {
       for (const method of ['aggregator', 'decimals', 'description', 'latestRoundData']) {
         try { candidate.observations[method] = Array.from(abi.decodeFunctionResult(method, await rpc.request('eth_call', [{ to: candidate.proxy, data: abi.encodeFunctionData(method) }, block]))).map(v => typeof v === 'bigint' ? v.toString() : v); }
         catch { candidate.observations[method] = { unverified: true }; }
+      }
+      const target = candidate.observations.aggregator?.[0];
+      candidate.aggregatorProbes = { sourceAuditVerified: false };
+      if (/^0x[0-9a-f]{40}$/i.test(target ?? '')) for (const method of ['typeAndVersion', 'owner']) {
+        try { candidate.aggregatorProbes[method] = abi.decodeFunctionResult(method, await rpc.request('eth_call', [{ to: target, data: abi.encodeFunctionData(method) }, block]))[0]; }
+        catch { candidate.aggregatorProbes[method] = { unverified: true }; }
       }
     }
     const report = { network: 'ethereum', chainId: 1, block: snapshot.number, blockHash: snapshot.hash, source, assets,

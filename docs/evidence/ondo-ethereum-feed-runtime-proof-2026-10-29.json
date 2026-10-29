@@ -1,0 +1,228 @@
+{
+  "network": "ethereum",
+  "chainId": 1,
+  "block": 26294021,
+  "blockHash": "0xa006d5da3793e8f9b02ba124eb3ec3d918ee764e318220d1d0a2b4d5cef7225c",
+  "reference": {
+    "address": "0xf1d388ca8f56a936cb758bc81175e1ad2ba85e18",
+    "codeHash": "0x8d2bf39f6bc925ed3c6b7a2276f9a3ac37ff0ad96285ae1f1d1f0614c1cb1155",
+    "source": "https://sourcify.dev/server/v2/contract/1/0xf1d388ca8f56a936cb758bc81175e1ad2ba85e18?fields=all"
+  },
+  "results": [
+    {
+      "symbol": "TSLAon",
+      "proxy": "0x737401E0D1299D8A85b653Fd52823501f4FE0be0",
+      "aggregator": "0x95dC7c293ad1706C80bCde068B609CA61B3FF78C",
+      "codeHash": "0x002e8ae17a17334d8dbb58abc1b901702938e2a6e3145e4f526b5b0af1fdd1e9",
+      "matchesReferenceFamily": true,
+      "semanticsVerified": false,
+      "liveCapabilitiesApproved": false,
+      "normalizedCodeHash": "0x743c5f045cdaf22ed4ab7dc8b04e9668ca73beccdba0593444e63dae77def0c5",
+      "immutableValues": [
+        {
+          "offsets": [
+            921,
+            8340,
+            17855
+          ],
+          "value": "0x0000000000000000000000000000000000000000000000000000000000000001"
+        },
+        {
+          "offsets": [
+            1284,
+            8380,
+            17898
+          ],
+          "value": "0x00000000000000000000ffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        {
+          "offsets": [
+            12702
+          ],
+          "value": "0x000000000000000000000000ed4e679adafa9abc97a3fa797dee000d7b0ed247"
+        },
+        {
+          "offsets": [
+            15711,
+            16371
+          ],
+          "value": "0x0000000000000000000000000000000000000000000000000000000000000014"
+        },
+        {
+          "offsets": [
+            1123
+          ],
+          "value": "0x0000000000000000000000000000000000000000000000000000000000000008"
+        }
+      ],
+      "note": "Reference implementation family matches outside consistent compiler-declared immutable fields, including metadata. Not an exact deployment match, offchain-report audit or corporate-action/status approval."
+    },
+    {
+      "symbol": "TSLAon",
+      "proxy": "0x89904B6fcF8dAD1e5DA47dFdF69fC38Ad6be0bd5",
+      "aggregator": "0x9F6B06e826d3DF391285c695749F8f921F6972D9",
+      "codeHash": "0xdf328049d61a44b46be2d56c31015d4c6bd3ca473b6845b9e1c8261287dde937",
+      "matchesReferenceFamily": true,
+      "semanticsVerified": false,
+      "liveCapabilitiesApproved": false,
+      "normalizedCodeHash": "0x743c5f045cdaf22ed4ab7dc8b04e9668ca73beccdba0593444e63dae77def0c5",
+      "immutableValues": [
+        {
+          "offsets": [
+            921,
+            8340,
+            17855
+          ],
+          "value": "0x0000000000000000000000000000000000000000000000000000000000000001"
+        },
+        {
+          "offsets": [
+            1284,
+            8380,
+            17898
+          ],
+          "value": "0x00000000000000000000ffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        {
+          "offsets": [
+            12702
+          ],
+          "value": "0x000000000000000000000000c557dcbc32a01a4fbf7b9e3107baf283f059edc7"
+        },
+        {
+          "offsets": [
+            15711,
+            16371
+          ],
+          "value": "0x0000000000000000000000000000000000000000000000000000000000000014"
+        },
+        {
+          "offsets": [
+            1123
+          ],
+          "value": "0x0000000000000000000000000000000000000000000000000000000000000008"
+        }
+      ],
+      "note": "Reference implementation family matches outside consistent compiler-declared immutable fields, including metadata. Not an exact deployment match, offchain-report audit or corporate-action/status approval."
+    },
+    {
+      "symbol": "SPYon",
+      "proxy": "0xd16cC387E87d37350f57421DaDF811968441C1a5",
+      "aggregator": "0x2053257478bA1FeDF7F99dEF0C412006753aC9Bf",
+      "codeHash": "0x39ac2a4e2518dc3fa411463b1d1ec72bcfeb9e99f90ffb31edc4ba9798d6193a",
+      "matchesReferenceFamily": true,
+      "semanticsVerified": false,
+      "liveCapabilitiesApproved": false,
+      "normalizedCodeHash": "0x743c5f045cdaf22ed4ab7dc8b04e9668ca73beccdba0593444e63dae77def0c5",
+      "immutableValues": [
+        {
+          "offsets": [
+            921,
+            8340,
+            17855
+          ],
+          "value": "0x0000000000000000000000000000000000000000000000000000000000000001"
+        },
+        {
+          "offsets": [
+            1284,
+            8380,
+            17898
+          ],
+          "value": "0x00000000000000000000ffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        {
+          "offsets": [
+            12702
+          ],
+          "value": "0x000000000000000000000000474cfe8ac0cf05986e69631dc144f81d10f72fc1"
+        },
+        {
+          "offsets": [
+            15711,
+            16371
+          ],
+          "value": "0x0000000000000000000000000000000000000000000000000000000000000014"
+        },
+        {
+          "offsets": [
+            1123
+          ],
+          "value": "0x0000000000000000000000000000000000000000000000000000000000000008"
+        }
+      ],
+      "note": "Reference implementation family matches outside consistent compiler-declared immutable fields, including metadata. Not an exact deployment match, offchain-report audit or corporate-action/status approval."
+    },
+    {
+      "symbol": "SPYon",
+      "proxy": "0x6EcC1b902dB35eAFE95332443802774Fd1D72576",
+      "aggregator": "0x9dDb5fBA9A737860c7ccEd0D9177Af56AB16c183",
+      "codeHash": "0x7a73479b6e9748910788c97b7076031620a181295e3fb7443f2d347a0875444c",
+      "matchesReferenceFamily": true,
+      "semanticsVerified": false,
+      "liveCapabilitiesApproved": false,
+      "normalizedCodeHash": "0x743c5f045cdaf22ed4ab7dc8b04e9668ca73beccdba0593444e63dae77def0c5",
+      "immutableValues": [
+        {
+          "offsets": [
+            921,
+            8340,
+            17855
+          ],
+          "value": "0x0000000000000000000000000000000000000000000000000000000000000001"
+        },
+        {
+          "offsets": [
+            1284,
+            8380,
+            17898
+          ],
+          "value": "0x00000000000000000000ffffffffffffffffffffffffffffffffffffffffffff"
+        },
+        {
+          "offsets": [
+            12702
+          ],
+          "value": "0x000000000000000000000000c9c10271b2b76767c385ac389c05d77c319dc41c"
+        },
+        {
+          "offsets": [
+            15711,
+            16371
+          ],
+          "value": "0x0000000000000000000000000000000000000000000000000000000000000014"
+        },
+        {
+          "offsets": [
+            1123
+          ],
+          "value": "0x0000000000000000000000000000000000000000000000000000000000000008"
+        }
+      ],
+      "note": "Reference implementation family matches outside consistent compiler-declared immutable fields, including metadata. Not an exact deployment match, offchain-report audit or corporate-action/status approval."
+    }
+  ],
+  "liveCapabilitiesApproved": false,
+  "note": "Pinned read-only implementation-family comparison. Candidate report identities are inputs, not an approved feed registry. Offchain total-return and corporate-action semantics remain unverified.",
+  "result": "PASS",
+  "checks": [
+    {
+      "name": "Sourcify reference runtime hash matches the pinned Ethereum reference deployment",
+      "ok": true
+    },
+    {
+      "name": "all four candidates match outside only consistent compiler-declared immutable words",
+      "ok": true
+    },
+    {
+      "name": "no opcode or metadata masking and no methodology/status/live approval",
+      "ok": true
+    }
+  ],
+  "sourceHashEncoding": "SHA256 of UTF-8 source with CRLF normalized to LF",
+  "sourceSha256": {
+    "scripts/lib/ondo-feed-runtime.mjs": "6e1d4938b5921d566e41d5f2466ef0562a53d187907dd725e8411c8ca77f6661",
+    "scripts/ondo-feed-runtime.mjs": "37e15330ad0159019961c803588efe9d635c281f5349dc3282bf2a6cf500948a",
+    "tests/fixtures/dual-aggregator-runtime.json": "ca815c8a0ee1c11d7c2d4f702ef56104728436ea4eba667063770f87f2b20771"
+  }
+}
