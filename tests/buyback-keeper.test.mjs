@@ -175,3 +175,22 @@ test('configuration: off without keys, refuses Solana mainnet and a Railway serv
   const mainnetOnly = await configuredBuybackKeeper({ env: { ELPIDA_BUYBACK_EVM_KEY: '0x' + '11'.repeat(32) }, publicIndex: { entries: new Map([['base', { net: { chainId: 8453 }, provider: null }]]) }, path: ':memory:' });
   assert.equal(mainnetOnly.status().state, 'no_eligible_network', 'an EVM mainnet entry gets no worker');
 });
+
+test('keeper: a token whose index is still loading is retried on the next tick, not after a whole interval', async () => {
+  let clock = 1_000_000, ready = false;
+  const tries = [];
+  const worker = {
+    chain: 'test', unit: 'lamports', format: String, address: async () => 'KEEPER',
+    candidates: async () => [{ address: 'MINT', symbol: 'M' }],
+    run: async () => { tries.push(clock); if (!ready) throw Object.assign(new Error('config_unavailable'), { code: 'config_unavailable' }); return { cost: 5n, hashes: ['sig'] }; },
+  };
+  const keeper = new BuybackKeeper({ workers: [worker], everyMs: 600_000, now: () => clock });
+  await keeper.tick();
+  assert.equal(keeper.status().chains[0].lastError.code, 'config_unavailable');
+  clock += 60_000; ready = true; await keeper.tick();
+  assert.equal(tries.length, 2, 'retried one tick later');
+  assert.deepEqual(keeper.status().chains[0].last.hashes, ['sig']);
+  clock += 60_000; await keeper.tick();
+  assert.equal(tries.length, 2, 'after a real run the interval applies again');
+  await keeper.close();
+});
