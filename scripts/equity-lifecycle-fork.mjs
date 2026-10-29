@@ -19,7 +19,7 @@ const ERC = ['function symbol() view returns(string)', 'function decimals() view
  * Runs the whole lifecycle with `stockAddress` as the approved quote. `fund(signers)` must give signers 0 and 1 a
  * balance of the quote asset. Returns { checks, steps } and throws on the first failed assertion.
  */
-export async function runLifecycle({ provider, stockAddress, fund, virtualQuote, firstBuy, tradeBuy, atomic = false, log = () => {}, onCheck = () => {} }) {
+export async function runLifecycle({ provider, stockAddress, fund, virtualQuote, firstBuy, tradeBuy, atomic = false, beforeOperation = async () => {}, log = () => {}, onCheck = () => {} }) {
   const compiled = compileContracts({ includeMocks: true });
   const art = n => compiled['contracts/evm/src/' + n + '.sol'][n];
   const fixture = n => compiled['tests/fixtures/' + n + '.sol'][n];
@@ -68,12 +68,19 @@ export async function runLifecycle({ provider, stockAddress, fund, virtualQuote,
   assert.equal(await stock.allowance(factory.target, curve.target), 0n);
   ok('factory leaves no approval behind');
 
+  const state = async () => ({ sold: await curve.sold(), complete: await curve.complete(), pool: await curve.pool(),
+    reserve: await curve.realReserve(), protocol: await curve.protocolFees(), creator: await curve.creatorFees(),
+    bonus: await curve.liquidityBonus(), dust: await curve.quoteDust(), supply: await token.totalSupply(),
+    balances: await Promise.all([...addresses, curve.target, adapter.target].map(async a => [a, await stock.balanceOf(a), await token.balanceOf(a)])) });
+  const restrict = async (name, send, target, extra = async () => ({}), deferred = false) => beforeOperation({ name, send, target, deferred, state: async () => ({ curve: await state(), extra: await extra() }) });
+
   // Trading after the anti-snipe window, both directions, with the invariant checked after each step.
   await provider.send('evm_increaseTime', [61]); await provider.send('evm_mine', []);
   const trader = signers[1];
   await mined(stock.connect(trader).approve(curve.target, tradeBuy));
   const [quotedOut] = await curve.quoteBuy(tradeBuy);
   const before = await token.balanceOf(addresses[1]);
+  await restrict('curve buy', () => curve.connect(trader).buy(tradeBuy, 0, { gasLimit: 15000000 }), curve.target);
   await mined(curve.connect(trader).buy(tradeBuy, quotedOut * 99n / 100n));
   const got = (await token.balanceOf(addresses[1])) - before;
   assert.ok(got >= quotedOut * 99n / 100n);
@@ -83,6 +90,7 @@ export async function runLifecycle({ provider, stockAddress, fund, virtualQuote,
   await mined(token.connect(trader).approve(curve.target, sellAmount));
   const stockBefore = await stock.balanceOf(addresses[1]);
   const [sellOut] = await curve.quoteSell(sellAmount);
+  await restrict('curve sell', () => curve.connect(trader).sell(sellAmount, 0, { gasLimit: 15000000 }), addresses[1]);
   await mined(curve.connect(trader).sell(sellAmount, sellOut * 99n / 100n));
   assert.equal((await stock.balanceOf(addresses[1])) - stockBefore, sellOut);
   assert.equal(await stock.balanceOf(curve.target), await liabilities());
@@ -91,6 +99,7 @@ export async function runLifecycle({ provider, stockAddress, fund, virtualQuote,
   // Fee payouts to the fixed recipients.
   const owedProtocol = await curve.protocolFees(), owedCreator = await curve.creatorFees();
   const tBefore = await stock.balanceOf(await curve.protocolTreasury()), cBefore = await stock.balanceOf(await curve.creatorRewardVault());
+  await restrict('curve fees', () => curve.claimFees(addresses[2], { gasLimit: 15000000 }), addresses[2], async () => ({}), true);
   await mined(curve.withdrawFees());
   assert.equal(await curve.protocolFees(), 0n); assert.equal(await curve.creatorFees(), 0n);
   const sameWallet = (await curve.protocolTreasury()).toLowerCase() === (await curve.creatorRewardVault()).toLowerCase();
@@ -106,6 +115,7 @@ export async function runLifecycle({ provider, stockAddress, fund, virtualQuote,
   const terminalT = await curve.virtualToken() - await curve.SALE_CAP();
   await mined(stock.connect(trader).approve(curve.target, gross));
   assert.ok(await stock.balanceOf(addresses[1]) >= gross, 'signer 1 needs enough quote asset to complete the curve (raise the funding)');
+  await restrict('final buy and atomic graduation', () => curve.connect(trader).buy(gross, 0, { gasLimit: 15000000 }), adapter.target);
   const completionReceipt = await mined(curve.connect(trader).buy(gross, 0, { gasLimit: 15000000 }));
   assert.equal(await curve.complete(), true);
   assert.equal(await stock.balanceOf(curve.target), await liabilities());
@@ -134,12 +144,15 @@ export async function runLifecycle({ provider, stockAddress, fund, virtualQuote,
   const args = { tokenIn: stockAddress, tokenOut: token.target, fee: 10000, recipient: addresses[0], amountIn: tradeBuy, amountOutMinimum: 0, sqrtPriceLimitX96: 0 };
   await mined(stock.connect(signers[0]).approve(router.target, tradeBuy));
   const out = await router.exactInputSingle.staticCall(args); assert.ok(out > 0n);
+  const poolState = async () => ({ liquidity: (await manager.positions(positionId)).liquidity, owner: await manager.ownerOf(positionId), slot0: Array.from(await pool.slot0()), poolQuote: await stock.balanceOf(poolAddress), poolToken: await token.balanceOf(poolAddress) });
+  await restrict('pool buy', () => router.exactInputSingle(args, { gasLimit: 15000000 }), poolAddress, poolState);
   await mined(router.exactInputSingle({ ...args, amountOutMinimum: out * 99n / 100n }));
   const sellIn = out / 2n;
   await mined(token.connect(signers[0]).approve(router.target, sellIn));
   const sArgs = { ...args, tokenIn: token.target, tokenOut: stockAddress, amountIn: sellIn };
   const sOut = await router.exactInputSingle.staticCall(sArgs); assert.ok(sOut > 0n);
   const sb = await stock.balanceOf(addresses[0]);
+  await restrict('pool sell', () => router.exactInputSingle(sArgs, { gasLimit: 15000000 }), poolAddress, poolState);
   await mined(router.exactInputSingle({ ...sArgs, amountOutMinimum: sOut * 99n / 100n }));
   assert.ok(await stock.balanceOf(addresses[0]) > sb);
   ok('post-graduation buy and sell through Uniswap v3 with the stock');
@@ -161,6 +174,7 @@ export async function runLifecycle({ provider, stockAddress, fund, virtualQuote,
     assert.equal(p + c, total); assert.equal(p, total / 2n); assert.equal(c, total - total / 2n);
     for (const recipient of [treasury, creator]) {
       const owed = await splitter.claimable(feeAsset.target, recipient), before = await feeAsset.balanceOf(recipient);
+      if (feeAsset.target === stockAddress) await restrict('pool fee claim ' + recipient, () => splitter.claim(feeAsset.target, recipient, { gasLimit: 15000000 }), recipient, async () => ({ pool: await poolState(), splitterBalance: await stock.balanceOf(splitter.target), owed: await splitter.claimable(feeAsset.target, recipient) }));
       await mined(splitter.claim(feeAsset.target, recipient));
       assert.equal((await feeAsset.balanceOf(recipient)) - before, owed);
       assert.equal(await splitter.claimable(feeAsset.target, recipient), 0n);
@@ -202,7 +216,8 @@ async function main() {
   const connection = await network.create({ network: 'localTest', override: { chainId: 31337, hardfork: 'cancun', forking: { url: rpc, blockNumber: block } } });
   const provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 }); provider.pollingInterval = 10;
   const report = { scope: 'LOCAL FORK ONLY: nothing is sent to the public chain', provider: providerId, atomic: providerId === 'ondo', source: asset.source, network: net, chainId: def.chainId, block, symbol, token: asset.address, holder, result: 'RUNNING', results: [] };
-  const reportPath = `backups/equity-fork/${net}-${providerId}-${symbol}-lifecycle-report.json`;
+  const restrictions = process.env.ELPIDA_EQUITY_RESTRICTIONS === '1';
+  const reportPath = `backups/equity-fork/${net}-${providerId}-${symbol}-${restrictions ? 'restrictions' : 'lifecycle'}-report.json`;
   mkdirSync('backups/equity-fork', { recursive: true });
   const saveReport = () => writeFileSync(reportPath, JSON.stringify(report, null, 2));
   saveReport();
@@ -224,8 +239,10 @@ async function main() {
       for (const s of signers.slice(0, 2)) await (await h.transfer(await s.getAddress(), need)).wait();
       await provider.send('hardhat_stopImpersonatingAccount', [holder]);
     };
-    const res = await runLifecycle({ provider, stockAddress: asset.address, fund, virtualQuote, firstBuy, tradeBuy, atomic: providerId === 'ondo', log: console.log, onCheck: check => { report.results.push(check); saveReport(); } });
-    report.results = res.checks; report.result = 'PASS';
+    const beforeOperation = restrictions ? await (await import('./lib/ondo-restrictions.mjs')).ondoRestrictionChecks({ provider, stockAddress: asset.address, onCheck: check => { report.results.push(check); saveReport(); console.log('PASS ', check.name); } }) : undefined;
+    if (beforeOperation) { report.restrictionEvidence = beforeOperation.evidence; saveReport(); }
+    const res = await runLifecycle({ beforeOperation, provider, stockAddress: asset.address, fund, virtualQuote, firstBuy, tradeBuy, atomic: providerId === 'ondo', log: console.log, onCheck: check => { report.results.push(check); saveReport(); } });
+    if (!restrictions) report.results = res.checks; report.result = 'PASS';
   } catch (e) {
     report.result = 'FAIL'; report.error = e.shortMessage ?? e.message; console.log(`FAIL  ${report.error}`);
   } finally {
