@@ -8,6 +8,7 @@ import { normalizeMetadata } from './metadata.mjs';
 import { readMetadataCache, writeMetadataCache } from './metadata-cache.mjs';
 import {launchDetailsError} from './launch-capabilities.mjs';
 import { EVM_TEST_PAIRS } from '/pairs.mjs';
+import { testStockHold, MARKET_STATUS } from './test-stock.mjs';
 import { DEX_MODEL, LEGACY_DEX_MODEL, BETA_MODEL, MODEL_VERSIONS, isDexModel, curveShape, startFdvUsdFor, assertDeploymentTerms, usdQuoteTemplate, GRADUATION_GRACE_SECONDS, BASE_FEE_BPS, SNIPE_START_BPS, SNIPE_WINDOW_SECONDS, SALE_CAP } from '/curve-model.mjs';
 import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
 import {nativeFundingError} from './payment-errors.mjs';
@@ -194,6 +195,22 @@ export class TestnetWallet {
   /** Decimals, address and symbol of a launch's trading asset. */
   qd(item) { return item.pair === 'native' ? 18 : item.quoteDecimals ?? 18; }
   qaddr(item) { return item.pair === 'native' ? this.dex?.weth : item.quoteAddress; }
+  /**
+   * Testnet Ondo-style stock pairs: stops before signing when the test issuer has paused the stock or blocked this
+   * wallet, or when a buy would complete (and graduate) the curve without a usable stock price.
+   */
+  async stockPreflight(item, action, { input = 0n, curve = null } = {}) {
+    const quote = item.pair === 'xstock' ? this.qaddr(item) : null, arts = this.config.contracts;
+    if (!quote || !arts?.testOndoStock || !arts?.testStockFeed) return;
+    let provider; try { provider = await new Contract(quote, ['function stockProvider() view returns(string)'], this.provider).stockProvider(); } catch { return; }
+    if (provider !== 'ondo-test') return;
+    const stock = new Contract(quote, arts.testOndoStock.abi, this.provider), feed = new Contract(await stock.referenceFeed(), arts.testStockFeed.abi, this.provider);
+    const [paused, blocked, round, status] = await Promise.all([stock.paused(), stock.blocked(this.address), feed.latestRoundData(), feed.marketStatus()]);
+    let completes = false;
+    if (action === 'buy' && curve && input > 0n) { try { const [sold, cap, [out]] = await Promise.all([curve.sold(), curve.SALE_CAP(), curve.quoteBuy(input)]); completes = sold + out >= cap; } catch { /* not a completing buy we can detect */ } }
+    const hold = testStockHold({ provider, paused, price: formatUnits(round[1], 8), updatedAt: Number(round[3]), marketStatus: MARKET_STATUS[Number(status)] }, { action, completes, blocked }, nowSeconds());
+    if (hold) throw new Error(hold);
+  }
   qsym(item, wrapped = false) { return item.pair === 'native' ? (wrapped ? 'WETH' : this.net.nativeCurrency.symbol) : item.quoteSymbol ?? 'paired token'; }
   /** The creation fee in whole native coins: the factory's live value once deployed, else the configured one. */
   feeText() { return this.launchFee !== undefined ? formatUnits(this.launchFee, 18).replace(/\.0$/, '') : this.pricing.launchFee; }
@@ -300,9 +317,11 @@ export class TestnetWallet {
       if(template.adapter===ZeroAddress||template.virtualQuote<=0n)return;
       const asset=new Contract(address,['function symbol() view returns(string)','function name() view returns(string)','function decimals() view returns(uint8)','function pairKind() view returns(string)','function FAUCET_LIMIT() view returns(uint256)'],this.provider);
       const [symbol,name,decimals]=await Promise.all([asset.symbol(),asset.name(),asset.decimals()]);
-      let kind='token',faucetLimit=0n;try{kind=await asset.pairKind()==='xstock'?'xstock':'token';}catch{}try{faucetLimit=await asset.FAUCET_LIMIT();}catch{}
+      let kind='token',faucetLimit=0n,stock=null;try{kind=await asset.pairKind()==='xstock'?'xstock':'token';}catch{}try{faucetLimit=await asset.FAUCET_LIMIT();}catch{}
+      // Ondo-style test stocks describe their issuer model and their total-return feed (contracts/evm/testnet).
+      if(kind==='xstock'){try{const s=new Contract(address,['function stockProvider() view returns(string)','function referenceFeed() view returns(address)'],this.provider);const provider=await s.stockProvider();if(provider==='ondo-test')stock={provider,feed:await s.referenceFeed()};}catch{}}
       if (this.feeUsdc && address.toLowerCase() === this.feeUsdc.toLowerCase()) kind='usdc';
-      this.approvedQuotes.push({id:address,address,kind,symbol,name,decimals:Number(decimals),virtualQuote:template.virtualQuote,test:faucetLimit>0n,faucet:faucetLimit>0n?{label:'Get '+formatUnits(faucetLimit,decimals).replace(/\.0$/,'')+' '+symbol,action:'faucet',body:{asset:address}}:null});
+      this.approvedQuotes.push({id:address,address,kind,symbol,name,decimals:Number(decimals),virtualQuote:template.virtualQuote,test:faucetLimit>0n,stock,faucet:faucetLimit>0n?{label:'Get '+formatUnits(faucetLimit,decimals).replace(/\.0$/,'')+' '+symbol,action:'faucet',body:{asset:address}}:null});
     };
     if(this.pairsScanned===undefined&&this.deployment.shared){
       const response=await fetch('/api/public/quotes?network='+encodeURIComponent(this.net.key),{signal:AbortSignal.timeout(15000)});
@@ -316,7 +335,26 @@ export class TestnetWallet {
     if(latest-from>20000)throw new Error('This launchpad needs its public pair index to load trading assets.');
     for(;from<=latest;from+=100){const to=Math.min(from+99,latest);for(const event of await factory.queryFilter(factory.filters.QuoteApproved(),from,to))await add(event.args.asset);this.pairsScanned=to;}
   }
-  /** Treasury only, DEX launchpads: deploys the labelled test xStock and test paired token and approves them as pairs. */
+  /** Test pairs this launchpad has not approved yet (after loadPairs), for the owner's setup button. */
+  missingTestPairs() { return this.approvedQuotes ? EVM_TEST_PAIRS.filter(t => !this.approvedQuotes.some(a => a.symbol === t.symbol && a.test)) : []; }
+  /**
+   * Treasury only: the test issuer's controls on an Ondo-style test stock, to rehearse the stock gate. `op` is
+   * 'price' (value: USD), 'status' (open | closed | corporate-action), 'pause' (true/false) or 'block' (address, blocked).
+   */
+  async testStockControl({ asset, op, value, account }) {
+    const quote = (this.approvedQuotes ?? []).find(a => a.address.toLowerCase() === String(asset).toLowerCase() && a.stock?.provider === 'ondo-test');
+    if (!quote) throw new Error('That is not an Ondo-style test stock on this launchpad.');
+    const stock = new Contract(quote.address, this.config.contracts.testOndoStock.abi, this.signer), feed = new Contract(quote.stock.feed, this.config.contracts.testStockFeed.abi, this.signer);
+    if ((await stock.controller()).toLowerCase() !== this.address.toLowerCase()) throw new Error('Only the wallet that deployed the test stock (the launchpad treasury) controls it.');
+    let r;
+    if (op === 'price') { const usd = Number(value); if (!(usd > 0)) throw new Error('Enter a positive USD price.'); r = await this.wait(feed.post(parseUnits(String(usd), 8)), `Post a ${quote.symbol} test price of $${usd}…`); }
+    else if (op === 'status') { const i = ['open', 'closed', 'corporate-action'].indexOf(value); if (i < 0) throw new Error('Unknown market status.'); r = await this.wait(feed.setMarketStatus(i), `Set the ${quote.symbol} test market to ${value}…`); }
+    else if (op === 'pause') r = await this.wait(stock.setPaused(!!value), `${value ? 'Pause' : 'Unpause'} ${quote.symbol} (test issuer control)…`);
+    else if (op === 'block') { if (!isAddress(account)) throw new Error('Enter a valid address.'); r = await this.wait(stock.setBlocked(account, !!value), `${value ? 'Block' : 'Unblock'} ${account.slice(0, 6)}…${account.slice(-4)} on ${quote.symbol}…`); }
+    else throw new Error('Unknown test stock control.');
+    return { hash: r.tx.hash, message: `${quote.symbol}: done. The token pages pick it up within about a minute.` };
+  }
+  /** Treasury only, DEX launchpads: deploys the labelled test assets (EVM_TEST_PAIRS) and approves them as pairs. */
   async setupTestPairs() {
     await this.checkNetwork();
     const factory = (await this.verifyFactory()).connect(this.signer);
@@ -328,15 +366,25 @@ export class TestnetWallet {
     for (const [i, t] of EVM_TEST_PAIRS.entries()) {
       if (this.approvedQuotes.some(a => a.symbol === t.symbol && a.test)) continue;
       const art = this.config.contracts.testAsset, adapterArt = this.config.contracts.adapter;
-      this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm the ${t.symbol} test asset deployment…`);
-      const asset = await new ContractFactory(art.abi, art.bytecode, this.signer).deploy(t.name, t.symbol, t.kind, t.decimals, BigInt(t.faucet)); await asset.waitForDeployment();
+      let asset;
+      if (t.ondo) {
+        // The Ondo-style test stock needs its test total-return feed first; the stock records the feed for good.
+        const feedArt = this.config.contracts.testStockFeed, stockArt = this.config.contracts.testOndoStock;
+        this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm the ${t.symbol} test price feed deployment…`);
+        const feed = await new ContractFactory(feedArt.abi, feedArt.bytecode, this.signer).deploy(t.ondo.feed, parseUnits(t.ondo.price, 8)); await feed.waitForDeployment();
+        this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm the ${t.symbol} test stock deployment…`);
+        asset = await new ContractFactory(stockArt.abi, stockArt.bytecode, this.signer).deploy(t.name, t.symbol, BigInt(t.faucet), feed.target); await asset.waitForDeployment();
+      } else {
+        this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm the ${t.symbol} test asset deployment…`);
+        asset = await new ContractFactory(art.abi, art.bytecode, this.signer).deploy(t.name, t.symbol, t.kind, t.decimals, BigInt(t.faucet)); await asset.waitForDeployment();
+      }
       this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm its ${this.dex?.name??'DEX'} migration adapter…`);
       const adapter = await new ContractFactory(adapterArt.abi, adapterArt.bytecode, this.signer).deploy(this.dex.manager, asset.target, 10000); await adapter.waitForDeployment();
       const virtualQuote = parseUnits(t.startFdv, t.decimals) * vt / supply;
       last = await this.wait(factory.approveQuote(asset.target, virtualQuote, adapter.target), `Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: approve ${t.symbol} as a trading pair…`);
     }
     this.pairsScanned = undefined; this.approvedQuotes = undefined; await this.loadPairs(factory);
-    return { hash: last?.tx.hash, message: 'TEST-STOCK (xStock) and TEST-MEME (paired token) are now approved trading pairs.' };
+    return { hash: last?.tx.hash, message: `${EVM_TEST_PAIRS.map(t => t.symbol).join(', ')} are now approved test trading pairs.` };
   }
   factoryContract(runner = this.provider) {
     const deployment = this.deployment;
@@ -698,6 +746,7 @@ export class TestnetWallet {
     const factory = (await this.verifyFactory()).connect(this.signer);
     let result;
     if (action === 'setup-pairs') return this.setupTestPairs();
+    if (action === 'test-stock') return this.testStockControl(body ?? {});
     if (action === 'setup-usdc-pair') return this.setupUsdcPair();
     if (action === 'convert-usdc') return this.convertUsdc(body);
     if (action === 'apply-pricing') return this.applyPricing();
@@ -825,6 +874,7 @@ export class TestnetWallet {
       if (action === 'reopen') { if (this.modelOf(item) !== DEX_MODEL) throw new Error('Only model 10 curves can be reopened.'); result = await this.wait(original.reopen(), 'Confirm reopening the curve for trading…'); }
       else if (action === 'graduate') result = await this.wait(original.graduate(), this.dex?`Confirm graduation into ${this.dex.name??'the DEX'}…`:'Confirm graduation into the locked test pool…');
       else if (action === 'withdraw') {
+        await this.stockPreflight(item, 'withdraw');
         // Every step is zero-safe on-chain (withdrawFees, collectFees and claim all succeed with nothing owed), so a
         // batching wallet gets them all in ONE confirmation. Other wallets get only the steps that will move money.
         const steps = [], add = (contract, fn, label) => steps.push({ to: contract.target, data: contract.interface.encodeFunctionData(fn.name, fn.args), label });
@@ -848,12 +898,13 @@ export class TestnetWallet {
         if (!steps.length) throw new Error('Nothing to claim yet. Fees appear here once the curve or the pool has traded.');
         result = await this.sendPermissionless(steps, 'Claim fees to their fixed recipients.');
       }
-      else if(this.dex&&await original.pool()!==ZeroAddress)result=await this.dexTrade(item,action,body);
+      else if(this.dex&&await original.pool()!==ZeroAddress){await this.stockPreflight(item, action);result=await this.dexTrade(item,action,body);}
       else {
         const percent = Number(body.slippage);
         if (!Number.isFinite(percent) || percent < 0.1 || percent > 5) throw new Error('Slippage must be between 0.1% and 5%.');
         const input = parseUnits(body.amount, action === 'buy' ? this.qd(item) : 18);
         if (input <= 0n) throw new Error('Enter a positive amount.');
+        await this.stockPreflight(item, action, { input, curve });
         const [out] = action === 'buy' ? await curve.quoteBuy(input) : await curve.quoteSell(input);
         const payment = action === 'buy' ? new Contract(this.qaddr(item) ?? ZeroAddress, this.config.contracts.quote.abi, this.signer) : new Contract(item.address, this.config.contracts.token.abi, this.signer);
         const marketAddress = await curve.getAddress();

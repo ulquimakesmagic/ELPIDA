@@ -28,6 +28,9 @@ export const CANDLE_INTERVALS=[1,15,60,300,900,3600,14400,86400];
 // Early-partner tiers (docs/DESIGN_PARTNER_TIERS.md): read with minimal ABIs so curves and splitters that predate them
 // simply report no tier.
 const PARTNER_ABI=['function buybackBps() view returns(uint256)','function buybackBurned() view returns(uint256)'];
+// Testnet Ondo-style stocks (contracts/evm/testnet/ElpidaTestOndoStock.sol) expose their issuer controls and feed.
+const TEST_STOCK_ABI=['function stockProvider() view returns(string)','function paused() view returns(bool)','function referenceFeed() view returns(address)'];
+const TEST_STOCK_FEED_ABI=['function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)','function marketStatus() view returns(uint8)','function decimals() view returns(uint8)','function description() view returns(string)'];
 const SPLITTER_PARTNER_ABI=['function burned() view returns(uint256)','function pendingBuyback(address) view returns(uint256)'];
 export class EvmIndexer {
   constructor({provider, factory, contracts, path = ':memory:', chainId = 31337, fromBlock = 0, confirmations = 0, nativeSymbol = 'ETH', batchSize = 1, dexName = 'Uniswap v3', fullRefreshMs = 0}) {
@@ -236,6 +239,16 @@ export class EvmIndexer {
     return this.partnerBps.get(r.curve);
   }
   /** Tokens a partner token's buybacks burned: on the curve, plus LP fees after graduation (token share burned, queue bought). */
+  /** A test Ondo-style stock's pause state and total-return feed, or null for any other quote asset. */
+  async stockSnapshot(quote,call){
+    if(!quote)return null;
+    this.stockProviders??=new Map();const key=quote.toLowerCase();
+    if(!this.stockProviders.has(key)){let provider=null;try{provider=await new Contract(quote,TEST_STOCK_ABI,this.provider).stockProvider(call);}catch(e){if(!['CALL_EXCEPTION','BAD_DATA'].includes(e.code))throw e;/* not a test stock */}this.stockProviders.set(key,provider);}
+    if(this.stockProviders.get(key)!=='ondo-test')return null;
+    const stock=new Contract(quote,TEST_STOCK_ABI,this.provider),[paused,feedAddress]=await Promise.all([stock.paused(call),stock.referenceFeed(call)]);
+    const feed=new Contract(feedAddress,TEST_STOCK_FEED_ABI,this.provider),[round,status,decimals,description]=await Promise.all([feed.latestRoundData(call),feed.marketStatus(call),feed.decimals(call),feed.description(call)]);
+    return {provider:'ondo-test',paused,feed:feedAddress.toLowerCase(),description,price:formatUnits(round[1],decimals),updatedAt:Number(round[3]),marketStatus:['open','closed','corporate-action'][Number(status)]??'unknown'};
+  }
   async partnerSnapshot(r,call,{graduated,splitter,quoteAsset}={}){
     const buybackBps=await this.buybackBpsOf(r,call);
     if(!buybackBps)return {buybackBps:0};
@@ -249,6 +262,7 @@ export class EvmIndexer {
     const [pool,sold,complete,supply,deadBalance,devHolding] = await Promise.all([c.pool(call),c.sold(call),c.complete(call),t.totalSupply(call),t.balanceOf(dead,call),t.balanceOf(r.creator,call)]);
     // Live creator holding and, for model 10, the locked anti-snipe bonus and graduation escape-hatch timing.
     const dev={devHoldingRaw:devHolding.toString(),devHoldingPct:supplyPercent(devHolding,supply)};
+    if(r.pair==='xstock'){const stock=await this.stockSnapshot(r.quoteAddress,call);if(stock)dev.stock=stock;}
     if(this.contracts.tax){const [buy,sell]=await Promise.all([t.buyTaxBps(call),t.sellTaxBps(call)]);dev.tax={buyBps:Number(buy),sellBps:Number(sell),protocolBps:3000,creatorBps:7000};dev.factory=this.factory;}
     if(r.curveModel===10){const [bonus,completedAt]=await Promise.all([c.liquidityBonus(call),c.completedAt(call)]);Object.assign(dev,{liquidityBonus:formatUnits(bonus,r.quoteDecimals),completedAt:Number(completedAt),reopenableAt:complete&&pool===ZeroAddress&&completedAt>0n?Number(completedAt)+r.graduationGrace:null});}
     const graduated=pool!==ZeroAddress,m=graduated?new Contract(pool,this.contracts.pool.abi,this.provider):c;

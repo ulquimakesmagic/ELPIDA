@@ -1,5 +1,7 @@
 # Ondo stock quote pairing — groundwork, 2026-10-28
 
+Update, 29 October: a [testnet Ondo-style stock pair (tNVDAon)](TESTNET_ONDO_STOCK.md) lets stock-paired launches, the issuer pause and blocklist, and the graduation price gate be tried end to end on Ethereum Sepolia and BNB Testnet. It is a labelled stand-in with no value; live Ondo pairing stays off.
+
 This phase adds Ondo as an explicitly selected provider alongside existing providers on Ethereum, BNB Chain, Solana and Robinhood Chain. It does not activate public stock launches, change Model 10, change wallet selection, or submit transactions. Base is not included. Nine issuer-sourced canonical records are imported: NVDAon, TSLAon and SPYon on Ethereum, BNB and Solana. Ticker matching and third-party address lists are insufficient. Contract transfer and price semantics remain unverified.
 
 The public discovery endpoint accepts `provider=ondo`, for example `/api/public/tokenized-equity?network=ethereum&provider=ondo`. Omitting the provider retains existing defaults. Discovery lists the imported assets with every capability disabled. These are not launch options. Mainnet Ondo addresses cannot be resolved through testnet aliases.

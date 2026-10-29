@@ -82,4 +82,8 @@ export function solanaPairTemplates(native, { test = false, usdcMint = null, usd
 export const EVM_TEST_PAIRS = [
   { kind: 'xstock', key: 'test-stock', symbol: 'TEST-STOCK', name: 'Elpida test stock (simulated xStock, no value)', decimals: 18, startFdv: '20', faucet: '250' },
   { kind: 'token', key: 'test-meme', symbol: 'TEST-MEME', name: 'Elpida test paired token (no value)', decimals: 18, startFdv: '500000', faucet: '6000000' },
+  // An Ondo-style test stock (contracts/evm/testnet/ElpidaTestOndoStock.sol): issuer pause, blocklist and a test
+  // total-return price feed, so the stock gate can be rehearsed end to end. Not an Ondo token; no value.
+  { kind: 'xstock', key: 'test-ondo-nvda', symbol: 'tNVDAon', name: 'Elpida test Ondo-style NVDA stock (no value)', decimals: 18, startFdv: '20', faucet: '25',
+    ondo: { feed: 'tNVDAon / USD (test total-return)', price: '180' } },
 ];

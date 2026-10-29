@@ -8,6 +8,8 @@ import { h, icon, short, number, compact, avatar, pricing, fmtPrice, fmtValue, p
 import { withWalletTimeout, walletErrorText } from './wallet.mjs';
 import { exceedsRemaining } from './amounts.mjs';
 import {terminalChart} from './terminal-chart.mjs';
+import { testStockStatus } from './test-stock.mjs';
+const STOCK_LABELS = { fresh: 'Price fresh', 'market-closed': 'Market closed', stale: 'Price stale', 'corporate-action': 'Corporate action', paused: 'Issuer paused', outage: 'No price' };
 import {holderTerminal} from './holder-terminal.mjs';
 import {tokenWalletImage,watchEvmToken} from './wallet-token.mjs';
 import {holderChat} from './holder-chat.mjs';
@@ -122,6 +124,7 @@ export function renderToken(ctx, address) {
           h('span.tk-tag.tk-addr', { title: token.address }, short(token.address), copyButton(token.address, '')),
           h('span.tk-tag', { title: 'Copy a link that shows a preview card on X, Telegram and Discord' }, 'Share', copyButton(`${location.origin}/token/${encodeURIComponent(token.network ?? ctx.wallet.net.key)}/${token.address}`, '')),
           token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null,
+          (stock => stock ? h('span.tk-tag.tk-tag-stock', { 'data-ok': String(stock.usable), title: stock.reason ?? 'Stock price is fresh; the curve can graduate.' }, icon('chart-candlestick', 'icon-xs'), `${q} · ${STOCK_LABELS[stock.status] ?? stock.status}`) : null)(testStockStatus(token.stock)),
           (chip => chip ? h('span.tk-tag.tk-tag-burn', { 'data-tier': chip.tier.toLowerCase(), title: chip.title }, icon('flame', 'icon-xs'), `${chip.tier} · ${chip.text}`) : null)(partnerChip(token)))),
         h('div.tk-sub', h('div.tk-about', descText, descMore),
           h('div.tk-links', ...linkPills, explorerHref ? h('a.tk-pill.tk-pill-end', { href: explorerHref, target: '_blank', rel: 'noopener noreferrer', title: 'Open in explorer' }, 'Explorer', icon('arrow-up-right', 'icon-sm')) : null, txUrl(launchHash) ? h('a.tk-pill', { href: txUrl(launchHash), target: '_blank', rel: 'noopener noreferrer', title: 'The transaction that created this token' }, 'Launch transaction', icon('arrow-up-right', 'icon-sm')) : null)))));
