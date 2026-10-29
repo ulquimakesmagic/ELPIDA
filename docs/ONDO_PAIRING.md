@@ -42,10 +42,29 @@ node scripts/equity-lifecycle-fork.mjs ethereum NVDAon ondo
 
 Use `bnb` for the BNB deployment. The holder is impersonated only inside Hardhat; no wallet or private key is used. Upstream calls read chain ID, block height and balances. All contract deployment, funding transfers, trades and graduation occur on the local fork at the recorded upstream block. Reports include network, provider, symbol, address and source. Ondo mode uses the atomic factory, publishes test metadata and launches with no creator purchase. This checks transfer/pool compatibility, not issuer eligibility or a production oracle.
 
-On 28 October the attempted public Ethereum and BNB archive endpoints returned HTTP 403. A real Ondo fork lifecycle is therefore **not verified**. Local mock lifecycle results must not be promoted to real-contract verification. No stock-pair capability or deployment flag was enabled.
+The initial public archive endpoints returned HTTP 403. Subsequent real Ethereum NVDAon testing succeeded through an authenticated archive RPC on 28 October. The evidence below supersedes that access blocker for this one asset and snapshot. BNB and Solana remain untested; no stock-pair capability or deployment flag was enabled.
 
 ## Local validation
 
 28 focused registry/discovery/accounting tests, 10 API integration tests and three local EVM lifecycle tests pass (41 total, no skips). Lifecycle coverage includes legacy 6-decimal quotes and atomic graduation with zero creator buy at both 6 and 18 decimals. The 18-decimal check caught a missing quoteDust term in the rehearsal balance assertion; conservation now includes separately recorded migration dust without changing any production contract.
 
-The broader npm test run started in the original shared checkout is still in progress; it is not a completed validation of this isolated branch. Real Ondo transfer, issuer-control, oracle and venue tests remain open.
+The earlier broad suite finished with 534 passes, 30 environmental skips and no failures, before the cached-runner changes. The current focused strict gate passes 37 tests with no skips, covering RPC cache behavior, discovery, provider isolation and mock lifecycle checks. A new broad run is in progress; its result must be assessed separately. Issuer-control, oracle and eligibility checks remain open.
+
+## Real NVDAon fork result and repeatable runs
+
+[ondo-ethereum-nvda-lifecycle-2026-10-28.json](evidence/ondo-ethereum-nvda-lifecycle-2026-10-28.json) records 15 passing checks at Ethereum block **26294021**, hash `0xa006d5da3793e8f9b02ba124eb3ec3d918ee764e318220d1d0a2b4d5cef7225c`. The quote is the issuer-listed NVDAon contract `0x2d1f7226bd1f780af6b9a49dcc0ae00e8df4bdee`. It covers zero creator purchase, exact buys/sells and curve fees, atomic graduation, migration dust, price continuity, permanent LP custody, pool swaps, fee collection and exact 50/50 creator/treasury pool-fee claims on both assets.
+
+This is an ELPIDA deployment and a local Uniswap v3 deployment on a mainnet fork. It is not a public deployment or a test of liquidity in an existing public pool. The rehearsal uses 20 stock tokens as a virtual quote reserve and a mock native USD feed; it does not verify a production stock oracle, issuer admin controls, future corporate actions, restricted recipients, partner buyback tiers or legal eligibility. No live verification records were added to the registry.
+
+Run from the repository root, with the archive URL configured locally:
+
+```powershell
+$env:ELPIDA_EQUITY_HOLDER = '0x3cd7caa5109d1634b5EA7DC9D469314439981a69'
+node --env-file=.env.ondo.local scripts/equity-cached-fork.mjs ethereum NVDAon ondo
+```
+
+The supervisor remembers a pin under `cache/equity-rpc/` and verifies that block's hash against the upstream before each run. `--fresh` chooses new state. `ELPIDA_EQUITY_FORK_BLOCK` explicitly selects a block. Never treat cached checks at an old block as a current issuer-status check.
+
+Only reads with an explicit pinned block are cached. They are forwarded by canonical block hash and stored in a chain/hash namespace with checksums; identical in-flight reads coalesce. Mutable tags and failures are not cached. URLs and credentials are excluded from cache entries. The loopback gateway refuses transaction methods; all writes run in the child Hardhat simulation. The final replay used eight upstream reads and 4,983 cache hits with no upstream failures.
+
+Each upstream request has a 25-second deadline. The default rehearsal limit is 300 seconds (`ELPIDA_EQUITY_FORK_TIMEOUT_SEC`, maximum 3600). The supervisor stops a timed-out child and records **INCOMPLETE**, preserving completed check results. Rerunning starts a new local simulation using the same cached upstream state. A five-second interruption was verified to produce INCOMPLETE rather than PASS. Reports and caches stay in ignored directories; publish only reviewed, credential-free evidence.

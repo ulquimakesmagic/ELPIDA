@@ -16,8 +16,11 @@ for (const [atomic, decimals] of [[false, 6], [true, 6], [true, 18]]) test(`loca
   const coin = await new ContractFactory(mock.abi, mock.evm.bytecode.object, signer0).deploy(); await coin.waitForDeployment();
   const unit = 10n ** BigInt(decimals);
   const fund = async signers => { for (const s of signers.slice(0, 2)) await (await coin.mint(await s.getAddress(), 1000n * unit)).wait(); };
-  const res = await runLifecycle({ provider, stockAddress: coin.target, fund, virtualQuote: 20n * unit, firstBuy: atomic ? 0n : unit, tradeBuy: unit, atomic });
+  const progress = [];
+  const res = await runLifecycle({ provider, stockAddress: coin.target, fund, virtualQuote: 20n * unit, firstBuy: atomic ? 0n : unit, tradeBuy: unit, atomic, onCheck: check => progress.push(check) });
   assert.ok(res.checks.length >= 10);
   assert.ok(res.checks.every(c => c.ok));
+  assert.deepEqual(progress, res.checks, 'each completed assertion is available to the partial report writer');
+  assert.ok(res.checks.some(c => c.name.startsWith('post-graduation creator and treasury claims')));
   if (atomic) assert.ok(res.checks.some(c => c.name === 'final stock purchase graduates in the same transaction'));
 });

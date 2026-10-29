@@ -1,0 +1,118 @@
+{
+  "scope": "LOCAL FORK ONLY: nothing is sent to the public chain",
+  "provider": "ondo",
+  "atomic": true,
+  "source": "https://app.ondo.finance/assets/nvdaon",
+  "network": "ethereum",
+  "chainId": 1,
+  "block": 26294021,
+  "symbol": "NVDAon",
+  "token": "0x2d1f7226bd1f780af6b9a49dcc0ae00e8df4bdee",
+  "holder": "0x3cd7caa5109d1634b5EA7DC9D469314439981a69",
+  "result": "PASS",
+  "blockHash": "0xa006d5da3793e8f9b02ba124eb3ec3d918ee764e318220d1d0a2b4d5cef7225c",
+  "rpcCache": {
+    "upstream": 8,
+    "hits": 4983,
+    "coalesced": 0,
+    "failures": 0
+  },
+  "checks": [
+    {
+      "name": "test accounts funded with the quote asset (raw units)",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "factory approves the stock as a quote asset",
+      "ok": true,
+      "detail": "decimals 18, virtual quote 20000000000000000000"
+    },
+    {
+      "name": "paired launch with the stock as first buy; curve holds exactly its liabilities",
+      "ok": true,
+      "detail": "balance 0"
+    },
+    {
+      "name": "zero creator purchase gives no launched-token allocation",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "factory leaves no approval behind",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "buy with the stock; balance delta equals the amount spent",
+      "ok": true,
+      "detail": "tokens out 52279796174971869565217391"
+    },
+    {
+      "name": "sell back into the stock; payout is exact and the curve stays fully backed",
+      "ok": true,
+      "detail": "paid 499325203949374809"
+    },
+    {
+      "name": "protocol and creator fees paid in the stock, raw amounts exact",
+      "ok": true,
+      "detail": "protocol 9410286100945410, creator 9410286100945410"
+    },
+    {
+      "name": "curve completes on a stock-denominated purchase",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "final stock purchase graduates in the same transaction",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "migration preserves raw quote accounting including quote dust",
+      "ok": true,
+      "detail": "5545"
+    },
+    {
+      "name": "graduation into Uniswap v3 with the stock as the quote side; price continuous; position locked",
+      "ok": true,
+      "detail": "pool 0xcb3D5bd89dCD27fc7A5318Be94ba7542e2921400"
+    },
+    {
+      "name": "post-graduation buy and sell through Uniswap v3 with the stock",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "locked position collects fees in the stock; principal unchanged",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "name": "post-graduation creator and treasury claims pay exact 50/50 shares; LP principal stays locked",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "kind": "tokenized-stock-local-fork-lifecycle",
+  "testedAt": "2026-10-28",
+  "limits": [
+    "All transactions and deployments were local to the fork. No public transactions were sent.",
+    "One canonical Ethereum asset at one block; no BNB or Solana compatibility assertion.",
+    "Local Uniswap v3 deployment and mock native USD feed; no production stock oracle or public-pool liquidity validation.",
+    "Issuer admin powers, corporate actions and end-user eligibility remain unverified. Live capabilities remain disabled."
+  ],
+  "sourceSha256": {
+    "scripts/equity-lifecycle-fork.mjs": "e01e471a4b656ba87375ea39538e7c535ca1f4aedd939fa40fd260ed29bbba99",
+    "scripts/equity-cached-fork.mjs": "0f144ab96aeb45fa14ac17c31bb81caa2c9528bfa44ff7cb63442fec4bd38db3",
+    "scripts/lib/equity-fork-rpc.mjs": "950b9886c80f25e065a4d8a44bc3f8414f8eef6b75d8a52d9a62b81720e61c23",
+    "contracts/evm/src/ElpidaAtomicDexFactory.sol": "a9a6efef37114af9158689a3d753df281e475f68090f376f84f2e0ec6f97871e",
+    "contracts/evm/src/ElpidaDexFactory.sol": "5935918ed1c52ef9d5fab102d623b2fb48b2b3093f8f6008796eb6a79e099016",
+    "contracts/evm/src/ElpidaDexCurve.sol": "467a30c97abcfda246093bde7f8864366ab5458e02400d4ae17ad36092b65ca2",
+    "contracts/evm/src/ElpidaV3MigrationAdapter.sol": "ff46c441e3793fe6bcb8244f0962e5c5e5ac02c14b0668fbc50724e05d100344",
+    "contracts/evm/src/ElpidaV3FeeLocker.sol": "bc2ec210e633cb8f5da0425c62b451d2c7d8cbff7234c23211ddf0023c653a84",
+    "contracts/evm/src/ElpidaFeeSplitter.sol": "eab7a14ea8d0f6b4e0433d4dd53073d3e8d121cc5079067da84b74a928f406ab",
+    "contracts/evm/src/ElpidaToken.sol": "110a20d64ebf7258f92db968267f1aa56a6921349b8eb853bbccb1b532211e61"
+  },
+  "sourceHashEncoding": "UTF-8 with LF line endings"
+}
