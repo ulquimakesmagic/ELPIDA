@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { indexedActivity, activityOf, exploreModel, pageOf, pageButtons, trendingTokens, topCreators, feedRows, exploreStateFromHash, exploreHash, matchesQuery } from '../apps/web/discovery.mjs';
+import { indexedActivity, activityOf, exploreModel, pageOf, pageButtons, trendingTokens, topCreators, feedRows, exploreStateFromHash, exploreHash, matchesQuery, overlayToken, tokenKey } from '../apps/web/discovery.mjs';
 
 const now = 2000000000, ref = { status: 'fresh', usd: 2000, updatedAt: now };
 const usdc = { status: 'fresh', usd: 1, updatedAt: now, maxAge: Number.MAX_SAFE_INTEGER };
@@ -111,4 +111,24 @@ test('Explore view state round-trips through the URL and ignores unknown values'
   assert.deepEqual(exploreStateFromHash(hash), state);
   assert.equal(exploreHash({}), '#/');
   assert.deepEqual(exploreStateFromHash('#/?tab=nope&pair=gold&page=-3'), { tab: 'trending', pair: 'all', chain: 'all', query: '', page: 1 });
+});
+
+test('a live wallet read laid over the index keeps 24h activity, the price change and the image (refresh regression)', () => {
+  const now = 1_800_000_000;
+  const indexed = { network: 'solana-devnet', address: 'MASHmint', symbol: 'MASHLE', volume24h: 2.81, trades24h: 6, lastTradeAt: now - 60, priceChange24h: { percent: 12 },
+    marketCap: '2.7', metadata: { name: 'Mash Burnedead', image: '/api/content/abc', description: 'd' } };
+  // The chain read through a connected wallet: fresher reserves, but no activity and an empty or partial metadata.
+  const live = { network: 'solana-devnet', address: 'MASHmint', symbol: 'MASHLE', marketCap: '2.9', reserve: '1.2', volume24h: undefined, metadata: {} };
+  const merged = overlayToken(indexed, live);
+  assert.equal(merged.marketCap, '2.9', 'live values win where the read has them');
+  assert.equal(merged.reserve, '1.2');
+  assert.equal(merged.volume24h, 2.81, 'activity comes from the index');
+  assert.deepEqual(merged.priceChange24h, { percent: 12 });
+  assert.equal(merged.metadata.image, '/api/content/abc', 'an empty metadata object does not erase the image');
+  assert.equal(overlayToken(indexed, { ...live, metadata: { name: 'Mash', image: '' } }).metadata.image, '/api/content/abc', 'nor does a blank field');
+  assert.equal(overlayToken(indexed, { ...live, metadata: { image: '/api/wallet-logo/x' } }).metadata.image, '/api/wallet-logo/x', 'a real new image replaces it');
+  // The Trending strip sees the token after the overlay, as it did before the refresh.
+  assert.deepEqual(trendingTokens([merged, { ...indexed, address: 'other', volume24h: 0 }], 10, now).map(t => t.symbol), ['MASHLE']);
+  assert.equal(overlayToken(undefined, live), live); assert.equal(overlayToken(indexed, null), indexed);
+  assert.equal(tokenKey('ethereum-sepolia', '0xABC'), tokenKey('ethereum-sepolia', '0xabc'), 'one key whatever the address casing');
 });
