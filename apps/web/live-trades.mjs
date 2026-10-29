@@ -79,8 +79,10 @@ export function connectTradeStream({
  * transaction hash plus the log index, not the timestamp.
  */
 export function mergeTrades(existing = [], incoming = [], limit = 20) {
-  const seen = new Set(existing.map(t => `${t?.tx}:${t?.height}`));
-  const fresh = incoming.filter(t => t && t.tx != null && !seen.has(`${t.tx}:${t.height}`));
+  // One transaction can hold several trades (a Solana launch and its first buy): the log index tells them apart.
+  const id = t => `${t?.tx}:${t?.index ?? 0}:${t?.height}`;
+  const seen = new Set(existing.map(id));
+  const fresh = (incoming ?? []).filter(t => t && t.tx != null && !seen.has(id(t)));
   if (!fresh.length) return { trades: existing, added: 0 };
   const trades = [...fresh, ...existing]
     .sort((a, b) => (b.timestamp ?? 0) - (a.timestamp ?? 0))

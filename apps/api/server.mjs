@@ -9,7 +9,8 @@ import { PriceKeeper } from './price-keeper.mjs';
 import {configuredGraduationKeeper} from './graduation-keeper.mjs';
 import { FeedRelay } from './feed-relay.mjs';
 import { testDexArtifacts } from './test-dex-artifacts.mjs';
-import { PublicIndexer, recentTrade } from './public-indexer.mjs';
+import { createStaticAssets, contentVersion } from './static-assets.mjs';
+import { PublicIndexer, recentTrade, feedTrades } from './public-indexer.mjs';
 import { TradeFeed } from './trade-feed.mjs';
 import { SolanaIndexer } from '../../packages/indexer/solana-indexer.mjs';
 import { validateSolanaRpc } from '../../packages/solana/rpc-config.mjs';
@@ -111,6 +112,13 @@ const vendorFiles = new Map([
   ['/curve-model.mjs', fileURLToPath(new URL('../../packages/core/curve-model.mjs', import.meta.url))],
 ]);
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const IMMUTABLE = 'public, max-age=31536000, immutable';
+/** A list size from ?limit= (trades and candles), 1 to 500. */
+const listLimit = (url, fallback) => Math.max(1, Math.min(500, Number(url.searchParams.get('limit')) || fallback));
+// Every served script and stylesheet, for versioned URLs and the modulepreload list (apps/api/static-assets.mjs).
+const staticFiles = new Map([...[...resources].filter(([, [, type]]) => type !== 'text/html').map(([path, [name]]) => [path, resolve(webRoot, name)]), ...vendorFiles]);
+const staticAssets = createStaticAssets({ files: staticFiles, version: process.env.ELPIDA_STATIC_CACHE === 'off' ? null : process.env.RAILWAY_ENVIRONMENT_NAME || process.env.NODE_ENV === 'production' || process.env.ELPIDA_STATIC_CACHE === 'on' ? contentVersion(staticFiles) : null });
+const SOLANA_TICK_MS = Math.max(1500, Math.min(60000, Number(process.env.ELPIDA_SOLANA_INDEX_INTERVAL_MS) || 3000));
 
 // Solana Devnet by default; ELPIDA_SOLANA_CLUSTER=localnet targets a local solana-test-validator.
 // The deployment comes from networks.mjs `shared`, else from `npm run solana:deploy` output.
@@ -176,7 +184,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const runtime = await createRuntime({ seed, metadataStore, metadataPath:port===0?null:dataFile('token-metadata.json'), dex:port!==0, indexerPath:":memory:", journalPath:port===0?null:dataFile('simulation-journal-v2.jsonl'), log:console.log });
   bootPhase('runtime_ready');
   const tradeFeed=new TradeFeed({log:line=>console.log(line)});
-  const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore,onTrades:(network,trades)=>tradeFeed.publish(network,trades)}).start();
+  const publicIndex=new PublicIndexer({networks:port===0?[]:evmTestnets,contracts:runtime.config.contracts,dataDir,metadataStore,onTrades:(network,trades)=>tradeFeed.publish(network,feedTrades(network,trades,publicIndex.listings(network)))}).start();
   bootPhase('indexers_ready');
   // Testnet-only price relay for test chains without a Chainlink feed (Robinhood testnet). Idle without its key.
   const feedRelay=soft('feedRelay',()=>new FeedRelay({networks:port===0?[]:evmTestnets,env:port===0?{}:process.env}).start(),()=>new FeedRelay({networks:[],env:{}}).start());
@@ -186,12 +194,17 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // D9: pre-ground Solana mint addresses ending in "hope" (encrypted at rest; random mint fallback).
   const vanity=soft('vanity',()=>new VanityMintPool({path:port===0?null:dataFile('solana-vanity-mints.json'),key:vanityKey(process.env.ELPIDA_VANITY_KEY),programId:solanaNet.deployment?.programId,suffix:process.env.ELPIDA_VANITY_SUFFIX||'hope',target:Number(process.env.ELPIDA_VANITY_TARGET??3),workers:Number(process.env.ELPIDA_VANITY_WORKERS??1)}),()=>new VanityMintPool({path:null,key:null,programId:solanaNet.deployment?.programId,suffix:'hope',target:0,workers:0}));
   if(process.env.ELPIDA_VANITY_KEY&&!vanity.enabled)console.log(JSON.stringify({event:'vanity_mints_disabled',reason:'ELPIDA_VANITY_KEY must be 32 bytes (64 hex characters or base64), with a Solana deployment configured.'}));
-  let solanaIndex=null,solanaTimer=null;
+  let solanaIndex=null,solanaTimer=null,solanaTick=null;
   if(port!==0&&solanaNet.deployment&&solanaRpc&&process.env.ELPIDA_SOLANA_INDEXER!=='off'){
     try{
       solanaIndex=new SolanaIndexer({web3:solanaWeb3,connection:new solanaWeb3.Connection(validateSolanaRpc(solanaRpc),'confirmed'),deployment:solanaNet.deployment,network:solanaNet,metadataStore,path:dataFile(`public-solana-${solanaNet.cluster}-${solanaNet.deployment.programId}.sqlite`)});
-      const tick=()=>solanaIndex.sync().then(()=>console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}))).catch(()=>console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,message:'Indexing unavailable; retrying.'})));
-      tick();solanaTimer=setInterval(tick,20000);solanaTimer.unref();
+      const fullTick=()=>solanaIndex.sync().then(()=>console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}))).catch(()=>console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,message:'Indexing unavailable; retrying.'})));
+      // Fast pass every few seconds (new transactions, then pools only if something traded), full pass every 30 s.
+      // New trades go to the live feed; the first pass after a restart only records where history ends.
+      let fedRow=null,lastFull=0;
+      const feed=()=>{if(fedRow===null){fedRow=solanaIndex.lastTradeRow();return;}const {trades,last}=solanaIndex.tradesAfter(fedRow);fedRow=last;if(trades.length)tradeFeed.publish(solanaNet.key,feedTrades(solanaNet.key,trades,solanaIndex.listings()));};
+      solanaTick=()=>{const full=Date.now()-lastFull>=30000;if(full)lastFull=Date.now();return (full?fullTick():solanaIndex.syncRecent().catch(()=>console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,message:'Indexing unavailable; retrying.'})))).then(feed,feed);};
+      solanaTick();solanaTimer=setInterval(solanaTick,SOLANA_TICK_MS);solanaTimer.unref();
     }catch(error){console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:String(error.name??'INIT').slice(0,40),message:error.message.slice(0,120)}));}
   }
   console.log(JSON.stringify({event:'storage_ready',durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),dataDir,publicNetworks:[...publicIndex.entries.keys()],simulation:runtime.config.simulation?.durable?`journal replay: ${runtime.config.simulation.replayed} actions restored, ${runtime.config.simulation.skipped} skipped`:'resets on process restart'}));
@@ -237,6 +250,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const chatLimit=write=>{if(Date.now()-chatWindow>=60000){chatWindow=Date.now();chatReads=0;chatWrites=0;}return write?++chatWrites>120:++chatReads>600;};
   // The routes below await a chain sync per request, so without a window one client can force unbounded RPC work.
   let syncWindow=Date.now(),syncReads=0;
+  let nudgeWindow=0,nudges=0;const lastNudge=new Map();
   const syncLimit=()=>{if(Date.now()-syncWindow>=60000){syncWindow=Date.now();syncReads=0;}return ++syncReads>240;};
   let terminalWindow=Date.now(),terminalCount=0,thesisCount=0;
   const uploadAdmission=new UploadAdmission({path:port===0?':memory:':dataFile('metadata-admission.sqlite')});
@@ -381,7 +395,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           if(!solanaIndex||url.searchParams.get('network')!==solanaIndex.network.key)return send(404,{error:'No public Solana index for this network.'});
           if(!solanaMatch[1]){const activity=indexedActivity(solanaIndex.db);return send(200,solanaIndex.listings().map(t=>({...t,priceChange24h:indexedChange(solanaIndex.db,t),...activityOf(activity,t.address)})));}
           const token=solanaIndex.token(solanaMatch[1]);if(!token)return send(404,{error:'Token not indexed yet. Check indexer status and retry.'});
-          return send(200,solanaMatch[2]==='trades'?solanaIndex.trades(token.address):solanaMatch[2]==='candles'?solanaIndex.candles(token.address,Number(url.searchParams.get('interval')??60)):solanaMatch[2]==='holders'?await solanaIndex.holders(token.address):token);
+          return send(200,solanaMatch[2]==='trades'?solanaIndex.trades(token.address,listLimit(url,100)):solanaMatch[2]==='candles'?solanaIndex.candles(token.address,Number(url.searchParams.get('interval')??60),listLimit(url,100)):solanaMatch[2]==='holders'?await solanaIndex.holders(token.address):token);
         }
         // One wallet's indexed balances on every EVM testnet, for the cross-chain Portfolio. Balances come from Transfer
         // events, like holders; `networks` says which ones answered and whether their index is fresh.
@@ -395,7 +409,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         }
         const publicMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?)?$/);
         if(publicMatch){const key=url.searchParams.get('network')??'base-sepolia';if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown public network.'});if(!publicMatch[1]){const activity=new Map();return send(200,publicIndex.listings(key,(e,t)=>{if(!activity.has(e))activity.set(e,indexedActivity(e.index.db));return {priceChange24h:indexedChange(e.index.db,t),...activityOf(activity.get(e),t.address)};}));}let data=null,failure=null;
-            try{data=publicIndex.detail(key,publicMatch[1],publicMatch[2],Number(url.searchParams.get('interval')??60));}
+            try{data=publicIndex.detail(key,publicMatch[1],publicMatch[2],Number(url.searchParams.get('interval')??60),listLimit(url,100));}
             catch(error){failure=publicErrorCode(error);}
             // A missing token and a failed lookup are different problems; say which one this was.
             if(data===null){if(failure)console.error(JSON.stringify({event:'public_token_lookup_failed',requestId,network:key,kind:publicMatch[2]??'token',code:failure}));return send(failure?503:404,{error:failure?'Indexer unavailable for this token. Retry shortly.':'Token not indexed yet. Check indexer status and retry.',...(failure?{code:failure}:{})});}
@@ -408,11 +422,11 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if (url.pathname === '/api/indexer/status') { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); return send(200,runtime.indexer.status()); }
         if (url.pathname === '/api/tokens') { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); return send(200,runtime.listings()); }
         const indexed = url.pathname.match(/^\/api\/tokens\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?$/);
-        if (indexed) { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); const token=runtime.listings().find(t=>t.address===indexed[1].toLowerCase()); if(!token)return send(404,{error:'Token not found.'}); return send(200,indexed[2]==='trades'?runtime.indexer.trades(token.address):indexed[2]==='holders'?runtime.indexer.holders(token.address):indexed[2]==='candles'?runtime.indexer.candles(token.address,Number(url.searchParams.get('interval')??60)):token); }
+        if (indexed) { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); const token=runtime.listings().find(t=>t.address===indexed[1].toLowerCase()); if(!token)return send(404,{error:'Token not found.'}); return send(200,indexed[2]==='trades'?runtime.indexer.trades(token.address,listLimit(url,100)):indexed[2]==='holders'?runtime.indexer.holders(token.address):indexed[2]==='candles'?runtime.indexer.candles(token.address,Number(url.searchParams.get('interval')??60),listLimit(url,100)):token); }
         if (url.pathname === '/api/state') return send(200, await runtime.state(url.searchParams.get('account') ?? '0'));
         // Simulation buys for the Explore live feed: the same public shape as /api/public/recent-trades.
         if (url.pathname === '/api/recent-trades') { const limit=Math.max(1,Math.min(50,Number(url.searchParams.get('limit'))||20)),tokens=new Map(runtime.listings().map(t=>[t.address.toLowerCase(),t])); return send(200, runtime.indexer.recentTrades(limit).flatMap(trade=>{const t=tokens.get(String(trade.token).toLowerCase());return t?[recentTrade('local',t,trade)]:[];})); }
-        if (vendorFiles.has(url.pathname)) { res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': 'public, max-age=86400, stale-while-revalidate=604800' }); return res.end(await readFile(vendorFiles.get(url.pathname))); }
+        if (vendorFiles.has(url.pathname)) { const out = staticAssets.serve(url.pathname, url.searchParams.get('v')); res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': out.immutable ? IMMUTABLE : 'no-cache' }); return res.end(out.body); }
         const seoOrigin = canonicalOrigin(), seoPage = PAGES.find(p => p.path === url.pathname);
         const seoBody = url.pathname === '/robots.txt' ? [renderRobots(seoOrigin), 'text/plain'] : url.pathname === '/sitemap.xml' ? [renderSitemap(seoOrigin), 'application/xml'] : url.pathname === '/llms.txt' ? [renderLlms(seoOrigin), 'text/plain'] : seoPage ? [renderPage(seoPage, seoOrigin), 'text/html'] : null;
         if (seoBody) { res.setHeader('Cache-Control', 'public, max-age=3600'); res.writeHead(200, { 'Content-Type': `${seoBody[1]}; charset=utf-8` }); return res.end(seoBody[0]); }
@@ -432,8 +446,13 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         }
         function publicErrorCode(error){return String(error?.code??error?.name??'LOOKUP_FAILED').replace(/[^a-zA-Z0-9_]/g,'').slice(0,64)||'LOOKUP_FAILED';}
         const resource = resources.get(url.pathname);
-        if (resource) { const content = await readFile(resolve(webRoot, resource[0])); res.writeHead(200, { 'Content-Type': `${resource[1]}; charset=utf-8`, // App modules change with every deploy; a cached copy would run old client code against a new server.
-      'Cache-Control': 'no-cache' }); return res.end(content); }
+        if (resource) {
+          // App code changes with every deploy: unversioned URLs are revalidated, versioned ones (?v=<build>, which
+          // index.html and every import use) are immutable because a deploy changes the build id.
+          if (resource[1] === 'text/html') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); return res.end(staticAssets.html(await readFile(resolve(webRoot, resource[0]), 'utf8'))); }
+          const out = staticAssets.serve(url.pathname, url.searchParams.get('v'));
+          res.writeHead(200, { 'Content-Type': `${resource[1]}; charset=utf-8`, 'Cache-Control': out.immutable ? IMMUTABLE : 'no-cache' }); return res.end(out.body);
+        }
         if (url.pathname.startsWith('/assets/')) {
           const file = resolve(assetRoot, '.' + decodeURIComponent(url.pathname.slice('/assets'.length)));
           const type = assetTypes[file.slice(file.lastIndexOf('.'))];
@@ -476,6 +495,18 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if(action==='partners/challenge'||action==='partners/apply'){
         if(partnerLimit(action==='partners/apply'))return send(429,{error:'Applications are busy. Try again in a minute.'});
         try{return send(200,action==='partners/challenge'?partnerApps.challenge(body):partnerApps.apply(body));}catch(error){return send(error.status??400,{error:error.message});}
+      }
+      // A wallet just confirmed a trade, launch or migration: index that network now instead of at the next tick, so
+      // the trade reaches every open page within a second or two. Coalesced per network and capped; nothing is signed.
+      if(action==='index-now'){
+        const key=String(body.network??''),now=Date.now();
+        if(Date.now()-nudgeWindow>=60000){nudgeWindow=now;nudges=0;}
+        if(++nudges>120||now-(lastNudge.get(key)??0)<1000)return send(202,{queued:false});
+        lastNudge.set(key,now);
+        if(solanaIndex&&key===solanaNet.key)solanaTick?.();
+        else if(publicIndex.entries.has(key))publicIndex.tick(key);
+        else return send(404,{error:'Unknown network.'});
+        return send(202,{queued:true});
       }
       if(action==='admin/logout'){adminAuth.signOut(req.headers.cookie);res.setHeader('Set-Cookie',clearCookie({secure:!!publicUrl}));return send(200,{signedIn:false});}
       if(['chat/report/prepare','chat/report/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat reporting is busy. Retry shortly.'});return send(200,action==='chat/report/prepare'?await chat.prepareReport(body):await chat.saveReport(body));}

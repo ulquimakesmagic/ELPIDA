@@ -215,3 +215,17 @@ test('the list stays capped and ignores junk', () => {
   assert.equal(cleaned.added, 1, 'only the entry with a transaction hash is added');
   assert.equal(mergeTrades([], undefined).added, 0);
 });
+
+test('index rows from both chains become feed trades the browser can merge (hash, log index, amounts), unknown tokens dropped', async () => {
+  const { feedTrades } = await import('../apps/api/public-indexer.mjs');
+  const listings = [{ address: '0xAbC', name: 'Evm Token', symbol: 'EVM', quoteSymbol: 'ETH', metadata: {} }, { address: 'So1Mint', name: 'Sol Token', symbol: 'SOLT', quoteSymbol: 'SOL', metadata: { image: 'https://x/i.png' } }];
+  const evm = { hash: '0xh', index: 3, token: '0xabc', side: 'buy', account: '0xacc', quoteAmount: '0.1', tokenAmount: '1000', priceQuote: '0.0001', timestamp: 50, blockNumber: 77, venue: 'curve' };
+  const sol = { hash: 'sig', idx: 1, token: 'So1Mint', side: 'sell', account: 'Wallet', quoteAmount: '0.2', tokenAmount: '5', priceQuote: 0.04, timestamp: 60, slot: 900, launch: false };
+  const out = feedTrades('mixed', [evm, sol, { hash: 'x', token: 'unknown' }, { token: '0xabc' }], listings);
+  assert.equal(out.length, 2, 'unknown tokens and rows without a hash are dropped');
+  assert.deepEqual([out[0].tx, out[0].index, out[0].height, out[0].address, out[0].quoteSymbol, out[0].quoteAmount], ['0xh', 3, 77, '0xAbC', 'ETH', '0.1']);
+  assert.deepEqual([out[1].tx, out[1].index, out[1].height, out[1].image, out[1].symbol], ['sig', 1, 900, 'https://x/i.png', 'SOLT']);
+  // Two trades in one transaction are both kept by the browser merge.
+  const merged = mergeTrades([], [{ ...out[1], index: 0 }, out[1]]);
+  assert.equal(merged.added, 2);
+});

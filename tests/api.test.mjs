@@ -147,7 +147,7 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.ok(listed.volume24h > 0.02 && listed.lastBuyAt > 0 && listed.lastTradeAt >= listed.lastBuyAt);
     const recent = await (await fetch(`${base}/api/recent-trades?limit=2`)).json();
     assert.deepEqual(recent.map(r => [r.address.toLowerCase(), r.side, r.network]), [[address.toLowerCase(), 'sell', 'local'], [address.toLowerCase(), 'buy', 'local']]);
-    assert.deepEqual(Object.keys(recent[0]).sort(), ['address', 'image', 'name', 'network', 'side', 'symbol', 'timestamp']);
+    assert.deepEqual(Object.keys(recent[0]).sort(), ['address', 'height', 'image', 'index', 'name', 'network', 'side', 'symbol', 'timestamp', 'tx']);
   });
   await t.test('pays accrued fees and survives rejected requests', async () => {
     const before = await state();

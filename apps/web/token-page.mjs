@@ -177,7 +177,7 @@ export function renderToken(ctx, address) {
   const info = h('div.tk-info.stack', details, addresses, about, tech);
   const activity = marketActivity(ctx, token, q, { addressUrl, isCreator, me, info,
     onCounts: ({ holders }) => { holdersValue.textContent = holders ?? '—'; },
-    onHolders: rows => drawSafety(rows) });
+    onHolders: rows => drawSafety(rows), onLiveTrade: () => chart.refresh?.() });
   const desk=holderTerminal(ctx,token,{onVolume:v=>volumeValue.textContent=fmtValue(v,token)});
   const trade = tradePanel(ctx, token, { dex, solana });
   const sideButton = s => h(`button.btn.btn-lg.${s === 'buy' ? 'btn-buy' : 'btn-sell'}`, { type: 'button', on: { click: () => { trade.selectSide?.(s); trade.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' }); } } }, s === 'buy' ? `Buy ${token.symbol}` : 'Sell');
@@ -200,7 +200,7 @@ export function renderToken(ctx, address) {
 const WHO_LABELS={all:'All',dev:'Dev',mine:'Mine',large:'Large'};
 const WHO_TITLES={all:'Every indexed trade',dev:"The creator's trades",mine:'Trades from your connected wallet',large:'The largest tenth of the indexed trades by size'};
 const TAB_LABELS={trades:'Trades',holders:'Holders',traders:'Top traders',info:'Info',chat:'Holder chat'};
-function marketActivity(ctx,token,q,{addressUrl,isCreator,me,info,onCounts,onHolders,onTrades}){
+function marketActivity(ctx,token,q,{addressUrl,isCreator,me,info,onCounts,onHolders,onTrades,onLiveTrade}){
   const content=h('div',h('p.muted.small','Loading trades…')),total=h('span.meta'),tabs=h('div.tk-tabs',{role:'tablist','aria-label':'Token activity'});
   let selected='trades',revision=0,side='all',who='all',chatView=null,shown=20,counts={trades:null,holders:null};
   const sideFilter=h('label.trade-side-filter',h('span.visually-hidden','Side'),h('select.select',{'aria-label':'Filter trades by side',on:{change:event=>{side=event.target.value;shown=20;load();}}},...['all','buy','sell'].map(value=>h('option',{value},value==='all'?'Buys and sells':value==='buy'?'Buys':'Sells'))));
@@ -267,6 +267,18 @@ function marketActivity(ctx,token,q,{addressUrl,isCreator,me,info,onCounts,onHol
     }catch(error){if(current===revision)content.replaceChildren(h('p.muted.small',`Trades are still indexing or temporarily unavailable. ${failedRequest(error)}`),h('button.btn.btn-secondary.btn-sm',{type:'button',on:{click:load}},'Retry'));}
   }
   Promise.allSettled([fetchKind('trades'),fetchKind('holders')]).then(([t,hd])=>{const f=r=>r.status==='fulfilled'?r.value:null,tr=f(t),ho=f(hd);if(tr)onTrades?.(tr);if(ho)onHolders?.(ho);const wallets=ho?walletHolders(ho,token).length:null;counts={trades:tr?`${tr.length}${tr.length>=100?'+':''}`:null,holders:ho?`${wallets}${ho.length>=50?'+':''}`:null};onCounts({trades:counts.trades,holders:counts.holders});if(panel.isConnected)drawTabs();});
+  // Live: a streamed trade of this token reloads the open table and the chart at once; a light poll covers a dropped
+  // stream (only when the newest trade changed, so an idle page does not redraw).
+  let liveTimer=null,newest=null;
+  const refreshLive=()=>{clearTimeout(liveTimer);liveTimer=setTimeout(()=>{if(!panel.isConnected)return;if(['trades','traders','holders'].includes(selected))load();onLiveTrade?.();},350);};
+  const same=a=>String(a??'').toLowerCase()===String(token.address).toLowerCase();
+  const onStream=event=>{if(!panel.isConnected){window.removeEventListener('elpida:trades',onStream);return;}if((event.detail?.trades??[]).some(t=>same(t.address)))refreshLive();};
+  window.addEventListener('elpida:trades',onStream);
+  const poll=setInterval(async()=>{
+    if(!panel.isConnected){clearInterval(poll);window.removeEventListener('elpida:trades',onStream);return;}
+    if(document.hidden)return;
+    try{const rows=await fetchKind('trades'),top=rows[0]?`${rows[0].hash}:${rows[0].index??0}`:'';if(newest!==null&&top!==newest)refreshLive();newest=top;}catch{/* the next poll retries */}
+  },8000);
   load();return panel;
 }
 

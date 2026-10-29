@@ -1,12 +1,10 @@
-import {h,icon,compact,usdRate} from './ui.mjs';
-import {axisLabel,priceText,pctText,tipPosition,tipFields} from './chart-format.mjs';
+import {h,icon,usdRate} from './ui.mjs';
+import {axisLabel,priceText,pctText,tipPosition,INTERVALS,fillGaps,defaultInterval,tradeMarkers} from './chart-format.mjs';
 
-// Executed-trade chart for the token page: one line over a gradient, the way the reference charts read.
-// No candles, no volume, no markers — a token's price is a single series, and a thin history should look thin
-// rather than pretending to be a market.
+// Token page chart, the way trading terminals draw one: candles of executed trades with volume bars underneath,
+// 1s to 1D candles, price or market cap, live updates (the token page calls refresh() when a trade of this token
+// streams in) and markers on the candles where the creator or the reader traded.
 const preferences=new Map();
-// Bucket size doubles as the window; ALL keeps hourly buckets and shows everything the index has.
-const RANGES=[[3600,'1H'],[14400,'6H'],[86400,'1D'],[3600,'ALL']];
 const tone=(name,fallback)=>getComputedStyle(document.documentElement).getPropertyValue(name).trim()||fallback;
 const alpha=(color,a)=>{
   const c=String(color).trim();
@@ -15,37 +13,47 @@ const alpha=(color,a)=>{
   const rgb=c.match(/rgba?\(\s*(\d+)[ ,]+(\d+)[ ,]+(\d+)/i);
   return rgb?`rgba(${rgb[1]},${rgb[2]},${rgb[3]},${a})`:c;
 };
+// Axis ticks in local time: year, month, day, then hours and minutes (seconds on the finest scale).
+function localTick(time,type){
+  const d=new Date(Number(time)*1000);
+  if(type===0)return String(d.getFullYear());
+  if(type===1)return d.toLocaleDateString(undefined,{month:'short'});
+  if(type===2)return d.toLocaleDateString(undefined,{day:'numeric',month:'short'});
+  return d.toLocaleTimeString(undefined,{hour:'2-digit',minute:'2-digit',...(type===4?{second:'2-digit'}:{}),hour12:false});
+}
 
 export function terminalChart(ctx,token,q){
-  const key=`${ctx.currentChain()}:${token.address}`;
-  const pref=preferences.get(key)??{basis:'price',range:'1H',interval:3600};
+  const network=token.network??ctx.currentChain();
+  const key=`${network}:${token.address}`;
+  const pref=preferences.get(key)??{basis:'price',interval:null};
   if(preferences.size>100)preferences.delete(preferences.keys().next().value);
   preferences.set(key,pref);
 
   const stage=h('div.chart-stage');
-  const plot=h('div.terminal-chart',{'aria-label':'Executed-trade price chart',role:'img'});
+  const plot=h('div.terminal-chart',{'aria-label':'Price chart of executed trades',role:'img'});
+  const legend=h('div.chart-legend',{'aria-hidden':'true'});
   const tip=h('div.chart-tip',{'aria-hidden':'true',hidden:true});
   const overlay=h('div.chart-overlay',{'aria-hidden':'true'});
   const toolbar=h('div.chart-toolbar');
   const status=h('p.chart-note',{role:'status'});
-  stage.append(plot,tip,overlay);
+  stage.append(plot,legend,tip,overlay);
   const panel=h('div.price-history',toolbar,stage,status,h('p.chart-credit',h('a',{href:'https://www.tradingview.com/',target:'_blank',rel:'noopener noreferrer'},'Charts by TradingView'),' · Lightweight Charts™ · Copyright © 2026 TradingView, Inc.'));
 
-  let chart,resizeObserver,line,rate,scale,unit,revision=0,timer,lastSignature='';
-  let current={points:[],data:[]};
+  let chart,candles,volume,markers,rate,scale,unit,revision=0,timer,lastSignature='',live=null;
+  let current={bars:[],byTime:new Map()};
   let lastCrosshair=null;
-  const decimals=ctx.wallet===ctx.solWallet?6:18;
-  // A sub-cent token plots at 5e-7 and the library's tick generator throws "unexpected base" on a span that small, so
-  // prices are drawn in a scaled domain and divided back in the formatter.
+  // A sub-cent token plots at 5e-7 and the library's tick generator fails on a span that small, so prices are drawn
+  // in a scaled domain and divided back in the formatter.
   let magnitude=0;
-  const axisText=value=>axisLabel(Number(value)/10**magnitude);
+  // Prices are never negative; the scale's bottom margin can still produce a tick below zero, which is left blank.
+  const axisText=value=>Number(value)<0?'':axisLabel(Number(value)/10**magnitude);
+  const me=()=>ctx.mode==='testnet'?ctx.wallet?.address:ctx.state?.wallet;
 
   function cleanup(){
-    if(chart){try{pref.visible=chart.timeScale().getVisibleRange();}catch{/* empty chart */}}
-    resizeObserver?.disconnect();chart?.remove();chart=line=null;
+    chart?.remove();chart=candles=volume=markers=null;
   }
 
-  // Desktop: the chart sits beside the trade panel, so size it to end just above the fold (300–560 px).
+  // Desktop: the chart sits beside the trade panel, so size it to end just above the fold (320–560 px).
   const wide=typeof matchMedia==='function'?matchMedia('(min-width: 1001px)'):null;
   function fitHeight(){
     if(!stage.isConnected)return;
@@ -58,7 +66,7 @@ export function terminalChart(ctx,token,q){
   if(typeof window!=='undefined'&&window.addEventListener){window.addEventListener('resize',onResize);requestAnimationFrame?.(()=>requestAnimationFrame(fitHeight));}
   const lifecycle=new MutationObserver(()=>{if(!panel.isConnected){cleanup();clearInterval(timer);window.removeEventListener?.('resize',onResize);lifecycle.disconnect();}});
 
-  /* ---------- controls: value basis and range, nothing else ---------- */
+  /* ---------- toolbar: candle size and value basis ---------- */
   function segment(label,items,value,onPick){
     const pick=event=>{
       const button=event.currentTarget;
@@ -67,16 +75,12 @@ export function terminalChart(ctx,token,q){
       for(const sibling of button.parentElement.children)sibling.setAttribute('aria-pressed',String(sibling===button));
     };
     return h('div.chart-seg',{role:'group','aria-label':label},items.map(([v,text])=>
-      h('button.chart-seg-btn',{type:'button','data-value':v,'aria-pressed':String(v===value),on:{click:pick}},text)));
+      h('button.chart-seg-btn',{type:'button','data-value':String(v),'aria-pressed':String(String(v)===String(value)),on:{click:pick}},text)));
   }
   function draw(){
     toolbar.replaceChildren(
-      segment('Chart value',[['price','Price'],['cap','MCap']],pref.basis,v=>{pref.basis=v;draw();load();}),
-      segment('Chart range',RANGES.map(([interval,label])=>[label,label]),pref.range,v=>{
-        pref.range=v;
-        pref.interval=RANGES.find(([,label])=>label===v)?.[0]??3600;
-        draw();load();
-      }));
+      segment('Candle size',INTERVALS,pref.interval??60,v=>{pref.interval=Number(v);pref.chosen=true;lastSignature='';load({fit:true});}),
+      segment('Chart value',[['price','Price'],['cap','MCap']],pref.basis,v=>{pref.basis=v;lastSignature='';load({fit:false});}));
   }
 
   /* ---------- chart ---------- */
@@ -84,114 +88,137 @@ export function terminalChart(ctx,token,q){
     cleanup();plot.replaceChildren();
     const lib=window.LightweightCharts;
     if(!lib)return false;
-    const accent=tone('--primary','#ADFF45');
-    const grid=tone('--line-soft','rgba(255,255,255,.086)'),cross=tone('--line-strong','rgba(255,255,255,.22)');
+    const up=tone('--candle-up','#2fd47f'),down=tone('--candle-down','#f6465d');
+    const grid=tone('--line-soft','rgba(255,255,255,.086)'),cross=tone('--line-strong','rgba(255,255,255,.22)'),label=tone('--surface-3','#222C25');
     chart=lib.createChart(plot,{
-      width:Math.max(280,plot.clientWidth||plot.parentElement?.clientWidth||320),
-      height:Math.max(180,plot.clientHeight||plot.parentElement?.clientHeight||320),
+      // The library follows the container's size itself (the stage is resized to fit the window).
+      autoSize:true,
       layout:{background:{type:'solid',color:tone('--paper','#080B09')},textColor:tone('--ink-3','#9AAA9E'),fontFamily:getComputedStyle(document.body).fontFamily,fontSize:11,attributionLogo:false},
-      // Horizontal rules only: a line chart needs a price ladder, not a grid over empty space.
-      grid:{vertLines:{visible:false},horzLines:{color:grid,style:lib.LineStyle.Dotted}},
-      rightPriceScale:{borderVisible:false,entireTextOnly:true,minimumWidth:64,scaleMargins:{top:.14,bottom:.1}},
-      timeScale:{borderVisible:false,timeVisible:true,secondsVisible:false,rightOffset:1,barSpacing:6,minBarSpacing:1.6,maxBarSpacing:120},
-      crosshair:{mode:lib.CrosshairMode.Normal,vertLine:{color:cross,style:lib.LineStyle.Dashed,labelBackgroundColor:tone('--surface-3','#222C25')},horzLine:{color:cross,style:lib.LineStyle.Dashed,labelBackgroundColor:tone('--surface-3','#222C25')}},
-      localization:{priceFormatter:axisText},
-      handleScale:{axisPressedMouseMove:{time:true,price:false}},
+      grid:{vertLines:{color:grid,style:lib.LineStyle.Dotted},horzLines:{color:grid,style:lib.LineStyle.Dotted}},
+      rightPriceScale:{borderVisible:false,entireTextOnly:true,minimumWidth:64,scaleMargins:{top:.1,bottom:.24}},
+      timeScale:{borderVisible:false,timeVisible:true,secondsVisible:(pref.interval??60)<60,rightOffset:4,barSpacing:8,minBarSpacing:1.5,maxBarSpacing:40,tickMarkFormatter:localTick},
+      crosshair:{mode:lib.CrosshairMode.Normal,vertLine:{color:cross,style:lib.LineStyle.Dashed,labelBackgroundColor:label},horzLine:{color:cross,style:lib.LineStyle.Dashed,labelBackgroundColor:label}},
+      // Times in the reader's own zone, like the tooltip (the library defaults to UTC).
+      localization:{priceFormatter:axisText,timeFormatter:t=>new Date(Number(t)*1000).toLocaleString(undefined,{day:'numeric',month:'short',hour:'2-digit',minute:'2-digit',...((pref.interval??60)<60?{second:'2-digit'}:{})})},
+      handleScale:{axisPressedMouseMove:{time:true,price:true}},
     });
-    line=chart.addSeries(lib.AreaSeries,{
-      lineColor:accent,lineWidth:2,
-      topColor:alpha(accent,.26),bottomColor:alpha(accent,0),
-      priceLineVisible:true,lastValueVisible:true,priceLineStyle:lib.LineStyle.Dashed,priceLineColor:alpha(accent,.7),
+    candles=chart.addSeries(lib.CandlestickSeries,{
+      upColor:up,downColor:down,borderUpColor:up,borderDownColor:down,wickUpColor:up,wickDownColor:down,
+      priceLineVisible:true,lastValueVisible:true,priceLineStyle:lib.LineStyle.Dashed,
       priceFormat:{type:'custom',formatter:axisText,minMove:0.0001},
-      crosshairMarkerRadius:3,crosshairMarkerBorderColor:tone('--paper','#080B09'),
     });
+    // Volume underneath, on its own scale in the bottom fifth, coloured by the candle's direction.
+    volume=chart.addSeries(lib.HistogramSeries,{priceScaleId:'volume',priceFormat:{type:'volume'},lastValueVisible:false,priceLineVisible:false});
+    chart.priceScale('volume').applyOptions({scaleMargins:{top:.8,bottom:0}});
+    markers=typeof lib.createSeriesMarkers==='function'?lib.createSeriesMarkers(candles,[]):null;
     chart.subscribeCrosshairMove(move=>{
       lastCrosshair=move?{time:move.time??null,point:move.point?{x:Math.round(move.point.x),y:Math.round(move.point.y)}:null}:null;
-      if(!move?.point||move.time===undefined){hideTip();return;}
-      const point=current.points.find(p=>p.timestamp===move.time);
-      if(!point){hideTip();return;}
-      showTip(move.point,point);
+      const bar=move?.time!==undefined?current.byTime.get(move.time):null;
+      showLegend(bar??current.bars.at(-1));
+      if(!move?.point||!bar){hideTip();return;}
+      showTip(move.point,bar);
     });
-    resizeObserver=new ResizeObserver(()=>{
-      if(!chart)return;
-      const width=plot.clientWidth,height=plot.clientHeight;
-      if(width>0&&height>0)chart.applyOptions({width,height});
-    });
-    resizeObserver.observe(plot);
     lifecycle.observe(document.body,{childList:true,subtree:true});
     return true;
   }
 
+  const volumeText=bar=>{
+    const v=quoteVolume(bar);
+    if(v===null)return '—';
+    return rate===null?`${priceText(v)} ${q}`:`$${priceText(v)}`;
+  };
+  // The legend above the candles: the hovered (or latest) candle's OHLC, change and volume.
+  function showLegend(bar){
+    if(!bar){legend.replaceChildren();return;}
+    const s=Number(scale),change=pctText(Number(bar.open),Number(bar.close)),dir=Number(bar.close)>=Number(bar.open)?'up':'down';
+    const cell=(k,v)=>h('span.chart-legend-cell',h('em',k),v);
+    legend.replaceChildren(
+      cell('O',priceText(Number(bar.open)*s)),cell('H',priceText(Number(bar.high)*s)),cell('L',priceText(Number(bar.low)*s)),cell('C',priceText(Number(bar.close)*s)),
+      change?h('span.chart-legend-chg',{'data-dir':dir},change):null,cell('Vol',volumeText(bar)));
+  }
   function showTip(point,bar){
-    const fields=tipFields(bar,bar.quoteVolumeRaw==null?null:quoteVolume(bar),volumeUnit);
-    const cell=(k,v)=>h('span.chart-tip-cell',h('em',k),v);
+    const s=Number(scale),cell=(k,v)=>h('span.chart-tip-cell',h('em',k),v),change=pctText(Number(bar.open),Number(bar.close));
     tip.replaceChildren(
-      h('div.chart-tip-head',new Date(bar.timestamp*1000).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'}),fields.change?h('span.chart-tip-chg',{'data-dir':fields.up?'up':'down'},fields.change):null),
-      h('div.chart-tip-grid',cell('O',priceText(bar.open)),cell('H',priceText(bar.high)),cell('L',priceText(bar.low)),cell('C',priceText(bar.close))));
+      h('div.chart-tip-head',new Date(bar.timestamp*1000).toLocaleString(undefined,{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit',...((pref.interval??60)<60?{second:'2-digit'}:{})}),change?h('span.chart-tip-chg',{'data-dir':Number(bar.close)>=Number(bar.open)?'up':'down'},change):null),
+      h('div.chart-tip-grid',cell('O',priceText(Number(bar.open)*s)),cell('H',priceText(Number(bar.high)*s)),cell('L',priceText(Number(bar.low)*s)),cell('C',priceText(Number(bar.close)*s))),
+      h('div.chart-tip-foot',h('span',h('em','Volume '),volumeText(bar)),h('span',h('em','Trades '),String(bar.trades??0))));
     tip.hidden=false;
     const box=stage.getBoundingClientRect();
-    const at=tipPosition(point,{width:tip.offsetWidth||170,height:tip.offsetHeight||84},{width:box.width,height:box.height});
+    const at=tipPosition(point,{width:tip.offsetWidth||190,height:tip.offsetHeight||96},{width:box.width,height:box.height});
     tip.style.setProperty('transform',`translate(${at.x}px, ${at.y}px)`);
   }
   function hideTip(){if(!tip.hidden)tip.hidden=true;}
 
   /* ---------- data ---------- */
-  const quoteVolume=p=>{
-    if(p.quoteVolumeRaw==null)return null;
-    const value=Number(p.quoteVolumeRaw)/10**Number(token.quoteDecimals??6);
-    return rate===null?value:value*(rate??1);
+  const quoteVolume=bar=>{
+    if(bar?.quoteVolumeRaw==null)return null;
+    const value=Number(bar.quoteVolumeRaw)/10**Number(token.quoteDecimals??(ctx.wallet===ctx.solWallet?9:18));
+    return rate===null?value:value*rate;
   };
-  let volumeUnit='';
-  function shape(rows){
-    const points=rows.filter(p=>Number.isSafeInteger(p.timestamp)&&Number(p.close)>0&&[p.open,p.high,p.low,p.close].every(v=>Number.isFinite(Number(v)))).sort((a,b)=>a.timestamp-b.timestamp);
+  function shape(rows,interval){
+    const valid=rows.filter(p=>Number.isSafeInteger(p.timestamp)&&Number(p.close)>0&&[p.open,p.high,p.low,p.close].every(v=>Number.isFinite(Number(v)))).sort((a,b)=>a.timestamp-b.timestamp);
+    const bars=fillGaps(valid,interval);
     rate=usdRate(token);scale=(pref.basis==='cap'?Number(token.supply??1e9):1)*(rate??1);unit=rate===null?q:'USD';
-    const closes=points.map(p=>Number(p.close)*scale).filter(v=>v>0);
-    const smallest=closes.length?Math.min(...closes):0;
+    const lows=bars.map(p=>Number(p.low)*scale).filter(v=>v>0);
+    const smallest=lows.length?Math.min(...lows):0;
     magnitude=smallest>0?Math.max(0,Math.min(12,Math.ceil(-Math.log10(smallest))+2)):0;
-    const draw=scale*10**magnitude;
-    const data=points.map(p=>({time:p.timestamp,value:Number(p.close)*draw}));
-    return {points,data};
+    const f=scale*10**magnitude;
+    const up=tone('--candle-up','#2fd47f'),down=tone('--candle-down','#f6465d');
+    const priceData=bars.map(p=>({time:p.timestamp,open:Number(p.open)*f,high:Number(p.high)*f,low:Number(p.low)*f,close:Number(p.close)*f}));
+    const volumeData=bars.map(p=>({time:p.timestamp,value:quoteVolume(p)??0,color:alpha(Number(p.close)>=Number(p.open)?up:down,p.filled?0:.45)}));
+    return {bars,priceData,volumeData,byTime:new Map(bars.map(b=>[b.timestamp,b]))};
   }
   function empty(message,sub){
-    overlay.replaceChildren(h('div.chart-empty',icon('chart-line','icon-lg'),h('strong',message),sub?h('span',sub):null));
+    overlay.replaceChildren(h('div.chart-empty',icon('chart-candlestick','icon-lg'),h('strong',message),sub?h('span',sub):null));
     overlay.hidden=false;
   }
+  const path=kind=>{
+    const base=ctx.mode==='local'?`tokens/${token.address}`:`public/tokens/${token.address}`,net=ctx.mode==='local'?'':`network=${encodeURIComponent(network)}&`;
+    return `${base}/${kind}?${net}`;
+  };
 
-  async function load(quiet=false){
+  async function load({quiet=false,fit=true}={}){
     const request=++revision;
     if(!quiet){status.textContent='Loading executed trades…';plot.classList.add('is-loading');}
     try{
-      const net=ctx.mode==='local'?'':`&network=${encodeURIComponent(ctx.currentChain())}`;
-      const base=ctx.mode==='local'?'tokens':'public/tokens';
-      let rows=await ctx.api(`${base}/${token.address}/candles?interval=${pref.interval}${net}`);
-      // A bucket wider than the whole history draws a single dot. If the range yields almost nothing, ask for the
-      // finest bucket and keep whichever view has more to show.
-      if(rows.length<=3&&pref.interval>60){
-        const finer=await ctx.api(`${base}/${token.address}/candles?interval=60${net}`);
-        if(finer.length>rows.length)rows=finer;
+      // No choice yet: open on the finest candle size that fits the history in ~300 candles.
+      if(!pref.chosen&&pref.interval==null){
+        const daily=await ctx.api(`${path('candles')}interval=86400&limit=500`).catch(()=>[]);
+        pref.interval=daily.length?defaultInterval(daily[0].timestamp,daily.at(-1).timestamp+86400):60;
+        draw();
       }
+      const interval=pref.interval??60;
+      const [rows,recent]=await Promise.all([ctx.api(`${path('candles')}interval=${interval}&limit=500`),ctx.api(`${path('trades')}limit=200`).catch(()=>[])]);
       if(request!==revision||!panel.isConnected)return;
-      const signature=JSON.stringify(rows.slice(-3))+rows.length+pref.basis+pref.range;
+      const signature=JSON.stringify(rows.slice(-2))+rows.length+pref.basis+interval+(recent[0]?.hash??'');
       if(quiet&&signature===lastSignature&&chart)return;
       lastSignature=signature;
       plot.classList.remove('is-loading');
-      const {points,data}=shape(rows);
-      if(!points.length){
-        cleanup();plot.replaceChildren();empty('No trades yet','The chart starts with the first buy or sell.');
+      const shaped=shape(rows,interval);
+      if(!shaped.bars.length){
+        cleanup();plot.replaceChildren();legend.replaceChildren();empty('No trades yet','Candles start with the first buy or sell.');
         status.textContent='Executed trades only. Nothing is shown until someone trades.';
         return;
       }
       if(!window.LightweightCharts)throw new Error('Chart library could not load.');
       overlay.hidden=true;
-      if(!chart)build();
-      current={points,data};
-      line.setData(data);
-      if(!quiet){
-        if(pref.visible&&pref.range!=='ALL')chart.timeScale().setVisibleRange(pref.visible);
-        else if(pref.range==='ALL')chart.timeScale().fitContent();
-        else chart.timeScale().fitContent();
+      const rebuild=!chart||chart.__interval!==interval;
+      if(rebuild){build();chart.__interval=interval;}
+      current=shaped;
+      candles.setData(shaped.priceData);volume.setData(shaped.volumeData);
+      // Small dots for the reader's own trades, labelled arrows for the creator's; the newest 60 only. On a phone-width
+      // plot the labels would overlap, so the arrows go unlabelled (the tooltip and trades table still say who traded).
+      const narrow=plot.clientWidth<480;
+      markers?.setMarkers(tradeMarkers(recent,interval,{creator:token.creator,me:me()}).filter(m=>shaped.byTime.has(m.time)).slice(narrow?-30:-60).map(m=>({time:m.time,position:m.position,
+        shape:m.who==='Dev'?m.shape:'circle',size:m.who==='Dev'?(narrow?0.8:1):0.55,color:m.side==='buy'?tone('--candle-up','#2fd47f'):tone('--candle-down','#f6465d'),text:m.who==='Dev'&&!narrow?`Dev ${m.side==='buy'?'buy':'sell'}`:''})));
+      if(rebuild||fit){
+        // Show the latest ~120 candles, or everything when there are fewer.
+        const n=shaped.priceData.length;
+        if(n>120)chart.timeScale().setVisibleLogicalRange({from:n-120,to:n+4});else chart.timeScale().fitContent();
       }
-      status.textContent=`${points.length} ${points.length===1?'bucket':'buckets'} of executed trades · ${unit}. ${rate===null?'USD reference unavailable.':'USD uses the current reference rate, not historical rates.'}`;
+      showLegend(shaped.bars.at(-1));
+      const label=INTERVALS.find(([s])=>s===interval)?.[1]??`${interval}s`;
+      status.textContent=`${label} candles of executed trades · ${pref.basis==='cap'?'market cap':'price'} in ${unit}. ${rate===null?'USD reference unavailable.':'USD uses the current reference rate, not historical rates.'}`;
     }catch{
       if(request===revision){
         plot.classList.remove('is-loading');
@@ -203,16 +230,17 @@ export function terminalChart(ctx,token,q){
     }
   }
 
-  /* ---------- hooks used by tests and capture ---------- */
+  /* ---------- hooks: live updates, tests and capture ---------- */
+  // A streamed trade of this token: reload quietly (coalesced), keeping the reader's zoom and scroll.
+  panel.refresh=()=>{clearTimeout(live);live=setTimeout(()=>{if(panel.isConnected)load({quiet:true,fit:false});},250);};
   panel.screenshot=()=>chart?.takeScreenshot?.()??null;
-  panel.debug=()=>({basis:pref.basis,range:pref.range,interval:pref.interval,magnitude,points:current.points.length,series:chart?1:0,crosshair:lastCrosshair,tip:!tip.hidden});
+  panel.debug=()=>({basis:pref.basis,interval:pref.interval,magnitude,bars:current.bars.length,series:chart?2:0,crosshair:lastCrosshair,tip:!tip.hidden});
 
   draw();overlay.hidden=true;load();
-  // Only the chart that is actually on screen may keep polling. A view that was replaced without being
-  // disconnected kept fetching the previous token every 15 s, which is what the request log showed.
+  // Only the chart that is actually on screen may keep polling (a replaced view must not keep fetching).
   timer=setInterval(()=>{
     if(!panel.isConnected||document.querySelector('.price-history')!==panel){clearInterval(timer);cleanup();return;}
-    if(!document.hidden)load(true);
+    if(!document.hidden)load({quiet:true,fit:false});
   },15000);
   return panel;
 }
