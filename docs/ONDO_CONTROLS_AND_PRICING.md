@@ -27,6 +27,18 @@ node --env-file=.env.ondo.local scripts/ondo-inspect.mjs ethereum NVDAon
 
 Reports go to ignored `backups/equity-fork/ethereum-ondo-NVDAon-controls.json`. Omit the block variable to select recent state. A historical observation is not a current issuer-status check. Getter failures stay unverified; the inspector never treats them as evidence of absent controls. Role enumeration is capped at 16 members and records truncation.
 
+## Comparing later control observations, 29 October 2026
+
+The inspector accepts an optional third argument: a saved baseline report path. Copy reviewed evidence to a separate filename before running; the latest output file cannot itself be the baseline. The comparison never updates or accepts the baseline automatically.
+
+```powershell
+node --env-file=.env.ondo.local scripts/ondo-inspect.mjs ethereum NVDAon backups/equity-fork/ethereum-ondo-NVDAon-baseline-2026-10-28.json
+```
+
+It writes a separate `-drift.json` report and returns exit code 2 if observed fields change. Comparisons include token bytecode, proxy pointers and target bytecode, beacon implementation/owner, readable status getters and enumerable roles. Member order alone is ignored. Failed probes and truncated role membership remain explicitly unverified; loss of a previously observed value is a change requiring review. Different assets, wrong chain IDs, older blocks and conflicting hashes at the same height are rejected. This is an on-demand inspection tool, not an installed recurring monitor or an execution gate.
+
+A fresh read-only NVDAon inspection on 29 October at block **26298112** matched the saved block 26294021 observations: **NO_OBSERVED_CHANGE**, zero changed fields and 14 unverified fields. This does not close the source/ABI audit or enable pairing. The strict focused gate passed 36 tests with no skips. A new full suite was started separately; the earlier 552-pass result below is historical evidence, not this run's result.
+
 ## Total-return valuation guard
 
 Ondo describes its stocks as total-return trackers. Dividends and other adjustments affect the economics represented by each raw token. BNB and Solana wallets can display a scaled balance with a corresponding display-price adjustment; that does not change raw onchain balances. An ordinary stock-price feed and a token total-return price are therefore not interchangeable.
