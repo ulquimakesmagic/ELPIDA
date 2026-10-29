@@ -1,0 +1,96 @@
+{
+  "scope": "READ ONLY: historical/diagnostic observations, not an approved oracle or market policy",
+  "network": "ethereum",
+  "chainId": 1,
+  "block": 26294021,
+  "blockHash": "0xa006d5da3793e8f9b02ba124eb3ec3d918ee764e318220d1d0a2b4d5cef7225c",
+  "source": "https://reference-data-directory.vercel.app/feeds-mainnet.json",
+  "directoryHeartbeatSec": 82800,
+  "cappedFeed": true,
+  "diagnosticPolicy": {
+    "network": "ethereum",
+    "token": "0x2d1f7226bd1f780af6b9a49dcc0ae00e8df4bdee",
+    "quoteToken": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "quoteDecimals": 6,
+    "quoteFeed": "0x8fFfFfd4AfB6115b954Bd326cbe7B4BA576818f6",
+    "quoteAggregator": "0x54bCC589d9743E521c64233706FC8cB36D275b07",
+    "quoteFeedId": "ethereum-usdc-usd-diagnostic",
+    "quoteFeedCodeHash": "0xbd6f524cdc4268b6bd1bb6f77a8821faeea9c52ee9e0afa0b6d948ce82c966c2",
+    "quoteAggregatorCodeHash": "0xec635dff6a4204a0de141a9a6728b9c84995894680d703e44ac0057ffb38c412",
+    "quoteFeedDecimals": 8,
+    "quoteDescription": "USDC / USD",
+    "quoteMaxAgeSec": 82800,
+    "maxAgeSec": 82800,
+    "minTwapWindowSec": 600,
+    "minHarmonicLiquidity": "1",
+    "pool": "0xc9b4bc7c15423fcfe6b75ab5118ba773945a3a46",
+    "factory": "0x1f98431c8ad98523631ae4a59f267346ea31f984",
+    "fee": 3000,
+    "poolCodeHash": "0xbeed12057a40235e8c4b3b76fe881a6a37a8d4b9857bbba6ba2297a1f6f9a3dd",
+    "factoryCodeHash": "0x4d7b8525cd5d14343fa67a732fba5b24cddba11620ca88392f4ec6c52f91fd69"
+  },
+  "quoteUsd": {
+    "network": "ethereum",
+    "token": "0xa0b86991c6218b36c1d19d4a2e9eb0ce3606eb48",
+    "feedId": "ethereum-usdc-usd-diagnostic",
+    "currency": "USD",
+    "basis": "per-raw-token",
+    "priceUsdWad": "999715560000000000",
+    "updatedAt": 1793213279,
+    "observedAt": 1793224091,
+    "blockNumber": 26294021,
+    "blockHash": "0xa006d5da3793e8f9b02ba124eb3ec3d918ee764e318220d1d0a2b4d5cef7225c",
+    "roundId": "73786976294838206511",
+    "aggregator": "0x54bCC589d9743E521c64233706FC8cB36D275b07",
+    "liveCapabilitiesApproved": false,
+    "note": "Quote-asset USD round only; not stock total return, corporate-action clearance or a guaranteed peg. Freshness evaluated at pinned block, not current wall clock."
+  },
+  "twap": {
+    "network": "ethereum",
+    "token": "0x2d1f7226bd1f780af6b9a49dcc0ae00e8df4bdee",
+    "pool": "0xc9b4bc7c15423fcfe6b75ab5118ba773945a3a46",
+    "currency": "USD",
+    "basis": "per-raw-token",
+    "priceUsdWad": "214058606837512021139",
+    "updatedAt": 1793224091,
+    "blockNumber": 26294021,
+    "blockHash": "0xa006d5da3793e8f9b02ba124eb3ec3d918ee764e318220d1d0a2b4d5cef7225c",
+    "windowSec": 600,
+    "meanTick": -222656,
+    "harmonicMeanLiquidity": "109142822439595808",
+    "liveCapabilitiesApproved": false,
+    "note": "Geometric tick-window price combined with a trusted quote-USD observation; not guaranteed execution or issuer approval."
+  },
+  "marketUsable": false,
+  "liveCapabilitiesApproved": false,
+  "unresolved": [
+    "Ethereum stock total-return reference and corporate-action/status source",
+    "Reviewed venue, freshness and liquidity risk limits",
+    "Bidirectional executable reserve-sized quotes and participant restrictions",
+    "Issuer and jurisdiction eligibility"
+  ],
+  "result": "PASS",
+  "checks": [
+    {
+      "name": "USDC USD round identity, aggregator, decimals and description matched observed diagnostic pins",
+      "ok": true
+    },
+    {
+      "name": "positive complete round retained original timestamp and met directory-heartbeat diagnostic limit at pinned block",
+      "ok": true
+    },
+    {
+      "name": "600-second NVDAon pool history and quote-USD observation share one canonical Ethereum block",
+      "ok": true
+    },
+    {
+      "name": "combined market explicitly remains unapproved without total-return/status and risk-policy evidence",
+      "ok": true
+    }
+  ],
+  "sourceHashEncoding": "SHA256 of UTF-8 source with CRLF normalized to LF",
+  "sourceSha256": {
+    "scripts/lib/ondo-quote-usd.mjs": "52114cd926205b243991d4f6ec801235a2758e0bfe9258a3323d70f38786aa24",
+    "scripts/ondo-market-observe.mjs": "1cfc4544c852c8d623b8396cd66f5e3f155f7f9e9500c6b7a3b8d289136e230c"
+  }
+}
