@@ -1,7 +1,7 @@
 import { nowSeconds, syncClock } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
 import { usdReferenceFor } from '/pairs.mjs';
-import { exploreHash } from './discovery.mjs';
+import { exploreHash, overlayToken, tokenKey } from './discovery.mjs';
 import { createExplore, exploreSkeleton } from './explore-view.mjs';
 import { assetIcon, chainIcon, chainSelector } from './chain-ui.mjs';
 import { renderAnalytics } from './analytics-view.mjs';
@@ -109,10 +109,14 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
     if(revision!==refreshRevision)return state;
     discoveryErrors=results.flatMap((r,i)=>r.status==='rejected'?[config.testnets[i].name]:[]);
     if(next.discoveryError)discoveryErrors.push(wallet.net.name);
-    const indexed=results.flatMap(r=>r.status==='fulfilled'?r.value:[]);
-    const merged=new Map(indexed.map(t=>[`${t.network}:${t.address.toLowerCase()}`,t]));
-    for(const t of next.tokens??[]){const key=`${currentChain()}:${t.address.toLowerCase()}`,publicToken=merged.get(key);merged.set(key,{...publicToken,...t,priceChange24h:publicToken?.priceChange24h??t.priceChange24h,network:currentChain()});}
-    if(solWallet.deployment&&wallet!==solWallet){try{for(const t of await solWallet.publicTokens())merged.set(`${solWallet.net.key}:${t.address}`,{...t,network:solWallet.net.key,usdReference:usdReferenceFor({...t,usdReference:null},config.prices?.[solWallet.net.key],nowSeconds())});}catch{discoveryErrors.push(solWallet.net.name);}}
+    // Solana's index is read with the other networks on every refresh, whichever wallet is active, so its tokens keep
+    // their 24h activity and images; live wallet reads are laid over the index without erasing either.
+    let solana=[];
+    if(solWallet.deployment){try{solana=(await solWallet.indexedTokens()).map(t=>({...t,network:solWallet.net.key,usdReference:usdReferenceFor({...t,usdReference:null},config.prices?.[solWallet.net.key]??solWallet.price,nowSeconds())}));}catch{discoveryErrors.push(solWallet.net.name);}}
+    if(revision!==refreshRevision)return state;
+    const indexed=[...results.flatMap(r=>r.status==='fulfilled'?r.value:[]),...solana];
+    const merged=new Map(indexed.map(t=>[tokenKey(t.network,t.address),t]));
+    for(const t of next.tokens??[]){const key=tokenKey(currentChain(),t.address);merged.set(key,{...overlayToken(merged.get(key),t),network:currentChain()});}
     allTokens=[...merged.values()];
     if(currentRoute.name==='explore'||currentRoute.name==='portfolio')rerender('background');
     refreshLastSale();

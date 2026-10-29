@@ -162,3 +162,28 @@ export function exploreHash({ tab = 'trending', pair = 'all', chain = 'all', que
   const text = params.toString();
   return text ? `#/?${text}` : '#/';
 }
+
+/* ---------- Merging indexed listings with live wallet reads ---------- */
+/** One key per token across every list the app merges (addresses compared case-insensitively). */
+export const tokenKey = (network, address) => `${network}:${String(address).toLowerCase()}`;
+const blank = v => v === undefined || v === null || v === '' || (typeof v === 'object' && !Array.isArray(v) && !Object.keys(v).length);
+/**
+ * Lays a live read (a wallet's chain read or a browser cache) over the indexed listing without erasing what only the
+ * index knows: 24h activity, the price change and resolved metadata. A live field replaces the indexed one only when
+ * it actually has a value; metadata merges field by field. (A refresh used to drop Solana tokens from Trending and
+ * blank images because the live read carried no volume and an empty or partial metadata object.)
+ */
+export function overlayToken(indexed, live) {
+  if (!indexed) return live;
+  if (!live) return indexed;
+  const out = { ...indexed };
+  for (const [key, value] of Object.entries(live)) {
+    if (key === 'metadata' || blank(value)) continue;
+    out[key] = value;
+  }
+  const meta = { ...(indexed.metadata ?? {}) };
+  for (const [key, value] of Object.entries(live.metadata ?? {})) if (!blank(value)) meta[key] = value;
+  if (Object.keys(meta).length) out.metadata = meta;
+  for (const key of ['volume24h', 'trades24h', 'buys24h', 'sells24h', 'lastTradeAt', 'lastBuyAt', 'priceChange24h']) if (indexed[key] !== undefined) out[key] = indexed[key];
+  return out;
+}
