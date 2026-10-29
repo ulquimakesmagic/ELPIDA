@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { priceText, pctText, tipPosition, tipFields, INTERVALS, fillGaps, defaultInterval, tradeMarkers } from '../apps/web/chart-format.mjs';
+import { priceText, pctText, tipPosition, tipFields, INTERVALS, fillGaps, defaultInterval, tradeMarkers, spacedLabels } from '../apps/web/chart-format.mjs';
 import { startServer } from '../apps/api/server.mjs';
 
 test('prices keep enough digits to tell a sub-cent token from zero', () => {
@@ -119,4 +119,17 @@ test('markers show the creator\'s and the reader\'s trades, one per candle, side
   ]);
   assert.deepEqual(tradeMarkers(trades, 60, {}), [], 'no wallet, no markers');
   assert.equal(tradeMarkers([{ timestamp: 1, side: 'buy', account: '0xdev' }], 60, { creator: '0xdev', me: '0xdev' })[0].who, 'You', 'a creator viewing their own token sees "You"');
+});
+
+test('creator labels are spaced so zoomed-out charts do not stack them', () => {
+  const times = [0, 60, 120, 180, 240, 300, 360];
+  const marks = [
+    { time: 0, position: 'belowBar' }, { time: 60, position: 'belowBar' }, { time: 120, position: 'aboveBar' },
+    { time: 180, position: 'belowBar' }, { time: 360, position: 'belowBar' }, { time: 999, position: 'belowBar' },
+  ];
+  const at = gap => spacedLabels(marks, times, gap).map(m => m.labelled);
+  assert.deepEqual(at(1), [true, true, true, true, true, false], 'room for every label; an unknown candle is never labelled');
+  assert.deepEqual(at(3), [true, false, true, true, true, false], 'above and below the candles are spaced separately');
+  assert.deepEqual(at(5), [true, false, true, false, true, false]);
+  assert.deepEqual(at(Infinity), [true, false, true, false, false, false], 'only the first on each side');
 });
