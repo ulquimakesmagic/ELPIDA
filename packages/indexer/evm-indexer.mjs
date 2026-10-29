@@ -23,17 +23,23 @@ export function ratio(numerator, denominator, digits = 24) {
 }
 
 /** Durable Elpida EVM indexer. Protocol adapters currently cover curves and custom test pools only. */
+/** Candle sizes in seconds: 1s, 15s, 1m, 5m, 15m, 1h, 4h, 1D. */
+export const CANDLE_INTERVALS=[1,15,60,300,900,3600,14400,86400];
 // Early-partner tiers (docs/DESIGN_PARTNER_TIERS.md): read with minimal ABIs so curves and splitters that predate them
 // simply report no tier.
 const PARTNER_ABI=['function buybackBps() view returns(uint256)','function buybackBurned() view returns(uint256)'];
 const SPLITTER_PARTNER_ABI=['function burned() view returns(uint256)','function pendingBuyback(address) view returns(uint256)'];
 export class EvmIndexer {
-  constructor({provider, factory, contracts, path = ':memory:', chainId = 31337, fromBlock = 0, confirmations = 0, nativeSymbol = 'ETH', batchSize = 1, dexName = 'Uniswap v3'}) {
+  constructor({provider, factory, contracts, path = ':memory:', chainId = 31337, fromBlock = 0, confirmations = 0, nativeSymbol = 'ETH', batchSize = 1, dexName = 'Uniswap v3', fullRefreshMs = 0}) {
     if (path !== ':memory:') mkdirSync(dirname(path), {recursive:true});
     this.db = new DatabaseSync(path); this.provider = provider; this.factory = factory.toLowerCase();
     this.chainId = chainId; this.fromBlock = fromBlock; this.confirmations = confirmations; this.nativeSymbol = nativeSymbol; this.dexName = dexName;
     this.contracts = contracts; this.interfaces = Object.fromEntries(['factory','curve','pool','token',...(contracts.dexPool?['dexPool']:[])].map(k=>[k,new Interface(contracts[k].abi)]));
     this.batchSize = Math.max(1, Math.min(2000, batchSize));
+    // Market snapshots are re-read for the tokens a block touched; every token is re-read at the end of a scan at most
+    // once per `fullRefreshMs` (0: at the end of every scan). Reading every token at every scanned block made a busy
+    // network lag by seconds per trade.
+    this.fullRefreshMs = fullRefreshMs; this.lastFull = 0;
     this.db.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS identity (id INTEGER PRIMARY KEY CHECK(id=1), value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS blocks (height INTEGER PRIMARY KEY, hash TEXT NOT NULL, parent TEXT NOT NULL, timestamp INTEGER NOT NULL);
@@ -121,9 +127,10 @@ export class EvmIndexer {
       if (current?.hash === tip.hash && tip.height <= target) break;
       this.rollback(tip.height-1);tip=this.tip();
     }
+    const full=this.fullRefreshMs===0||Date.now()-this.lastFull>=this.fullRefreshMs;
     for(let height = tip ? tip.height+1 : this.fromBlock; height<=target; height+=this.batchSize) {
       const end=Math.min(target,height+this.batchSize-1);
-      if(this.batchSize===1){await this.scanBlock(height);continue;}
+      if(this.batchSize===1){await this.scanBlock(height,{refreshAll:full&&height===target});continue;}
       // Watch creation, transfers, curve trades and pool swaps in bounded ranges.
       // Fetch new markets too: a token may launch and trade several times in one range.
       const known=this.tokens(), watched=new Set([this.factory,...known.flatMap(t=>[t.address,t.curve,...(this.snapshot(t.address)?.graduated?[this.snapshot(t.address).pool]:[])])]);
@@ -140,12 +147,13 @@ export class EvmIndexer {
       // Headers in parallel: the blocks are contiguous, so their linkage is verified locally below.
       const blocks=new Map();
       await mapLimit(heights,8,async h=>{blocks.set(h,await this.provider.getBlock(h));});
-      for(const h of heights)await this.scanBlock(h,{block:blocks.get(h),batch:unique,verified:true});
+      for(const h of heights)await this.scanBlock(h,{block:blocks.get(h),batch:unique,verified:true,refreshAll:full&&h===target});
     }
+    if(full&&(tip?tip.height:this.fromBlock-1)<target)this.lastFull=Date.now();
     this.head=head;this.lastError=null;
     return this.status();
   }
-  async scanBlock(height,{block:given,batch,verified}={}) {
+  async scanBlock(height,{block:given,batch,verified,refreshAll=true}={}) {
     const block = given ?? await this.provider.getBlock(height);
     if(!block) throw new Error('Block unavailable; retry indexing.');
     if(!verified){const tip=this.tip(); if(tip && (height===tip.height+1?block.parentHash!==tip.hash:(await this.provider.getBlock(tip.height))?.hash!==tip.hash)) throw new Error('Chain changed during indexing; retry.');}
@@ -190,8 +198,11 @@ export class EvmIndexer {
       const first=logs.filter(l=>l.address.toLowerCase()===r.curve&&l.transactionHash===r.hash).map(l=>this.parse('curve',l)).find(e=>e?.name==='Bought');
       r.devBoughtRaw=(first?.args.tokensOut??0n).toString();r.devBoughtPct=supplyPercent(r.devBoughtRaw);
     }
+    // Snapshot the tokens this block touched (and new ones); every token when a full refresh is due.
+    const touched=new Set(fresh.map(r=>r.address));
+    for(const l of logs){const info=addressMap.get(l.address.toLowerCase());if(info)touched.add(info.r.address);}
     const snapshots=[];
-    for(const r of records) snapshots.push([r,await this.readSnapshot(r,height,block)]);
+    for(const r of records) if(refreshAll||touched.has(r.address)||!this.snapshot(r.address)) snapshots.push([r,await this.readSnapshot(r,height,block)]);
     // Refuse to commit an inconsistent history if the block was replaced mid-read.
     if((await this.provider.getBlock(height))?.hash!==block.hash)throw new Error('Chain changed during indexing; retry.');
     logs.push(...launches);logs.sort((a,b)=>a.transactionIndex-b.transactionIndex || a.index-b.index);
@@ -313,7 +324,7 @@ export class EvmIndexer {
 
   candles(address,interval=60,limit=100) {return this.cached(`candles:${String(address).toLowerCase()}:${interval}:${limit}`,()=>this.computeCandles(address,interval,limit));}
   computeCandles(address,interval=60,limit=100) {
-    if(![60,300,900,3600,14400,86400].includes(interval))throw new Error('Unsupported candle interval.');
+    if(!CANDLE_INTERVALS.includes(interval))throw new Error('Unsupported candle interval.');
     const span=Math.max(1,Math.min(500,limit))*interval;
     // The answer is the last `limit` buckets, so history older than that cannot change it.
     const latest=this.db.prepare('SELECT MAX(timestamp) t FROM trades WHERE address=?').get(address.toLowerCase())?.t;

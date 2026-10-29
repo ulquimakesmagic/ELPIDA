@@ -26,6 +26,7 @@
   --highlight: rgba(255, 255, 255, .035);
   --up: #76ed9a;   --up-soft: rgba(118, 237, 154, .1);
   --down: #ffa1a1; --down-bg: rgba(51, 23, 25, .93); --down-line: rgba(228, 130, 130, .2);
+  --candle-up: #2fd47f; --candle-down: #f6465d;
   --age: #c9d9b0;
   /* Accent: Elpida's green-lime. Change this one family to retint the whole app. */
   --accent: #adff45;
@@ -90,6 +91,7 @@
   --highlight: rgba(255, 255, 255, .8);
   --up: #18884a;   --up-soft: rgba(24, 136, 74, .1);
   --down: #c2413b; --down-bg: rgba(194, 65, 59, .09); --down-line: rgba(194, 65, 59, .22);
+  --candle-up: #12a150; --candle-down: #d9304a;
   --age: #6b7186;
   --accent: #5b5bd6; --accent-hi: #7b7bea; --accent-lo: #4545bd; --accent-ink: #ffffff;
   --accent-text: #4338ca;

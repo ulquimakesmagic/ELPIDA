@@ -6,9 +6,10 @@
 
 /** Event payloads are trimmed to what the strip and the live feed render, so a message stays small. */
 const tradeFields = trade => ({
-  address: trade.address, network: trade.network, symbol: trade.symbol, name: trade.name,
-  side: trade.side, priceQuote: trade.priceQuote, quoteSymbol: trade.quoteSymbol,
-  timestamp: trade.timestamp, tx: trade.tx, height: trade.height,
+  address: trade.address, network: trade.network, symbol: trade.symbol, name: trade.name, image: typeof trade.image === 'string' && !trade.image.startsWith('data:') ? trade.image : null,
+  side: trade.side, priceQuote: trade.priceQuote, quoteSymbol: trade.quoteSymbol, quoteAmount: trade.quoteAmount ?? null, tokenAmount: trade.tokenAmount ?? null,
+  account: trade.account ?? null, venue: trade.venue ?? null, launch: Boolean(trade.launch),
+  timestamp: trade.timestamp, tx: trade.tx, height: trade.height, index: trade.index ?? 0,
 });
 
 export class TradeFeed {

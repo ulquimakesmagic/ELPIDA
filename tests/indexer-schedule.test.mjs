@@ -47,6 +47,24 @@ test('a pass that is still running is not started twice', async () => {
   assert.equal(runs, 1, 'the overlapping pass returned immediately');
 });
 
+test('a slow network does not hold the next pass back for the others, and a nudge syncs one network only', async () => {
+  const indexer = service();
+  const runs = { slow: 0, fast: 0 };
+  const counted = (key, ms) => ({ ...entry(key, ms), index: { sync: async () => { runs[key]++; await sleep(ms); }, status: () => ({ indexedBlock: 1 }), tokens: () => [] } });
+  indexer.entries.set('slow', counted('slow', 300));
+  indexer.entries.set('fast', counted('fast', 10));
+  const first = indexer.tick();
+  await sleep(50);
+  await indexer.tick();
+  await indexer.tick();
+  assert.equal(runs.fast, 3, 'the fast network synced on every pass');
+  assert.equal(runs.slow, 1, 'the slow one was not started again while still running');
+  await first;
+  await indexer.tick('fast');
+  assert.deepEqual(runs, { slow: 1, fast: 4 }, 'a nudge for one network leaves the others alone');
+  assert.equal(indexer.running, false);
+});
+
 test('one failing network does not stop the others, and is reported as a code', async () => {
   const indexer = service();
   indexer.entries.set('slow', entry('slow', 10));

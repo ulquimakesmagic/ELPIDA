@@ -57,6 +57,8 @@ async function run(action, body = {}, { quiet = false, onProgress } = {}) {
   try {
     const result = action === 'deploy' ? await wallet.deploy(body) : action === 'deploy-test-dex' ? await wallet.deployTestDex() : mode === 'local' ? await api(action, body) : await wallet.transact(action, body);
     if (!quiet) toast(result.message ?? 'Done.', { kind: 'success', link: txLink(result.hash) });
+    // Confirmed on chain: ask the server to index this network now, so the trade appears everywhere within seconds.
+    if (mode === 'testnet' && result?.hash) api('index-now', { network: wallet.net.key }).catch(() => {});
     try { await refresh(); } catch {}
     return result;
   } catch(error){api('client-error',{stage:action,code:error.code??error.name??'UNKNOWN'}).catch(()=>{});throw error;
@@ -366,6 +368,8 @@ async function refreshLastSale() {
 /** Inserts streamed trades into the strip and the live feed, newest first, without duplicates. */
 function applyLiveTrades(trades) {
   if(!Array.isArray(trades)||!trades.length)return;
+  // The token page listens for trades of its own token (trades table and chart).
+  try{window.dispatchEvent(new CustomEvent('elpida:trades',{detail:{trades}}));}catch{}
   const merged=mergeTrades(recentBuys,trades);
   if(!merged.added)return;
   recentBuys=merged.trades;

@@ -71,7 +71,7 @@ test('a legacy team factory stays listed and tradable next to the current one',a
     for(const [e,ts,token,side] of [[now,40,newToken,'buy'],[legacy,35,oldToken,'sell'],[legacy,50,'0x'+'09'.repeat(20),'buy']])e.index.db.prepare('INSERT INTO trades(tx,idx,address,height,timestamp,data) VALUES(?,?,?,?,?,?)').run('r'+ts,0,token,2,ts,JSON.stringify({token,side,account:'0xsecret',quoteAmount:'5'}));
     const recent=service.recentTrades(5);
     assert.deepEqual(recent.map(r=>[r.name,r.side,r.timestamp,r.network]),[['New','buy',40,'test'],['Old','sell',35,'test']]);
-    assert.deepEqual(Object.keys(recent[0]).sort(),['address','image','name','network','side','symbol','timestamp']);
+    assert.deepEqual(Object.keys(recent[0]).sort(),['address','height','image','index','name','network','side','symbol','timestamp','tx']);
     // Pair discovery stays on the current factory only.
     assert.equal(service.quotes('test'),null,'unvalidated current factory');
   }finally{await service.close();rmSync(dir,{recursive:true,force:true});}

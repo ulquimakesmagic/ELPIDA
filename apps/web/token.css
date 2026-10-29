@@ -151,7 +151,8 @@
 
 /* ---------- Phase 7: chart ---------- */
 .chart-stage { position: relative; height: 420px; margin-top: 6px; border-radius: 14px; overflow: hidden; background: linear-gradient(var(--panel-2), transparent 70%); border: .67px solid var(--line-soft); }
-.price-history .terminal-chart { position: absolute; inset: 0; }
+/* The plot always fills the stage; the stage carries the height (older rules sized the plot itself). */
+.price-history .chart-stage > .terminal-chart { position: absolute; inset: 0; height: auto; }
 .chart-overlay { position: absolute; inset: 0; display: grid; place-items: center; z-index: 3; pointer-events: none; }
 .chart-overlay[hidden] { display: none; }
 .chart-empty { display: grid; justify-items: center; gap: 6px; text-align: center; padding: 20px; color: var(--muted); }
@@ -171,6 +172,12 @@
 .chart-tip-cell em, .chart-tip-foot em { font-style: normal; color: var(--muted); font-family: var(--font-sans); }
 .chart-tip-foot { margin-top: 6px; padding-top: 6px; border-top: .67px solid var(--line-soft); display: flex; justify-content: space-between; gap: 8px; font: 500 11px/1.3 var(--font-sans); color: var(--ink-2); }
 .chart-tip.chart-tip-static { transition: none; }
+.chart-legend { position: absolute; top: 8px; left: 10px; right: 76px; z-index: 2; display: flex; flex-wrap: wrap; gap: 4px 10px; align-items: baseline; pointer-events: none; font: 500 11.5px/1.3 var(--font-mono, ui-monospace); color: var(--ink); }
+.chart-legend-cell em { font-style: normal; color: var(--muted); font-family: var(--font-sans); margin-right: 3px; }
+.chart-legend-chg { font-weight: 600; }
+.chart-legend-chg[data-dir="up"] { color: var(--candle-up); }
+.chart-legend-chg[data-dir="down"] { color: var(--candle-down); }
+@media (max-width: 640px) { .chart-legend { font-size: 10.5px; right: 64px; } }
 .chart-note { margin: 8px 2px 0; font-size: 12px; line-height: 1.45; color: var(--muted); }
 .chart-credit { margin: 6px 2px 0; font-size: 11px; color: var(--muted); opacity: .8; }
 .chart-credit a { color: inherit; }

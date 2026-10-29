@@ -175,3 +175,33 @@ test('Metaplex metadata URI is read from a MetadataV1 account and ignored otherw
   assert.equal(metadataUri(Buffer.alloc(100)), '', 'too short');
   assert.equal(metadataUri(null), '');
 });
+
+test('the fast pass reads new transactions, reloads pools only when something traded, and feeds new rows once', async () => {
+  const f = fixture(); f.setTransaction(success());
+  let poolLoads = 0, dexReads = 0;
+  f.index.syncPools = async () => { poolLoads++; };
+  f.index.syncPumpTrades = async () => { dexReads++; return 0; };
+  f.index.networkValidated = true; f.index.lastSuccess = new Date().toISOString();
+  try {
+    const before = f.index.lastTradeRow();
+    await f.index.syncRecent();
+    assert.equal(poolLoads, 1, 'a trade happened: prices reload');
+    assert.equal(dexReads, 1, 'swaps on migrated pools are read every pass');
+    const { trades, last } = f.index.tradesAfter(before);
+    assert.equal(trades.length, 1); assert.equal(trades[0].hash, 'transaction-one'); assert.equal(trades[0].idx, 0);
+    assert.equal(f.index.tradesAfter(last).trades.length, 0, 'nothing is fed twice');
+    await f.index.syncRecent();
+    assert.equal(poolLoads, 1, 'an idle pass does not reload the pools');
+  } finally { f.index.close(); }
+});
+
+test('a launch newer than the pool snapshot reloads the pools before its trades are read, so none is skipped', async () => {
+  const f = fixture(); f.setTransaction(success());
+  f.index.db.prepare('DELETE FROM tokens').run();
+  let loads = 0;
+  f.index.syncPools = async () => { loads++; f.index.db.prepare('INSERT OR IGNORE INTO tokens VALUES(?,?,?)').run(mint, 100, JSON.stringify({ address: mint, pool, quoteDecimals: 6 })); };
+  try {
+    assert.equal(await f.index.syncTrades(), 1, 'the trade of the pool unknown at the start is kept');
+    assert.equal(loads, 1);
+  } finally { f.index.close(); }
+});

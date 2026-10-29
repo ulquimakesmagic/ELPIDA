@@ -2,7 +2,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { priceText, pctText, tipPosition, tipFields } from '../apps/web/chart-format.mjs';
+import { priceText, pctText, tipPosition, tipFields, INTERVALS, fillGaps, defaultInterval, tradeMarkers } from '../apps/web/chart-format.mjs';
 import { startServer } from '../apps/api/server.mjs';
 
 test('prices keep enough digits to tell a sub-cent token from zero', () => {
@@ -83,4 +83,40 @@ test('every module the app imports is served, so the app cannot 404 its own impo
   // chart-format.mjs is imported by terminal-chart.mjs rather than by app.mjs directly.
   const chart = await fetch(`${app.url}/chart-format.mjs`);
   assert.equal(chart.status, 200);
+});
+
+test('the chart offers 1s to 1D candles and opens on the finest size that fits the history in ~300 candles', () => {
+  assert.deepEqual(INTERVALS.map(([s]) => s), [1, 15, 60, 300, 900, 3600, 14400, 86400]);
+  assert.equal(defaultInterval(1000, 1000), 60, 'a single trade');
+  assert.equal(defaultInterval(0, 200), 1, 'a token minutes old shows seconds');
+  assert.equal(defaultInterval(0, 3 * 3600), 60, 'three hours at 1m');
+  assert.equal(defaultInterval(0, 2 * 86400), 900, 'two days at 15m');
+  assert.equal(defaultInterval(0, 10 * 365 * 86400), 86400, 'anything longer falls back to 1D');
+});
+
+test('quiet buckets become flat candles at the previous close, unless that would add too many', () => {
+  const bar = (timestamp, open, close) => ({ timestamp, open, high: Math.max(open, close), low: Math.min(open, close), close, quoteVolumeRaw: '5', trades: 1 });
+  const filled = fillGaps([bar(0, 1, 2), bar(180, 2, 3)], 60);
+  assert.deepEqual(filled.map(b => b.timestamp), [0, 60, 120, 180]);
+  assert.deepEqual(filled[1], { timestamp: 60, open: 2, high: 2, low: 2, close: 2, quoteVolumeRaw: '0', trades: 0, filled: true });
+  assert.equal(fillGaps([bar(0, 1, 2), bar(10_000, 2, 3)], 1, 1500).length, 2, 'a long-idle token at 1s is left as is');
+  assert.equal(fillGaps([bar(0, 1, 2)], 60).length, 1);
+});
+
+test('markers show the creator\'s and the reader\'s trades, one per candle, side and wallet, in time order', () => {
+  const trades = [
+    { timestamp: 130, side: 'sell', account: '0xDEV' },
+    { timestamp: 61, side: 'buy', account: '0xdev' },
+    { timestamp: 75, side: 'buy', account: '0xDev' },
+    { timestamp: 90, side: 'buy', account: '0xME' },
+    { timestamp: 95, side: 'buy', account: '0xother' },
+  ];
+  const marks = tradeMarkers(trades, 60, { creator: '0xdev', me: '0xme' });
+  assert.deepEqual(marks.map(m => [m.time, m.side, m.who, m.position, m.shape]), [
+    [60, 'buy', 'Dev', 'belowBar', 'arrowUp'],
+    [60, 'buy', 'You', 'belowBar', 'arrowUp'],
+    [120, 'sell', 'Dev', 'aboveBar', 'arrowDown'],
+  ]);
+  assert.deepEqual(tradeMarkers(trades, 60, {}), [], 'no wallet, no markers');
+  assert.equal(tradeMarkers([{ timestamp: 1, side: 'buy', account: '0xdev' }], 60, { creator: '0xdev', me: '0xdev' })[0].who, 'You', 'a creator viewing their own token sees "You"');
 });
