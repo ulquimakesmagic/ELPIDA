@@ -12,6 +12,11 @@ import { testnetDexes } from '../../packages/core/uniswap.mjs';
 // The EVM networks expose no WebSocket endpoint, so a block is seen no sooner than one poll. 3 s is the floor that
 // stays inside the public RPCs' rate limits for four chains; ELPIDA_INDEX_INTERVAL_MS tunes it per deployment.
 const TICK_MS=Math.max(1500,Math.min(60000,Number(process.env.ELPIDA_INDEX_INTERVAL_MS)||3000));
+// Confirmation depth for the public EVM indexers. 0 reads the newest block, so a trade shows within a tick of being
+// mined (one block on Sepolia was 12 s of the 17.5 s measured on 29 Oct 2026). Safe because every scan first re-checks
+// the indexed tip's hash and rolls back replaced blocks, trades included. ELPIDA_EVM_CONFIRMATIONS raises it (max 64).
+export function evmConfirmations(value=process.env.ELPIDA_EVM_CONFIRMATIONS){const n=Number(value);return Number.isInteger(n)&&n>=0?Math.min(n,64):0;}
+const EVM_CONFIRMATIONS=evmConfirmations();
 const TICK_CONCURRENCY=Math.max(1,Math.min(8,Number(process.env.ELPIDA_INDEX_CONCURRENCY)||3));
 // One token's inline data: image made every listing 1.1 MB. A listing ships the URL instead; the bytes are
 // served once by /api/wallet-logo and cached by the browser.
@@ -150,7 +155,7 @@ export function feedTrades(network,rows,listings){
 function openEntry({net,deployment,provider,contracts,dataDir,legacy=false}){
   const tax=deployment.model==='curve-tax-v10',dex=isDexModel(deployment.model)||tax,factory=deployment.factory.toLowerCase();
   const taxPair={abi:['function token0() view returns(address)','function token1() view returns(address)','function getReserves() view returns(uint112,uint112,uint32)','function totalSupply() view returns(uint256)','function balanceOf(address) view returns(uint256)','event Swap(address indexed sender,uint256 amount0In,uint256 amount1In,uint256 amount0Out,uint256 amount1Out,address indexed to)']};
-  const index=new EvmIndexer({provider,factory:deployment.factory,contracts:{...contracts,factory:tax?contracts.taxFactory:dex?contracts.dexFactory:contracts.legacyFactory,curve:tax?contracts.taxCurve:dex?contracts.dexCurve:contracts.legacyCurve,...(!dex?{dexPool:undefined}:{}),...(tax?{tax:true,token:contracts.taxToken,dexPool:taxPair,pool:taxPair}:{})},path:join(dataDir,`public-${net.chainId}-${factory}.sqlite`),chainId:net.chainId,fromBlock:deployment.block,confirmations:1,nativeSymbol:net.nativeCurrency.symbol,batchSize:100,dexName:testnetDexes[net.key]?.name??'Uniswap v3',fullRefreshMs:60000});
+  const index=new EvmIndexer({provider,factory:deployment.factory,contracts:{...contracts,factory:tax?contracts.taxFactory:dex?contracts.dexFactory:contracts.legacyFactory,curve:tax?contracts.taxCurve:dex?contracts.dexCurve:contracts.legacyCurve,...(!dex?{dexPool:undefined}:{}),...(tax?{tax:true,token:contracts.taxToken,dexPool:taxPair,pool:taxPair}:{})},path:join(dataDir,`public-${net.chainId}-${factory}.sqlite`),chainId:net.chainId,fromBlock:deployment.block,confirmations:EVM_CONFIRMATIONS,nativeSymbol:net.nativeCurrency.symbol,batchSize:100,dexName:testnetDexes[net.key]?.name??'Uniswap v3',fullRefreshMs:60000});
   const metadataPath=join(dataDir,`public-metadata-${net.chainId}-${factory}.json`);
   const metadata=new Map(existsSync(metadataPath)?Object.entries(JSON.parse(readFileSync(metadataPath,'utf8'))):[]);
   return {net,deployment,legacy,index,provider,metadata,metadataPath,validated:false,error:null,lastSuccess:null};
