@@ -1,5 +1,17 @@
 # Ondo market-input validation, 29 October 2026
 
+## Pool history reader added after PR132
+
+`readOndoV3Twap` now obtains `observe([window, 0])` cumulative tick and seconds-per-liquidity observations. It verifies chain, block hash, pool/factory code pins and wiring, fee, token identities and onchain decimals. Missing history reverts with no spot fallback. A reviewed per-pool minimum harmonic active-liquidity value is mandatory; these raw liquidity units are not a USD-depth measure. Independent QuoterV2 depth checks remain necessary.
+
+Tick accumulators use int56 wrapping and the mean tick is floored, including negative values, following [Uniswap's OracleLibrary](https://github.com/Uniswap/v3-periphery/blob/main/contracts/libraries/OracleLibrary.sol). For price conversion the direct ratio uses the lower tick; the inverse ratio uses the upper tick before inversion. Integer interval exponentiation bounds 1.0001^tick without floating-point prices. Both bounds and USD conversion round conservatively. The quote asset still requires a trusted fresh per-raw-token USD observation at the same block. There is no assumed stablecoin dollar peg and no feed configured by this reader.
+
+`node --env-file=.env.ondo.local scripts/ondo-v3-observe.mjs` is a separate read-only reconnaissance tool. It defaults to the observed NVDAon/USDC 0.3% candidate, verifies its factory wiring and records raw cumulative observations and code hashes. It does not promote those observed hashes into a reviewed policy. Optional arguments select another pool and window; only canonical Ethereum NVDAon pools at the official factory qualify. Set ELPIDA_EQUITY_FORK_BLOCK to reproduce a historical observation.
+
+[ondo-ethereum-nvda-v3-observations-2026-10-29.json](evidence/ondo-ethereum-nvda-v3-observations-2026-10-29.json) records a real 600-second window at Ethereum block 26294021: pool `0xc9b4bc7c15423fcfe6b75ab5118ba773945a3a46`, mean tick -222656, harmonic liquidity 109142822439595808. This is a historical onchain read; no transaction was sent. USD price is deliberately null because no quote-USD/total-return source is approved. The result is observation evidence, not a claim that the market gate passes or that liquidity is adequate.
+
+The PR132 full local suite subsequently completed **587 passes, zero failures and 33 missing-Solana-validator skips** (620 total). This result predates the new TWAP reader. Its new tests cover integer bounds, negative fractional ticks, accumulator wrapping, both token orientations, decimal mismatches, unavailable history, thin liquidity and stale/substituted USD inputs. Live pairing remains disabled.
+
 This phase adds a pure market-input gate and a read-only Uniswap-v3-compatible QuoterV2 adapter. It does not configure a production oracle, select a live pool, expose a launch option or authorize transactions. Model 10 and separate chain wallets are unchanged.
 
 ## Valuation and executable observations
