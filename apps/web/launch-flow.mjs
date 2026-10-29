@@ -294,7 +294,7 @@ export function renderLaunch(ctx) {
       field({label:'Buy tax (%)',control:input('taxBuy',{type:'number',min:'0',max:'10',step:'0.01',disabled:!canTax})}),
       field({label:'Sell tax (%)',control:input('taxSell',{type:'number',min:'0',max:'10',step:'0.01',disabled:!canTax})}),
       h('p.hint',canTax?'0–10% per side, fixed at launch. Additional tax splits 30% to Elpida and 70% to your wallet allocations. The 1.25% curve fee remains 50/50. After migration, the token tax and V2 pool fee apply. Creator tax rewards after migration are paid in your launched token.':'Tax launches require the verified V2 tax factory deployment. Available in the local DEX rehearsal; existing public V3 factories cannot create transfer-tax tokens.')) : null;
-    settings.append(h('div.summary-card', h('h4', 'Fixed at launch'), h('ul.fixed-list', h('li', 'The reward strategy and its settings'), h('li', 'Recipients and their percentages'), h('li', 'The 50/50 split of trading fees between Elpida and the creator share'))));
+    settings.append(h('div.summary-card', h('h4', 'Fixed at launch'), h('ul.fixed-list', h('li', 'The reward strategy and its settings'), h('li', 'Recipients and their percentages'), h('li', 'Your creator share of trading fees'))));
     return { body: [
       local ? null : callout('', 'info', 'On public testnets, creator fees go to one creator wallet. Holder distributions, buybacks and X or website allocations are available in the local simulation until their contracts are deployed publicly.'),
       taxControls, grid, settings, error,
