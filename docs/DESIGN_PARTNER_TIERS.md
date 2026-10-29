@@ -154,3 +154,40 @@ The same in the Anchor program (built 26 October 2026; devnet upgrade by Malik):
 
 - **Cap on launches per partner within the window** (for example 10), so one approved wallet cannot launch dozens of
   Elite tokens. Off unless Malik wants it; it is a small addition to the registry.
+
+## 7. Verified on Solana devnet: an Elite token through Raydium (29 October 2026)
+
+This is a live run of section 5, step 5, for the Solana SOL pair: one partner launch taken through graduation into
+Raydium CPMM and a fee harvest. Malik signed every transaction. Claude read each one back from devnet: the program
+logs, the balance changes, the program's own events and the mint's supply.
+
+1. **Registration:** `node scripts/solana-partner.mjs --creator DQ7c…F5xD --bps 2000 --days 7` (signed by the devnet
+   treasury key), tx `KaomBFsz…6xvdyxf`. Read back: Elite, 20%, until 5 Nov 2026.
+2. **Launch and curve:** MASHLE (Mash Burnedead), SOL pair, 1 SOL creator buy.
+   - The launch page showed the Elite notice before signing.
+   - The token record shows `buybackBps: 2000`.
+   - Curve trades burned 646,701 MASHLE before graduation.
+3. **Graduation:** tx `HqTWWTqj…frkh2NG`. The completing **Buy** and **MigrateToRaydium** ran in one transaction.
+   - The pool opened with 240.25M MASHLE and 1.018 SOL, and its LP is locked.
+   - Raydium's 0.15 SOL creation fee was paid out of the raise. The wallet's net SOL change in that transaction was −0.1146 SOL.
+4. **Curve fees:** tx `5cmwbrPg…6ncRvZPsD`, 0.012111 SOL split **62.5% creator / 37.5% treasury**.
+   - This is exact: the 20% share was already spent at each curve trade, and the remaining 80% splits 50/30.
+5. **LP fee harvest and buyback:** tx `3UrDLAYo…YSLZs8v`, one transaction. **HarvestRaydiumFees**, then
+   **RaydiumBuyback** through Raydium's **SwapBaseInput**:
+   - The harvest withdrew 1.7146 LP: 0.009067535 SOL and 326,481 MASHLE of fee growth. The locked principal stayed
+     at 494,612,654,487 LP units.
+   - The SOL side split 0.004533768 to the creator and 0.00272026 to the treasury. The MASHLE side split 163,240.50
+     to the creator and 97,944.30 to the treasury. Both are 62.5 / 37.5, as above.
+   - The 20% token side, **65,296.20 MASHLE**, was burned at once.
+   - The 20% SOL side, **1,813,507 lamports** (exactly 20% of 9,067,535), was queued and spent in the same
+     transaction. It bought **64,598.71 MASHLE** from the pool, and all of it was burned. The queue is now 0.
+   - The 1% cap held: 0.0018 SOL spent against a cap of 0.026 SOL (1% of the pool's 2.607 SOL before the swap).
+6. **Supply and site:**
+   - The mint's supply is **999,166,374.151741**. The indexed `burned` total is **833,625.848259**, which matches
+     `1,000,000,000 − supply` to the last unit.
+   - Explore shows **"Burn 20%"**, with "Elite tier: 20% of trading fees buy back and burn $MASHLE. 833.6K burned so
+     far."
+
+Every partner-tier path on Solana that the audit scope lists has now run on a real cluster: registration, curve
+burns, graduation into Raydium, the LP-fee harvest split, the token-side burn, and the capped `raydium_buyback`. The
+expired-partner launch from step 5 has not been run on devnet yet; tests cover it.

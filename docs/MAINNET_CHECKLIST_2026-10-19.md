@@ -27,6 +27,7 @@ Status as of today: testnet only. Public site live at elpida.fun.
 | B2 | Solana suite green against the rebuilt binaries | Done (26/26) | Test log | Claude |
 | B3 | Post-graduation (PumpSwap) market indexing complete | **Done (24 Oct)**, trading and indexing verified against the chain. MADARA (`GM8ipkk6XGFnNXsWvjstkqj8sTchStUW8uQPZPEXhope`) on devnet: launch `3CPvhiayXEptkHj3cW26YBzRoUPk3Nj17k5UAUmS3ZQpSm5zhcHvebrNwsRCUcrXcG8vb7BeWUjL7MvNRKj5jBTt`; the completing buy migrated in the same transaction (`qZMfv37VsYF4h5nNYt6W5NL1tXjhub4ivgfzRBNg2G6sYbk96E5G1wRy7upvupE55MnMvnHmdtN3xsSWzbYqQe1`: `Buy`, `MigrateToPumpswap`, PumpSwap `CreatePool`) into pool `yJP3XDYGs4egHM7QLEes9aSVeFEbW7zSoms9AomGmMf`. Then from the token page (#78, PumpSwap's official SDK), each with one signature: buy `1242NyfGeu3BxNDr8mYYJA3Q1uU9CSJWa7d6k63HYG7YnzxEQYJYYk7qwVHdXvhvV7YHmZDN44FApTC2sdzGUEQr` (1 SOL in, 110,479,622 MADARA out, plus a one-time `ExtendAccount` of the pool) and sell `27vxuTqq2BHqxpcYtowJivrMNQ7tFFB6KeTpH9q95Ea9znypp6UYrdFoRKTwZK8D8y68d23coGZE2qXi7m8baCXC` (217,556,637 MADARA in, 1.3555 SOL out). The public indexer lists both as PumpSwap trades (side, venue, pool-vault amounts), and its liquidity (0.81441288 SOL) and price (2.3448e-9 SOL per MADARA) equal the pool's vaults read on-chain at the same time | Trades, price and liquidity after migration visible and checked against chain | Other agent, Claude |
 | B4 | Mainnet build confirms `TestNetworksOnly` on test instructions | Open | `test_build_check` run on the target cluster before configuring | Malik |
+| B5 | Raydium CPMM graduation and the partner buyback on devnet | **Done (29 Oct)**, read back from devnet: Elite token MASHLE graduated into Raydium in its completing buy (`HqTWWTqj…`); curve fees split 62.5/37.5 (`5cmwbrPg…`); one harvest (`3UrDLAYo…`) withdrew 0.009068 SOL and 326,481 MASHLE of LP fees, burned the 20% token side (65,296.20) and spent the 20% SOL side (1,813,507 lamports, under the 1% depth cap) on a Raydium swap whose 64,598.71 MASHLE were all burned. Indexed `burned` equals 1B minus the mint supply exactly. Details in `docs/DESIGN_PARTNER_TIERS.md` section 7 | Tx hashes, events and supply | Malik, Claude |
 
 ## C. Security and review (the long pole)
 
@@ -50,6 +51,61 @@ Status as of today: testnet only. Public site live at elpida.fun.
 | D5 | Legal, terms and risk disclosures reviewed for the launch jurisdiction | **Draft ready (24 Oct)**, not reviewed: `docs/TERMS_AND_RISK_DRAFT.md` (terms outline, plain-language risks, questions for counsel). Nigeria first: the Investments and Securities Act 2025 brings digital assets into the definition of securities, and SEC rules cover digital asset offering platforms (`docs/PRE_MAINNET_PLAN.md` section 3) | Reviewed by a professional | Malik |
 | D6 | Domain: elpida.fun live; `ELPIDA_PUBLIC_URL` set; X redirect URI updated if X verification is used | Mostly done | Site loads on the domain; verification flow tested | Malik |
 | D7 | Public status page and an owner for monitoring and incident response | **Monitors live (24 Oct)**: UptimeRobot (free) checks `https://elpida.fun/health` and `https://elpida.fun/api/operations/status` every 5 minutes, with email alerts to Malik. The operations monitor alerted at once on a real incident (the Ethereum Sepolia index stuck since block 11972106). Open: confirm the first alert email arrived | Alerts reach a person | Malik, Claude |
+| D8 | Mainnet token charts: embed an external chart per token (decided 29 Oct); Elpida's own candle chart stays on testnet and as the fallback | Open: see "Mainnet charts" below | Checked on one graduated and one pre-graduation mainnet token per chain | Claude, Malik |
+
+## Mainnet charts (decided 29 October 2026)
+
+Decision (Malik): on mainnet, token pages embed an external chart. GMGN was named first; DexScreener was raised as an option. The built-in candle chart (#125, #128) is for testnet and stays as the fallback.
+
+**GMGN**
+
+- Documented embed: `https://www.gmgn.cc/kline/{chain}/{token address}?theme=dark&interval=15`, keyed by the token address.
+- Chains in its examples: `sol`, `eth`, `bsc`. Intervals: `1S`, `1`, `5`, `15`, `60`, `240`, `720`, `1D`.
+- Open questions: does Base work, and does a token still on Elpida's own curve show at all? GMGN charts the launchpads it lists, so Elpida may need a listing first.
+
+**DexScreener**
+
+- Embed: `https://dexscreener.com/{chain}/{pool address}?embed=1&theme=dark&trades=0`, keyed by the pool address. Optional: `chartTheme=dark`, `chartType=usd`, `interval=60`.
+- The parameters are observed from DexScreener's embed links and other projects' integrations. They are not a documented API and could change. One integration found that `info=0` leaves the embed stuck on "Loading pair…".
+- Chain slugs include `solana`, `ethereum`, `bsc`, `base` and `robinhood`.
+- Any DEX pool is picked up automatically, so every graduated Elpida pool charts with no listing.
+- A token still on the curve has no pool, so there is no chart for it.
+
+**Rule to implement**
+
+1. Before graduation: Elpida's chart.
+2. After graduation: DexScreener by pool address on every chain, or GMGN on Solana if preferred.
+3. If the embed fails to load: Elpida's chart.
+
+**Work**
+
+- Add the chosen origins to the CSP `frame-src`.
+- Match the iframe theme to the site theme.
+- Lazy-load the iframe.
+
+**Trade-off and fallback**
+
+- Embeds lose Elpida's Dev and own-trade markers and the MCap toggle. The trades table still shows who traded.
+- DEXTools' widget (pool address; it lists `robinhood`) is a further fallback.
+
+Sources:
+
+- GMGN, "Cooperation-API: Integrate GMGN price chart" (docs.gmgn.ai)
+- `dextools-io/chart-widget` (GitHub)
+- PoolPartyLabs `pool-party-v2-frontend` PR #169 and `amnay667/nomadev` PR #7 (GitHub), for the observed DexScreener parameters
+
+## Trade latency on testnet (measured 29 October 2026)
+
+How long after its block a trade appeared on elpida.fun:
+
+| Trade | Before | After |
+|---|---|---|
+| Ethereum Sepolia | 17.5 s (with one confirmation) | 3.9 s at the newest block (#131) |
+| Solana devnet | 18 to 25 s | 2.1 s |
+
+- One Sepolia outlier took 33 s. In the minute of monitoring afterwards, the index stayed level with the head on every check.
+- On Solana, the public devnet RPC itself sometimes lists new signatures 15 to 20 s late. Elpida showed each trade within about a second of the RPC listing it.
+- On mainnet, a paid RPC (already required by the production guard) should keep both chains at a few seconds.
 
 ## Suggested order
 
