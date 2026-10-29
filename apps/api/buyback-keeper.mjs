@@ -68,6 +68,7 @@ export class BuybackKeeper {
       s.watching = due.length; s.checkedAt = new Date(this.now()).toISOString(); s.state = 'watching'; delete s.error;
       for (const token of due) {
         const key = token.address.toLowerCase();
+        let retrySoon = false;
         try {
           const result = await worker.run(token, { spent: this.spent(worker.chain) });
           if (result) {
@@ -80,14 +81,18 @@ export class BuybackKeeper {
           s.lastError = { token: token.symbol ?? key, code: errorCode(error), at: new Date(this.now()).toISOString() };
           this.log({ event: 'buyback_keeper_error', chain: worker.chain, token: key, code: errorCode(error) });
           if (errorCode(error) === 'daily_budget') { s.state = 'budget_reached'; }
+          // The index still loading (just after a restart) is not a reason to wait a whole interval: retry next tick.
+          retrySoon = TRANSIENT.has(errorCode(error));
         }
-        this.db.prepare('INSERT INTO buyback_runs VALUES(?,?,?) ON CONFLICT(chain, token) DO UPDATE SET at=excluded.at').run(worker.chain, key, this.now());
+        if (!retrySoon) this.db.prepare('INSERT INTO buyback_runs VALUES(?,?,?) ON CONFLICT(chain, token) DO UPDATE SET at=excluded.at').run(worker.chain, key, this.now());
       }
     } catch (error) { s.state = 'unavailable'; s.error = errorCode(error); }
   }
   async close() { this.stopping = true; clearInterval(this.timer); while (this.running) await new Promise(r => setTimeout(r, 50)); this.db.close(); }
 }
 
+/** Errors that only mean the index or the pool read is not ready yet; the token is retried on the next tick. */
+export const TRANSIENT = new Set(['config_unavailable', 'pool_unavailable']);
 const errorCode = error => String(error?.code && typeof error.code === 'string' ? error.code : error?.message ?? 'error').replace(/[^a-zA-Z0-9_ .:-]/g, '').slice(0, 80);
 const fail = code => Object.assign(new Error(code), { code });
 

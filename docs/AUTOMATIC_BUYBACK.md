@@ -1,6 +1,7 @@
 # Automatic buyback after graduation (partner tokens)
 
-**Status:** the code is ready but **off** until a keeper key is set. It runs on testnets only and never on mainnet.
+**Status:** live on elpida.fun since 29 October 2026, on testnets only (never mainnet), with the keeper wallets
+`0x2C60…933C` (EVM) and `x3Kv…jWVq` (Solana devnet). It stays off on any deployment without a keeper key.
 
 ## Why
 
@@ -80,3 +81,24 @@ keeper's wallet cannot redirect anything; it just pays network fees.
 - **Mainnet.** It needs its own wallets, budgets and explicit approval (mainnet checklist).
 - **Automatic payout of the creator's EVM share.** Collecting credits it in the splitter, and the creator's existing
   "Claim fees" pays it out. Calling `claim` for every token on every run would add gas for little benefit.
+
+## Verified live: Solana devnet, 29 October 2026
+
+The keeper was switched on in Railway, its Solana wallet was funded with 0.5 devnet SOL, and Malik made three MASHLE
+buys on the Raydium pool without touching Rewards. On its next round the keeper harvested and bought back by itself:
+transaction `4NNU5ntY…Tj4tcJf3`, 22:33:28 Lagos time. Claude read it back from devnet:
+
+- **Instructions:** HarvestRaydiumFees, Withdraw, RaydiumBuyback and SwapBaseInput, in one transaction.
+- **Harvest:** 12,880,355 lamports and 121,550.000262 MASHLE of LP fees.
+- **Paid out:**
+  - the creator, 0.006440178 SOL and 60,775 MASHLE (50%);
+  - the treasury, 0.003864106 SOL and 36,465 MASHLE (30%).
+- **Burned at once:** 24,310.000052 MASHLE, the 20% token side.
+- **Bought back:** the 20% SOL side, 2,576,071 lamports (exactly 20% of the harvest), bought 24,054.848294 MASHLE
+  through the pool. All of it was burned, and the queue is empty.
+- **The 1% cap held:** 0.0026 SOL spent against a cap of 0.051 SOL (1% of the pool's 5.10 SOL).
+- **Keeper cost:** 0.00149344 SOL, of which 0.00148844 was one-time account rent.
+- **Indexed `burned`:** 833,625.848259 before and 881,990.696605 after, exactly the two burns above.
+
+The first round after the redeploy found the Solana index still loading (`config_unavailable`) and waited a full
+interval. Errors like that now retry on the next tick, about a minute later.
