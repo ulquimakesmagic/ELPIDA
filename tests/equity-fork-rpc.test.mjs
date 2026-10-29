@@ -85,6 +85,11 @@ test('corrupt cached state is fetched again; endpoint credentials never enter ca
 });
 
 test('archive requests enforce a deadline and redact transport and upstream errors', async () => {
-  const fetchImpl = async (_, options) => new Promise((resolve, reject) => { options.signal.addEventListener('abort', () => reject(new Error('private-test-key')), { once: true }); setTimeout(resolve, 50).unref(); });
+  // The fake request holds a normal (ref'd) timer until the deadline aborts it. AbortSignal.timeout's own timer does not
+  // keep the event loop alive, so with nothing else pending Node could cancel the test before the deadline fired.
+  const fetchImpl = async (_, options) => new Promise((resolve, reject) => {
+    const slow = setTimeout(resolve, 5000);
+    options.signal.addEventListener('abort', () => { clearTimeout(slow); reject(new Error('private-test-key')); }, { once: true });
+  });
   await assert.rejects(archiveRead('https://example.invalid/private-test-key', 'eth_chainId', [], { timeoutMs: 10, fetchImpl }), error => /timed out/.test(error.message) && !error.message.includes('private-test-key'));
 });
