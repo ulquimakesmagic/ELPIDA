@@ -38,8 +38,8 @@ export function renderRewards(ctx) {
 function feesSection(ctx, mine) {
   const section = h('section.section', { 'aria-labelledby': 'fees-title' }, h('h2#fees-title', 'Creator fees'));
   if (ctx.state.disconnected) { section.append(callout('', 'wallet', 'Connect your wallet to see the tokens you created.')); return section; }
-  if (!mine.length) { section.append(h('div.empty', h('h3', 'No creator fees yet'), h('p', 'When you create a token, its creator fees appear here. Every curve trade pays 1.25%, split equally between Elpida and the creator.'), h('a.btn.btn-primary', { href: '#/launch' }, icon('plus'), 'Create token'))); return section; }
-  section.append(h('p.small.muted', 'Claiming pays each share to its fixed recipient: the creator wallet or reward treasury, and Elpida. Recipients are fixed at launch; this action does not redirect fees to the connected wallet.'));
+  if (!mine.length) { section.append(h('div.empty', h('h3', 'No creator fees yet'), h('p', 'When you create a token, its creator fees appear here. You earn creator fees on every trade of your token, on the curve and after graduation.'), h('a.btn.btn-primary', { href: '#/launch' }, icon('plus'), 'Create token'))); return section; }
+  section.append(h('p.small.muted', 'Claiming pays your share to the creator wallet or reward treasury fixed at launch. It never redirects fees to the connected wallet.'));
   const table = h('div.activity');
   for (const token of mine) {
     const q = token.quoteSymbol ?? ctx.state?.nativeSymbol ?? 'ETH';
@@ -49,7 +49,7 @@ function feesSection(ctx, mine) {
     table.append(h('div.fee-row',
       h('a.token-card-head', { href: `#/token/${token.address}` }, avatar(token), h('div', h('h3', token.name), h('span.sym.muted.small', token.tax?'Fixed creator allocations':token.rewardVault ? 'Reward treasury' : `Creator wallet ${short(token.reward)}`))),
       h('div.figure', h('span', token.tax?'Your creator allocation':'Creator share'), h('strong', token.tax?`${amount(token.creatorAllocationFees,q)} + ${amount(token.creatorTokenFees,token.symbol)}`:amount(token.creatorFees, q))),
-      h('div.figure', h('span', harvest ? `${token.venue ?? 'DEX'} LP fees ready` : 'Elpida share'), h('strong', harvest ? `${number(token.harvestableQuote, 4)} ${q} + ${number(token.harvestableTokens, 0)} ${token.symbol}` : amount(token.protocolFees, q))),
+      harvest ? h('div.figure', h('span', `Your ${token.venue ?? 'DEX'} LP fees ready`), h('strong', `${number(Number(token.harvestableQuote) / 2, 4)} ${q} + ${number(Number(token.harvestableTokens) / 2, 0)} ${token.symbol}`)) : null,
       h('div', h('button.btn.btn-secondary.btn-sm', { type: 'button', 'data-busy-disable': '', disabled: nothing, on: { click: async () => { error.textContent = ''; try { await ctx.run('withdraw', { token: token.address }); } catch (e) { error.textContent = errorText(e); } } } }, 'Claim fees'), error)));
   }
   section.append(table);

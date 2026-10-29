@@ -31,8 +31,9 @@ test('the launch page says what a registered wallet\'s next launch gets, and whe
   assert.equal(launchTierNotice({ buybackBps: 0, expiresAt: 0 }, now), null, 'no tier');
   const live = launchTierNotice({ buybackBps: 2000, expiresAt: now + 30 * 86400 }, now);
   assert.equal(live.live, true); assert.equal(live.tier, 'Elite'); assert.equal(live.percent, 20);
-  assert.match(live.text, /^Elite tier: 20% of this token's trading fees will buy back and burn it, for life, out of Elpida's share\. You still keep 50%\. Applies to launches until /);
+  assert.match(live.text, /^Elite tier: 20% of this token's trading fees will buy back and burn it, for life\. Your creator share is unchanged\. Applies to launches until /);
+  assert.doesNotMatch(live.text, /Elpida|treasury|50\/50/, 'the creator sees their own terms only');
   const ended = launchTierNotice({ buybackBps: 1000, expiresAt: now - 1 }, now);
   assert.equal(ended.live, false);
-  assert.match(ended.text, /^Your Partner tier ended on .+\. Tokens you launch now are standard \(50\/50\)\.$/);
+  assert.match(ended.text, /^Your Partner tier ended on .+\. Tokens you launch now have no buyback\.$/);
 });

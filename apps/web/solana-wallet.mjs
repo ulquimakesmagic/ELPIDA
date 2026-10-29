@@ -638,7 +638,7 @@ export class SolanaWallet {
         if (harvest.length) hashes.push(await this.sendInstructions([this.client.computeBudget(HARVEST_COMPUTE_UNITS), ...harvest], [], `Confirm the ${venue} LP fee harvest in your wallet…`));
       }
       if (!hashes.length) throw new Error(`Nothing to distribute yet. LP fees become harvestable once ${venue} trading has earned at least 0.01% of the locked position.`);
-      return { hash: hashes.at(-1), message: 'Fees distributed 50/50 to the treasury and the creator reward wallet.' };
+      return { hash: hashes.at(-1), message: 'Fees claimed. Your creator share was paid to your reward wallet.' };
     }
     if (pool.status === STATUS_MIGRATED) {
       const dex = await this.dexStateOf(pool);

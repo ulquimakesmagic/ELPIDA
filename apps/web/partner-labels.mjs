@@ -43,6 +43,6 @@ export function launchTierNotice(record, now = Math.floor(Date.now() / 1000)) {
   if (!record || !TIERS[Number(record.buybackBps)]) return null;
   const bps = Number(record.buybackBps), until = Number(record.expiresAt);
   const date = new Date(until * 1000).toLocaleDateString([], { day: 'numeric', month: 'short', year: 'numeric' });
-  if (!(until > now)) return { live: false, tier: TIERS[bps], text: `Your ${TIERS[bps]} tier ended on ${date}. Tokens you launch now are standard (50/50).` };
-  return { live: true, tier: TIERS[bps], percent: bps / 100, text: `${TIERS[bps]} tier: ${bps / 100}% of this token's trading fees will buy back and burn it, for life, out of Elpida's share. You still keep 50%. Applies to launches until ${date}.` };
+  if (!(until > now)) return { live: false, tier: TIERS[bps], text: `Your ${TIERS[bps]} tier ended on ${date}. Tokens you launch now have no buyback.` };
+  return { live: true, tier: TIERS[bps], percent: bps / 100, text: `${TIERS[bps]} tier: ${bps / 100}% of this token's trading fees will buy back and burn it, for life. Your creator share is unchanged. Applies to launches until ${date}.` };
 }
