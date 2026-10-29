@@ -1,0 +1,51 @@
+{
+  "scope": "READ ONLY: raw pool observations, no approved USD price or execution",
+  "network": "ethereum",
+  "chainId": 1,
+  "block": 26294021,
+  "blockHash": "0xa006d5da3793e8f9b02ba124eb3ec3d918ee764e318220d1d0a2b4d5cef7225c",
+  "pool": "0xc9b4bc7c15423fcfe6b75ab5118ba773945a3a46",
+  "token": "0x2d1f7226bd1f780af6b9a49dcc0ae00e8df4bdee",
+  "token0": "0x2D1F7226Bd1F780AF6B9A49DCC0aE00E8Df4bDEE",
+  "token1": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  "fee": 3000,
+  "windowSec": 600,
+  "factory": "0x1f98431c8ad98523631ae4a59f267346ea31f984",
+  "poolCodeHash": "0xbeed12057a40235e8c4b3b76fe881a6a37a8d4b9857bbba6ba2297a1f6f9a3dd",
+  "factoryCodeHash": "0x4d7b8525cd5d14343fa67a732fba5b24cddba11620ca88392f4ec6c52f91fd69",
+  "ticks": [
+    "-4178684901876",
+    "-4178818495476"
+  ],
+  "secondsPerLiquidity": [
+    "4642816697657689033811826751765968183718612526",
+    "4642816697657689033813697414587296255497534356"
+  ],
+  "floorTick": -222656,
+  "ceilTick": -222656,
+  "harmonicMeanLiquidity": "109142822439595808",
+  "usdPrice": null,
+  "liveCapabilitiesApproved": false,
+  "source": "https://raw.githubusercontent.com/Uniswap/sdk-core/main/src/addresses.ts",
+  "note": "Pool wiring/history observed, not an independent audited feed, adequate USD depth, issuer eligibility or future fill.",
+  "result": "PASS",
+  "checks": [
+    {
+      "name": "candidate pool wiring matches official Ethereum factory and canonical NVDAon",
+      "ok": true
+    },
+    {
+      "name": "600-second observe window returns real cumulative values",
+      "ok": true
+    },
+    {
+      "name": "signed mean tick and harmonic liquidity derived from raw cumulatives",
+      "ok": true
+    }
+  ],
+  "sourceSha256": {
+    "scripts/lib/ondo-v3-twap.mjs": "a32b9df40f0b66884aefd86903edc52b5b9b839e8d736e2ad423d89aa1bbe9e2",
+    "scripts/ondo-v3-observe.mjs": "3c4deb49cfe915b01c039917a3662c1d90f652c57a9d8408f3334d5e2120860e"
+  },
+  "sourceHashEncoding": "SHA256 of UTF-8 source with CRLF normalized to LF"
+}
