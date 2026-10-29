@@ -1,5 +1,7 @@
 # Ondo market-input validation, 29 October 2026
 
+The subsequent [feed review](ONDO_FEED_REVIEW.md) adds quote-USD observations and documents why display APIs and cross-chain feed aliases cannot close the Ethereum stock-reference gate.
+
 ## Pool history reader added after PR132
 
 `readOndoV3Twap` now obtains `observe([window, 0])` cumulative tick and seconds-per-liquidity observations. It verifies chain, block hash, pool/factory code pins and wiring, fee, token identities and onchain decimals. Missing history reverts with no spot fallback. A reviewed per-pool minimum harmonic active-liquidity value is mandatory; these raw liquidity units are not a USD-depth measure. Independent QuoterV2 depth checks remain necessary.
