@@ -1,5 +1,26 @@
 # Ondo feed review and quote-USD observations, 29 October 2026
 
+## Ethereum candidate discovery and main-branch reconciliation
+
+PR134 was merged into the old PR133 feature branch after PR133 reached main. Its quote-USD changes therefore still needed a PR targeting main directly. This reconciliation preserves that tested implementation and the other agent's chart and Solana devnet records.
+
+The prior full suite completed **594 passes, zero failures and 33 missing-Solana-validator skips** (627 total). The directory discovery below is a subsequent change and has its own focused checks.
+
+The narrative Chainlink Ondo page lists Base, but a broader direct Ethereum directory inspection found four candidate records. [ondo-ethereum-feed-candidates-2026-10-29.json](evidence/ondo-ethereum-feed-candidates-2026-10-29.json) retains the metadata and raw getter observations at block 26294021. This supersedes any interpretation that Ethereum has no Ondo-labelled feeds at all. None is mapped to an approved stock reference in the registry.
+
+| Asset | Candidate proxy | Directory/onchain description |
+|---|---|---|
+| TSLAon | `0x737401E0D1299D8A85b653Fd52823501f4FE0be0` | TSLAon / USD (Ondo API) |
+| TSLAon | `0x89904B6fcF8dAD1e5DA47dFdF69fC38Ad6be0bd5` | TSLAon-USD (Calculated) |
+| SPYon | `0x6EcC1b902dB35eAFE95332443802774Fd1D72576` | SPYon / USD (Ondo API) |
+| SPYon | `0xd16cC387E87d37350f57421DaDF811968441C1a5` | SPYon-USD (Calculated) |
+
+All four reported eight decimals and returned rounds at the pinned block. Their directory heartbeat is 86400 seconds. The bounded exact-base-asset scan found no NVDAon record in the downloaded Ethereum directory. This is not proof that no NVDAon feed exists anywhere. Multiple candidate variants remain ambiguous: labels and positive rounds do not prove multiplier inclusion, status/pause semantics, source independence, deprecation state or suitability as a risk oracle.
+
+`node --env-file=.env.ondo.local scripts/ondo-feed-candidates.mjs` repeats read-only discovery. The parser requires Ethereum, an exact canonical Ondo symbol, USD quote and an EVM proxy address; ordinary underlying tickers, other chains and other providers do not match. It preserves all competing variants instead of selecting the first. Raw getter failures stay unverified; no candidate or code hash is promoted into a live policy.
+
+The next decision needs provider/source confirmation of the Ethereum candidates' calculation and corporate-action behavior, or a confirmed NVDAon reference if NVDAon remains the first target. Do not use the ordinary NVDA equity feed, pick the API-labelled variant based only on its name, or borrow Base semantics for an Ethereum proxy. No external message was sent; live pairing remains off.
+
 This phase builds on PR133 (pool history). It adds a pinned Chainlink-style quote-asset USD reader and a diagnostic pairing of that observation with real NVDAon pool history. No production policy, stock reference feed, corporate-action clearance or live capability is installed.
 
 ## Source suitability
