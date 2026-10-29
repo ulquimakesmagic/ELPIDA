@@ -19,16 +19,20 @@ function validate(report) {
 function fields(report) {
   const result = { codePresent: report.codePresent, codeHash: report.codeHash, identityMatches: report.identityMatches };
   const add = (key, probe) => { result[key] = probe?.status === 'observed' ? normalized(probe.value) : { unverified: true }; };
-  for (const key of ['symbol', 'decimals', 'owner', 'paused', 'blocklist', 'sanctionsList', 'sharesMultiplier']) add(`token.${key}`, report.observations[key]);
+  for (const key of ['symbol', 'decimals', 'owner', 'paused', 'blocklist', 'sanctionsList', 'sharesMultiplier', 'compliance', 'tokenPauseManager']) add(`token.${key}`, report.observations[key]);
   for (const key of ['implementation', 'admin', 'beacon']) add(`proxy.${key}`, report.proxySlots[key]);
   result['beacon.address'] = report.beacon?.address?.toLowerCase() ?? null;
   for (const key of ['owner', 'implementation', 'implementationCode']) add(`beacon.${key}`, report.beacon?.[key]);
-  for (const key of ['DEFAULT_ADMIN_ROLE', 'PAUSER_ROLE', 'UPGRADER_ROLE', 'BURNER_ROLE', 'BLOCKLIST_ROLE']) {
+  for (const key of ['DEFAULT_ADMIN_ROLE', 'PAUSER_ROLE', 'UPGRADER_ROLE', 'BURNER_ROLE', 'BLOCKLIST_ROLE', 'CONFIGURER_ROLE', 'MINTER_ROLE']) {
     const role = report.roles[key];
-    add(`role.${key}.id`, role?.role); add(`role.${key}.count`, role?.memberCount);
+    add(`role.${key}.admin`, role?.admin); add(`role.${key}.id`, role?.role); add(`role.${key}.count`, role?.memberCount);
     // Enumerable sets may change order without changing membership.
     result[`role.${key}.members`] = role?.members?.every(x => x.status === 'observed') && role.truncated === false
       ? role.members.map(x => normalized(x.value)).sort() : { unverified: true };
+  }
+  for (const key of ['compliance', 'tokenPauseManager']) {
+    add(`dependency.${key}.code`, report.dependencies?.[key]?.code);
+    if (key === 'tokenPauseManager') add(`dependency.${key}.tokenPaused`, report.dependencies?.[key]?.tokenPaused);
   }
   return result;
 }

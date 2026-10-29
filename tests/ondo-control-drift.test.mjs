@@ -39,6 +39,19 @@ test('incomplete role enumeration is unknown rather than a complete member list'
   assert.equal(result.status, 'CHANGED'); assert.ok(result.unverified.includes('role.DEFAULT_ADMIN_ROLE.members'));
 });
 
+test('manager replacement, manager bytecode, pause status and role-admin changes are tracked', () => {
+  const a = baseline();
+  a.observations.compliance = observed(address);
+  a.dependencies = { tokenPauseManager: { code: observed({ hash }), tokenPaused: observed(false) } };
+  a.roles.DEFAULT_ADMIN_ROLE.admin = observed(hash);
+  const b = structuredClone(a); b.number++;
+  b.observations.compliance.value = '0x' + 'cd'.repeat(20);
+  b.dependencies.tokenPauseManager.code.value.hash = '0x' + '34'.repeat(32);
+  b.dependencies.tokenPauseManager.tokenPaused.value = true;
+  b.roles.DEFAULT_ADMIN_ROLE.admin.value = '0x' + '56'.repeat(32);
+  assert.equal(compareOndoControls(a, b).changes.length, 4);
+});
+
 test('rejects asset substitution, wrong chain, stale or reorged comparisons and malformed reports', () => {
   for (const change of [{ token: '0x' + 'cd'.repeat(20) }, { chainId: 56 }, { number: 99 },
     { hash: '0x' + '34'.repeat(32) }, { hash: 'invalid' }, { observations: null }]) {
