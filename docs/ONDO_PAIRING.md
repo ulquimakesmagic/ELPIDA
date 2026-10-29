@@ -48,9 +48,11 @@ The initial public archive endpoints returned HTTP 403. Subsequent real Ethereum
 
 28 focused registry/discovery/accounting tests, 10 API integration tests and three local EVM lifecycle tests pass (41 total, no skips). Lifecycle coverage includes legacy 6-decimal quotes and atomic graduation with zero creator buy at both 6 and 18 decimals. The 18-decimal check caught a missing quoteDust term in the rehearsal balance assertion; conservation now includes separately recorded migration dust without changing any production contract.
 
-The earlier broad suite finished with 534 passes, 30 environmental skips and no failures, before the cached-runner changes. The current focused strict gate passes 37 tests with no skips, covering RPC cache behavior, discovery, provider isolation and mock lifecycle checks. A new broad run is in progress; its result must be assessed separately. Issuer-control, oracle and eligibility checks remain open.
+The earlier broad suite finished with 534 passes, 30 environmental skips and no failures, before the cached-runner changes. The current focused strict gate passes 37 tests with no skips, covering RPC cache behavior, discovery, provider isolation and mock lifecycle checks. The cached-runner broad suite subsequently completed with 552 passes, zero failures and 33 missing-Solana-validator skips on Windows; the skips do not establish Solana execution coverage. Issuer-control, oracle and eligibility checks remain open.
 
 ## Real NVDAon fork result and repeatable runs
+
+The next phase's read-only issuer observations and valuation guard are documented in [ONDO_CONTROLS_AND_PRICING.md](ONDO_CONTROLS_AND_PRICING.md). They do not enable live pairing or configure a production stock feed.
 
 [ondo-ethereum-nvda-lifecycle-2026-10-28.json](evidence/ondo-ethereum-nvda-lifecycle-2026-10-28.json) records 15 passing checks at Ethereum block **26294021**, hash `0xa006d5da3793e8f9b02ba124eb3ec3d918ee764e318220d1d0a2b4d5cef7225c`. The quote is the issuer-listed NVDAon contract `0x2d1f7226bd1f780af6b9a49dcc0ae00e8df4bdee`. It covers zero creator purchase, exact buys/sells and curve fees, atomic graduation, migration dust, price continuity, permanent LP custody, pool swaps, fee collection and exact 50/50 creator/treasury pool-fee claims on both assets.
 
