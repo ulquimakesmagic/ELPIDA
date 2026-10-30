@@ -8,11 +8,11 @@ import { mkdirSync } from 'node:fs';
 // when consent was given (deleted again if consent is withdrawn), a per-tab session id, the page name from a fixed list,
 // the token being viewed, the chosen network, where the visit came from and a coarse device class. The server adds the
 // Cloudflare country code. No IP address, user agent, wallet address or search text is stored, and ids are stored only
-// as salted hashes. Consent and disclaimer choices are counted per day with no identifier at all, so the panel can show
+// as salted hashes. Terms and consent choices are counted per day with no identifier at all, so the panel can show
 // how many visitors declined. Rows older than RETAIN_DAYS are deleted.
 
 export const RETAIN_DAYS = 90;
-export const PAGES = ['explore', 'launch', 'portfolio', 'rewards', 'analytics', 'docs', 'partners', 'token', 'notfound'];
+export const PAGES = ['explore', 'launch', 'portfolio', 'rewards', 'analytics', 'docs', 'partners', 'terms', 'token', 'notfound'];
 export const DEVICES = ['mobile', 'tablet', 'desktop', 'bot', 'unknown'];
 export const PERIODS = [1, 7, 30, 90];
 const MAX_VIEWS_PER_DAY = 200_000;
@@ -57,7 +57,10 @@ export function cleanEvent(body, { networks = null, ownHost = null } = {}) {
     if (typeof body.analytics !== 'boolean') throw fail('Invalid consent choice.');
     return { kind: 'consent', value: body.analytics ? 'accepted' : 'declined' };
   }
-  if (body.kind === 'disclaimer') return { kind: 'disclaimer', value: 'accepted' };
+  if (body.kind === 'terms') {
+    if (typeof body.accepted !== 'boolean') throw fail('Invalid Terms choice.');
+    return { kind: 'terms', value: body.accepted ? 'accepted' : 'declined' };
+  }
   if (body.kind !== 'view') throw fail('Unknown event.');
   if (!ID.test(String(body.visitor ?? '')) || !ID.test(String(body.session ?? ''))) throw fail('Invalid visitor.');
   if (!PAGES.includes(body.page)) throw fail('Unknown page.');
@@ -128,7 +131,7 @@ export class SiteAnalytics {
       returning: { returning, new: Math.max(0, period.visitors - returning) },
       daily, pages: top('page'), tokens, sources: top('source'), countries: top('country'), devices: top('device'), networks: top('network'),
       consent: { accepted: choice('consent', 'accepted'), declined: choice('consent', 'declined') },
-      disclaimer: { accepted: choice('disclaimer', 'accepted') },
+      terms: { accepted: choice('terms', 'accepted'), declined: choice('terms', 'declined') },
     };
   }
 
@@ -138,9 +141,9 @@ export class SiteAnalytics {
 function safeLabel(label, network, token) { try { const value = label(network, token); return value ? String(value).slice(0, 40) : null; } catch { return null; } }
 
 /**
- * The places the entry disclaimer asks visitors to confirm they are not in, from ELPIDA_RESTRICTED_JURISDICTIONS
+ * The places the Terms of Use name as restricted (section 4, apps/web/terms.mjs), from ELPIDA_RESTRICTED_JURISDICTIONS
  * (comma separated, for example "United States, Ontario"). Empty by default: which places to list is a legal decision
- * (docs/TERMS_AND_RISK_DRAFT.md), and the disclaimer then asks about any place where using Elpida is prohibited.
+ * (docs/TERMS_AND_RISK_DRAFT.md); the Terms then name only sanctioned places and anywhere use is prohibited by law.
  */
 export function restrictedJurisdictions(setting) {
   return [...new Set(String(setting ?? '').split(',').map(s => s.replace(/[^\p{L}\p{N} .'()-]/gu, '').trim().slice(0, 40)).filter(Boolean))].slice(0, 20);

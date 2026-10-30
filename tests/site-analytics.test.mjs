@@ -1,10 +1,11 @@
-// Entry disclaimer, cookie consent and the operator Visitors tab: opt-in only, no IP, user agent or raw id stored,
+// Terms of Use dialog, cookie consent and the operator Visitors tab: opt-in only, no IP, user agent or raw id stored,
 // strict input checks, retention, and the operator-only summary.
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { SiteAnalytics, cleanEvent, deviceOf, countryOf, sourceOf, restrictedJurisdictions, telemetryLimiter, dayOf, RETAIN_DAYS } from '../apps/api/site-analytics.mjs';
-import { pageOf, visitSource, jurisdictionText, disclaimerAccepted, consentChoice, disclaimerPoints, fullDisclaimer, DISCLAIMER_VERSION, CONSENT_VERSION } from '../apps/web/consent.mjs';
+import { pageOf, visitSource, termsAccepted, consentChoice, disclaimerPoints, fullDisclaimer, CONSENT_VERSION } from '../apps/web/consent.mjs';
+import { termsDocument, TERMS_VERSION } from '../apps/web/terms.mjs';
 import { startServer } from '../apps/api/server.mjs';
 
 const id = n => n.toString(16).padStart(32, '0');
@@ -14,7 +15,9 @@ const PHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 18_0 like Mac OS X) Mobile/15E
 
 test('browser events are checked strictly; anything unexpected is refused or dropped', () => {
   assert.deepEqual(cleanEvent({ kind: 'consent', analytics: false }), { kind: 'consent', value: 'declined' });
-  assert.deepEqual(cleanEvent({ kind: 'disclaimer', extra: 'ignored' }), { kind: 'disclaimer', value: 'accepted' });
+  assert.deepEqual(cleanEvent({ kind: 'terms', accepted: true, extra: 'ignored' }), { kind: 'terms', value: 'accepted' });
+  assert.deepEqual(cleanEvent({ kind: 'terms', accepted: false }), { kind: 'terms', value: 'declined' });
+  assert.throws(() => cleanEvent({ kind: 'terms' }), /Invalid Terms/);
   assert.throws(() => cleanEvent({ kind: 'consent', analytics: 'yes' }), /Invalid consent/);
   assert.throws(() => cleanEvent({ kind: 'click' }), /Unknown event/);
   assert.throws(() => cleanEvent({ kind: 'view', visitor: 'wallet-0xabc', session: id(1), page: 'explore' }), /Invalid visitor/);
@@ -52,7 +55,8 @@ test('the store keeps salted hashes only, no IP or user agent, and summarises pe
   store.record(cleanEvent({ kind: 'consent', analytics: true }));
   store.record(cleanEvent({ kind: 'consent', analytics: false }));
   store.record(cleanEvent({ kind: 'consent', analytics: false }));
-  store.record(cleanEvent({ kind: 'disclaimer' }));
+  store.record(cleanEvent({ kind: 'terms', accepted: true }));
+  store.record(cleanEvent({ kind: 'terms', accepted: false }));
 
   const columns = store.db.prepare("SELECT name FROM pragma_table_info('views')").all().map(r => r.name);
   assert.ok(!columns.some(c => /ip|agent|wallet|address/i.test(c)), `no identifying columns: ${columns}`);
@@ -73,7 +77,7 @@ test('the store keeps salted hashes only, no IP or user agent, and summarises pe
   assert.deepEqual(s.devices.map(r => r.key).sort(), ['desktop', 'mobile']);
   assert.equal(s.pages[0].key, 'explore');
   assert.deepEqual(s.consent, { accepted: 1, declined: 2 });
-  assert.deepEqual(s.disclaimer, { accepted: 1 });
+  assert.deepEqual(s.terms, { accepted: 1, declined: 1 });
   assert.equal(store.summary({ days: 12345 }).days, 30, 'unknown periods fall back to 30 days');
 
   // Retention: rows older than 90 days go at the next write.
@@ -105,15 +109,26 @@ test('the browser counts only known pages and never the operator panel or search
   assert.equal(visitSource('', ''), null);
 });
 
-test('disclaimer and cookie choices are versioned; the jurisdiction line follows the operator setting', () => {
-  assert.equal(disclaimerAccepted({ v: DISCLAIMER_VERSION, at: 1 }), true);
-  assert.equal(disclaimerAccepted({ v: DISCLAIMER_VERSION - 1, at: 1 }), false, 'a new version asks again');
-  assert.equal(disclaimerAccepted(null), false);
+test('Terms and cookie choices are versioned; the restricted places follow the operator setting', () => {
+  assert.equal(termsAccepted({ v: TERMS_VERSION, at: 1 }), true);
+  assert.equal(termsAccepted({ v: TERMS_VERSION - 1, at: 1 }), false, 'a new version asks again');
+  assert.equal(termsAccepted(null), false);
   assert.deepEqual(consentChoice({ v: CONSENT_VERSION, analytics: false, at: 1 }), { analytics: false });
   assert.equal(consentChoice({ v: CONSENT_VERSION, analytics: 'yes' }), null);
-  assert.match(jurisdictionText([]), /any place where using Elpida is prohibited/);
-  assert.match(jurisdictionText(['United States']), /resident of, United States, or any other place/);
-  assert.match(jurisdictionText(['United States', 'Ontario', 'Cuba']), /United States, Ontario or Cuba/);
+  const text = doc => JSON.stringify(doc);
+  const plain = termsDocument();
+  assert.doesNotMatch(text(plain), /using the Services from/, 'no named places unless the operator sets them');
+  assert.match(text(termsDocument({ restricted: ['United States', 'Ontario', 'Canada'] })), /using the Services from United States, Ontario or Canada;/);
+  assert.match(text(plain), /Cuba, Iran, North Korea/, 'comprehensively sanctioned places are always restricted');
+  assert.match(plain.notice[0], /no monetary value/);
+  assert.doesNotMatch(plain.notice[0], /lose everything/, 'testnet terms do not claim real losses');
+  assert.match(termsDocument({ mainnet: true }).notice[0], /invite-only mainnet beta with real funds/);
+  // Section references in the notice point at the sections they name.
+  const titles = plain.sections.map(([t]) => t);
+  assert.match(plain.notice[0], new RegExp(`sections ${titles.indexOf('Test networks and the mainnet beta') + 1} and ${titles.indexOf('Risks you accept') + 1}`));
+  assert.match(plain.notice[1], new RegExp(`section ${titles.indexOf('Not advice, not an offer') + 1} `));
+  assert.equal(titles.indexOf('Who may use Elpida'), 3, 'the checkbox cites section 4 for Restricted Persons');
+  assert.doesNotMatch(text(plain), /StonkFun|stonkfun/i);
   assert.equal(disclaimerPoints().length, 3);
   assert.match(disclaimerPoints({ mainnet: true })[0].text, /real funds/);
   assert.match(fullDisclaimer().join(' '), /no monetary value/);
@@ -125,6 +140,7 @@ test('the page wires the banner, footer links and stylesheet; no module sets a s
   assert.match(html, /<link rel="stylesheet" href="\/consent\.css">/);
   assert.match(html, /data-cookie-settings/);
   assert.match(html, /href="#\/docs\/privacy"/);
+  assert.match(html, /href="#\/terms"/);
   const app = readFileSync(new URL('../apps/web/app.mjs', import.meta.url), 'utf8');
   assert.match(app, /initConsent\(\{ config \}\)/);
 });
@@ -135,11 +151,11 @@ test('telemetry needs the page token, stores a view, and the Visitors summary is
   const config = await (await fetch(`${app.url}/api/config`)).json();
   assert.deepEqual(config.consent, { restricted: [] });
   const post = (body, headers = {}) => fetch(`${app.url}/api/telemetry`, { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': config.csrf, ...headers }, body: JSON.stringify(body) });
-  assert.equal((await post({ kind: 'disclaimer' }, { 'X-Elpida-Token': 'wrong' })).status, 403);
+  assert.equal((await post({ kind: 'terms', accepted: true }, { 'X-Elpida-Token': 'wrong' })).status, 403);
   const ok = await post({ kind: 'view', visitor: id(7), session: id(8), page: 'launch', network: 'local' }, { 'CF-IPCountry': 'NG', 'User-Agent': DESKTOP });
   assert.equal(ok.status, 202);
   assert.deepEqual(await ok.json(), { recorded: true });
   assert.equal((await post({ kind: 'view', visitor: id(7), session: id(8), page: 'monkey' })).status, 400);
   assert.equal((await fetch(`${app.url}/api/admin/visitors`)).status, 401);
-  for (const path of ['/consent.mjs', '/consent.css', '/admin-visitors.mjs']) assert.equal((await fetch(`${app.url}${path}`)).status, 200, path);
+  for (const path of ['/consent.mjs', '/terms.mjs', '/consent.css', '/admin-visitors.mjs']) assert.equal((await fetch(`${app.url}${path}`)).status, 200, path);
 });

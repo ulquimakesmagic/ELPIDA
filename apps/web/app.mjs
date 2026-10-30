@@ -6,6 +6,7 @@ import { createExplore, exploreSkeleton } from './explore-view.mjs';
 import { assetIcon, chainIcon, chainSelector } from './chain-ui.mjs';
 import { renderAnalytics } from './analytics-view.mjs';
 import { initConsent } from './consent.mjs';
+import { renderTermsPage } from './terms.mjs';
 // Elpida web app shell: environment (local simulation or public testnet), wallets, routing, discovery,
 // portfolio and the network/test-funds panel. Views live in launch-flow.mjs, token-page.mjs and
 // rewards-view.mjs and receive the shared `ctx` object below.
@@ -223,7 +224,7 @@ function parseRoute() {
   if (doc) return { name: 'docs', section: doc[1] };
   const token = hash.match(/^\/token\/([A-Za-z0-9]{32,64})$/);
   if (token) return { name: 'token', address: token[1],network:new URLSearchParams(query).get('network') };
-  return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/docs': 'docs', '/monkey': 'admin', '/partners': 'partners' }[hash] ?? 'notfound' };
+  return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/docs': 'docs', '/monkey': 'admin', '/partners': 'partners', '/terms': 'terms' }[hash] ?? 'notfound' };
 }
 function route() {
   const next = parseRoute(); const changed = next.name !== currentRoute.name || next.address !== currentRoute.address;
@@ -232,7 +233,7 @@ function route() {
 
   if(next.network&&networkByKey(next.network)&&next.network!==currentChain()){chooseChain(next.network).catch(e=>toast(errorText(e),{kind:'error'}));return;}
   $$('[data-nav]').forEach(link => { if (link.dataset.nav === next.name) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
-  document.title = { explore: 'Explore tokens across chains | Elpida', portfolio: 'Portfolio | Elpida', rewards: 'Creator rewards | Elpida', launch: 'Create a token | Elpida', token: 'Token | Elpida', analytics: 'Analytics — Launches, volume & fees | Elpida', admin: 'Operations | Elpida', partners: 'Partner with Elpida | Elpida', docs: 'Docs | Elpida', notfound: 'Page not found | Elpida' }[next.name];
+  document.title = { explore: 'Explore tokens across chains | Elpida', portfolio: 'Portfolio | Elpida', rewards: 'Creator rewards | Elpida', launch: 'Create a token | Elpida', token: 'Token | Elpida', analytics: 'Analytics — Launches, volume & fees | Elpida', admin: 'Operations | Elpida', partners: 'Partner with Elpida | Elpida', docs: 'Docs | Elpida', terms: 'Terms of Use | Elpida', notfound: 'Page not found | Elpida' }[next.name];
   rerender('route');
   { const v = $('#view'); v.classList.remove('view-enter'); void v.offsetWidth; v.classList.add('view-enter'); }
   if(changed&&wallet?.address&&!['explore','analytics'].includes(next.name))refresh({preserveInput:true,walletRead:true}).catch(e=>toast(errorText(e),{kind:'error'}));
@@ -301,6 +302,7 @@ function rerender(reason) {
   else if (r.name === 'portfolio') view.replaceChildren(portfolioView(ctx, { connect: connectCurrent, rerender: () => rerender('route') }));
   else if (r.name === 'rewards') view.replaceChildren(renderRewards(ctx));
   else if (r.name === 'docs') view.replaceChildren(renderDocs(ctx, r.section));
+  else if (r.name === 'terms') view.replaceChildren(renderTermsPage(ctx));
   else if (!exploreView || !view.contains(exploreView.root)) {
     // One Explore controller per visit: later refreshes update its cards in place.
     closeExplore(); exploreView = createExplore(exploreSource); view.replaceChildren(exploreView.root); exploreView.setTrades(recentBuys);
