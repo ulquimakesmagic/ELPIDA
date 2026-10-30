@@ -4,7 +4,7 @@ import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, ZeroAddress } from '/vendor/ethers.js';
 import { routerAbi, swapCalldata } from '/dex-router.mjs';
 
-import { normalizeMetadata } from './metadata.mjs';
+import { normalizeMetadata, withSavedMetadata } from './metadata.mjs';
 import { readMetadataCache, writeMetadataCache } from './metadata-cache.mjs';
 import {launchDetailsError} from './launch-capabilities.mjs';
 import { EVM_TEST_PAIRS } from '/pairs.mjs';
@@ -649,7 +649,7 @@ export class TestnetWallet {
       Object.assign(item, asset ? { pair: asset.kind, quoteSymbol: asset.symbol, quoteDecimals: asset.decimals } : { pair: 'token', quoteSymbol: 'paired token', quoteDecimals: 18 });
     }
     const tokens = await Promise.all([...this.launches.values()].reverse().map(async item => {
-      item = {...item,metadata:await readMetadataCache(metadataKey(this.net.chainId,item.factory??this.deployment.factory,item.address)) ?? item.metadata ?? {}};
+      item = {...item,metadata:withSavedMetadata(item.metadata,await readMetadataCache(metadataKey(this.net.chainId,item.factory??this.deployment.factory,item.address)))};
       if(item.metadataURI){try{const response=await fetch('/api/metadata/resolve?uri='+encodeURIComponent(item.metadataURI));if(!response.ok)throw new Error('unavailable');item.metadata=normalizeMetadata(await response.json());item.metadataStatus='published';}catch{item.metadataStatus='unavailable';}}
       if(item.tax)return readTaxMarket(this,item);
       const d = this.qd(item);
@@ -686,7 +686,7 @@ export class TestnetWallet {
   }
   async publicTokens(){
     const response=await fetch('/api/public/tokens?network='+encodeURIComponent(this.net.key));if(!response.ok)throw new Error('Public token discovery is unavailable.');
-    const entries=await response.json();return Promise.all(entries.map(async item=>({...item,metadata:this.deployment&&!item.metadataURI?await readMetadataCache(metadataKey(this.net.chainId,item.factory??this.deployment.factory,item.address))??item.metadata:item.metadata})));
+    const entries=await response.json();return Promise.all(entries.map(async item=>({...item,metadata:this.deployment&&!item.metadataURI?withSavedMetadata(item.metadata,await readMetadataCache(metadataKey(this.net.chainId,item.factory??this.deployment.factory,item.address))):item.metadata})));
   }
   async dexState(item,token,curve,pool,d){
     const market=new Contract(pool,this.config.contracts.dexPool.abi,this.provider),[slot,a,b,name,symbol,supply,sold,held,reward,cp,cc,locker,splitter]=await Promise.all([market.slot0(),market.token0(),market.token1(),token.name(),token.symbol(),token.totalSupply(),curve.sold(),token.balanceOf(this.address),curve.creatorRewardVault(),curve.protocolFees(),curve.creatorFees(),curve.locker(),curve.feeSplitter()]);

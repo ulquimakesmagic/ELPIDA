@@ -1,6 +1,6 @@
 import { nowSeconds } from './clock.mjs';
 import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut, VENUE_RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, raydiumQuote, raydiumCreationCost, raydiumBuybackAmount } from '/elpida-solana.mjs';
-import {normalizeMetadata} from './metadata.mjs';
+import {normalizeMetadata,withSavedMetadata} from './metadata.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 import { PAIR_LIMITS, usdReferenceFor } from '/pairs.mjs';
 import { withWalletTimeout, walletErrorText } from './wallet.mjs';
@@ -22,7 +22,10 @@ function solanaProvider(id = chosenSolanaWallet(),chain='solana:devnet') {
 }
 import {readMetadataCache,writeMetadataCache} from './metadata-cache.mjs';
 const metadataKey=(program,mint)=>`elpida:solana-metadata:${program}:${mint}`;
-const readMetadata=async key=>{try{return normalizeMetadata(await readMetadataCache(key)??{});}catch{return {};}};
+// What this browser saved at launch, or null. (It used to return an empty object when nothing was saved, which hid the
+// server's image on every other device.)
+const readSaved=async key=>{try{return await readMetadataCache(key)??null;}catch{return null;}};
+const readMetadata=async key=>withSavedMetadata({},await readSaved(key));
 
 const web3 = globalThis.solanaWeb3;
 
@@ -127,7 +130,7 @@ export class SolanaWallet {
     const response = await fetch('/api/public/tokens?network=' + encodeURIComponent(this.net.key));
     if (!response.ok) throw new Error('Public Solana token discovery is unavailable.');
     const entries = await response.json();
-    return Promise.all(entries.map(async item => ({ ...item, metadata: this.deployment ? await readMetadata(metadataKey(this.deployment.programId, item.address)) ?? item.metadata ?? {} : item.metadata ?? {} })));
+    return Promise.all(entries.map(async item => ({ ...item, metadata: withSavedMetadata(item.metadata, this.deployment ? await readSaved(metadataKey(this.deployment.programId, item.address)) : null) })));
   }
   /** USDC mint accepted for the $10 fee, when the deployment's USD pricing offers it. */
   get feeUsdc() { return this.deployment?.usdPricing?.usdcMint ?? null; }
