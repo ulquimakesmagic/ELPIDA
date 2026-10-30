@@ -6,7 +6,7 @@ import { chainIcon } from './chain-ui.mjs';
 // declined, so the totals can be read as a lower bound.
 
 const PERIODS = [[1, 'Today'], [7, '7 days'], [30, '30 days'], [90, '90 days']];
-const PAGE_NAMES = { explore: 'Explore', launch: 'Create', portfolio: 'Portfolio', rewards: 'Rewards', analytics: 'Analytics', docs: 'Docs', partners: 'Partners', token: 'Token pages', notfound: 'Not found' };
+const PAGE_NAMES = { explore: 'Explore', launch: 'Create', portfolio: 'Portfolio', rewards: 'Rewards', analytics: 'Analytics', docs: 'Docs', partners: 'Partners', token: 'Token pages', terms: 'Terms of Use', notfound: 'Not found' };
 const DEVICE_NAMES = { mobile: 'Phone', tablet: 'Tablet', desktop: 'Computer', unknown: 'Unknown' };
 let regionNames = null;
 try { regionNames = new Intl.DisplayNames(['en'], { type: 'region' }); } catch {}
@@ -85,7 +85,8 @@ export function renderVisitors(ctx, { getJson }) {
       h('div.op-grid',
         card('Networks', ranked(d.networks, r => h('span.op-net', chainIcon(r.key), r.key), { empty: 'No network chosen yet.', total: period.visitors })),
         card('Choices', h('dl.op-kv',
-          h('dt', 'Disclaimer accepted'), h('dd', number(d.disclaimer?.accepted ?? 0, 0)),
+          h('dt', 'Terms accepted'), h('dd', number(d.terms?.accepted ?? 0, 0)),
+          h('dt', 'Terms declined'), h('dd', number(d.terms?.declined ?? 0, 0)),
           h('dt', 'Analytics allowed'), h('dd', number(d.consent?.accepted ?? 0, 0)),
           h('dt', 'Essential only'), h('dd', number(d.consent?.declined ?? 0, 0))),
           h('p.meta', 'Counted per choice, with no id: one person who changes their mind counts twice.'))),

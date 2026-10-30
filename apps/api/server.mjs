@@ -103,6 +103,7 @@ resources.set('/resilience.css', ['resilience.css', 'text/css']);
 resources.set('/token-landing.mjs', ['token-landing.mjs', 'text/javascript']);
 resources.set('/docs-view.mjs', ['docs-view.mjs', 'text/javascript']);
 resources.set('/consent.mjs', ['consent.mjs', 'text/javascript']);
+resources.set('/terms.mjs', ['terms.mjs', 'text/javascript']);
 resources.set('/consent.css', ['consent.css', 'text/css']);
 resources.set('/admin-visitors.mjs', ['admin-visitors.mjs', 'text/javascript']);
 const assetTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8' };
