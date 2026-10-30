@@ -15,6 +15,20 @@ volume, indexers, the price relay, graduation and backups. It cannot send transa
 - The page lives at `#/monkey`, not `#/admin`, so it is not the first thing a scanner finds. That only hides the
   door: the lock is the wallet signature, checked by the server on every request. `#/admin` shows "Page not found".
 
+### Visitors tab (`#/monkey?tab=visitors`), 30 October 2026
+
+Opt-in site analytics: visitors, page views, pages, tokens viewed, sources, countries, devices and networks, plus how
+many visitors allowed or declined analytics. Only visitors who press "Allow analytics" on the cookie banner are counted.
+Details and what is stored: [SITE_ANALYTICS.md](SITE_ANALYTICS.md). Nothing to set up.
+
+- **Entry disclaimer:** every visitor accepts a short risk disclaimer before using the app. The second checkbox asks
+  them to confirm they are not somewhere using Elpida is prohibited.
+- **Optional, decide with a lawyer before mainnet:** to name specific places in that checkbox, add the Railway
+  variable `ELPIDA_RESTRICTED_JURISDICTIONS`, comma separated (for example `United States, Ontario`). Empty by
+  default, so the checkbox stays general. It holds no secret.
+- Changing the disclaimer wording in a way that matters: raise `DISCLAIMER_VERSION` in `apps/web/consent.mjs` so every
+  visitor accepts it again.
+
 ### Partners tab (`#/monkey?tab=partners`)
 
 Devs apply from the footer link "Partner with Elpida" (`#/partners`). Each application proves its launching wallets

@@ -5,6 +5,7 @@ import { exploreHash, overlayToken, tokenKey } from './discovery.mjs';
 import { createExplore, exploreSkeleton } from './explore-view.mjs';
 import { assetIcon, chainIcon, chainSelector } from './chain-ui.mjs';
 import { renderAnalytics } from './analytics-view.mjs';
+import { initConsent } from './consent.mjs';
 // Elpida web app shell: environment (local simulation or public testnet), wallets, routing, discovery,
 // portfolio and the network/test-funds panel. Views live in launch-flow.mjs, token-page.mjs and
 // rewards-view.mjs and receive the shared `ctx` object below.
@@ -491,6 +492,8 @@ async function init() {
   initShell({ onHow: () => { location.hash = '#/docs'; }, onSearch: (query,{submit=false}={}) => { if(currentRoute.name==='explore'&&exploreView)exploreView.setQuery(query,{reveal:submit});else if(query||submit||currentRoute.name==='explore'){pendingSearchReveal=submit;location.hash=exploreHash({query});} } });
   window.addEventListener('hashchange', route);
   updateChrome(); route();
+  // First visit: the risk disclaimer, then the cookie banner; page views are sent only with analytics allowed.
+  try { initConsent({ config }); } catch {}
   // Return to the testnet used last time, but only silently: wallets that already trust Elpida reconnect
   // without a prompt. Anything else shows the local simulation first, so the page never waits on a popup.
   // Show the public index before slow wallet/RPC reads; browsing must not wait for reconnection.

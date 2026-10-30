@@ -3,6 +3,7 @@ import { indexedChange, indexedActivity, activityOf } from '../web/discovery.mjs
 import { protocolAnalytics } from './protocol-analytics.mjs';
 import { AdminAuth, parseAdminAddresses, sessionCookie, clearCookie } from './admin-auth.mjs';
 import { readTreasuries, operatorAddresses, cachedLoader } from './admin-overview.mjs';
+import { SiteAnalytics, cleanEvent, telemetryLimiter, restrictedJurisdictions } from './site-analytics.mjs';
 import { PartnerApplications, registryStatus, registrationCall, solanaPartnerStatus } from './partner-applications.mjs';
 import { createElpidaSolana } from '../../packages/solana/client.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
@@ -101,6 +102,9 @@ resources.set('/resilience.mjs', ['resilience.mjs', 'text/javascript']);
 resources.set('/resilience.css', ['resilience.css', 'text/css']);
 resources.set('/token-landing.mjs', ['token-landing.mjs', 'text/javascript']);
 resources.set('/docs-view.mjs', ['docs-view.mjs', 'text/javascript']);
+resources.set('/consent.mjs', ['consent.mjs', 'text/javascript']);
+resources.set('/consent.css', ['consent.css', 'text/css']);
+resources.set('/admin-visitors.mjs', ['admin-visitors.mjs', 'text/javascript']);
 const assetTypes = { '.svg': 'image/svg+xml', '.png': 'image/png', '.woff2': 'font/woff2', '.webmanifest': 'application/manifest+json', '.txt': 'text/plain; charset=utf-8' };
 const vendorFiles = new Map([
   ['/vendor/lightweight-charts.js', fileURLToPath(new URL('../../node_modules/lightweight-charts/dist/lightweight-charts.standalone.production.js', import.meta.url))],
@@ -231,6 +235,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // Early-partner applications: private, reviewed in the admin panel; registration is a treasury-signed setPartner.
   const siteHost=(()=>{try{return publicUrl?new URL(publicUrl).host:'localhost';}catch{return 'elpida';}})();
   const partnerApps=new PartnerApplications({path:port===0?':memory:':dataFile('partner-applications.sqlite'),host:siteHost});
+  // Opt-in visitor analytics for the Visitors tab (docs/SITE_ANALYTICS.md). No IP or user agent is stored.
+  const siteAnalytics=new SiteAnalytics({path:port===0?':memory:':dataFile('site-analytics.sqlite')}),telemetryLimit=telemetryLimiter();
+  const consentConfig={restricted:restrictedJurisdictions(process.env.ELPIDA_RESTRICTED_JURISDICTIONS)};
   let partnerWindow=Date.now(),partnerChallenges=0,partnerApplies=0;
   const partnerLimit=apply=>{if(Date.now()-partnerWindow>=60000){partnerWindow=Date.now();partnerChallenges=0;partnerApplies=0;}return apply?++partnerApplies>10:++partnerChallenges>60;};
   const registryNetworks=()=>treasuryNetworks().map(n=>({key:n.key,name:n.name,explorer:n.explorer,factory:n.factory,provider:n.provider}));
@@ -349,6 +356,11 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           let treasury=[];try{treasury=await treasuries();}catch(error){treasury=[{error:String(error.message).slice(0,160)}];}
           return send(200,{operator:s.address,generatedAt:Date.now(),health,backup:backupRunner.status(),relay:feedRelay.status(),graduation:graduationKeeper.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),metadata:metadataStore.status().storage},prices:priceSnapshot(),networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,{name:n.name,...publicIndex.status(n.key)}])),...(solanaIndex?{[solanaIndex.network.key]:{name:solanaIndex.network.name,enabled:true,...solanaIndex.status()}}:{})},treasury,activity,admins:{configured:adminAddresses.length,treasuries:treasury.filter(t=>t.treasury).length}});
         }
+        if(url.pathname==='/api/admin/visitors'){
+          const s=adminAuth.session(req.headers.cookie);if(!s)return send(401,{error:'Sign in as an operator to see this.'});
+          const label=(network,address)=>{if(!network||!address)return null;const t=network.startsWith('solana-')?(solanaIndex&&solanaIndex.network.key===network?solanaIndex.token(address):null):evmTestnets.some(n=>n.key===network)?publicIndex.detail(network,address):null;return t?(t.metadata?.symbol??t.symbol??null):null;};
+          return send(200,{operator:s.address,...siteAnalytics.summary({days:Number(url.searchParams.get('days')??30),label})});
+        }
         if(url.pathname==='/api/admin/partners'){
           const s=adminAuth.session(req.headers.cookie);if(!s)return send(401,{error:'Sign in as an operator to see this.'});
           const applications=partnerApps.list();let registry={},registryError=null;
@@ -424,7 +436,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
             return send(200,data);}
         // Bytecode for the labelled test DEX and relay feed, fetched only when the launchpad owner deploys them.
         if (url.pathname === '/api/test-dex-artifacts') return send(200, testDexArtifacts());
-        if (url.pathname === '/api/config') return send(200, { ...runtime.config, serverTime: Date.now()/1000, vanity: vanity.status(), circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), relay: feedRelay.publicConfig(), csrf });
+        if (url.pathname === '/api/config') return send(200, { ...runtime.config, serverTime: Date.now()/1000, vanity: vanity.status(), circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), relay: feedRelay.publicConfig(), consent: consentConfig, csrf });
         if(url.pathname==='/api/metadata/resolve')return send(200,await metadataStore.resolve(url.searchParams.get('uri')));
         if(url.pathname.startsWith('/api/content/')){const record=metadataStore.get(url.pathname.slice('/api/content/'.length));if(!record)return send(404,{error:'Content not found.'});res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}
         if (url.pathname === '/api/indexer/status') { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); return send(200,runtime.indexer.status()); }
@@ -516,6 +528,11 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         else return send(404,{error:'Unknown network.'});
         return send(202,{queued:true});
       }
+      if(action==='telemetry'){
+        if(telemetryLimit(clientAddress(req)))return send(429,{error:'Too many events.'});
+        try{const event=cleanEvent(body,{networks:new Set([...evmTestnets.map(n=>n.key),solanaNet.key,'local']),ownHost:siteHost});return send(202,siteAnalytics.record(event,{country:req.headers['cf-ipcountry'],userAgent:req.headers['user-agent']}));}
+        catch(error){return send(error.status??400,{error:error.message});}
+      }
       if(action==='admin/logout'){adminAuth.signOut(req.headers.cookie);res.setHeader('Set-Cookie',clearCookie({secure:!!publicUrl}));return send(200,{signedIn:false});}
       if(['chat/report/prepare','chat/report/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat reporting is busy. Retry shortly.'});return send(200,action==='chat/report/prepare'?await chat.prepareReport(body):await chat.saveReport(body));}
       if(['chat/prepare','chat/save'].includes(action)){if(chatLimit(true))return send(429,{error:'Chat publishing is busy. Retry shortly.'});return send(200,action==='chat/prepare'?await chat.prepare(body):await chat.save(body));}
@@ -558,7 +575,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
   bootPhase('listening');
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {await buybackKeeper.close();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();partnerApps.db.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {await buybackKeeper.close();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();partnerApps.db.close();siteAnalytics.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

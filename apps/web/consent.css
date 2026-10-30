@@ -1,0 +1,82 @@
+/* Entry disclaimer (.dl-*), cookie banner (.ck-*) and the operator Visitors tab (.vs-*). See consent.mjs. */
+
+/* ---------- Entry disclaimer ---------- */
+.dl-dialog { width: min(560px, calc(100vw - 24px)); max-height: calc(100dvh - 24px); overflow-y: auto; padding: 26px; display: grid; gap: 16px; }
+.dl-dialog:not([open]) { display: none; }
+.dl-dialog::backdrop { background: rgba(4, 5, 6, .82); backdrop-filter: blur(10px); }
+.dl-head { display: flex; gap: 14px; align-items: flex-start; }
+.dl-head h2 { margin: 0; font: 650 24px/1.15 var(--font-sans); letter-spacing: -.4px; }
+.dl-head p { margin: 6px 0 0; color: var(--ink-2); font-size: 14px; line-height: 1.5; }
+.dl-mark { flex: none; width: 44px; height: 44px; display: grid; place-items: center; border-radius: 14px; background: var(--down-bg); border: .67px solid var(--down-line); color: var(--down); }
+.dl-points { display: grid; gap: 8px; }
+.dl-point { display: flex; gap: 12px; padding: 14px 16px; border: .67px solid var(--line-soft); border-radius: var(--r-tile); background: var(--panel-2); }
+.dl-point strong { font: 600 14.5px/1.3 var(--font-sans); }
+.dl-point p { margin: 4px 0 0; font-size: 13px; line-height: 1.55; color: var(--ink-2); }
+.dl-icon { flex: none; width: 30px; height: 30px; display: grid; place-items: center; border-radius: 10px; background: var(--accent-tint); color: var(--accent-text); }
+.dl-full { border: .67px solid var(--line-soft); border-radius: 14px; }
+.dl-full summary { display: flex; justify-content: space-between; align-items: center; gap: 12px; padding: 0 14px; min-height: 44px; cursor: pointer; font: 600 13px/1 var(--font-sans); color: var(--ink-2); list-style: none; }
+.dl-full summary::-webkit-details-marker { display: none; }
+.dl-full[open] summary .icon { transform: rotate(180deg); }
+.dl-full > div { display: grid; gap: 10px; padding: 0 14px 14px; max-height: 240px; overflow-y: auto; }
+.dl-full p { margin: 0; font-size: 12.5px; line-height: 1.6; color: var(--ink-2); }
+.dl-full .dl-note { color: var(--muted); }
+.dl-checks { display: grid; gap: 10px; }
+.dl-check { display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; border-radius: 14px; border: .67px solid var(--line); cursor: pointer; font-size: 13.5px; line-height: 1.5; }
+.dl-check:has(input:checked) { border-color: var(--accent-line); background: var(--accent-tint); }
+.dl-check input, .ck-row input { flex: none; width: 18px; height: 18px; margin: 2px 0 0; accent-color: var(--accent); }
+.dl-continue { width: 100%; justify-content: center; }
+.dl-continue:disabled { opacity: .45; cursor: not-allowed; box-shadow: none; }
+
+/* ---------- Cookie banner ---------- */
+.ck-banner { position: fixed; z-index: 60; left: 50%; transform: translateX(-50%); bottom: calc(16px + env(safe-area-inset-bottom)); width: min(760px, calc(100% - 24px));
+  display: grid; gap: 12px; padding: 16px 18px; border-radius: 22px; border: .67px solid var(--line); background: linear-gradient(160deg, var(--panel-hi), var(--panel-lo) 85%); box-shadow: var(--shadow-pop); }
+.ck-main { display: flex; gap: 16px; align-items: center; }
+.ck-text { min-width: 0; flex: 1; }
+.ck-text strong { font: 600 14px/1.3 var(--font-sans); }
+.ck-text p { margin: 4px 0 0; font-size: 12.5px; line-height: 1.55; color: var(--ink-2); }
+.ck-text a { color: var(--accent-text); }
+.ck-buttons { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+.ck-link { display: inline-flex; align-items: center; gap: 6px; min-height: 38px; padding: 0 6px; color: var(--muted); font-size: 12.5px; font-weight: 600; }
+.ck-link:hover { color: var(--ink); }
+.ck-settings { display: grid; gap: 8px; padding-top: 12px; border-top: .67px solid var(--line-soft); }
+.ck-settings[hidden] { display: none; }
+.ck-row { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border-radius: 12px; background: var(--panel-2); cursor: pointer; }
+.ck-row span { display: grid; gap: 3px; }
+.ck-row strong { font-size: 13px; }
+.ck-row small { font-size: 12px; line-height: 1.5; color: var(--muted); }
+.ck-actions { display: flex; justify-content: flex-end; }
+@media (max-width: 780px) {
+  /* Above the fixed tabbar (86px tall, 12px from the bottom). */
+  .ck-banner { bottom: calc(108px + env(safe-area-inset-bottom)); max-height: calc(100dvh - 140px); overflow-y: auto; }
+  .ck-main { flex-direction: column; align-items: stretch; }
+  .ck-buttons { justify-content: stretch; }
+  .ck-buttons .btn, .ck-buttons .btn-accent { flex: 1 1 auto; justify-content: center; }
+}
+
+/* ---------- Operator Visitors tab ---------- */
+.vs-periods { display: inline-flex; gap: 2px; padding: 3px; border-radius: var(--r-pill); background: var(--panel-2); }
+.vs-periods .btn[aria-pressed="true"] { background: var(--panel-3); color: var(--ink); }
+.vs-chart-wrap { display: grid; gap: 8px; }
+.vs-legend { display: flex; flex-wrap: wrap; gap: 6px 16px; font-size: 12px; color: var(--ink-2); }
+.vs-key { display: inline-flex; align-items: center; gap: 6px; }
+.vs-key::before { content: ""; width: 10px; height: 10px; border-radius: 3px; }
+.vs-key-people::before { background: var(--accent); }
+.vs-key-views::before { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.vs-chart { display: flex; align-items: stretch; gap: 3px; height: 180px; padding: 4px 0; border-bottom: .67px solid var(--line-soft); }
+.vs-col { flex: 1 1 0; min-width: 0; display: flex; align-items: flex-end; }
+.vs-bar { position: relative; width: 100%; height: 100%; }
+.vs-bar span { position: absolute; left: 0; right: 0; bottom: 0; border-radius: 4px 4px 1px 1px; min-height: 0; }
+.vs-bar-views { background: color-mix(in srgb, var(--accent) 28%, transparent); }
+.vs-bar-people { background: var(--accent); left: 22%; right: 22%; }
+.vs-col:hover .vs-bar-views { background: color-mix(in srgb, var(--accent) 42%, transparent); }
+.vs-axis { display: flex; gap: 3px; font: 500 10.5px/1 var(--font-mono); color: var(--muted); }
+.vs-axis span { flex: 1 1 0; min-width: 0; white-space: nowrap; overflow: visible; }
+.vs-rank { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.vs-rank li { position: relative; display: flex; align-items: center; gap: 10px; min-height: 34px; padding: 0 10px; border-radius: 10px; overflow: hidden; font-size: 13px; }
+.vs-rank-bar { position: absolute; inset: 0; }
+.vs-fill { display: block; height: 100%; background: var(--accent-tint); border-radius: 10px; }
+.vs-rank-name { position: relative; flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.vs-rank-name .op-net { gap: 6px; }
+.vs-rank-num { position: relative; font: 600 12.5px/1 var(--font-mono); }
+.vs-rank-num small { color: var(--muted); font-weight: 500; }
+@media (max-width: 600px) { .vs .op-head { flex-wrap: wrap; } .vs .op-actions { flex-wrap: wrap; } .vs-chart { height: 140px; gap: 2px; } }

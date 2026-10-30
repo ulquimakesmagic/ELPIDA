@@ -1,6 +1,7 @@
 // Docs (#/docs): guidance in plain language. Figures come from packages/core/curve-model.mjs and the network
 // registry, so this page cannot drift from the contracts. Nothing here promises mainnet availability.
 import { h, icon, copyButton, short } from './ui.mjs';
+import { disclaimerPoints, fullDisclaimer } from './consent.mjs';
 import { BASE_FEE_BPS, SNIPE_START_BPS, SNIPE_WINDOW_SECONDS, GRADUATION_GRACE_SECONDS, END_MULTIPLE, TESTNET_START_FDV_USD } from '/curve-model.mjs';
 
 const SECTIONS = [
@@ -11,6 +12,7 @@ const SECTIONS = [
   ['fees-and-rewards', 'Fees and rewards', 'coins'],
   ['contracts', 'Contracts', 'file-text'],
   ['faq', 'FAQ', 'circle-help'],
+  ['privacy', 'Privacy and cookies', 'lock'],
 ];
 const pct = bps => `${(bps / 100).toFixed(bps % 100 ? 2 : 0)}%`;
 const tile = (title, text) => h('div.dc-tile', h('strong', title), h('p', text));
@@ -53,6 +55,7 @@ const FAQ = [
 ];
 
 export function renderDocs(ctx, section) {
+  const mainnet = !!ctx.config?.solana?.mainnet;
   const links = SECTIONS.map(([key, label, glyph]) => h('a.dc-toc-link', { href: `#/docs/${key}`, 'data-key': key }, icon(glyph, 'icon-sm'), label));
   const side = h('aside.dc-side', h('p.dc-eyebrow', '◆ ', ctx.envLabel?.() ?? 'Elpida'),
     h('h1', 'A little guidance. A whole new token.'),
@@ -62,7 +65,8 @@ export function renderDocs(ctx, section) {
 
   const body = h('div.dc-body',
     card(0, SECTIONS[0],
-      h('div.dc-tiles', tile('Tokens can lose all value', 'New tokens are volatile and many go to zero. Only use funds you can afford to lose.'), tile('Experimental software', 'The contracts have not had an independent audit and bugs are possible.'), tile('Test networks', 'Most networks here are test networks. Test tokens have no monetary value.')),
+      h('div.dc-tiles', disclaimerPoints({ mainnet }).map(p => tile(p.title, p.text))),
+      ...fullDisclaimer({ mainnet }).map(text => h('p', text)),
       note('warn', 'triangle-alert', h('strong', 'Nothing on Elpida is financial advice. '), 'You are responsible for your own decisions and for checking every transaction your wallet asks you to confirm.')),
     card(1, SECTIONS[1],
       h('div.dc-steps', ...[['Connect and choose a chain', 'Connect a wallet and pick the network, on the create page or from the selector at the top.'], ['Describe the token', 'Name, symbol, image and optional links. These are fixed at launch.'], ['Pick a pair and rewards', 'Choose what buyers pay with and where the creator share of fees goes.'], ['Launch, optionally buying first', 'Pay the $10 launch fee. A creator purchase is optional: if you buy, it happens in the same transaction; zero means no tokens, no trade and no trading fee. No liquidity deposit.']].map(([t, d], i) => h('div.dc-step', h('span.dc-dot', String(i + 1)), h('div', h('strong', t), h('p', d))))),
@@ -84,6 +88,15 @@ export function renderDocs(ctx, section) {
       h('p', 'Optional token tax: a creator can fix a buy tax and a sell tax of 0–10% each at launch, on top of the curve fee. The tax is split 30% to Elpida and 70% to the creator’s wallet allocations, and can never be changed. Tax tokens use a separate V2-style pool whose fees stay in the locked liquidity. This is only available where a verified tax deployment is registered, and none is active on a public network yet.')),
     card(5, SECTIONS[5], h('p.muted', 'Generated from the network registry. Always compare an address with the explorer before interacting.'), contracts(ctx)),
     card(6, SECTIONS[6], h('div.dc-faq', ...FAQ.map(([q, a]) => h('details.dc-q', h('summary', q, icon('chevron-down', 'icon-sm')), h('p', a))))),
+    card(7, SECTIONS[7],
+      h('p', 'Elpida keeps as little about you as it can. It has no accounts, no advertising and no third-party trackers.'),
+      h('div.dc-options',
+        tile('Essential storage', 'Your browser remembers your network, theme, wallet choice, the disclaimer and your cookie choice. A short-lived cookie protects token uploads, and operators get a sign-in cookie. Always on.'),
+        tile('Analytics, only if you allow it', 'Which pages are visited, the token and network viewed, where the visit came from, the country and the device type (phone, tablet or computer), linked by a random id kept in your browser. Stored for 90 days.'),
+        tile('Never collected', 'Elpida does not store your IP address, wallet address, browser details or search text with analytics. Our hosting and network providers see IP addresses to deliver the site. Nothing is sold or shared with advertisers.'),
+        tile('Public by nature', 'Transactions you make are public on the blockchain. Elpida reads and shows that public data, as any explorer does.')),
+      h('p', 'Turning analytics off deletes the random id from your browser. After that only your choice itself is counted, with no id. Clearing your site data also removes the id and brings back the disclaimer and the cookie banner.'),
+      h('p', h('button.btn.btn-secondary', { type: 'button', 'data-cookie-settings': '' }, icon('sliders-horizontal', 'icon-sm'), 'Cookie settings'))),
     h('section.dc-cta', h('div', h('strong', 'Your idea is next.'), h('p.muted', 'Launch on a test network first and see every step.')), h('a.btn.btn-primary', { href: '#/launch' }, 'Create a token', icon('arrow-right', 'icon-sm'))));
 
   const root = h('div.dc', side, body);
