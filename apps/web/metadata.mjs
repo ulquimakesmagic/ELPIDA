@@ -16,6 +16,8 @@ export function normalizeMetadata(body = {}) {
     }
     if (!value) { result[field] = ''; continue; }
     if (field === 'image' && /^\/api\/content\/(b[a-z2-7]{30,100}|Qm[1-9A-HJ-NP-Za-km-z]{44})$/.test(value)) { result[field]=value; continue; }
+    // The server's own logo route for EVM tokens whose details were signed by the creator (no IPFS document).
+    if (field === 'image' && /^\/api\/wallet-logo\/[a-z0-9-]+\/0x[0-9a-fA-F]{40}$/.test(value)) { result[field]=value; continue; }
     if (field === 'image' && value.startsWith('data:')) {
       const match = value.match(/^data:image\/(png|jpeg|webp|gif|avif|bmp);base64,([A-Za-z0-9+/]+={0,2})$/);
       const padding = match ? (match[2].endsWith('==') ? 2 : match[2].endsWith('=') ? 1 : 0) : 0;
@@ -44,4 +46,18 @@ export function normalizeMetadata(body = {}) {
     result[field] = url.href;
   }
   return result;
+}
+
+/**
+ * Token details for display: what this browser saved at launch, over what the server indexed, field by field. A blank
+ * or missing saved field never hides the server's value (a fresh device has nothing saved; an old save may lack the
+ * image). Anything that fails validation is ignored rather than shown.
+ */
+export function withSavedMetadata(server, saved) {
+  let base = {}, mine = {};
+  try { base = normalizeMetadata(server ?? {}); } catch { base = {}; }
+  try { mine = saved ? normalizeMetadata(saved) : {}; } catch { mine = {}; }
+  const out = { ...(server && typeof server === 'object' ? server : {}), ...base };
+  for (const [key, value] of Object.entries(mine)) if (value) out[key] = value;
+  return out;
 }
