@@ -55,3 +55,7 @@ Elpida works are from the code and docs as of this date. Bracketed items need de
 3. Entity, governing law and dispute resolution.
 4. Whether the creator fee share or fee splitting creates any obligation (for example tax reporting).
 5. Content moderation duties for user-uploaded names and images.
+6. Whether the click-through entry disclaimer (docs/SITE_ANALYTICS.md) is enough, which places to name in it
+   (`ELPIDA_RESTRICTED_JURISDICTIONS`), and whether attestation alone is acceptable or a geo-block is needed.
+7. Privacy: whether the opt-in analytics and the Docs privacy notice meet the NDPA 2023 (Nigeria), the GDPR for EU and
+   UK visitors, and what a full privacy policy must add (controller identity, contact, retention, visitor rights).
