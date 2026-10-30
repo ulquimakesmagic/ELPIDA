@@ -5,8 +5,9 @@ Ethereum or Solana. Prices are market references, not quotes. Nothing here has b
 
 ## 1. Audit (C1)
 
-**What we ask auditors to review** is fixed in `docs/AUDIT_SCOPE.md`: 9 EVM files, 631 source lines (one codebase
-for all four EVM chains), plus the Solana program (1,223 lines, Anchor) as a separate engagement. The brief already
+**What we ask auditors to review** is fixed in `docs/AUDIT_SCOPE.md`: 9 EVM files, 719 source lines (one codebase
+for all four EVM chains; 631 before the partner buyback was added on 26 October), plus the Solana program (2,194
+lines, Anchor, 23 instructions, including the Raydium graduation and buyback) as a separate engagement. The brief already
 lists our own findings (F-1 to F-7), the invariants we test, the Slither triage and the fork-check results on all
 four mainnets.
 
@@ -32,14 +33,15 @@ four mainnets.
 
 **Quote request (draft; Malik sends it, nothing is sent automatically):**
 
-> Subject: Audit quote: Elpida launchpad, 9 Solidity files / 631 SLOC
+> Subject: Audit quote: Elpida launchpad, 9 Solidity files / 719 SLOC
 >
 > Hi, I'm Malik, building Elpida (elpida.fun), a memecoin launchpad. I'm looking for a security review of our EVM
 > contracts before mainnet on Base, BNB Chain, Ethereum and Robinhood Chain.
 >
 > - Scope: 9 Solidity 0.8.24 files, 631 source lines. A bonding curve that graduates into a Uniswap v3 / PancakeSwap v3
->   pool inside the completing buy, a full-range position locked forever, a Chainlink-priced $10 launch fee, and a
->   50/50 fee splitter. No owner, pause, upgrade or rescue functions.
+>   pool inside the completing buy, a full-range position locked forever, a Chainlink-priced $10 launch fee, a
+>   50/50 fee splitter, and an opt-in partner buyback-and-burn capped at 1% of pool depth per call. No owner, pause,
+>   upgrade or rescue functions.
 > - The brief is attached: scope, roles, invariants, our own findings and the Slither triage. Fork checks of the full
 >   lifecycle passed on all four mainnets.
 > - Repository and the commit to review are available on request.
@@ -48,6 +50,51 @@ four mainnets.
 > on a tight budget, so a focused review of the money-moving paths suits us best.
 >
 > Thanks, Malik
+
+### Shortlist and how to reach them (checked 30 October 2026)
+
+Contact routes are taken from each firm's own site. No firm has been contacted, and no price has been quoted.
+
+| Scope | Who | Why | How to request |
+|---|---|---|---|
+| EVM | Pashov Audit Group | Boutique; lists both Solidity and Solana (Rust/Anchor); says a focused single-contract review takes 3–5 days and can start within 24 h | Form at pashov.com/request-audit, or Telegram @pashovkrum |
+| EVM | Cantina | Private audit by a matched researcher team, or a competition | support@cantina.xyz, or "Request an Audit" on cantina.xyz |
+| EVM | Sherlock | Contest or collaborative audit | sherlock.xyz/contact |
+| Solana | Accretion | Anchor-specific reviews by two researchers, fix verification included; public reports (MetaDAO, Marginfi) at github.com/accretion-xyz/audit-reports | accretion.xyz/inquiry, contact@accretion.xyz |
+
+A 2026 market guide puts boutique and independent reviews at about $5k–60k over 1–6 weeks, and Rust programs at a
+20–60% premium over Solidity. Ask each firm for:
+- a fixed price;
+- the start date;
+- the number of reviewers;
+- whether a re-check of fixes is included.
+
+**Attach the brief as a PDF** rendered from `AUDIT_SCOPE.md` at the commit you send. Keep the repository private;
+grant read access to the chosen auditor only, at the recorded commit.
+
+**Solana quote request (draft):**
+
+> Subject: Anchor audit quote: Elpida launchpad program, ~2,200 lines
+>
+> Hi, I'm Malik, building Elpida (elpida.fun), a memecoin launchpad live on Solana devnet. Before Solana mainnet
+> I'm looking for a review of our Anchor program.
+>
+> - Scope: one Anchor program (`lib.rs`, about 2,200 lines, 23 instructions): a bonding curve, a $10 launch fee priced
+>   by Pyth, graduation into Raydium CPMM (1% tier) through raw CPIs with permanently locked LP, LP-fee harvesting
+>   and a partner buyback-and-burn capped at 1% of pool depth. Other pairs graduate into PumpSwap.
+> - Test-only instructions refuse to run off test clusters. Upgrade authority moves to a Squads multisig before
+>   mainnet.
+> - The brief is attached. The Raydium graduation, harvest and buyback have been verified on devnet.
+>
+> Could you share availability, a fixed price and whether a re-check of fixes is included?
+>
+> Thanks, Malik
+
+Sources: [Pashov Audit Group](https://www.pashov.com/),
+[Cantina: how audits work](https://docs.cantina.xyz/for-organizations/security-solutions/how-audits-work),
+[Sherlock audit contests](https://sherlock.xyz/solutions/audit-contests),
+[Accretion Anchor audits](https://accretion.xyz/services/anchor-audits),
+[Smart contract audit pricing 2026](https://www.smartcontractaudit.com/guides/smart-contract-audit-pricing-2026).
 
 ## 2. Keys (C3)
 
