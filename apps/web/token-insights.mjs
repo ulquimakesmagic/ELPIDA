@@ -3,6 +3,7 @@
 // page already fetched (indexed trades and holders) and from the token record, so it can be tested directly.
 
 import { partnerCheck } from './partner-labels.mjs';
+import { testStockStatus, TEST_STOCK_PROVIDERS } from './test-stock.mjs';
 
 const lower = value => String(value ?? '').toLowerCase();
 const amountOf = row => { const v = Number(row?.quoteAmount); return Number.isFinite(v) && v > 0 ? v : 0; };
@@ -95,6 +96,16 @@ export const TOP_TEN_WARN = 30;
  * The safety checklist. Every line is a fact the contracts guarantee or a number from indexed data; nothing is
  * shown that the page cannot back up. `ok: false` lines are warnings, not verdicts.
  */
+/**
+ * The issuer line for a token paired with a test Ondo-style stock: who controls the pair asset, and whether its
+ * price lets the curve graduate right now. Null for any other pair.
+ */
+export function stockCheck(token, now) {
+  if (!token?.stock) return null;
+  const s = testStockStatus(token.stock, now), who = TEST_STOCK_PROVIDERS[token.stock.provider] ?? 'its issuer', q = token.quoteSymbol ?? 'the stock';
+  const base = `Paired with ${q}, a test stand-in for an Ondo stock (${who}): the issuer can pause it or block wallets.`;
+  return s.usable ? { ok: true, text: `${base} Stock price $${Number(token.stock.price).toLocaleString()}, fresh.` } : { ok: false, text: `${base} ${s.reason}` };
+}
 export function safetyChecks(token, { holders, dex } = {}) {
   const checks = [{ ok: true, text: 'Fixed supply of 1B. No mint and no owner after launch.' }];
   const venue = dex && dex !== 'test' ? dex : 'the DEX pool';
@@ -105,6 +116,8 @@ export function safetyChecks(token, { holders, dex } = {}) {
   else checks.push({ ok: true, text: token.graduated ? 'No buy or sell tax.' : 'No buy or sell tax. The curve fee is 1.25% per trade.' });
   const partner = partnerCheck(token);
   if (partner) checks.push(partner);
+  const stock = stockCheck(token);
+  if (stock) checks.push(stock);
   if (token.metadataURI) checks.push({ ok: true, text: 'Details were published at launch and cannot be edited.' });
   if (token.devBoughtPct != null) {
     const holds = token.devHoldingPct;

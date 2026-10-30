@@ -17,6 +17,8 @@
 .tk-tag-strong { color: var(--accent-text); border-color: var(--accent-line); background: var(--accent-tint); font-weight: 600; }
 .tk-tag-live { color: var(--up); }
 .tk-tag-burn { color: #ff9a6b; gap: 4px; }
+.tk-tag-stock { gap: 4px; color: var(--up); }
+.tk-tag-stock[data-ok="false"] { color: var(--down); }
 .tk-tag-burn[data-tier="elite"] { color: #ff8080; }
 [data-theme="light"] .tk-tag-burn { color: #a8410f; }
 [data-theme="light"] .tk-tag-burn[data-tier="elite"] { color: #a61b1b; }
