@@ -21,13 +21,14 @@ Opt-in site analytics: visitors, page views, pages, tokens viewed, sources, coun
 many visitors allowed or declined analytics. Only visitors who press "Allow analytics" on the cookie banner are counted.
 Details and what is stored: [SITE_ANALYTICS.md](SITE_ANALYTICS.md). Nothing to set up.
 
-- **Entry disclaimer:** every visitor accepts a short risk disclaimer before using the app. The second checkbox asks
-  them to confirm they are not somewhere using Elpida is prohibited.
-- **Optional, decide with a lawyer before mainnet:** to name specific places in that checkbox, add the Railway
-  variable `ELPIDA_RESTRICTED_JURISDICTIONS`, comma separated (for example `United States, Ontario`). Empty by
-  default, so the checkbox stays general. It holds no secret.
-- Changing the disclaimer wording in a way that matters: raise `DISCLAIMER_VERSION` in `apps/web/consent.mjs` so every
-  visitor accepts it again.
+- **Terms of Use:** every visitor reads and accepts the Terms (`apps/web/terms.mjs`, also at `#/terms`) before using
+  the app. It is a draft written for Elpida: have a lawyer review it before mainnet. It leaves the operating entity,
+  governing law and dispute forum to be filled in once decided.
+- **Optional, decide with a lawyer before mainnet:** to name places in section 4 (Restricted Persons), add the Railway
+  variable `ELPIDA_RESTRICTED_JURISDICTIONS`, comma separated (for example `United States, Canada, United Kingdom`).
+  Empty by default; sanctioned places are always listed. It holds no secret.
+- Changing the Terms in a way that matters: raise `TERMS_VERSION` and `TERMS_UPDATED` in `apps/web/terms.mjs` so every
+  visitor accepts them again.
 
 ### Partners tab (`#/monkey?tab=partners`)
 
