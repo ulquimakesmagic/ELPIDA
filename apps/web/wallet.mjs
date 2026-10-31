@@ -13,7 +13,7 @@ import { DEX_MODEL, LEGACY_DEX_MODEL, BETA_MODEL, MODEL_VERSIONS, isDexModel, cu
 import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
 import {nativeFundingError} from './payment-errors.mjs';
 import {supportsAtomicLaunch,waitAtomicLaunch,waitAtomicBatch,atomicBatchRequest} from './wallet-batch.mjs';
-import { PublicRpcSigner } from './public-rpc-signer.mjs';
+import { PublicRpcSigner, resumeSetupDeployment } from './public-rpc-signer.mjs';
 import { MULTICALL3, multicallData, approvalFor, launchApproval, waitForAllowance } from './one-confirmation.mjs';
 import { readSafe, treasuryError, safeBatch } from './safe-batch.mjs';
 import { graduationSqrtPriceX96, blockedByPool, tokenCheaperInPool } from './graduation-unblock.mjs';
@@ -355,13 +355,29 @@ export class TestnetWallet {
     return { hash: r.tx.hash, message: `${quote.symbol}: done. The token pages pick it up within about a minute.` };
   }
   /** Treasury only, DEX launchpads: deploys the labelled test assets (EVM_TEST_PAIRS) and approves them as pairs. */
-  async setupTestPairs() {
+  async setupTestPairs({ recoveryHash } = {}) {
     await this.checkNetwork();
     const factory = (await this.verifyFactory()).connect(this.signer);
     if (!this.dex) throw new Error('Test pairs need a launchpad with DEX graduation (Base Sepolia).');
     if ((await factory.treasury()).toLowerCase() !== this.address.toLowerCase()) throw new Error('Only the launchpad owner (its treasury wallet) can approve trading pairs.');
     await this.loadPairs(factory);
     const supply = await factory.TOKEN_SUPPLY(), vt = await factory.VIRTUAL_TOKEN();
+    const deployStage = async (symbol, stage, artifact, args) => {
+      const key = `elpida:test-pair:${this.net.chainId}:${String(factory.target).toLowerCase()}:${this.address.toLowerCase()}:${symbol}:${stage}`;
+      if (recoveryHash && symbol === 'TEST-STOCK' && stage === 'asset' && !localStorage.getItem(key)) {
+        if (!/^0x[0-9a-f]{64}$/i.test(recoveryHash)) throw new Error('Enter a valid setup transaction hash.');
+        const tx = await this.provider.getTransaction(recoveryHash);
+        const expected = await new ContractFactory(artifact.abi, artifact.bytecode, this.signer).getDeployTransaction(...args);
+        if (!tx || tx.to !== null || tx.from.toLowerCase() !== this.address.toLowerCase() || tx.data.toLowerCase() !== expected.data.toLowerCase() || tx.value !== 0n)
+          throw new Error('Recovery transaction must be this wallet�s exact TEST-STOCK deployment on this network.');
+        const receipt = await this.provider.getTransactionReceipt(recoveryHash);
+        if (!receipt || receipt.status !== 1 || !receipt.contractAddress) throw new Error('Recovery deployment has not succeeded yet.');
+        localStorage.setItem(key, JSON.stringify({ hash: recoveryHash, address: receipt.contractAddress }));
+      }
+      const address = await resumeSetupDeployment({ provider: this.provider, storage: localStorage, key,
+        deploy: () => new ContractFactory(artifact.abi, artifact.bytecode, this.signer).deploy(...args) });
+      return new Contract(address, artifact.abi, this.signer);
+    };
     let last;
     for (const [i, t] of EVM_TEST_PAIRS.entries()) {
       if (this.approvedQuotes.some(a => a.symbol === t.symbol && a.test)) continue;
@@ -371,15 +387,15 @@ export class TestnetWallet {
         // The Ondo-style test stock needs its test total-return feed first; the stock records the feed for good.
         const feedArt = this.config.contracts.testStockFeed, stockArt = this.config.contracts.testOndoStock;
         this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm the ${t.symbol} test price feed deployment…`);
-        const feed = await new ContractFactory(feedArt.abi, feedArt.bytecode, this.signer).deploy(t.ondo.feed, parseUnits(t.ondo.price, 8)); await feed.waitForDeployment();
+        const feed = await deployStage(t.symbol, 'feed', feedArt, [t.ondo.feed, parseUnits(t.ondo.price, 8)]);
         this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm the ${t.symbol} test stock deployment…`);
-        asset = await new ContractFactory(stockArt.abi, stockArt.bytecode, this.signer).deploy(t.name, t.symbol, BigInt(t.faucet), feed.target); await asset.waitForDeployment();
+        asset = await deployStage(t.symbol, 'asset', stockArt, [t.name, t.symbol, BigInt(t.faucet), feed.target]);
       } else {
         this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm the ${t.symbol} test asset deployment…`);
-        asset = await new ContractFactory(art.abi, art.bytecode, this.signer).deploy(t.name, t.symbol, t.kind, t.decimals, BigInt(t.faucet)); await asset.waitForDeployment();
+        asset = await deployStage(t.symbol, 'asset', art, [t.name, t.symbol, t.kind, t.decimals, BigInt(t.faucet)]);
       }
       this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm its ${this.dex?.name??'DEX'} migration adapter…`);
-      const adapter = await new ContractFactory(adapterArt.abi, adapterArt.bytecode, this.signer).deploy(this.dex.manager, asset.target, 10000); await adapter.waitForDeployment();
+      const adapter = await deployStage(t.symbol, 'adapter', adapterArt, [this.dex.manager, asset.target, 10000]);
       const virtualQuote = parseUnits(t.startFdv, t.decimals) * vt / supply;
       last = await this.wait(factory.approveQuote(asset.target, virtualQuote, adapter.target), `Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: approve ${t.symbol} as a trading pair…`);
     }
@@ -745,7 +761,7 @@ export class TestnetWallet {
     if(action==='launch'&&body.tax)return launchPublicTax(this,body);
     const factory = (await this.verifyFactory()).connect(this.signer);
     let result;
-    if (action === 'setup-pairs') return this.setupTestPairs();
+    if (action === 'setup-pairs') return this.setupTestPairs(body);
     if (action === 'test-stock') return this.testStockControl(body ?? {});
     if (action === 'setup-usdc-pair') return this.setupUsdcPair();
     if (action === 'convert-usdc') return this.convertUsdc(body);

@@ -76,3 +76,17 @@ It uses the same rules as `referencePriceStatus` and `checkGraduation` (`on-comp
 - A server-side heartbeat for the test feed. The treasury posts prices by hand; after two days without a post,
   graduation waits.
 - Corporate-action multipliers. The feed is already total-return, so nothing needs scaling.
+
+## Interrupted setup recovery
+
+Setup deployment stages now save their transaction hash and address in this browser, scoped to chain, factory,
+wallet, pair and stage. Receipt checks poll the public RPC directly, stop after two minutes, and preserve the
+record for the next attempt. A failed receipt or missing contract code never triggers an automatic redeployment.
+Keep browser storage until setup finishes.
+
+For a TEST-STOCK deployment submitted before this recovery support, enter its transaction hash in the optional
+recovery field before resuming setup. The wallet verifies the sender and exact constructor bytecode against the
+current TEST-STOCK artifact and requires a successful creation receipt. It reuses that asset, then requests the
+remaining adapter and approval transactions. This does not recover an unknown historical adapter or approval.
+
+Focused validation: public RPC signer and test Ondo stock suites, 9 passed, no skips or failures.
