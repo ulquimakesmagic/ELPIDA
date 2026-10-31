@@ -1,7 +1,7 @@
 import { nowSeconds } from './clock.mjs';
 import { snipeLabel } from '/curve-model.mjs';
 import { assetIcon, chainIcon } from './chain-ui.mjs';
-import { usdcFunding } from './usdc-funding.mjs';
+import { usdcFunding, nativePairFunding } from './usdc-funding.mjs';
 // Token detail page: market figures with plain definitions, bonding-curve progress, trade panel,
 // graduation actions, creator-fee summary and technical details.
 import { h, icon, short, number, compact, avatar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, copyButton, errorText, toast, usdRate, formatPrice, bar } from './ui.mjs';
@@ -422,7 +422,7 @@ function tradePanel(ctx, token, { dex, solana }) {
     tabs,
     h('div.pay-box', h('label', { for: 'trade-amount' }, side === 'buy' ? 'Pay' : 'Sell'), h('div.pay-input', amount, unit), shortcuts, balance),
     remainingHint, useRemaining,
-    funding,
+    funding, nativePairFunding(ctx,token),
     h('div.receive', h('span', 'You receive'), out),
     h('div.trade-meta', h('span', 'Trading fee'), fee),
     h('div.trade-meta', h('span', 'Minimum received'), minOut),

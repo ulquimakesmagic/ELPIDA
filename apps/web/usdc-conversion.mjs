@@ -37,3 +37,31 @@ export function conversionCalls({Contract,router,dex,usdc,owner,quote}) {
   const c=new Contract(router,CONVERSION_ROUTER_ABI);
   return [c.interface.encodeFunctionData('exactOutputSingle',[{tokenIn:usdc,tokenOut:dex.weth,fee:quote.fee,recipient:router,amountOut:quote.amountOut,amountInMaximum:quote.maxUsdc,sqrtPriceLimitX96:0}]),c.interface.encodeFunctionData('unwrapWETH9',[quote.amountOut,owner])];
 }
+
+// Pair funding/cash-out is a separate, explicit swap. It never submits the subsequent curve or pool trade.
+export async function quoteNativePairConversion({Contract,provider,dex,asset,amountIn,toNative=false,slippageBps=100}) {
+  if(!dex?.router||!dex?.factory||!dex?.weth||!dex?.quoter||!/^0x[0-9a-f]{40}$/i.test(asset)||asset.toLowerCase()===dex.weth.toLowerCase())throw new Error('No distinct native/pair conversion route configured.');
+  if(typeof amountIn!=='bigint'||amountIn<=0n||!Number.isInteger(slippageBps)||slippageBps<10||slippageBps>500)throw new Error('Invalid conversion amount or slippage.');
+  const router=new Contract(dex.router,['function factory() view returns(address)','function WETH9() view returns(address)'],provider);
+  const quoter=new Contract(dex.quoter,['function factory() view returns(address)','function WETH9() view returns(address)','function quoteExactInputSingle((address tokenIn,address tokenOut,uint256 amountIn,uint24 fee,uint160 sqrtPriceLimitX96)) returns(uint256,uint160,uint32,uint256)'],provider);
+  for(const c of [router,quoter]){
+    const [factory,weth]=await Promise.all([c.factory(),c.WETH9()]);
+    if(factory.toLowerCase()!==dex.factory.toLowerCase()||weth.toLowerCase()!==dex.weth.toLowerCase())throw new Error('Conversion contracts do not match this network configured DEX.');
+  }
+  const tokenIn=toNative?asset:dex.weth,tokenOut=toNative?dex.weth:asset;
+  const factory=new Contract(dex.factory,['function getPool(address,address,uint24) view returns(address)'],provider),routes=[];
+  for(const fee of [100,500,2500,3000,10000]){
+    const pool=await factory.getPool(tokenIn,tokenOut,fee);
+    if(/^0x0{40}$/i.test(pool))continue;
+    const c=new Contract(pool,['function token0() view returns(address)','function token1() view returns(address)','function factory() view returns(address)','function fee() view returns(uint24)','function liquidity() view returns(uint128)'],provider);
+    const [a,b,f,pf,liquidity]=await Promise.all([c.token0(),c.token1(),c.factory(),c.fee(),c.liquidity()]);
+    if(f.toLowerCase()!==dex.factory.toLowerCase()||Number(pf)!==fee||[a,b].map(x=>x.toLowerCase()).sort().join()!==[tokenIn,tokenOut].map(x=>x.toLowerCase()).sort().join())throw new Error('Conversion pool identity mismatch.');
+    if(liquidity===0n)continue;
+    try{const [out]=await quoter.quoteExactInputSingle.staticCall({tokenIn,tokenOut,amountIn,fee,sqrtPriceLimitX96:0});if(out>0n)routes.push({pool,fee,amountOut:out});}catch{/* No executable route at this size. */}
+  }
+  if(!routes.length)throw new Error('No funded native/pair conversion pool is available on this network. Direct pair-asset trading remains available.');
+  routes.sort((a,b)=>a.amountOut>b.amountOut?-1:a.amountOut<b.amountOut?1:0);
+  const best=routes[0],minimum=best.amountOut*BigInt(10000-slippageBps)/10000n;
+  if(minimum===0n)throw new Error('Conversion amount is too small.');
+  return {...best,asset,tokenIn,tokenOut,amountIn,toNative,minimum,quotedAt:Date.now()};
+}
