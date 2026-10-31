@@ -83,3 +83,23 @@ test('on a real chain: deploy, wait for deployment, call, wait for the receipt, 
   assert.equal(await asset.balanceOf(await signer.getAddress()), 10n ** 18n);
   await assert.rejects(asset.faucet(10n ** 30n), /faucet limit/); assert.equal(sent.length, 2, 'the wallet was never asked for the doomed call');
 });
+
+test('setup resumes a confirmed deployment without resending and preserves pending or failed records', async () => {
+  const { resumeSetupDeployment } = await import('../apps/web/public-rpc-signer.mjs');
+  const hash = '0x' + '12'.repeat(32), address = '0x' + '34'.repeat(20);
+  const records = new Map(), storage = { getItem: k => records.get(k), setItem: (k, v) => records.set(k, v) };
+  let sent = 0, receipt = null;
+  const args = { storage, key: 'chain:factory:wallet:asset', timeoutMs: 0,
+    provider: { getTransactionReceipt: async () => receipt, getCode: async () => '0x6000' },
+    deploy: async () => { sent++; return { target: address, deploymentTransaction: () => ({ hash }) }; } };
+  await assert.rejects(resumeSetupDeployment(args), /Reopen setup to resume/);
+  assert.equal(sent, 1); assert.ok(records.has(args.key));
+  receipt = { status: 1, contractAddress: address };
+  assert.equal(await resumeSetupDeployment(args), address); assert.equal(sent, 1);
+  receipt = { status: 0, contractAddress: address };
+  await assert.rejects(resumeSetupDeployment(args), /failed/); assert.equal(sent, 1);
+  receipt = { status: 1, contractAddress: ME };
+  await assert.rejects(resumeSetupDeployment(args), /different contract/);
+  receipt = { status: 1, contractAddress: address }; args.provider.getCode = async () => '0x';
+  await assert.rejects(resumeSetupDeployment(args), /no code/);
+});

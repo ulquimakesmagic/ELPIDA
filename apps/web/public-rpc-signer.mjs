@@ -55,3 +55,27 @@ export class PublicRpcSigner extends AbstractSigner {
     }
   }
 }
+
+/** Persist a setup transaction before waiting. A timeout never resubmits it. */
+export async function resumeSetupDeployment({ provider, storage, key, deploy, timeoutMs = 120000, pollMs = 2000, sleep = ms => new Promise(r => setTimeout(r, ms)) }) {
+  let record = JSON.parse(storage.getItem(key) ?? 'null');
+  if (!record) {
+    const contract = await deploy();
+    const tx = contract.deploymentTransaction();
+    record = { hash: tx.hash, address: contract.target };
+    storage.setItem(key, JSON.stringify(record));
+  }
+  if (!/^0x[0-9a-f]{64}$/i.test(record.hash) || !/^0x[0-9a-f]{40}$/i.test(record.address)) throw new Error('Invalid saved setup transaction.');
+  const started = Date.now();
+  for (;;) {
+    const receipt = await provider.getTransactionReceipt(record.hash);
+    if (receipt) {
+      if (Number(receipt.status) !== 1) throw new Error(`Setup transaction ${record.hash} failed. Inspect it before clearing the saved setup.`);
+      if (String(receipt.contractAddress).toLowerCase() !== record.address.toLowerCase()) throw new Error('Setup receipt created a different contract.');
+      if (await provider.getCode(record.address) === '0x') throw new Error('Confirmed setup contract has no code.');
+      return record.address;
+    }
+    if (Date.now() - started >= timeoutMs) throw new Error(`Setup transaction ${record.hash} is awaiting confirmation. Reopen setup to resume; do not deploy again.`);
+    await sleep(pollMs);
+  }
+}
