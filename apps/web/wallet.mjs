@@ -10,7 +10,7 @@ import {launchDetailsError} from './launch-capabilities.mjs';
 import { EVM_TEST_PAIRS } from '/pairs.mjs';
 import { testStockHold, MARKET_STATUS } from './test-stock.mjs';
 import { DEX_MODEL, LEGACY_DEX_MODEL, BETA_MODEL, MODEL_VERSIONS, isDexModel, curveShape, startFdvUsdFor, assertDeploymentTerms, usdQuoteTemplate, GRADUATION_GRACE_SECONDS, BASE_FEE_BPS, SNIPE_START_BPS, SNIPE_WINDOW_SECONDS, SALE_CAP } from '/curve-model.mjs';
-import { quoteUsdcConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
+import { quoteUsdcConversion, quoteNativePairConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
 import {nativeFundingError} from './payment-errors.mjs';
 import {supportsAtomicLaunch,waitAtomicLaunch,waitAtomicBatch,atomicBatchRequest} from './wallet-batch.mjs';
 import { PublicRpcSigner, resumeSetupDeployment } from './public-rpc-signer.mjs';
@@ -284,6 +284,34 @@ export class TestnetWallet {
     if(!/^\d+(\.\d+)?$/.test(text)||Number(text)<=0)throw new Error('Enter an amount greater than zero.');
     return text;
   }
+  async getNativePairConversionQuote(body) {
+    await this.checkNetwork(); await this.verifyFactory();
+    const item=this.launches.get(String(body.token).toLowerCase());
+    if(!item)throw new Error('Token not found. Refresh the launchpad.');
+    if(item.pair==='native'||item.tax)throw new Error('Native conversion is for standard non-native pairs only.');
+    const asset=this.qaddr(item),toNative=body.direction==='to-native';
+    if(!['to-native','from-native'].includes(body.direction))throw new Error('Invalid conversion direction.');
+    const decimals=Number(await new Contract(asset,['function decimals() view returns(uint8)'],this.provider).decimals());
+    const amountIn=parseUnits(this.nativeAmount(body.amount),toNative?decimals:18);
+    const result=await quoteNativePairConversion({Contract,provider:this.provider,dex:this.dex,asset,amountIn,toNative,slippageBps:100});
+    return {token:body.token,direction:body.direction,amount:body.amount,minimum:result.minimum.toString(),output:formatUnits(result.amountOut,toNative?18:decimals),quotedAt:result.quotedAt};
+  }
+  async convertNativePair(body) {
+    if(!Number.isFinite(body.quotedAt)||Date.now()-body.quotedAt>60000||body.quotedAt>Date.now())throw new Error('Conversion quote expired.');
+    const fresh=await this.getNativePairConversionQuote(body),minimum=BigInt(body.minimum);
+    if(minimum<=0n||BigInt(fresh.minimum)<minimum)throw new Error('Conversion price moved. Get a new quote.');
+    const item=this.launches.get(String(body.token).toLowerCase()),asset=this.qaddr(item),toNative=body.direction==='to-native';
+    await this.stockPreflight(item,toNative?'sell':'buy');
+    const decimals=Number(await new Contract(asset,['function decimals() view returns(uint8)'],this.provider).decimals());
+    const input=parseUnits(body.amount,toNative?decimals:18);
+    const route=await quoteNativePairConversion({Contract,provider:this.provider,dex:this.dex,asset,amountIn:input,toNative});
+    if(route.amountOut<minimum)throw new Error('Conversion price moved. Get a new quote.');
+    if(toNative){const coin=new Contract(asset,this.config.contracts.quote.abi,this.signer);if(await coin.allowance(this.address,this.dex.router)<input)await this.wait(coin.approve(this.dex.router,input),'Approve only the pair-asset conversion amount...');}
+    const deadline=BigInt((await this.provider.getBlock('latest')).timestamp+300);
+    const data=swapCalldata(Interface,this.dex.routerVersion??2,this.dex.router,{tokenIn:route.tokenIn,tokenOut:route.tokenOut,fee:route.fee,recipient:this.address,amountIn:input,amountOutMinimum:minimum},{deadline,unwrapTo:toNative?this.address:null,refundETH:!toNative});
+    const result=await this.wait(this.signer.sendTransaction({to:this.dex.router,data,value:toNative?0n:input}),'Confirm the separate native/pair conversion...');
+    return {hash:result.tx.hash,message:'Conversion confirmed. Funds are in your wallet; the token trade is separate.'};
+  }
   async getUsdcConversionQuote(body) {
     await this.checkNetwork();await this.verifyFactory();
     const nativeAmount=this.nativeAmount(body?.nativeAmount);
@@ -369,7 +397,7 @@ export class TestnetWallet {
         const tx = await this.provider.getTransaction(recoveryHash);
         const expected = await new ContractFactory(artifact.abi, artifact.bytecode, this.signer).getDeployTransaction(...args);
         if (!tx || tx.to !== null || tx.from.toLowerCase() !== this.address.toLowerCase() || tx.data.toLowerCase() !== expected.data.toLowerCase() || tx.value !== 0n)
-          throw new Error('Recovery transaction must be this wallet’s exact TEST-STOCK deployment on this network.');
+          throw new Error('Recovery transaction must be this connected accountâ€™s exact TEST-STOCK deployment on this network.');
         const receipt = await this.provider.getTransactionReceipt(recoveryHash);
         if (!receipt || receipt.status !== 1 || !receipt.contractAddress) throw new Error('Recovery deployment has not succeeded yet.');
         localStorage.setItem(key, JSON.stringify({ hash: recoveryHash, address: receipt.contractAddress }));
@@ -764,6 +792,7 @@ export class TestnetWallet {
     if (action === 'setup-pairs') return this.setupTestPairs(body);
     if (action === 'test-stock') return this.testStockControl(body ?? {});
     if (action === 'setup-usdc-pair') return this.setupUsdcPair();
+    if (action === 'convert-native-pair') return this.convertNativePair(body);
     if (action === 'convert-usdc') return this.convertUsdc(body);
     if (action === 'apply-pricing') return this.applyPricing();
     if (action === 'faucet' && body?.asset) {
