@@ -10,3 +10,10 @@ export function exceedsRemaining(amount, remaining) {
   const units = value => BigInt(value.whole + value.fraction.padEnd(places,'0'));
   return units(a) > units(b);
 }
+
+// Display only: transaction amounts and minimums keep their original integer/decimal units.
+export function compactTradeAmount(value){
+ const n=Number(value);if(!Number.isFinite(n))return '—';if(n===0)return '0';
+ if(Math.abs(n)<0.000001)return n.toExponential(3).replace(/\.?0+e/,'e');
+ return n.toLocaleString('en-US',Math.abs(n)>=1000?{notation:'compact',maximumFractionDigits:2}:{maximumSignificantDigits:6});
+}

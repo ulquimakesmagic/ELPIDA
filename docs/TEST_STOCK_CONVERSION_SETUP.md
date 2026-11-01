@@ -24,3 +24,18 @@ The helper verifies the manager's factory and wrapped-native identity, test issu
 Local tests create a real V3 pool with the simulated issuer asset, verify native quoting, budget bounds, repeat-funding detection, manager/network/controller mismatches and paused/blocked/corporate-action/stale issuer states. Display and draft tests cover fresh/stale USD references and currency restoration order/context.
 
 Validation results: full suite 670 tests, 637 passed, zero failures, 33 environment skips. Focused liquidity, native routing, USD/draft, analytics and web-shell checks passed 18/18 after the final approval-resume changes. No public funding transaction was sent.
+
+## Public Sepolia evidence, 1 November 2026
+
+- Funding transaction `0x2338dfc3e1f571818a00d7ccc1a7e91b099f68118dac264d62ff1acf430f7cd4`, successful at block **12040191**; gas used 36,956,344.
+- ETH/tNVDAon 0.3% V3 pool: `0x6391Be5cA5A590317091856D7387c249E435a6C0`. Nonzero liquidity: `177556541743671675`.
+- Position NFT **233963** is owned by `0xf5B0cE04241f9518dfA3CBfbaafC7E40638E639D`.
+- Supplied about **0.05 test ETH + 0.630526510319444443 tNVDAon**. Manager allowance remaining at verification was **1 raw unit** (approval cleanup still outstanding).
+- Read-only conversion quote: **0.0001 test ETH → 0.001254767854475148 tNVDAon**, minimum `0.001242220175930396`.
+- Full native token trade quote in Zerion refused because its wallet capabilities do not support the required atomic batch. No end-to-end native STKTEST trade was submitted. An ordinary-wallet router is the remaining implementation, not more conversion liquidity.
+
+## Compact panel follow-up
+
+The token trade panel removes the separate USDC funding section and inline wallet choices. Connection is shared with the top wallet button. The receive placeholder is `0.00`; amounts use compact display notation with the full quote in its title, while submitted amounts and minimum-output enforcement are unchanged. Pay/receive cards, fonts and shortcuts are smaller. Quote, minimum, route and remaining-curve rows stay on one line. Ethereum/Solana selector badges have less internal padding. The USDC conversion utility remains available to the separate launch flow.
+
+Compact panel validation: full suite 671 tests, 638 passed, zero failures, 33 environment skips. Ten focused amount/draft/style/shell checks passed. Local browser preview confirms a connected top-level wallet still enables quoting/trading while background market reads are marked disconnected, with no inline wallet buttons or funding section.
