@@ -108,6 +108,8 @@ contract ElpidaV3MigrationAdapter {
     }
     /// Lets a deployer tell this adapter from one that predates partner tiers before reusing it.
     function PARTNER_TIERS_VERSION() external pure returns(uint256){return 1;}
+    /// 1: the fee splitter this adapter creates has the buyback price guard (review finding E-1).
+    function REVIEW_FIXES_VERSION() external pure returns(uint256){return 1;}
     /// The calling curve's partner burn share for LP fees (`buybackBps`), or 0 for curves without one. A caller can only
     /// set the share of the splitter created for its own migration.
     function _buybackOf(address curve) private view returns(uint256){

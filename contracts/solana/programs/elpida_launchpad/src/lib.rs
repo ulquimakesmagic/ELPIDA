@@ -110,9 +110,27 @@ const RAY_POOL_LP_SUPPLY: usize = 333;
 const RAY_POOL_PROTOCOL_FEES_0: usize = 341;
 const RAY_POOL_FUND_FEES_0: usize = 357;
 const RAY_POOL_CREATOR_FEES_0: usize = 397;
-/// A partner buyback spends at most this fraction of the pool's SOL depth per call (1 / 100 = 1%). With the 1% fee
-/// tier on both legs, pushing the price before a buyback costs more than it can return.
-pub const BUYBACK_DEPTH_DIVISOR: u64 = 100;
+/// A partner buyback spends at most this fraction of the pool's SOL depth per call (1 / 200 = 0.5%), which moves the
+/// price by about 1%, inside the band below.
+pub const BUYBACK_DEPTH_DIVISOR: u64 = 200;
+/// Sandwich guard for `raydium_buyback` (review finding S-1). The pool price must be within MAX_TWAP_DEVIATION_BPS of
+/// its time-weighted average from Raydium's own observation account, over the last TWAP_WINDOW_SECS (or all the
+/// history it keeps, at least MIN_TWAP_SECS), both before and after the buyback's swap. A front-run that moves the
+/// price makes the buyback refuse instead of overpaying, and the swap's minimum output follows the average price.
+pub const TWAP_WINDOW_SECS: u64 = 600;
+pub const MIN_TWAP_SECS: u64 = 60;
+pub const MAX_TWAP_DEVIATION_BPS: u128 = 150;
+/// Minimum output of a buyback swap, below the amount the average price gives: the 1% fee, the swap's own price
+/// impact and the band, with margin.
+pub const BUYBACK_MIN_OUT_BPS: u128 = 9_600;
+// Raydium CPMM `ObservationState` (zero-copy, packed): discriminator, initialized u8, observation_index u16, pool_id,
+// then 100 observations of { block_timestamp u64, cumulative_token_0_price_x32 u128, cumulative_token_1_price_x32 u128 }.
+// token_0_price_x32 is token_1 per token_0, shifted left 32 bits; Raydium adds price * seconds at most every 15 s.
+pub const RAY_OBS_INDEX: usize = 9;
+pub const RAY_OBS_POOL: usize = 11;
+pub const RAY_OBS_FIRST: usize = 43;
+pub const RAY_OBS_SIZE: usize = 40;
+pub const RAY_OBS_COUNT: usize = 100;
 /// Migration venues, stored in the migration record's extension.
 pub const VENUE_PUMPSWAP: u8 = 0;
 pub const VENUE_RAYDIUM: u8 = 1;
@@ -882,7 +900,8 @@ pub mod elpida_launchpad {
     }
 
     /// Permissionless: spends a partner pool's queued SOL (the quote side of its harvests) on its own token through the
-    /// Raydium pool and burns what it buys. One call spends at most 1% of the pool's SOL depth.
+    /// Raydium pool and burns what it buys. One call spends at most 0.5% of the pool's SOL depth, and only while the
+    /// pool's price is near its recent average (see TWAP_WINDOW_SECS).
     pub fn raydium_buyback(ctx: Context<RaydiumBuyback>) -> Result<()> {
         let a = &ctx.accounts;
         let mint_key = a.mint.key();
@@ -893,12 +912,15 @@ pub mod elpida_launchpad {
         let (state, base_is_0) = read_raydium(&a.ray_pool.to_account_info(), &a.ray_vault_0.to_account_info(), &a.ray_vault_1.to_account_info(), &mint_key)?;
         let amount_in = buyback_amount(ext.pending_buyback.min(token_amount(&a.authority_quote.to_account_info())?), state.quote);
         require!(amount_in > 0, ElpidaError::NothingToBuyBack);
+        let average = raydium_average_base_per_quote(&a.observation.to_account_info(), &a.ray_pool.key(), base_is_0)?;
+        require!(near_average(base_per_quote_x32(&state)?, average), ElpidaError::PriceAwayFromAverage);
+        let min_out = (((amount_in as u128 * average) >> 32) * BUYBACK_MIN_OUT_BPS / BPS).max(1) as u64;
         let authority_seeds: &[&[u8]] = &[b"pump-lp", mint_key.as_ref(), &[a.migration.authority_bump]];
         let base_before = token_amount(&a.authority_base.to_account_info())?;
         let mut data = Vec::with_capacity(24);
         data.extend_from_slice(&RAY_SWAP_BASE_INPUT);
         data.extend_from_slice(&amount_in.to_le_bytes());
-        data.extend_from_slice(&1u64.to_le_bytes());
+        data.extend_from_slice(&min_out.to_le_bytes());
         let (input_vault, output_vault) = if base_is_0 { (a.ray_vault_1.to_account_info(), a.ray_vault_0.to_account_info()) } else { (a.ray_vault_0.to_account_info(), a.ray_vault_1.to_account_info()) };
         let infos = [
             a.lp_authority.to_account_info(), a.ray_authority.to_account_info(), a.amm_config.to_account_info(), a.ray_pool.to_account_info(),
@@ -911,6 +933,8 @@ pub mod elpida_launchpad {
         let accounts = infos.iter().enumerate().map(|(i, info)| AccountMeta { pubkey: *info.key, is_signer: i == 0, is_writable: WRITABLE[i] }).collect();
         invoke_signed(&Instruction { program_id: raydium::PROGRAM, accounts, data }, &infos, &[authority_seeds])?;
         let bought = token_amount(&a.authority_base.to_account_info())?.checked_sub(base_before).ok_or(ElpidaError::MathOverflow)?;
+        let (after, _) = read_raydium(&a.ray_pool.to_account_info(), &a.ray_vault_0.to_account_info(), &a.ray_vault_1.to_account_info(), &mint_key)?;
+        require!(near_average(base_per_quote_x32(&after)?, average), ElpidaError::PriceAwayFromAverage);
         token::burn(
             CpiContext::new_with_signer(a.token_program.to_account_info(), Burn { mint: a.mint.to_account_info(), from: a.authority_base.to_account_info(), authority: a.lp_authority.to_account_info() }, &[authority_seeds]),
             bought,
@@ -945,6 +969,47 @@ impl PumpState {
 /// Raydium CPMM pool state, in the same terms as `PumpState`: LP supply and the reserves a withdrawal pays from (vault
 /// balances less the protocol, fund and creator fees Raydium keeps in them), mapped to base (the curve's token) and
 /// quote (SOL). Also returns whether the token is Raydium's token 0 (mints are ordered by address).
+/// The pool's average price over TWAP_WINDOW_SECS ending at its latest observation, as tokens per SOL (base per
+/// quote) shifted left 32 bits. The larger of the two ratios keeps precision for low-priced tokens.
+pub fn raydium_average_base_per_quote(observation: &AccountInfo, ray_pool: &Pubkey, base_is_0: bool) -> Result<u128> {
+    require_keys_eq!(*observation.owner, raydium::PROGRAM, ElpidaError::RaydiumAccount);
+    let data = observation.try_borrow_data()?;
+    require!(data.len() >= RAY_OBS_FIRST + RAY_OBS_SIZE * RAY_OBS_COUNT && data[8] == 1 && data[RAY_OBS_POOL..RAY_OBS_POOL + 32] == ray_pool.to_bytes(), ElpidaError::RaydiumAccount);
+    let index = u16::from_le_bytes([data[RAY_OBS_INDEX], data[RAY_OBS_INDEX + 1]]) as usize;
+    require!(index < RAY_OBS_COUNT, ElpidaError::RaydiumAccount);
+    // token_1_price is token_0 per token_1: base per quote when the token is token_0, and the other way round.
+    let at = |i: usize| -> (u64, u128) {
+        let o = RAY_OBS_FIRST + RAY_OBS_SIZE * i;
+        let ts = u64::from_le_bytes(data[o..o + 8].try_into().unwrap());
+        let c = if base_is_0 { o + 24 } else { o + 8 };
+        (ts, u128::from_le_bytes(data[c..c + 16].try_into().unwrap()))
+    };
+    let (latest_ts, latest_cum) = at(index);
+    let mut older = None;
+    for back in 1..RAY_OBS_COUNT {
+        let (ts, cum) = at((index + RAY_OBS_COUNT - back) % RAY_OBS_COUNT);
+        if ts == 0 || ts >= latest_ts { break; }
+        older = Some((ts, cum));
+        if latest_ts - ts >= TWAP_WINDOW_SECS { break; }
+    }
+    let (older_ts, older_cum) = older.ok_or(ElpidaError::PriceHistoryTooShort)?;
+    let span = latest_ts - older_ts;
+    require!(span >= MIN_TWAP_SECS, ElpidaError::PriceHistoryTooShort);
+    Ok(latest_cum.wrapping_sub(older_cum) / span as u128)
+}
+
+/// Base per quote, shifted left 32 bits, from the pool's reserves.
+pub fn base_per_quote_x32(state: &PumpState) -> Result<u128> {
+    require!(state.quote > 0, ElpidaError::RaydiumAccount);
+    Ok(((state.base as u128) << 32) / state.quote as u128)
+}
+
+/// True when `spot` is within MAX_TWAP_DEVIATION_BPS of `average`.
+pub fn near_average(spot: u128, average: u128) -> bool {
+    let gap = if spot > average { spot - average } else { average - spot };
+    gap.saturating_mul(BPS) <= average.saturating_mul(MAX_TWAP_DEVIATION_BPS)
+}
+
 pub fn read_raydium(pool: &AccountInfo, vault_0: &AccountInfo, vault_1: &AccountInfo, mint: &Pubkey) -> Result<(PumpState, bool)> {
     require_keys_eq!(*pool.owner, raydium::PROGRAM, ElpidaError::RaydiumAccount);
     let data = pool.try_borrow_data()?;
@@ -1053,7 +1118,7 @@ impl HarvestSplit {
     }
 }
 
-/// Largest partner buyback one call may spend: the queued SOL, at most 1% of the pool's SOL depth.
+/// Largest partner buyback one call may spend: the queued SOL, at most 0.5% of the pool's SOL depth.
 pub fn buyback_amount(pending: u64, quote_reserve: u64) -> u64 { pending.min(quote_reserve / BUYBACK_DEPTH_DIVISOR) }
 
 fn token_amount(account: &AccountInfo) -> Result<u64> {
@@ -2217,4 +2282,6 @@ pub enum ElpidaError {
     #[msg("SOL pairs graduate to Raydium; other pairs to PumpSwap")] WrongVenue,
     #[msg("Unexpected Raydium account")] RaydiumAccount,
     #[msg("No queued partner buyback to spend")] NothingToBuyBack,
+    #[msg("The pool price is away from its recent average; the buyback waits")] PriceAwayFromAverage,
+    #[msg("The pool does not have enough price history for a buyback yet")] PriceHistoryTooShort,
 }

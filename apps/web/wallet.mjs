@@ -110,6 +110,7 @@ export class TestnetWallet {
     // Team deployment is authoritative across visitors; saved private deployments remain intact.
     // A model 10 record saved by this browser takes precedence over a pinned legacy model 9 team deployment.
     const shared=this.net.shared, model=modelOf(this.net.chainId, !!this.dex), saved=read(deploymentKey(this.net.chainId, !!this.dex));
+    if(saved?.reviewFixesVersion===1&&saved.model===DEX_MODEL&&(shared?.reviewFixesVersion??0)<1)return saved;
     if(saved?.partnerTiersVersion===1&&saved.model===DEX_MODEL&&(shared?.partnerTiersVersion??0)<1)return saved;
     if(saved?.launchFeaturesVersion===1&&saved.model===DEX_MODEL&&(shared?.launchFeaturesVersion??0)<1)return saved;
     if(this.net.key==='base-sepolia'&&saved?.model===DEX_MODEL&&saved.feeAccountingVersion===1&&(shared?.feeAccountingVersion??0)<1)return saved;
@@ -124,13 +125,17 @@ export class TestnetWallet {
   get feeFixUpgradeAvailable(){return this.net.key==='base-sepolia'&&this.model===DEX_MODEL&&!!this.deployment&&this.feeAccountingVersion===0;}
   /** True when this network's launchpad predates the partner-tier registry (docs/DESIGN_PARTNER_TIERS.md). */
   get partnerUpgradeAvailable(){return !!(this.model===DEX_MODEL&&this.deployment&&this.launchFeaturesChecked&&this.partnerTiersVersion===0&&!this.launchUpgradeAvailable&&!this.feeFixUpgradeAvailable);}
+  /** True when this network's launchpad predates the 1 November review fixes (buyback price guard, graduation dust). */
+  get reviewUpgradeAvailable(){return !!(this.model===DEX_MODEL&&this.deployment&&this.launchFeaturesChecked&&this.partnerTiersVersion>=1&&this.reviewFixesVersion===0&&!this.launchUpgradeAvailable&&!this.feeFixUpgradeAvailable);}
   get launchUpgradeAvailable(){return this.net.key==='base-sepolia'&&this.model===DEX_MODEL&&!!this.deployment&&this.launchFeaturesChecked&&!this.automaticGraduationSupported;}
   async checkLaunchFeatures(factory=this.factoryContract()){
     if(this.launchFeaturesChecked&&this._launchFeaturesFactory===factory.target)return;
-    this.launchFeaturesChecked=false;this.automaticGraduationSupported=false;this.partnerTiersVersion=undefined;
+    this.launchFeaturesChecked=false;this.automaticGraduationSupported=false;this.partnerTiersVersion=undefined;this.reviewFixesVersion=undefined;
     if(this.model===DEX_MODEL){
       try{this.partnerTiersVersion=Number(await new Contract(factory.target,['function PARTNER_TIERS_VERSION() pure returns(uint256)'],this.provider).PARTNER_TIERS_VERSION());}
       catch(error){if(error.code!=='CALL_EXCEPTION'||(error.data&&error.data!=='0x'))throw error;this.partnerTiersVersion=0;}
+      try{this.reviewFixesVersion=Number(await new Contract(factory.target,['function REVIEW_FIXES_VERSION() pure returns(uint256)'],this.provider).REVIEW_FIXES_VERSION());}
+      catch(error){if(error.code!=='CALL_EXCEPTION'||(error.data&&error.data!=='0x'))throw error;this.reviewFixesVersion=0;}
       try{this.automaticGraduationSupported=await new Contract(factory.target,['function automaticGraduation() view returns(bool)'],this.provider).automaticGraduation();}
       catch(error){if(error.code!=='CALL_EXCEPTION'||(error.data&&error.data!=='0x'))throw error;}
     }
@@ -722,7 +727,7 @@ export class TestnetWallet {
     const treasuryProblem = treasuryError({ mainnet: !!this.net.mainnet, treasury, connected: this.address, safe });
     if (treasuryProblem) throw new Error(treasuryProblem);
     if (external && !this.dex) throw new Error('A multisig treasury needs the DEX launchpad on this network. Nothing was deployed.');
-    if (this.deployment && !this.needsMetadataUpgrade && !this.modelUpgradeAvailable && !this.feeFixUpgradeAvailable && !this.launchUpgradeAvailable && !this.partnerUpgradeAvailable) throw new Error(`This ${this.net.name} launchpad is already set up. Use it for your launches.`);
+    if (this.deployment && !this.needsMetadataUpgrade && !this.modelUpgradeAvailable && !this.feeFixUpgradeAvailable && !this.launchUpgradeAvailable && !this.partnerUpgradeAvailable && !this.reviewUpgradeAvailable) throw new Error(`This ${this.net.name} launchpad is already set up. Use it for your launches.`);
     const previousDeployment=this.deployment;
     await this.oraclePrice();
     if (await this.provider.getBalance(this.address) === 0n) throw new Error(`Get ${this.net.nativeCurrency.symbol} on ${this.net.name} from a faucet to pay deployment gas.`);
@@ -733,7 +738,7 @@ export class TestnetWallet {
       if((await manager.factory()).toLowerCase()!==this.dex.factory.toLowerCase()||(await manager.WETH9()).toLowerCase()!==this.dex.weth.toLowerCase())throw new Error(`Unexpected ${this.dex.name??'DEX'} position manager configuration.`);
       // Native pairs graduate through an adapter whose ERC-20 side is WETH.
       const key='elpida:dex-adapter:'+this.net.chainId+':native',saved=read(key);
-      if(saved&&isAddress(saved)&&await this.provider.getCode(saved)!=='0x'&&await adapterHasPartnerTiers(saved,this.provider)){
+      if(saved&&isAddress(saved)&&await this.provider.getCode(saved)!=='0x'&&await adapterHasPartnerTiers(saved,this.provider)&&await adapterHasReviewFixes(saved,this.provider)){
         const existing=new Contract(saved,this.config.contracts.adapter.abi,this.provider);
         if((await existing.manager()).toLowerCase()!==this.dex.manager.toLowerCase()||(await existing.usdc()).toLowerCase()!==this.dex.weth.toLowerCase()||await existing.fee()!==10000n)throw new Error('Saved adapter configuration mismatch.');migrationAdapter=saved;
       }else{this.onProgress(`Step 1 of 2: confirm the ${this.dex.name??'DEX'} migration adapter deployment…`);const a=this.config.contracts.adapter,c=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,this.dex.weth,10000);await c.waitForDeployment();migrationAdapter=c.target;write(key,migrationAdapter);}
@@ -745,7 +750,7 @@ export class TestnetWallet {
     this.onProgress('Deployment submitted. Waiting for confirmation…');
     await contract.waitForDeployment();
     const receipt = await contract.deploymentTransaction().wait();
-    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, treasury, migrationAdapter, model: modelOf(this.net.chainId, !!this.dex), metadataVersion:this.dex?1:undefined,feeAccountingVersion:this.dex?Number(await contract.FEE_ACCOUNTING_VERSION()):undefined,launchFeaturesVersion:this.dex&&this.config.contracts.atomicFactory?1:undefined,partnerTiersVersion:this.dex?Number(await contract.PARTNER_TIERS_VERSION()):undefined };
+    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, treasury, migrationAdapter, model: modelOf(this.net.chainId, !!this.dex), metadataVersion:this.dex?1:undefined,feeAccountingVersion:this.dex?Number(await contract.FEE_ACCOUNTING_VERSION()):undefined,launchFeaturesVersion:this.dex&&this.config.contracts.atomicFactory?1:undefined,partnerTiersVersion:this.dex?Number(await contract.PARTNER_TIERS_VERSION()):undefined,reviewFixesVersion:this.dex?Number(await contract.REVIEW_FIXES_VERSION()):undefined };
     if(previousDeployment && !write('elpida:previous-factory:'+this.net.chainId+':'+previousDeployment.factory,previousDeployment))throw new Error('Factory deployed, but previous deployment could not be archived. Save the new factory '+record.factory+' manually.');
     this.launches.clear(); this.scannedBlock = undefined; this.factoryStartFdvUsd = undefined;this.pairsScanned=undefined;this.approvedQuotes=[];this.nativeVirtualQuote=undefined;this.launchFee=undefined;
     if (!write(deploymentKey(this.net.chainId, !!this.dex), record)) throw new Error(`Deployed, but this browser blocks storage. Save factory ${record.factory} (block ${record.block}) in packages/core/networks.mjs.`);
@@ -1098,6 +1103,11 @@ export class TestnetWallet {
   }
 }
 
+/** A saved graduation adapter is reused only if its fee splitter has the buyback price guard (review finding E-1). */
+async function adapterHasReviewFixes(address,provider){
+  try{return Number(await new Contract(address,['function REVIEW_FIXES_VERSION() pure returns(uint256)'],provider).REVIEW_FIXES_VERSION())===1;}
+  catch(error){if(error.code==='CALL_EXCEPTION'&&(!error.data||error.data==='0x'))return false;throw error;}
+}
 /** A saved graduation adapter is reused only if it passes the partner burn share to the LP fee splitter. */
 async function adapterHasPartnerTiers(address,provider){
   try{return Number(await new Contract(address,['function PARTNER_TIERS_VERSION() pure returns(uint256)'],provider).PARTNER_TIERS_VERSION())===1;}

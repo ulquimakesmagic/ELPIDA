@@ -11,7 +11,8 @@
 //   pool's price is near its 10-minute average, so a sandwich makes it wait instead of overpay; a backlog drains over
 //   later runs).
 // - Solana: one transaction with `harvest_raydium_fees` (or `harvest_lp_fees` on PumpSwap) and, on Raydium,
-//   `raydium_buyback` (also capped at 1% of the pool's SOL depth).
+//   `raydium_buyback` (capped at 0.5% of the pool's SOL depth, and only near the pool's average price; when the price
+//   guard refuses, the harvest still runs and the buyback waits for a later run).
 //
 // Testnets only. Every transaction and every rolling 24 hours of gas are capped; the worker never spends more gas
 // than the fees it collects on native-quote pools; only public addresses appear in its status.
@@ -181,11 +182,18 @@ export function solanaBuybackWorker({ chain, web3, connection, payer, client, li
       const reward = new web3.PublicKey(token.reward);
       if (lp > 0n && out.quote >= minHarvestLamports) instructions.push(...(raydium ? client.harvestRaydiumFees({ payer: payer.publicKey, config, mint, reward }) : client.harvestLpFees({ payer: payer.publicKey, config, mint, reward })));
       const queued = BigInt(migration.pendingBuyback ?? 0n) + (instructions.length ? out.quote * BigInt(token.buybackBps) / 10_000n : 0n);
-      if (raydium && raydiumBuybackAmount(queued, state.quote) > 0n) instructions.push(client.raydiumBuyback({ mint }));
+      const buyback = raydium && raydiumBuybackAmount(queued, state.quote) > 0n;
+      if (buyback) instructions.push(client.raydiumBuyback({ mint }));
       if (!instructions.length) return null;
-      const tx = new web3.Transaction().add(client.computeBudget(HARVEST_COMPUTE_UNITS + 100_000), ...instructions);
-      tx.feePayer = payer.publicKey;
-      tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+      const blockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+      const build = () => { const t = new web3.Transaction().add(client.computeBudget(HARVEST_COMPUTE_UNITS + 100_000), ...instructions); t.feePayer = payer.publicKey; t.recentBlockhash = blockhash; return t; };
+      // The buyback refuses while the pool price is away from its average (review finding S-1). That must not cost
+      // the harvest, so a dry run decides whether the buyback goes in this transaction or waits for a later run.
+      if (buyback && connection.simulateTransaction) {
+        const sim = await connection.simulateTransaction(build());
+        if (guardRefused(sim?.value?.err)) { instructions.pop(); if (!instructions.length) return null; }
+      }
+      const tx = build();
       const fee = BigInt((await connection.getFeeForMessage(tx.compileMessage(), 'confirmed')).value ?? 0);
       withinBudget(fee, { spent, maxCost, dailyBudget });
       // A first harvest may create up to five token accounts (rent, paid once); the measured cost below records it.
@@ -196,6 +204,12 @@ export function solanaBuybackWorker({ chain, web3, connection, payer, client, li
       return { cost: before > after ? before - after : fee, hashes: [signature] };
     },
   };
+}
+
+/** True when a simulation failed only because the buyback's price guard refused (Anchor errors 6036 and 6037). */
+export function guardRefused(err) {
+  const code = Number(JSON.stringify(err ?? null).match(/"Custom":(\d+)/)?.[1]);
+  return [6036, 6037].includes(code);
 }
 
 /** Reads a key from `<NAME>_FILE` (a mounted secret) or `<NAME>` (a host secret variable). Never logged or returned. */

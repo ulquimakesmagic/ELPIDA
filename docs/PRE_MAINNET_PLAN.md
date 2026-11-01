@@ -5,8 +5,8 @@ Ethereum or Solana. Prices are market references, not quotes. Nothing here has b
 
 ## 1. Audit (C1)
 
-**What we ask auditors to review** is fixed in `docs/AUDIT_SCOPE.md`: 9 EVM files, 719 source lines (one codebase
-for all four EVM chains; 631 before the partner buyback was added on 26 October), plus the Solana program (2,194
+**What we ask auditors to review** is fixed in `docs/AUDIT_SCOPE.md`: 9 EVM files, 768 source lines (one codebase
+for all four EVM chains; 631 before the partner buyback was added on 26 October), plus the Solana program (2,287
 lines, Anchor, 23 instructions, including the Raydium graduation and buyback) as a separate engagement. The brief already
 lists our own findings (F-1 to F-7), the invariants we test, the Slither triage and the fork-check results on all
 four mainnets.
@@ -33,7 +33,7 @@ four mainnets.
 
 **Quote request (draft; Malik sends it, nothing is sent automatically):**
 
-> Subject: Audit quote: Elpida launchpad, 9 Solidity files / 719 SLOC
+> Subject: Audit quote: Elpida launchpad, 9 Solidity files / 768 SLOC
 >
 > Hi, I'm Malik, building Elpida (elpida.fun), a memecoin launchpad. I'm looking for a security review of our EVM
 > contracts before mainnet on Base, BNB Chain, Ethereum and Robinhood Chain.
