@@ -42,7 +42,7 @@ Validation: the full-suite checkpoint passed **644 tests**, with **33 intentiona
 - Earlier buy `0xfcfb8bafc1439d9691d0493489b0e4f69cd170e72bbe807fc23d44b8a155feac` reverted after its deadline; replay confirmed `amount/minimum/deadline`. Purchase principal was not spent; gas was charged.
 - Ordinary-wallet native sell `0x0eccd80d917d9101f72c6ecd8bdb59477e934c0aeb8df7308d40b15154ab7d85`, block 12042229, succeeded: **1000000 STKTEST → 0.001709492503277334 test ETH** before gas. Gas used 441394. The wallet balance increase plus gas paid exactly matches the event payout. Public history attributes the sell to the actual wallet. Router token/quote/WETH/native balances, temporary approvals and the wallet's consumed router sell allowance are zero.
 - The Sepolia registry now shares the verified router address and creation hash with every browser, scoped to factory `0x5aA283B8B12786314e76ac4E977B1E9275b407f6`. Browsers still verify creation provenance and fixed DEX identities. A browser selecting a different factory uses its own factory-scoped local record; it is never sent to the pinned router silently.
-- Still open: public native buy/sell after graduation; the earlier one-raw-unit liquidity-manager approval cleanup. No mainnet actions or real funds.
+- Still open: public native buy/sell after the now-confirmed graduation; the earlier one-raw-unit liquidity-manager approval cleanup. No mainnet actions or real funds.
 
 The accompanying CSS fix keeps the complete Ethereum diamond inside a circular badge, including when that image is used as token artwork. Verified locally in a 390px-wide swap fixture: both image bounds are 24×24 with `object-fit: contain`. Other uploaded artwork retains cover behavior. Web-shell checks: 3/3 passed; `git diff --check` clean.
 
@@ -58,6 +58,20 @@ The read-only check on 1 November found `automaticGraduation = true`, no pool ye
 
 The shared router record does not upgrade existing contracts, change pricing, alter creator/protocol recipients, or combine chain wallets. Public post-graduation evidence remains open until these receipts exist.
 
-Funding mint confirmed: `0x79eb2b33ff32bd2934f0994964662fb479ea21f2898a1243c658353ae6264525`, block 12042310, successful 25 tNVDAon mint to the test wallet. Observed balance afterward: 48.403769994929974261 tNVDAon. The completing purchase has not yet been confirmed.
+Funding mint confirmed: `0x79eb2b33ff32bd2934f0994964662fb479ea21f2898a1243c658353ae6264525`, block 12042310, successful 25 tNVDAon mint to the test wallet. Observed balance afterward: 48.403769994929974261 tNVDAon. The completing purchase subsequently confirmed; see the evidence below.
 
 Shared-registration validation: full `npm test` passed **649**, skipped **33**, failed **0** (682 total); focused API, router EVM, registry/model and web-shell checks **38/38 passed**. No source edits followed those checks; this final addition records the funding receipt.
+
+
+## Confirmed automatic graduation — 1 November 2026
+
+Transaction `0x421801267d5534a8cce8897d47cfa528201703ad5790dbc5e2d876db186a49e8` succeeded at block **12042819** through the existing test wallet using **Zerion**. Submitted gas limit **65246623**, actual gas used **53860642**. Earlier failing Trust attempts still carried a 900000 limit; the newer request used the correct verified limit. This comparison establishes the submitted values, not the internals of the wallet's gas handling.
+
+The completing purchase and graduation occurred in the same successful transaction:
+
+- Curve `0x6244e307A17dd98831B6524e18Aedd9B62c39bC1`: `complete = true`.
+- Genuine Uniswap v3 stock/STKTEST pool: `0x96E134B8179944a24773a0c0581B2EeF306Fe0A4`, matched against the configured factory's `getPool`. Pair assets match tNVDAon and STKTEST; fee **10000** (1%). Observed liquidity **107444440763681912677546**.
+- LP NFT **233970**: position manager `0x1238536071E1c677A632429e3655c799b22cDA52` reports owner `0x1eE587D21B79F6818dC5195eE03418bfe4A182aC`. That locker reports the same token ID and `locked = true`; its fixed manager and adapter match the configured manager and curve migration adapter.
+- Fee splitter: `0xc2B1b48DF993Cff883D8718BE02A72f8478a278c`.
+
+Public post-graduation native buy/sell receipts and the earlier raw-unit LP approval cleanup remain open. The pool exists and LP custody is verified; this is testnet integration evidence, not a mainnet safety approval. No mainnet or real funds.
