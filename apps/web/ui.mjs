@@ -161,4 +161,4 @@ export const storage = {
 };
 
 // Market capitalization is always dollar-denominated; an absent FX reference is not a pair-value cap.
-export const fmtMarketCap = token => usdRate(token) === null ? 'USD unavailable' : '$' + compact(pricing(token).marketCap * usdRate(token));
+export const fmtMarketCap = (token, value = pricing(token).marketCap) => usdRate(token) === null ? 'USD unavailable' : '$' + compact(Number(value) * usdRate(token));

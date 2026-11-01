@@ -158,7 +158,7 @@ export function portfolioView(ctx, { connect, rerender }) {
       rows = withPosition(rows, t.address, p, t.network);
       drawSummary();
       if (!cells) return;
-      cells.entry.textContent = p?.entryMarketCapQuote ? fmtValue(Number(p.entryMarketCapQuote), t) : '—';
+      cells.entry.textContent = p?.entryMarketCapQuote ? fmtMarketCap(t,Number(p.entryMarketCapQuote)) : '—';
       if (p?.basisKnown) {
         const u = Number(p.unrealizedQuote), dir = u > 0 ? 'up' : u < 0 ? 'down' : '';
         cells.pnl.replaceChildren(h(`span${dir ? '.' + dir : ''}`, row.rate !== null ? signed(u * row.rate) : `${u > 0 ? '+' : ''}${number(u, 6)} ${t.quoteSymbol ?? ''}`), h('small.pf-pct', ` ${Number(p.unrealizedPercent) > 0 ? '+' : ''}${number(p.unrealizedPercent, 2)}%`));
