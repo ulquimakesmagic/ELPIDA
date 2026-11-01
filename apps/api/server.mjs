@@ -58,6 +58,7 @@ resources.set('/holder-chat.mjs',['holder-chat.mjs','text/javascript']);
 resources.set('/trade-filter.mjs',['trade-filter.mjs','text/javascript']);
 resources.set('/token-insights.mjs',['token-insights.mjs','text/javascript']);
 resources.set('/partner-labels.mjs',['partner-labels.mjs','text/javascript']);
+resources.set('/native-trade-router.mjs',['native-trade-router.mjs','text/javascript']);
 resources.set('/trade-draft.mjs',['trade-draft.mjs','text/javascript']);
 resources.set('/test-stock-liquidity-ui.mjs',['test-stock-liquidity-ui.mjs','text/javascript']);
 resources.set('/test-stock-liquidity.mjs',['test-stock-liquidity.mjs','text/javascript']);
