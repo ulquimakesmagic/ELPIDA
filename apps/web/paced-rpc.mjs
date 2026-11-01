@@ -37,7 +37,7 @@ export async function recoverEmptySimulation(payload, original, {urls=[],chainId
   return original;
 }
 async function rpcRead(url,payload){
-  const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal:AbortSignal.timeout(5000)});
+  const response=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload),signal:AbortSignal.timeout(['eth_call','eth_estimateGas'].includes(payload.method)?15000:5000)});
   if(!response.ok)throw new Error('Simulation RPC unavailable.');
   return response.json();
 }

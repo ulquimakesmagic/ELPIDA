@@ -24,7 +24,7 @@ export const testnets = [
   {
     key: 'ethereum-sepolia', name: 'Ethereum Sepolia', short: 'ETH SEPOLIA', kind: 'evm', enabled: true,
     chainId: 11155111, rpcUrl: 'https://ethereum-sepolia-rpc.publicnode.com', explorer: 'https://sepolia.etherscan.io',
-    rpcFallbacks: ['https://sepolia.drpc.org', 'https://1rpc.io/sepolia', 'https://sepolia.gateway.tenderly.co'],
+    rpcFallbacks: ['https://sepolia.gateway.tenderly.co', 'https://1rpc.io/sepolia', 'https://sepolia.drpc.org'],
     nativeCurrency: { name: 'Sepolia Ether', symbol: 'ETH', decimals: 18 },
     gasFaucet: 'https://cloud.google.com/application/web3/faucet/ethereum/sepolia',
     // Partner-tier atomic Model 10 factory (Uniswap v3), deployed by Malik 26 Oct 2026 (block 12000324); adapter 0x2a0f…b79a.

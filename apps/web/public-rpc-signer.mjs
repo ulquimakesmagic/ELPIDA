@@ -5,7 +5,9 @@
 // chain's public RPC, which the page already uses for everything else. It also says so when the wallet is slow.
 import { AbstractSigner } from '/vendor/ethers.js';
 
-const isRevert = error => error?.code === 'CALL_EXCEPTION' && error.data != null;
+// Empty revert bytes can mean a node's simulation gas cap was hit. Never let a wallet
+// replace that unresolved simulation with its small default gas limit (graduation creates a pool).
+const isRevert = error => error?.code === 'CALL_EXCEPTION';
 
 export class PublicRpcSigner extends AbstractSigner {
   /**
@@ -35,8 +37,8 @@ export class PublicRpcSigner extends AbstractSigner {
     const from = await this.getAddress();
     try { return { ...tx, gasLimit: (await this.provider.estimateGas({ ...tx, from })) * 120n / 100n }; }
     catch (error) {
-      if (isRevert(error)) throw error;    // it would revert on-chain too: report it before the wallet opens
-      return tx;                            // public RPC trouble: let the wallet estimate, as before
+      if (isRevert(error)) throw error;    // a revert or unresolved simulation must stop before the wallet opens
+      throw Object.assign(new Error('The network could not verify the transaction gas. No wallet request was sent. Refresh and retry.'), { code: 'GAS_ESTIMATE_UNAVAILABLE', cause: error });
     }
   }
 
