@@ -206,11 +206,13 @@ the local chain). No way to take user funds, locked liquidity or creator fees wa
   2 minutes of history), before and after its own swap; at most once per block; at most 0.5% of the pool's quote
   balance per call. The first queued buyback asks the pool to keep 16 price observations. Replayed, the attack
   loses at every size (`tests/buyback-sandwich.test.mjs`, `partner-tiers-lp.test.mjs`).
-- **S-1 (Medium): the same on Solana's `raydium_buyback`** (cap read live, minimum output 1). **Fix:** the same band
-  against the average price from Raydium's own observation account (the latest stretch of at least 60 s; Raydium
-  records a point at most every 15 s), checked
-  before and after the swap; minimum output 96% of the amount the average price gives; at most 0.5% of the pool's
-  SOL depth per call. The keeper dry-runs the buyback and keeps the harvest when the guard says "wait".
+- **S-1 (Medium): the same on Solana's `raydium_buyback`** (cap read live, minimum output 1, repeatable in one
+  transaction). **Fix:** at most 0.5% of the pool's SOL depth per call and at most one buyback every 150 slots (about
+  a minute, recorded in the migration record), so a front-run, many buybacks and a back-run cannot share a
+  transaction or a bundle. One buyback moves the price about 1%, less than the 2% of pool fees a sandwich pays. An
+  average-price band like E-1's was tried against Raydium's observation account and dropped: its accumulated price
+  did not match the reserves between observations on the local validator, so it could not be relied on. The keeper
+  dry-runs the buyback and keeps the harvest when it is too soon. Weaker than the EVM guard; worth an auditor's view.
 - **S-2 (Medium): partner pools on PumpSwap queued a quote share that could never be spent** (only Raydium has a
   buyback). **Fix:** PumpSwap harvests burn the token-side share and leave the quote side in the treasury half; any
   quote an earlier build queued is released to the treasury at the next harvest (`StrandedBuybackReleased`).

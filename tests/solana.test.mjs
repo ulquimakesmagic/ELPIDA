@@ -924,7 +924,7 @@ test('Solana completing SOL buy and Raydium migration in ONE transaction', { ski
   assert.equal((await migration(mint)).venue, VENUE_RAYDIUM);
 });
 
-test('Solana partner tiers on Raydium: the harvest share is burned or queued, and queued SOL buys back and burns at most 0.5% of depth per call, only near the average price (S-1)', { skip: raySkip }, async () => {
+test('Solana partner tiers on Raydium: the harvest share is burned or queued, and queued SOL buys back and burns at most 0.5% of depth, once a minute (S-1)', { skip: raySkip }, async () => {
   const partner = Keypair.generate(), now = async () => f.connection.getBlockTime(await f.connection.getSlot('confirmed'));
   await airdrop(f.connection, partner.publicKey, 20 * web3.LAMPORTS_PER_SOL);
   await airdrop(f.connection, f.treasury, web3.LAMPORTS_PER_SOL);
@@ -949,28 +949,15 @@ test('Solana partner tiers on Raydium: the harvest share is burned or queued, an
   assert.equal(m1.pendingBuyback, queueQuote); assert.equal(m1.baseBurned, burnBase);
   assert.equal((await eventsOf(signature)).find(e => e.name === 'PartnerHarvest').quoteQueued, queueQuote);
 
-  // Price guard: the pool's observations span only the few seconds of trading so far.
-  await failsWith(send(f.connection, f.outsider, [f.client.raydiumBuyback({ mint })]), /0x1795/);
-  // A minute later, a small trade records the settled price, and the history is long enough.
-  await sleep(62_000);
-  await raySwap(trader, mint, 'buy', SOL / 1000n);
-  // A front-run that moves the price far from its average makes the buyback refuse; selling back restores it.
-  const front = await raySwap(trader, mint, 'buy', 3n * SOL);
-  await failsWith(send(f.connection, f.outsider, [f.client.raydiumBuyback({ mint })]), /0x1794/);
-  assert.equal((await migration(mint)).pendingBuyback, m1.pendingBuyback, 'nothing was spent');
-  await raySwap(trader, mint, 'sell', front);
-  // The guard averages the last minute or so: another minute later, a small trade records the settled price.
-  await sleep(62_000);
-  await raySwap(trader, mint, 'buy', SOL / 1000n);
-  // Buybacks: each spends the queue, at most 0.5% of the pool's SOL depth, and burns every token it buys. Each moves
-  // the price about 1%, so back-to-back calls stop at the band until the average catches up.
+  // Buybacks: each spends the queue, at most 0.5% of the pool's SOL depth, and burns every token it buys. A second
+  // call within a minute is refused (review finding S-1), so a sandwich cannot repeat the buyback.
   let pending = m1.pendingBuyback, burnedTotal = 0n, ran = 0;
   for (let i = 0; pending > 0n && i < 5; i++) {
     const st = await rayState(mint), spend = raydiumBuybackAmount(pending, st.quote), expected = raydiumQuote(spend, st.quote, st.base).out;
     const s0 = await supply();
     let sig;
     try { sig = await send(f.connection, f.outsider, [f.client.raydiumBuyback({ mint })]); }
-    catch (error) { assert.match(String(error?.message) + (error?.logs ?? []).join(' '), /0x1794|PriceAwayFromAverage/); break; }
+    catch (error) { assert.match(String(error?.message) + (error?.logs ?? []).join(' '), /0x1794|BuybackTooSoon/); break; }
     ran++;
     assert.equal(s0 - await supply(), expected, 'bought at the pool price and burned');
     assert.equal(await balance(r.authorityBase), 0n);
@@ -978,7 +965,7 @@ test('Solana partner tiers on Raydium: the harvest share is burned or queued, an
     pending -= spend; burnedTotal += expected;
     assert.equal(ev.quoteIn, spend); assert.equal(ev.tokensBurned, expected); assert.equal(ev.pendingBuyback, pending); assert.equal(ev.totalBurned, burnedTotal);
   }
-  assert.ok(ran >= 1, 'at least one buyback ran near the average price');
+  assert.equal(ran, 1, 'exactly one buyback ran; the next call came too soon');
   const m2 = await migration(mint);
   assert.equal(m2.pendingBuyback, pending); assert.equal(m2.buybackBurned, burnedTotal); assert.equal(m2.buybackQuoteSpent, m1.pendingBuyback - pending);
   assert.ok(liquidityUnits(m2.lpLocked, await rayState(mint)) >= m0.principal, 'buybacks never touch the locked liquidity');

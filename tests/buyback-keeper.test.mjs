@@ -163,10 +163,9 @@ test('Solana: below the harvest minimum only a queued buyback runs; with nothing
   assert.deepEqual(f.sent, [['budget', 'ata', 'harvestPump']], 'PumpSwap: harvest burns the token side; no PumpSwap buyback');
 });
 
-test('Solana: when the price guard refuses the buyback (S-1), the harvest still runs and the buyback waits', async () => {
+test('Solana: when the buyback refuses (S-1, too soon after the last), the harvest still runs and the buyback waits', async () => {
   const run = async err => { const g = solanaFakes(); g.connection.simulateTransaction = async () => ({ value: { err } }); await g.worker().run(g.token, { spent: 0n }); return g.sent; };
-  assert.deepEqual(await run({ InstructionError: [3, { Custom: 6036 }] }), [['budget', 'ata', 'harvestRaydium']], 'price away from average: harvest only');
-  assert.deepEqual(await run({ InstructionError: [3, { Custom: 6037 }] }), [['budget', 'ata', 'harvestRaydium']], 'too little history: harvest only');
+  assert.deepEqual(await run({ InstructionError: [3, { Custom: 6036 }] }), [['budget', 'ata', 'harvestRaydium']], 'too soon: harvest only');
   assert.deepEqual(await run(null), [['budget', 'ata', 'harvestRaydium', 'raydiumBuyback']], 'a passing dry run keeps the buyback');
   assert.equal(guardRefused({ InstructionError: [0, { Custom: 6035 }] }), false, 'other errors are not treated as a wait');
 });

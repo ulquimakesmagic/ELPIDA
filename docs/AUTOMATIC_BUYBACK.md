@@ -31,8 +31,8 @@ The keeper checks every graduated partner token about every 10 minutes (`ELPIDA_
 **Solana** (devnet only): one transaction.
 
 - On **Raydium**, `harvest_raydium_fees` followed by `raydium_buyback`. The buyback is capped at 0.5% of the pool's
-  SOL depth and runs only near the pool's average price (review finding S-1). The keeper dry-runs it first; when the
-  price guard refuses, it sends the harvest alone and the buyback waits. This is the same pair of instructions verified live with MASHLE (`DESIGN_PARTNER_TIERS.md` section 7).
+  SOL depth and runs at most once a minute (review finding S-1). The keeper dry-runs it first; when it is too soon, it
+  sends the harvest alone and the buyback waits. This is the same pair of instructions verified live with MASHLE (`DESIGN_PARTNER_TIERS.md` section 7).
 - On **PumpSwap**, `harvest_lp_fees` only. Its token-side share burns; PumpSwap has no buyback, so since the
   1 November build the quote side of the share goes to the treasury instead of waiting (review finding S-2).
 

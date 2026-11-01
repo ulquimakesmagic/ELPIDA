@@ -74,8 +74,8 @@ export function raydiumQuote(amountIn, reserveIn, reserveOut, feeRate = RAYDIUM_
 }
 /** Mirrors `buyback_amount`: queued SOL, at most 0.5% of the pool's SOL depth per call. */
 export const raydiumBuybackAmount = (pending, quoteReserve) => { const cap = BigInt(quoteReserve) / 200n; return BigInt(pending) < cap ? BigInt(pending) : cap; };
-/** `raydium_buyback` refusals that mean "not now" (review finding S-1): price away from its average, or too little history. */
-export const BUYBACK_GUARD_ERRORS = [6036, 6037];
+/** `raydium_buyback` refusal that means "not now" (review finding S-1): a buyback ran less than a minute ago. */
+export const BUYBACK_GUARD_ERRORS = [6036];
 /** Fees PumpSwap charges on pools it did not create itself: 0.25% to LP holders, 0.05% to pump. */
 export const PUMPSWAP_FEES = { lpFeeBps: 25, protocolFeeBps: 5, creatorFeeBps: 0 };
 export const LAUNCH_COMPUTE_UNITS = 400_000;
@@ -246,8 +246,7 @@ export const PROGRAM_ERRORS = [
   'SOL pairs graduate to Raydium; other pairs graduate to PumpSwap.',
   'Unexpected Raydium account.',
   'No queued partner buyback to spend yet.',
-  'The pool price is away from its recent average, so the buyback waits. Try again later.',
-  'The pool does not have enough price history for a buyback yet. Try again in a few minutes.',
+  'A buyback ran less than a minute ago; the next one waits. Try again shortly.',
 ];
 
 /** Turns a Solana/Anchor error into a readable message. */

@@ -267,7 +267,7 @@ proptest! {
     fn migration_extension_round_trips(pending in any::<u64>(), burned in any::<u64>(), spent in any::<u64>(), bought in any::<u64>(), venue in 0u8..=1) {
         let base = 8 + <PumpMigration as anchor_lang::Space>::INIT_SPACE;
         let mut data = vec![9u8; base + MIGRATION_EXT_LEN];
-        let ext = MigrationExt { pending_buyback: pending, base_burned: burned, quote_spent: spent, bought_burned: bought, venue };
+        let ext = MigrationExt { pending_buyback: pending, base_burned: burned, quote_spent: spent, bought_burned: bought, venue, last_buyback_slot: spent ^ bought };
         ext.write(&mut data).unwrap();
         prop_assert_eq!(MigrationExt::read(&data), Some(ext));
         prop_assert_eq!(&data[..base], &vec![9u8; base][..]);
