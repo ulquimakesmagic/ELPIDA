@@ -9,6 +9,8 @@ import { createElpidaSolana } from '../../packages/solana/client.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
 import {configuredGraduationKeeper} from './graduation-keeper.mjs';
 import {configuredBuybackKeeper} from './buyback-keeper.mjs';
+import {configuredFlywheelKeeper} from './flywheel-keeper.mjs';
+import {testnetDexes} from '../../packages/core/uniswap.mjs';
 import { FeedRelay } from './feed-relay.mjs';
 import { testDexArtifacts } from './test-dex-artifacts.mjs';
 import { createStaticAssets, contentVersion } from './static-assets.mjs';
@@ -223,6 +225,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   if(port!==0)configuredBuybackKeeper({env:process.env,publicIndex,solanaIndex,path:dataFile('buyback-keeper.sqlite'),log:e=>console.log(JSON.stringify(e))})
     .then(k=>{buybackKeeper=k;if(k.status().enabled)console.log(JSON.stringify({event:'buyback_keeper_started',chains:k.status().chains.map(c=>c.chain)}));})
     .catch(error=>{console.log(JSON.stringify({event:'subsystem_unavailable',subsystem:'buybackKeeper',degraded:true,message:String(error.message).slice(0,120)}));buybackKeeper={status:()=>({enabled:false,state:'unavailable'}),close:async()=>{}};});
+  // Revenue flywheel (docs/REVENUE_FLYWHEEL.md): buys and burns the top ten tokens by market cap from a wallet the
+  // treasury tops up. Off until ELPIDA_FLYWHEEL_EVM_KEY is set; testnets only.
+  const flywheelKeeper=port===0?{summary:()=>({enabled:false,state:'not_configured'}),close:async()=>{}}:soft('flywheelKeeper',()=>configuredFlywheelKeeper({env:process.env,publicIndex,dexes:testnetDexes,path:dataFile('flywheel-keeper.sqlite'),log:e=>console.log(JSON.stringify(e))}),()=>({summary:()=>({enabled:false,state:'unavailable'}),close:async()=>{}}));
   console.log(JSON.stringify({event:'storage_ready',durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),dataDir,publicNetworks:[...publicIndex.entries.keys()],simulation:runtime.config.simulation?.durable?`journal replay: ${runtime.config.simulation.replayed} actions restored, ${runtime.config.simulation.skipped} skipped`:'resets on process restart'}));
   const priceKeeper=soft('priceKeeper',()=>new PriceKeeper(),()=>({refresh:async()=>{},snapshot:()=>({})}));
   const updatePrices=async()=>{await priceKeeper.refresh();const prices=priceKeeper.snapshot();const p=[prices.local,prices['base-sepolia'],prices['ethereum-sepolia']].find(p=>p.status==='fresh');if(p)await runtime.updatePrice(p.usd);};
@@ -400,6 +405,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/public/tokenized-equity'){const view=tokenizedEquity.describeNetwork(url.searchParams.get('network')??'',url.searchParams.get('provider'));return view?send(200,{...view,live:false,note:'Tokenized stocks are disabled until each capability is verified with the provider. Nothing here is an official partnership.'}):send(404,{error:'No tokenized-stock provider is designated for this network.'});}
         if(url.pathname==='/api/graduation/status')return send(200,graduationKeeper.status());
         if(url.pathname==='/api/buyback/status')return send(200,buybackKeeper.status());
+        if(url.pathname==='/api/public/flywheel')return send(200,flywheelKeeper.summary());
         if(url.pathname==='/api/public/status')return send(200,{stream:tradeFeed.status(),graduation:graduationKeeper.status(),buyback:buybackKeeper.status(),relay:feedRelay.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),simulationEphemeral:!runtime.config.simulation?.durable,simulation:runtime.config.simulation},networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,publicIndex.status(n.key)])),...(solanaIndex?{[solanaIndex.network.key]:{enabled:true,...solanaIndex.status()}}:{})}});
         if(url.pathname==='/api/public/stream'){
           if(req.method!=='GET')return send(405,{error:'Use GET for the event stream.'});
@@ -580,7 +586,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
   bootPhase('listening');
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {await buybackKeeper.close();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();partnerApps.db.close();siteAnalytics.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {await buybackKeeper.close();await flywheelKeeper.close();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();partnerApps.db.close();siteAnalytics.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

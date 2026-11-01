@@ -9,6 +9,35 @@ Creator fees, user deposits, liquidity principal, unrealized fee balances and th
 partner buybacks do not count as protocol receipts. Budgets stay scoped to chain and revenue asset; no bridges,
 mainnet spending, new keys or fund transfers are enabled.
 
+## Execution, 1 November 2026: a keeper wallet the treasury tops up
+
+Decision (Malik): no on-chain fee split. The treasury sends 10% of the protocol fees it received to a dedicated
+flywheel wallet, by hand; a keeper on the server spends that wallet. This replaces the receipt ledger below for now:
+the wallet's balance is the budget, and what goes in is decided by the treasury, outside the contracts.
+
+`apps/api/flywheel-keeper.mjs`, testnets only (Base Sepolia, Ethereum Sepolia, BNB Testnet, Robinhood Testnet, local):
+
+- **Cadence:** one cycle per chain every 24 hours (`ELPIDA_FLYWHEEL_EVERY_HOURS`).
+- **Budget:** the wallet balance less a gas reserve (`ELPIDA_FLYWHEEL_GAS_RESERVE_ETH`, 0.005), at most
+  `ELPIDA_FLYWHEEL_MAX_PER_CYCLE_ETH` (0.05) per cycle, split into **ten equal slots**.
+- **Eligible:** Elpida tokens from the public index on that chain, paired with the native coin, at least a day old,
+  not restricted, ranked by circulating market cap (`planFlywheelCycle` in `packages/core/revenue-flywheel.mjs`).
+- **Caps:** on the curve a slot is at most 25% of what is left to complete it, so the flywheel never graduates a
+  curve; on a pool at most 0.5% of its quote balance. Whatever a slot cannot spend stays in the wallet.
+- **Guards:** a pool order runs only while the pool price is within 150 ticks of its 10-minute average (the same rule
+  as the partner buyback, review finding E-1); the keeper asks a pool to keep 16 price points the first time. A dry
+  run sets the minimum output, less 1% slippage.
+- **Burn:** what each order bought is sent to `0x…dEaD` in the next transaction (Elpida tokens have no burn function,
+  so this is a dead-address transfer, labelled as such). Every order is journalled before it is sent; tokens left by
+  an interrupted order are sent to the dead address at the next cycle.
+- **Public record:** `GET /api/public/flywheel` and the Analytics page list each chain's burn orders, amount spent and
+  the burn transactions.
+
+Not covered yet: USDC and stock pairs (the budget is the native coin, no conversion), Solana, and reconciling top-ups
+against received fees. Setup steps are in `HUMAN_ACTIONS.md`.
+
+## Original planning notes
+
 The pure planner in packages/core/revenue-flywheel.mjs produces reviewable orders only (executionEnabled=false).
 It requires trusted receipt and market records, excludes stale/unverified market caps, missing routes, issuer
 restrictions and unavailable burn support, and rejects duplicate identities/receipts. Ranking is descending market

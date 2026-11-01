@@ -1,5 +1,18 @@
 # Actions that need Malik
 
+## Revenue flywheel wallet (testnets), 1 November 2026
+
+The flywheel keeper buys the top ten tokens by market cap on each testnet and sends them to the dead address, from a
+wallet you top up with 10% of the protocol fees the treasury received (`REVENUE_FLYWHEEL.md`).
+
+1. In `elpida-fork`: `node scripts/flywheel-keeper-key.mjs`. It writes `local-data\flywheel-keeper-evm.key` and prints
+   only the wallet's public address. Never paste the key anywhere but Railway.
+2. In Railway, add the variable `ELPIDA_FLYWHEEL_EVM_KEY` with the file's contents. Railway redeploys.
+3. Send that address test ETH / tBNB on each testnet: about 10% of what the treasury received there, plus 0.005 for
+   gas. The first cycle runs within a minute of the redeploy, then every 24 hours.
+4. Optional variables: `ELPIDA_FLYWHEEL_EVERY_HOURS` (24), `ELPIDA_FLYWHEEL_MAX_PER_CYCLE_ETH` (0.05),
+   `ELPIDA_FLYWHEEL_GAS_RESERVE_ETH` (0.005).
+
 ## Operator panel (`elpida.fun/#/monkey`), 26 October 2026
 
 A read-only operations view: health and incidents, each factory's treasury balance (native and USDC), launches and
