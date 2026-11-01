@@ -15,7 +15,7 @@ export function protocolAnalytics({sources, prices, period='7d', network='all', 
       totals.tokens++;if(t.graduated)totals.graduated++;
       if(t.graduated&&Number(t.completedAt)>0&&Number(t.completedAt)<=now)graduations.push({address:t.address,name:t.metadata?.name??t.name,symbol:t.metadata?.symbol??t.symbol,network:source.key,chain:source.name,quoteSymbol:t.quoteSymbol??'Quote asset',graduatedAt:Number(t.completedAt),dex:t.dex??null});
       if(t.created/1000>=start&&t.created/1000<=now){totals.launches++;activity.push({timestamp:t.created/1000,launches:1});}
-      const ref=usdReferenceFor(t,prices[source.key],now);
+      const ref=usdReferenceFor({...t,network:source.key},prices[source.key],now);
       const rate=ref?.status==='fresh'&&Number.isFinite(ref.usd)&&ref.usd>0&&now-ref.updatedAt<=(ref.maxAge??180)&&ref.updatedAt<=now+60?ref.usd:null;
       const key=source.key+':'+(t.quoteAddress??t.quoteMint??t.quoteSymbol??'native');
       const a=assets.get(key)??{key,network:source.key,chain:source.name,symbol:t.quoteSymbol??'Quote asset',volume:0,volumeUsd:0,trades:0,reserve:0,creatorFees:0,protocolFees:0,priced:rate!==null};

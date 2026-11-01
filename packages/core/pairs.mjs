@@ -19,6 +19,15 @@ export const USDC_PARITY_SOURCE = 'USDC valued at $1 (assumed parity)';
 export function usdReferenceFor(token, nativeReference, now = Math.floor(Date.now() / 1000)) {
   if (token?.pair === 'native') return nativeReference ?? null;
   if (token?.pair === 'usdc') return { status: 'fresh', usd: 1, updatedAt: now, maxAge: Number.MAX_SAFE_INTEGER, source: USDC_PARITY_SOURCE };
+  // Only the explicitly simulated issuer on public test networks supplies this reference.
+  // Never promote test issuer data into a live stock valuation.
+  const stock=token?.stock;
+  if(token?.pair==='xstock'&&['ethereum-sepolia','base-sepolia','bnb-testnet','robinhood-testnet'].includes(token.network)&&stock?.provider==='ondo-test'){
+    const usd=Number(stock.price),updatedAt=Number(stock.updatedAt),age=now-updatedAt;
+    if(!stock.paused&&['open','closed'].includes(stock.marketStatus)&&Number.isFinite(usd)&&usd>0&&Number.isFinite(updatedAt)&&age>=-300&&age<=172800)
+      return {status:'fresh',usd,updatedAt:Math.min(now,updatedAt),maxAge:172800,source:'Simulated test-stock USD feed (no monetary value)',feed:stock.feed};
+    return null;
+  }
   return token?.usdReference ?? null;
 }
 

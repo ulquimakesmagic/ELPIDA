@@ -1,3 +1,5 @@
+import {testLiquidityTools} from './test-stock-liquidity-ui.mjs';
+import {restoreTradeDraft} from './trade-draft.mjs';
 import { nowSeconds, syncClock } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
 import { usdReferenceFor } from '/pairs.mjs';
@@ -104,10 +106,10 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
   }}
   if (revision !== refreshRevision) return state;
   const reference=config.prices?.[currentChain()]??wallet.price;
-  for(const t of next.tokens??[])t.usdReference=usdReferenceFor(t,reference,nowSeconds());
+  for(const t of next.tokens??[]){t.network??=currentChain();t.usdReference=usdReferenceFor(t,reference,nowSeconds());}
   state = next; updateChrome(); rerender(preserveInput ? 'background' : 'data');
   if(mode==='testnet'){
-    const results=await Promise.allSettled(config.testnets.map(async net=>(await api(`public/tokens?network=${encodeURIComponent(net.key)}`)).map(t=>({...t,network:net.key,usdReference:usdReferenceFor(t,config.prices?.[net.key],nowSeconds())}))));
+    const results=await Promise.allSettled(config.testnets.map(async net=>(await api(`public/tokens?network=${encodeURIComponent(net.key)}`)).map(t=>({...t,network:net.key,usdReference:usdReferenceFor({...t,network:net.key},config.prices?.[net.key],nowSeconds())}))));
     if(revision!==refreshRevision)return state;
     discoveryErrors=results.flatMap((r,i)=>r.status==='rejected'?[config.testnets[i].name]:[]);
     if(next.discoveryError)discoveryErrors.push(wallet.net.name);
@@ -287,15 +289,14 @@ function rerender(reason) {
     const previous = reason === 'background' ? {
       side: view.querySelector('[data-side][role=tab][aria-selected=true]')?.dataset.side,
       amount: view.querySelector('#trade-amount')?.value,
+      settlement:view.querySelector('#trade-amount')?.dataset.settlement,
+      context:view.querySelector('#trade-amount')?.dataset.context,
       slippage: view.querySelector('#trade-slippage')?.value,
       focused: document.activeElement?.id,
     } : null;
     view.replaceChildren(renderToken(ctx, r.address));
     if (previous) {
-      if (previous.side === 'sell') view.querySelector('[data-side=sell]')?.click();
-      const input = view.querySelector('#trade-amount'), slippage = view.querySelector('#trade-slippage');
-      if (slippage && previous.slippage) slippage.value = previous.slippage;
-      if (input && previous.amount) { input.value = previous.amount; input.dispatchEvent(new Event('input')); }
+      restoreTradeDraft(previous,{input:view.querySelector('#trade-amount'),slippage:view.querySelector('#trade-slippage'),panel:view.querySelector('.tk-trade')});
       if (previous.focused) document.getElementById(previous.focused)?.focus({ preventScroll: true });
     }
   }
@@ -450,7 +451,7 @@ async function openTools() {
         deployed && wallet.dex && wallet.address && pairs && (pairs.xstock.unavailable || pairs.token.unavailable || (wallet.missingTestPairs?.() ?? []).length) ? h('div.stack', h('p.small.muted', 'xStock and paired-token launches need approved assets. The launchpad owner can deploy the labelled test assets (TEST-STOCK and TEST-MEME) and approve them: six confirmations, gas only.'),
           h('label.field', h('span', 'Previous TEST-STOCK deployment hash (optional, recover interrupted setup)'), recoveryInput),
           h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('setup-pairs', { recoveryHash: recoveryInput.value.trim() || undefined }); openTools(); } catch (e) { fail(e); } } } }, (m => m.length ? `Add test pairs: ${m.map(t => t.symbol).join(', ')}` : 'Add test xStock and token pairs')((wallet.missingTestPairs?.() ?? [])))) : null,
-        deployed && wallet.dex && wallet.address ? testStockControls(wallet, run, fail) : null));
+        deployed && wallet.dex && wallet.address ? h('div.stack',testStockControls(wallet, run, fail),testLiquidityTools(wallet,run)) : null));
     } else funds.append(h('p.small.muted', wallet.deployment ? `Solana program: ${short(wallet.deployment.programId)}.${state?.pricing ? ` Creation fee ${number(state.pricing.launchFee, 6)} SOL. New USD-priced launches are pending a verified-oracle program upgrade.` : ''}` : 'The Solana program is not deployed. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.'));
   }
   body.replaceChildren(envSection, funds, circleFundingPanel({ config: config.circle, csrf: config.csrf, connected: mode === 'testnet' ? { address: wallet.address, network: wallet.net.key } : null }), error);
