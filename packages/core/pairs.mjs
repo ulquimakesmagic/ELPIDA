@@ -44,8 +44,12 @@ export const PAIR_INFO = {
  * xStock-paired curve could never graduate. Meteora DAMM v2 accepts them (xStocks are badged there),
  * so a DAMM v2 graduation path is the way to add them.
  */
+// New Solana launches pair with SOL only, so every curve graduates to Raydium (decided 1 November 2026). Tokens
+// already launched on USDC or token pairs keep trading on their PumpSwap pools, and stay indexed and claimable.
+const SOL_ONLY = 'New Solana launches pair with SOL and graduate to Raydium. Tokens already launched on other pairs keep trading on PumpSwap.';
+export const SOLANA_LAUNCH_KINDS = Object.freeze(['native']);
 export const PAIR_LIMITS = {
-  solana: { xstock: 'Not on Solana yet: xStocks carry an issuer permanent delegate, which PumpSwap does not accept, so the curve could never graduate. It needs a Meteora graduation path and written confirmation from xStocks (see docs/TOKENIZED_EQUITY.md).' },
+  solana: { usdc: SOL_ONLY, token: SOL_ONLY, xstock: 'Not on Solana: new Solana launches pair with SOL only, and xStocks carry an issuer permanent delegate that blocks graduation (see docs/TOKENIZED_EQUITY.md).' },
 };
 
 /**
