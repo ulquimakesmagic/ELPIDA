@@ -126,6 +126,7 @@ export function setError(control, message) {
 export function errorText(error) {
   if (error?.code === 4001 || error?.code === 'ACTION_REJECTED' || /user rejected|rejected the request|denied/i.test(error?.message ?? '')) return 'You cancelled the request in your wallet. Nothing was submitted.';
   const text = error?.reason ?? error?.shortMessage ?? error?.message ?? 'Something went wrong. Try again.';
+  if(/missing revert data/i.test(text))return 'The network could not simulate this transaction and returned no explanation. Refresh and retry. If you already confirmed a request, check wallet activity before retrying.';
   if(/StaleOraclePrice|stale oracle/i.test(text))return 'The launch price feed is stale. Wait for its next update, then refresh and retry.';
   if(/FeeQuoteMoved/i.test(text))return 'The fee moved beyond your 1% cap. Refresh the quote and try again.';
   if(/InvalidOracleRound|OracleUnavailable/i.test(text))return 'A verified launch price is unavailable. Refresh later; no launch was submitted.';
@@ -158,3 +159,6 @@ export const storage = {
   set(key, value) { try { sessionStorage.setItem(key, JSON.stringify(value)); } catch {} },
   remove(key) { try { sessionStorage.removeItem(key); } catch {} },
 };
+
+// Market capitalization is always dollar-denominated; an absent FX reference is not a pair-value cap.
+export const fmtMarketCap = (token, value = pricing(token).marketCap) => usdRate(token) === null ? 'USD unavailable' : '$' + compact(Number(value) * usdRate(token));

@@ -24,11 +24,13 @@ export const testnets = [
   {
     key: 'ethereum-sepolia', name: 'Ethereum Sepolia', short: 'ETH SEPOLIA', kind: 'evm', enabled: true,
     chainId: 11155111, rpcUrl: 'https://ethereum-sepolia-rpc.publicnode.com', explorer: 'https://sepolia.etherscan.io',
-    rpcFallbacks: ['https://sepolia.drpc.org', 'https://1rpc.io/sepolia', 'https://sepolia.gateway.tenderly.co'],
+    rpcFallbacks: ['https://sepolia.gateway.tenderly.co', 'https://1rpc.io/sepolia', 'https://sepolia.drpc.org'],
     nativeCurrency: { name: 'Sepolia Ether', symbol: 'ETH', decimals: 18 },
     gasFaucet: 'https://cloud.google.com/application/web3/faucet/ethereum/sepolia',
     // Partner-tier atomic Model 10 factory (Uniswap v3), deployed by Malik 26 Oct 2026 (block 12000324); adapter 0x2a0f…b79a.
     shared: { factory: '0x5aA283B8B12786314e76ac4E977B1E9275b407f6', block: 12000324, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 },
+    // Ownerless native/pair router, verified with public ordinary-wallet buy and sell on 1 Nov 2026.
+    nativeTradeRouter: { factory: '0x5aA283B8B12786314e76ac4E977B1E9275b407f6', address: '0xDDCc87C34eD8D8bEB6D5fAFc6C14e7cE8578fd41', hash: '0x2843b435316c72830356f414bab1bd6b4ed6a77ae951a08f9ac05db9cd75eb61' },
     // The 22 Oct factory (tx 0xdad271f4…82be9; first launch VEGETA) stays indexed. No new launches go here.
     legacy: [{ factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 11972040, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },

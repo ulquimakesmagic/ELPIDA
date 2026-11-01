@@ -1,3 +1,5 @@
+import {testLiquidityTools} from './test-stock-liquidity-ui.mjs';
+import {restoreTradeDraft} from './trade-draft.mjs';
 import { nowSeconds, syncClock } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
 import { usdReferenceFor } from '/pairs.mjs';
@@ -6,6 +8,7 @@ import { createExplore, exploreSkeleton } from './explore-view.mjs';
 import { assetIcon, chainIcon, chainSelector } from './chain-ui.mjs';
 import { renderAnalytics } from './analytics-view.mjs';
 import { initConsent } from './consent.mjs';
+import { renderTermsPage } from './terms.mjs';
 // Elpida web app shell: environment (local simulation or public testnet), wallets, routing, discovery,
 // portfolio and the network/test-funds panel. Views live in launch-flow.mjs, token-page.mjs and
 // rewards-view.mjs and receive the shared `ctx` object below.
@@ -103,10 +106,10 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
   }}
   if (revision !== refreshRevision) return state;
   const reference=config.prices?.[currentChain()]??wallet.price;
-  for(const t of next.tokens??[])t.usdReference=usdReferenceFor(t,reference,nowSeconds());
+  for(const t of next.tokens??[]){t.network??=currentChain();t.usdReference=usdReferenceFor(t,reference,nowSeconds());}
   state = next; updateChrome(); rerender(preserveInput ? 'background' : 'data');
   if(mode==='testnet'){
-    const results=await Promise.allSettled(config.testnets.map(async net=>(await api(`public/tokens?network=${encodeURIComponent(net.key)}`)).map(t=>({...t,network:net.key,usdReference:usdReferenceFor(t,config.prices?.[net.key],nowSeconds())}))));
+    const results=await Promise.allSettled(config.testnets.map(async net=>(await api(`public/tokens?network=${encodeURIComponent(net.key)}`)).map(t=>({...t,network:net.key,usdReference:usdReferenceFor({...t,network:net.key},config.prices?.[net.key],nowSeconds())}))));
     if(revision!==refreshRevision)return state;
     discoveryErrors=results.flatMap((r,i)=>r.status==='rejected'?[config.testnets[i].name]:[]);
     if(next.discoveryError)discoveryErrors.push(wallet.net.name);
@@ -223,7 +226,7 @@ function parseRoute() {
   if (doc) return { name: 'docs', section: doc[1] };
   const token = hash.match(/^\/token\/([A-Za-z0-9]{32,64})$/);
   if (token) return { name: 'token', address: token[1],network:new URLSearchParams(query).get('network') };
-  return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/docs': 'docs', '/monkey': 'admin', '/partners': 'partners' }[hash] ?? 'notfound' };
+  return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/docs': 'docs', '/monkey': 'admin', '/partners': 'partners', '/terms': 'terms' }[hash] ?? 'notfound' };
 }
 function route() {
   const next = parseRoute(); const changed = next.name !== currentRoute.name || next.address !== currentRoute.address;
@@ -232,7 +235,7 @@ function route() {
 
   if(next.network&&networkByKey(next.network)&&next.network!==currentChain()){chooseChain(next.network).catch(e=>toast(errorText(e),{kind:'error'}));return;}
   $$('[data-nav]').forEach(link => { if (link.dataset.nav === next.name) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
-  document.title = { explore: 'Explore tokens across chains | Elpida', portfolio: 'Portfolio | Elpida', rewards: 'Creator rewards | Elpida', launch: 'Create a token | Elpida', token: 'Token | Elpida', analytics: 'Analytics — Launches, volume & fees | Elpida', admin: 'Operations | Elpida', partners: 'Partner with Elpida | Elpida', docs: 'Docs | Elpida', notfound: 'Page not found | Elpida' }[next.name];
+  document.title = { explore: 'Explore tokens across chains | Elpida', portfolio: 'Portfolio | Elpida', rewards: 'Creator rewards | Elpida', launch: 'Create a token | Elpida', token: 'Token | Elpida', analytics: 'Analytics — Launches, volume & fees | Elpida', admin: 'Operations | Elpida', partners: 'Partner with Elpida | Elpida', docs: 'Docs | Elpida', terms: 'Terms of Use | Elpida', notfound: 'Page not found | Elpida' }[next.name];
   rerender('route');
   { const v = $('#view'); v.classList.remove('view-enter'); void v.offsetWidth; v.classList.add('view-enter'); }
   if(changed&&wallet?.address&&!['explore','analytics'].includes(next.name))refresh({preserveInput:true,walletRead:true}).catch(e=>toast(errorText(e),{kind:'error'}));
@@ -286,21 +289,21 @@ function rerender(reason) {
     const previous = reason === 'background' ? {
       side: view.querySelector('[data-side][role=tab][aria-selected=true]')?.dataset.side,
       amount: view.querySelector('#trade-amount')?.value,
+      settlement:view.querySelector('#trade-amount')?.dataset.settlement,
+      context:view.querySelector('#trade-amount')?.dataset.context,
       slippage: view.querySelector('#trade-slippage')?.value,
       focused: document.activeElement?.id,
     } : null;
     view.replaceChildren(renderToken(ctx, r.address));
     if (previous) {
-      if (previous.side === 'sell') view.querySelector('[data-side=sell]')?.click();
-      const input = view.querySelector('#trade-amount'), slippage = view.querySelector('#trade-slippage');
-      if (slippage && previous.slippage) slippage.value = previous.slippage;
-      if (input && previous.amount) { input.value = previous.amount; input.dispatchEvent(new Event('input')); }
+      restoreTradeDraft(previous,{input:view.querySelector('#trade-amount'),slippage:view.querySelector('#trade-slippage'),panel:view.querySelector('.tk-trade')});
       if (previous.focused) document.getElementById(previous.focused)?.focus({ preventScroll: true });
     }
   }
   else if (r.name === 'portfolio') view.replaceChildren(portfolioView(ctx, { connect: connectCurrent, rerender: () => rerender('route') }));
   else if (r.name === 'rewards') view.replaceChildren(renderRewards(ctx));
   else if (r.name === 'docs') view.replaceChildren(renderDocs(ctx, r.section));
+  else if (r.name === 'terms') view.replaceChildren(renderTermsPage(ctx));
   else if (!exploreView || !view.contains(exploreView.root)) {
     // One Explore controller per visit: later refreshes update its cards in place.
     closeExplore(); exploreView = createExplore(exploreSource); view.replaceChildren(exploreView.root); exploreView.setTrades(recentBuys);
@@ -401,7 +404,7 @@ function applyLiveTrades(trades) {
   exploreView?.setTrades(recentBuys);
 }
 async function openTools() {
-  const body = $('#tools-body'); const error = h('p.error-text', { role: 'alert' });
+  const body = $('#tools-body'); const recoveryInput=h('input',{id:'test-pair-recovery',type:'text',placeholder:'0x...'}); const error = h('p.error-text', { role: 'alert' });
   const fail = e => { error.textContent = errorText(e); };
   const local = mode === 'local';
   if(!local&&wallet.address&&wallet.deployment){try{await wallet.checkFeeAccounting?.();await wallet.checkLaunchFeatures?.();}catch(e){fail(e);}}
@@ -446,8 +449,9 @@ async function openTools() {
         wallet.feeFixUpgradeAvailable?h('p.small.muted','The current Model 10 factory predates the shared-recipient fee fix. Deploy a corrected testnet factory using test ETH for gas. Pricing stays unchanged. Existing tokens keep their original contracts. After deployment, share the factory address so it can be registered for all visitors.'):null,
         deployed ? h('div.stack', h('p.small.muted', state?.pricing?.verified ? `$10 launch fee, converted by the on-chain price feed at execution. Starting FDV: $${Number(wallet.startFdvUsd ?? 5000).toLocaleString()} before the first purchase.` : 'USD pricing must be activated before launching.'), !state?.pricing?.verified ? h('button.btn.btn-secondary',{type:'button',on:{click:()=>act('apply-pricing',{}).then(r=>{downloadSafeBatch(r);openTools();})}},wallet.deployment?.treasury&&wallet.deployment.treasury.toLowerCase()!==String(wallet.address).toLowerCase()?'Download the Safe setup file':'Activate price feed') : null) : null,
         deployed && wallet.dex && wallet.address && pairs && (pairs.xstock.unavailable || pairs.token.unavailable || (wallet.missingTestPairs?.() ?? []).length) ? h('div.stack', h('p.small.muted', 'xStock and paired-token launches need approved assets. The launchpad owner can deploy the labelled test assets (TEST-STOCK and TEST-MEME) and approve them: six confirmations, gas only.'),
-          h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('setup-pairs', {}); openTools(); } catch (e) { fail(e); } } } }, (m => m.length ? `Add test pairs: ${m.map(t => t.symbol).join(', ')}` : 'Add test xStock and token pairs')((wallet.missingTestPairs?.() ?? [])))) : null,
-        deployed && wallet.dex && wallet.address ? testStockControls(wallet, run, fail) : null));
+          h('label.field', h('span', 'Previous TEST-STOCK deployment hash (optional, recover interrupted setup)'), recoveryInput),
+          h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('setup-pairs', { recoveryHash: recoveryInput.value.trim() || undefined }); openTools(); } catch (e) { fail(e); } } } }, (m => m.length ? `Add test pairs: ${m.map(t => t.symbol).join(', ')}` : 'Add test xStock and token pairs')((wallet.missingTestPairs?.() ?? [])))) : null,
+        deployed && wallet.dex && wallet.address ? h('div.stack',testStockControls(wallet, run, fail),testLiquidityTools(wallet,run),wallet.net.chainId===11155111&&wallet.dex?.routerVersion===2?h('div.stack',h('p.hint',wallet.nativeRouterRecord()?.address?`Ordinary-wallet native router: ${short(wallet.nativeRouterRecord().address)}`:'Native trades on ordinary wallets need a fixed router deployment. One test-gas transaction, no deposit.'),!wallet.nativeRouterRecord()?.address?h('button.btn.btn-secondary',{type:'button','data-busy-disable':'',on:{click:()=>act('deploy-native-router',{}).then(()=>openTools())}},'Deploy ordinary-wallet native router'):null):null) : null));
     } else funds.append(h('p.small.muted', wallet.deployment ? `Solana program: ${short(wallet.deployment.programId)}.${state?.pricing ? ` Creation fee ${number(state.pricing.launchFee, 6)} SOL. New USD-priced launches are pending a verified-oracle program upgrade.` : ''}` : 'The Solana program is not deployed. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.'));
   }
   body.replaceChildren(envSection, funds, circleFundingPanel({ config: config.circle, csrf: config.csrf, connected: mode === 'testnet' ? { address: wallet.address, network: wallet.net.key } : null }), error);

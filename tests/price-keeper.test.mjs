@@ -37,3 +37,44 @@ test('fresh Pyth display references take precedence without changing on-chain fe
  const k=new PriceKeeper({now:()=>1000,oracles:{}});k.values.ETH={usd:2500,updatedAt:1000,source:'Pyth Hermes'};k.chainValues['base-sepolia']={usd:2400,updatedAt:1000,source:'On-chain USD oracle'};
  assert.equal(k.snapshot()['base-sepolia'].source,'Pyth Hermes');k.values.ETH.updatedAt=700;assert.equal(k.snapshot()['base-sepolia'].source,'On-chain USD oracle');
 });
+
+test('display prices renew before expiry instead of disappearing between refresh ticks',async()=>{
+ let now=1000,calls=0;
+ const fetcher=async()=>{calls++;return{ok:true,json:async()=>({ethereum:{usd:2500,last_updated_at:now},binancecoin:{usd:700,last_updated_at:now},solana:{usd:100,last_updated_at:now}})};};
+ const k=new PriceKeeper({fetcher,now:()=>now,pythApiKey:null,oracles:{}});
+ await k.refresh();now=1121;await k.refresh();assert.equal(calls,2);
+ now=1181;assert.equal(k.snapshot()['solana-devnet'].status,'fresh');assert.equal(k.snapshot()['solana-devnet'].updatedAt,1121);
+});
+
+test('a fresh ETH oracle on another chain covers an unavailable chain without mixing native assets',()=>{
+ let now=1000;const k=new PriceKeeper({now:()=>now,oracles:{}});
+ k.values.ETH={usd:2500,updatedAt:700,source:'CoinGecko'};
+ k.chainValues['ethereum-sepolia']={usd:2400,updatedAt:700,maxAge:180,source:'On-chain USD oracle'};
+ k.chainValues['base-sepolia']={usd:2450,updatedAt:990,maxAge:1500,source:'On-chain USD oracle',feed:'verified-base-feed'};
+ let p=k.snapshot();assert.equal(p['ethereum-sepolia'].status,'fresh');assert.equal(p['ethereum-sepolia'].feed,'verified-base-feed');assert.equal(p['ethereum-sepolia'].updatedAt,990);assert.equal(p['ethereum-sepolia'].referenceOnly,true);assert.equal(p['ethereum-sepolia'].sourceChain,'base-sepolia');
+ assert.equal(p['bnb-testnet'].status,'unavailable');assert.equal(p['solana-devnet'].status,'unavailable');
+ now=2500;p=k.snapshot();assert.equal(p['ethereum-sepolia'].status,'stale');assert.equal(p['ethereum-sepolia'].updatedAt,700);
+});
+
+test('verified on-chain SOL fallback survives a web-price outage without enabling mainnet references',async()=>{
+ const {DISCRIMINATORS,PYTH_RECEIVER}=await import('../packages/solana/client.mjs');
+ const {SOLANA_ORACLES}=await import('../packages/core/usd-oracles.mjs');
+ const raw=Buffer.alloc(133);Buffer.from(DISCRIMINATORS.PriceUpdateV2).copy(raw);raw[40]=1;
+ Buffer.from(SOLANA_ORACLES.devnet.feedId,'hex').copy(raw,41);raw.writeBigInt64LE(10000000000n,73);raw.writeBigUInt64LE(1000n,81);raw.writeInt32LE(-8,89);raw.writeBigInt64LE(1000n,93);
+ let now=1000,owner=PYTH_RECEIVER,offline=false;
+ const fetcher=async(url,options)=>{
+  if(offline||url!=='https://api.devnet.solana.com')throw Error('source offline');
+  assert.equal(JSON.parse(options.body).params[0],SOLANA_ORACLES.devnet.priceAccount);
+  return{ok:true,json:async()=>({result:{value:{owner,data:[raw.toString('base64'),'base64']}}})};
+ };
+ const k=new PriceKeeper({fetcher,now:()=>now,pythApiKey:null,oracles:{}});await k.refresh();
+ assert.equal(k.snapshot()['solana-devnet'].usd,100);assert.equal(k.snapshot()['solana-devnet'].status,'fresh');assert.equal(k.snapshot()['solana-devnet'].updatedAt,1000);assert.equal(k.snapshot()['solana-mainnet'].status,'unavailable');
+ offline=true;now=1301;await k.refresh();assert.equal(k.snapshot()['solana-devnet'].status,'stale');assert.equal(k.snapshot()['solana-devnet'].updatedAt,1000);
+ for(const bad of ['owner','partial','feed','confidence','stale','future','exponent']){
+  const copy=Buffer.from(raw);let testOwner=PYTH_RECEIVER;
+  if(bad==='owner')testOwner='wrong';if(bad==='partial')copy[40]=0;if(bad==='feed')copy[41]^=1;
+  if(bad==='confidence')copy.writeBigUInt64LE(10000000000n,81);if(bad==='stale')copy.writeBigInt64LE(600n,93);if(bad==='future')copy.writeBigInt64LE(1100n,93);if(bad==='exponent')copy.writeInt32LE(1,89);
+  const invalid=new PriceKeeper({now:()=>1000,oracles:{},pythApiKey:null,fetcher:async()=>({ok:true,json:async()=>({result:{value:{owner:testOwner,data:[copy.toString('base64'),'base64']}}})})});
+  await assert.rejects(invalid.readSolanaOracle());assert.equal(invalid.snapshot()['solana-devnet'].status,'unavailable');
+ }
+});

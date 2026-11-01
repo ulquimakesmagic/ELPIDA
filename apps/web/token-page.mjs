@@ -1,12 +1,11 @@
 import { nowSeconds } from './clock.mjs';
 import { snipeLabel } from '/curve-model.mjs';
 import { assetIcon, chainIcon } from './chain-ui.mjs';
-import { usdcFunding } from './usdc-funding.mjs';
 // Token detail page: market figures with plain definitions, bonding-curve progress, trade panel,
 // graduation actions, creator-fee summary and technical details.
-import { h, icon, short, number, compact, avatar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, copyButton, errorText, toast, usdRate, formatPrice, bar } from './ui.mjs';
+import { h, icon, short, number, compact, avatar, pricing, fmtMarketCap, fmtPrice, fmtValue, progressOf, lifecycle, copyButton, errorText, toast, usdRate, formatPrice, bar } from './ui.mjs';
 import { withWalletTimeout, walletErrorText } from './wallet.mjs';
-import { exceedsRemaining } from './amounts.mjs';
+import { compactTradeAmount, exceedsRemaining } from './amounts.mjs';
 import {terminalChart} from './terminal-chart.mjs';
 import { testStockStatus } from './test-stock.mjs';
 const STOCK_LABELS = { fresh: 'Price fresh', 'market-closed': 'Market closed', stale: 'Price stale', 'corporate-action': 'Corporate action', paused: 'Issuer paused', outage: 'No price' };
@@ -96,7 +95,7 @@ export function renderToken(ctx, address) {
   const txValue = h('strong', buys != null && sells != null ? [String(number(Number(buys) + Number(sells), 0)), ' ', h('small', h('span.up', `${number(buys, 0)} ${Number(buys) === 1 ? 'buy' : 'buys'}`), ' · ', h('span.down', `${number(sells, 0)} ${Number(sells) === 1 ? 'sell' : 'sells'}`))] : (token.trades24h != null ? number(token.trades24h, 0) : '—'));
   const strip = h('section.tk-strip', { 'aria-label': 'Market numbers' },
     tile2(usdOn ? 'Price' : `Price in ${q}`, h('div.tk-strip-price', odometer(fmtPrice(token), 'tk-price-value'), changePill)),
-    tile2('Market cap', h('strong.tk-accent', fmtValue(p.marketCap, token)), '.tk-strip-cap', 'Price × total supply (1B)'),
+    tile2('Market cap', h('strong.tk-accent', fmtMarketCap(token)), '.tk-strip-cap', 'Price × total supply (1B)'),
     tile2('Liquidity', h('strong', fmtValue(Number(token.reserve ?? 0), token)), '', 'Actual quote assets in the curve or pool; virtual reserves are excluded.'),
     tile2('24h volume', volumeValue),
     tile2('Holders', holdersValue),
@@ -285,9 +284,9 @@ function marketActivity(ctx,token,q,{addressUrl,isCreator,me,info,onCounts,onHol
   load();return panel;
 }
 
-function tradePanel(ctx, token, { dex, solana }) {
+export function tradePanel(ctx, token, { dex, solana }) {
   const q = token.quoteSymbol ?? ctx.state?.nativeSymbol ?? 'ETH';
-  if(ctx.state.disconnected && !(token.complete && !token.graduated))return h('section.panel.trade-panel',h('h2','Trade'),h('p.muted',ctx.state.walletReadError?'Your wallet connection could not read this network. Reconnect to trade; indexed market data is still available.':`Connect your wallet on ${ctx.wallet.net.name} to buy or sell ${token.symbol}. Market data remains available without connecting.`),ctx.walletButtons(ctx.wallet.net,{onDone:()=>ctx.refresh(),onError:e=>toast(errorText(e),{kind:'error'})}));
+
   // A migrated Solana token trades here too, through its locked Raydium (SOL pairs) or PumpSwap pool (solana-wallet).
   if (token.complete && !token.graduated) {
     const error = h('p.error-text', { role: 'alert' });
@@ -305,12 +304,25 @@ function tradePanel(ctx, token, { dex, solana }) {
     return h('section.panel.trade-panel', h('h2', automatic ? 'Graduation pending' : 'Curve complete'), progress,
       automatic ? h('details',h('summary.small.muted','Manual fallback'),h('p.small.muted','Optional: submit graduation yourself and pay network gas.'),manual) : manual, reopenNote, reopen, error);
   }
+  let settlement='pair',nativeQuote=null;
+  const native=ctx.wallet?.net?.nativeCurrency?.symbol??(solana?'SOL':q);
+  const routed=()=>settlement==='native'&&token.pair!=='native';
+  const currency=()=>routed()?native:q;
   let side = 'buy', revision = 0, timer, quoteReady = false, submitting = false;
   const amount = h('input.input#trade-amount', { type: 'number', min: '0', step: 'any', inputmode: 'decimal', placeholder: '0.00', required: true, 'aria-describedby': 'trade-balance' });
-  const unit = h('span.affix');
+  const unit=h('div.swap-asset-slot'),receiveUnit=h('div.swap-asset-slot'),routeLabel=h('p.swap-route');
+  const chip=(symbol,isToken=false)=>h('span.swap-asset',isToken?avatar(token):assetIcon(symbol),h('span',symbol));
+  function picker(){
+    if(token.pair==='native')return chip(q);
+    const menu=h('div.swap-asset-menu',{hidden:true});
+    const button=h('button.swap-asset',{type:'button','aria-label':'Choose trading currency','aria-expanded':'false',on:{click:()=>{menu.hidden=!menu.hidden;button.setAttribute('aria-expanded',String(!menu.hidden));}}},assetIcon(currency()),currency(),icon('chevron-down','icon-sm'));
+    for(const [value,symbol,label] of [['pair',q,'Paired token'],['native',native,'Native coin']])menu.append(h('button.swap-asset-option',{type:'button','aria-pressed':String(settlement===value),on:{click:()=>{if(submitting)return;settlement=value;setSide(side);}}},assetIcon(symbol),h('span',h('strong',symbol),h('small',label)),settlement===value?icon('check','icon-sm'):null));
+    menu.addEventListener('keydown',e=>{if(e.key==='Escape'){menu.hidden=true;button.setAttribute('aria-expanded','false');button.focus();}});
+    return h('div.swap-picker',button,menu);
+  }
   const balance = h('p.hint#trade-balance');
   const shortcuts = h('div.shortcuts', { role: 'group', 'aria-label': 'Amount shortcuts' });
-  const out = h('strong', 'Enter an amount'), fee = h('strong', '—'), minOut = h('strong', '—'), feeNote = h('p.hint');
+  const out = h('strong', '0.00'), fee = h('strong', '—'), minOut = h('strong', '—'), feeNote = h('p.hint');
   // Live anti-snipe countdown ("Launch fee window: 47% → 1.25% in 31 s") while the first minute lasts.
   const feeWindow = h('p.hint.fee-window', { role: 'status', 'aria-live': 'off' });
   let feeTicks = 0;
@@ -328,12 +340,13 @@ function tradePanel(ctx, token, { dex, solana }) {
   const error = h('p.error-text', { role: 'alert' });
   const slippage = h('select.select#trade-slippage', [['0.1', '0.1%'], ['0.5', '0.5%'], ['1', '1%'], ['3', '3%'], ['5', '5%']].map(([v, l]) => h('option', { value: v, selected: v === '1' }, l)));
   const submit = h('button.btn.btn-block.btn-lg', { type: 'submit', disabled:true });
-  const updateSubmit = () => { submit.disabled = !quoteReady || submitting; };
+  const connected=ctx.mode!=='testnet'||!!ctx.wallet?.address;
+  const updateSubmit = () => { submit.disabled = !quoteReady || submitting || !connected; };
   const remainingDisplay = token.remainingBase ?? token.remainingBuy;
   const remaining = !token.complete && !token.graduated && Number(token.remainingBuy) > 0;
-  const remainingHint = h('p.hint', remaining ? `About ${number(remainingDisplay,8)} ${q} remains to complete the curve. Further trading continues after graduation into the locked pool.` : '');
+  const remainingHint = h('p.hint.swap-remaining', {title:remaining?`${remainingDisplay} ${q} remains to complete the curve`:''}, remaining ? `Curve remaining: ${compactTradeAmount(remainingDisplay)} ${q}` : '');
   const useRemaining = h('button.btn.btn-secondary.btn-sm.curve-limit-action', {type:'button',hidden:true,on:{click:()=>{amount.value=token.remainingBuy;quote();}}}, 'Use remaining amount');
-  const funding=token.pair==='native'?usdcFunding(ctx,{amount:()=>amount.value,symbol:q,context:token.address}):null;
+
   const tabs = h('div.segmented', { role: 'tablist', 'aria-label': 'Trade side' }, ['buy', 'sell'].map(s => h('button', { type: 'button', role: 'tab', 'data-side': s, 'aria-selected': String(s === side), on: { click: () => setSide(s) } }, s === 'buy' ? 'Buy' : 'Sell')));
   const quoteBalance = () => {
     if(token.pair === 'native') return `${number(ctx.state.nativeBalance ?? 0, 6)} ${q}`;
@@ -342,69 +355,70 @@ function tradePanel(ctx, token, { dex, solana }) {
     return ctx.state.balanceSymbol===q?`${number(ctx.state.balance,4)} ${q}`:null;
   };
   function setSide(next) {
-    side = next; revision++; clearTimeout(timer);
-    if(funding)funding.hidden=side!=='buy';
-    quoteReady = false; updateSubmit(); useRemaining.hidden = true; remainingHint.hidden = side !== 'buy';
+    if(submitting)return; side = next; amount.dataset.settlement=settlement;amount.dataset.context=[ctx.mode,token.network??ctx.wallet?.net?.key,token.address,ctx.wallet?.address??ctx.state.wallet??''].join(':').toLowerCase(); nativeQuote=null; slippage.disabled=routed();if(routed())slippage.value='1'; revision++; clearTimeout(timer);
+    form?.querySelectorAll('.swap-slippage button').forEach(b=>{b.disabled=routed();b.setAttribute('aria-pressed',String(b.dataset.value===slippage.value));});
+    quoteReady = false; updateSubmit(); useRemaining.hidden = true; remainingHint.hidden = side !== 'buy' || routed();
     tabs.querySelectorAll('button').forEach(b => { b.setAttribute('aria-selected', String(b.dataset.side === side)); b.tabIndex = b.dataset.side === side ? 0 : -1; });
-    form?.querySelector('label[for=trade-amount]')?.replaceChildren(side === 'buy' ? 'Pay' : 'Sell');
-    unit.textContent = side === 'buy' ? q : token.symbol;
+    form?.querySelector('label[for=trade-amount]')?.replaceChildren('You pay');
+    unit.replaceChildren(side==='buy'?picker():chip(token.symbol,true));receiveUnit.replaceChildren(side==='buy'?chip(token.symbol,true):picker());routeLabel.textContent=side==='buy'?`${currency()} → ${token.symbol}`:`${token.symbol} → ${currency()}`;
     submit.textContent = `${side === 'buy' ? 'Buy' : 'Sell'} ${token.symbol}`;
     submit.className = `btn btn-block btn-lg ${side === 'buy' ? 'btn-buy' : 'btn-sell'}`;
-    amount.value = ''; out.textContent = 'Enter an amount'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = ''; error.textContent = '';
-    const qb = quoteBalance();
+    amount.value = ''; out.textContent = '0.00'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = ''; error.textContent = '';
+    const qb=routed()?`${number(ctx.state.nativeBalance??0,6)} ${native}`:quoteBalance();
     balance.textContent = side === 'buy' ? (qb ? `Available: ${qb}` : '') : `Available: ${number(token.balance, 4)} ${token.symbol}`;
     // 25/50/75/Max of the spendable balance. Buys keep a small native reserve for network fees.
-    const decimals = side === 'buy' ? (token.pair === 'native' ? (solana ? 9 : 18) : (token.quoteDecimals ?? 18)) : (token.decimals ?? 18);
-    const available = side === 'buy' ? (token.pair === 'native' ? ctx.state.nativeBalance : Object.entries(ctx.state.pairBalances ?? {}).find(([k]) => k.toLowerCase() === String(token.quoteAddress).toLowerCase())?.[1] ?? null) : token.balance;
-    const gasReserve = side === 'buy' && token.pair === 'native' ? (solana ? 0.02 : 0.0005) : 0;
+    const decimals = side === 'buy' ? (routed() || token.pair === 'native' ? (solana ? 9 : 18) : (token.quoteDecimals ?? 18)) : (token.decimals ?? 18);
+    const available = side === 'buy' ? (routed() || token.pair === 'native' ? ctx.state.nativeBalance : Object.entries(ctx.state.pairBalances ?? {}).find(([k]) => k.toLowerCase() === String(token.quoteAddress).toLowerCase())?.[1] ?? null) : token.balance;
+    const gasReserve = side === 'buy' && (routed() || token.pair === 'native') ? (solana ? 0.02 : 0.0005) : 0;
     const toUnits = text => { const [w, f = ''] = String(text ?? '0').split('.'); return BigInt(w || '0') * 10n ** BigInt(decimals) + BigInt((f.slice(0, decimals) || '0').padEnd(decimals, '0')); };
     const fromUnits = n => `${n / 10n ** BigInt(decimals)}.${(n % 10n ** BigInt(decimals)).toString().padStart(decimals, '0')}`.replace(/\.?0+$/, '') || '0';
     // Buys: one-tap sizes in the pair asset, then Max. Sells: a share of the tokens held.
     const funded = available != null && Number(available) > gasReserve;
-    const quick = side === 'buy' ? quickAmounts(q).map(v => `quick:${v}`) : [];
-    const presets = [...quick, ...(funded ? (side === 'buy' ? [100] : [25, 50, 75, 100]) : []), ...(side === 'buy' && !token.complete && token.remainingBuy ? ['curve'] : [])];
-    shortcuts.replaceChildren(...presets.map(value => h('button.chip-btn', { type: 'button', 'data-preset': String(value), 'aria-label': value === 'curve' ? 'Fill the amount that completes the curve' : String(value).startsWith('quick:') ? `Buy with ${String(value).slice(6)} ${q}` : `${value === 100 ? 'Maximum' : value + '%'} of your balance`, on: { click: () => {
+    const quick = side === 'buy' ? quickAmounts(currency()).map(v => `quick:${v}`) : [];
+    const presets = [...quick, ...(funded ? (side === 'buy' ? [100] : [25, 50, 75, 100]) : []), ...(!routed() && side === 'buy' && !token.complete && token.remainingBuy ? ['curve'] : [])];
+    shortcuts.replaceChildren(...presets.map(value => h('button.chip-btn', { type: 'button', 'data-preset': String(value), 'aria-label': value === 'curve' ? 'Fill the amount that completes the curve' : String(value).startsWith('quick:') ? `Buy with ${String(value).slice(6)} ${currency()}` : `${value === 100 ? 'Maximum' : value + '%'} of your balance`, on: { click: () => {
       if (value === 'curve') amount.value = token.remainingBuy;
       else if (String(value).startsWith('quick:')) {
         amount.value = String(value).slice(6);
-        if (remaining && exceedsRemaining(amount.value, token.remainingBuy) && !solana && !token.partialFill) amount.value = token.remainingBuy;
+        if (!routed() && remaining && exceedsRemaining(amount.value, token.remainingBuy) && !solana && !token.partialFill) amount.value = token.remainingBuy;
       }
       else {
         // Integer arithmetic so Max never exceeds the actual balance.
         const spendable = toUnits(available) - toUnits(String(gasReserve));
         amount.value = fromUnits((spendable > 0n ? spendable : 0n) * BigInt(value) / 100n);
-        if (side === 'buy' && remaining && exceedsRemaining(amount.value, token.remainingBuy)) amount.value = token.remainingBuy;
+        if (!routed() && side === 'buy' && remaining && exceedsRemaining(amount.value, token.remainingBuy)) amount.value = token.remainingBuy;
       }
       quote();
     } } }, value === 'curve' ? 'Complete curve' : String(value).startsWith('quick:') ? String(value).slice(6) : value === 100 ? 'Max' : `${value}%`)));
   }
   function quote() {
-    const value = amount.value, rev = ++revision; clearTimeout(timer); error.textContent = '';
+    nativeQuote=null; const value = amount.value, rev = ++revision; clearTimeout(timer); error.textContent = '';
     quoteReady = false; updateSubmit(); useRemaining.hidden = true;
-    if (!(Number(value) > 0)) { out.textContent = 'Enter an amount'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = ''; return; }
+    if (!connected || !(Number(value) > 0)) { out.textContent = '0.00'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = ''; return; }
     // A curve reopened after its graduation grace is fully sold: selling works, buying resumes once a holder sells.
     if (side === 'buy' && token.soldOut && !token.complete && !token.graduated) {
       out.textContent = 'Nothing left to buy'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = '';
       error.textContent = 'Every curve token is sold. This curve was reopened after graduation did not happen, so holders can sell now; buying resumes as soon as someone sells.';
       return;
     }
-    if (side === 'buy' && remaining && exceedsRemaining(value,token.remainingBuy) && !solana && !token.partialFill) {
+    if (!routed() && side === 'buy' && remaining && exceedsRemaining(value,token.remainingBuy) && !solana && !token.partialFill) {
       out.textContent = 'Amount exceeds the curve limit'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = '';
       error.textContent = `About ${number(token.remainingBuy,8)} ${q} remains on the bonding curve. Use the remaining-amount button to fill the exact limit, then graduate to the locked pool.`;
       useRemaining.hidden = false; return;
     }
     fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = '';
-    out.textContent = 'Getting quote…';
+    out.textContent = '…';
     timer = setTimeout(async () => {
       try {
-        const result = ctx.mode === 'local' ? await ctx.api('quote', { token: token.address, side, amount: value }) : await ctx.wallet.getQuote({ token: token.address, side, amount: value });
+        if(routed()&&typeof ctx.wallet?.getNativePairTradeQuote!=='function')throw new Error('Native routing is not supported by this wallet or network. Choose the paired token.');
+        const result = routed() ? await ctx.wallet.getNativePairTradeQuote({token:token.address,side,amount:value}) : ctx.mode === 'local' ? await ctx.api('quote', { token: token.address, side, amount: value }) : await ctx.wallet.getQuote({ token: token.address, side, amount: value });
         if (rev !== revision) return;
-        quoteReady = true; updateSubmit();
-        out.textContent = `${number(result.out, side === 'buy' ? 2 : 6)} ${side === 'buy' ? token.symbol : q}`;
-        fee.textContent = `${number(result.fee, 6)} ${result.feeSymbol ?? q}`;
-        minOut.textContent = `${number(Number(result.out) * (1 - Number(slippage.value) / 100), side === 'buy' ? 2 : 6)} ${side === 'buy' ? token.symbol : q}`;
-        feeNote.textContent = result.antiSnipeActive ? `Launch protection is active: the fee is ${number(result.feeBps / 100, 2)}% right now and falls to 1.25% by the end of the first minute. The amount above 1.25% is added to the token's locked liquidity.` : result.completesCurve ? `This purchase completes the curve. Only ${number(result.spend, 4)} ${q} will be charged.` : '';
-      } catch (e) { if (rev !== revision) return; out.textContent = 'Quote unavailable'; fee.textContent = '—'; minOut.textContent = '—'; error.textContent = errorText(e); }
+        nativeQuote=routed()?result:null; quoteReady = true; updateSubmit();
+        out.textContent = compactTradeAmount(routed()?result.output:result.out);out.title=String(routed()?result.output:result.out);
+        fee.textContent=routed()?'Included in route':`${compactTradeAmount(result.fee)} ${result.feeSymbol??q}`;
+        minOut.textContent = `${compactTradeAmount(Number(routed()?result.output:result.out) * (1 - (routed()?1:Number(slippage.value)) / 100))} ${side === 'buy' ? token.symbol : currency()}`;
+        feeNote.textContent = routed() ? 'Native routes protect each hop with 1% slippage. Any unused pair asset stays in your wallet. Requires funded conversion liquidity and a verified native router or atomic-capable wallet.' : result.antiSnipeActive ? `Launch protection is active: the fee is ${number(result.feeBps / 100, 2)}% right now and falls to 1.25% by the end of the first minute. The amount above 1.25% is added to the token's locked liquidity.` : result.completesCurve ? `This purchase completes the curve. Only ${number(result.spend, 4)} ${q} will be charged.` : '';
+      } catch (e) { if (rev !== revision) return; out.textContent = '—'; fee.textContent = '—'; minOut.textContent = '—'; error.textContent = errorText(e); }
     }, 300);
   }
   amount.addEventListener('input', quote);
@@ -415,21 +429,22 @@ function tradePanel(ctx, token, { dex, solana }) {
     if (!quoteReady || submitting) { quote(); return; }
     if (ctx.mode === 'testnet' && !ctx.wallet.address) { error.textContent = 'Connect your wallet first.'; return; }
     submitting = true; updateSubmit();
-    try { await ctx.run(side, { token: token.address, amount: amount.value, slippage: slippage.value }); }
+    try { if(routed()){if(!nativeQuote)throw new Error('Get a fresh native quote.');await ctx.run('trade-native-pair',nativeQuote);}else await ctx.run(side, { token: token.address, amount: amount.value, slippage: slippage.value }); }
     catch (e) { error.textContent = errorText(e); }
     finally { submitting = false; updateSubmit(); }
   } } },
     tabs,
-    h('div.pay-box', h('label', { for: 'trade-amount' }, side === 'buy' ? 'Pay' : 'Sell'), h('div.pay-input', amount, unit), shortcuts, balance),
-    remainingHint, useRemaining,
-    funding,
-    h('div.receive', h('span', 'You receive'), out),
+    h('div.pay-box',h('div.swap-card-top',h('label',{for:'trade-amount'},'You pay'),balance),h('div.pay-input',amount,unit),shortcuts),
+    h('div.swap-direction',icon('chevron-down','icon-sm')),h('div.receive',h('div.swap-card-top',h('span','You receive'),h('span','Estimated')),h('div.swap-receive-row',out,receiveUnit)),routeLabel,remainingHint,useRemaining,
     h('div.trade-meta', h('span', 'Trading fee'), fee),
     h('div.trade-meta', h('span', 'Minimum received'), minOut),
     h('details.trade-settings', h('summary', icon('sliders-horizontal', 'icon-sm'), 'Slippage settings'), h('div.trade-meta', h('label', { for: 'trade-slippage' }, 'Slippage tolerance'), slippage)),
     feeWindow, feeNote, error, submit);
+  const settings=form.querySelector('.trade-settings');
+  settings.append(h('div.swap-slippage',['0.1','0.5','1','3'].map(value=>h('button',{type:'button','data-value':value,'aria-pressed':String(value===slippage.value),on:{click:()=>{slippage.value=value;settings.querySelectorAll('button').forEach(b=>b.setAttribute('aria-pressed',String(b.dataset.value===value)));quote();}}},value+'%'))),h('p.hint','Swaps revert if output is below the minimum. Native routes use 1% protection per hop.'));
+  form.insertBefore(settings,tabs.nextSibling);
   form.querySelector('label[for=trade-amount]').dataset.dynamic = 'true';
-  tabs.addEventListener('click', () => { form.querySelector('label[for=trade-amount]').textContent = side === 'buy' ? 'Pay' : 'Sell'; });
+  tabs.addEventListener('click', () => { form.querySelector('label[for=trade-amount]').textContent = 'You pay'; });
   tabs.addEventListener('keydown', event => {
     if (!['ArrowLeft', 'ArrowRight', 'Home', 'End'].includes(event.key)) return;
     event.preventDefault();
@@ -438,10 +453,11 @@ function tradePanel(ctx, token, { dex, solana }) {
   });
   setSide('buy');
   tickFeeWindow();
-  const section = h('section.panel.trade-panel.tk-trade', { 'aria-labelledby': 'trade-title' }, h('h2#trade-title.visually-hidden', 'Trade'),
-    form,
+  const section = h('section.panel.trade-panel.tk-trade', { 'aria-labelledby': 'trade-title' }, h('div.swap-heading',h('h2#trade-title','Swap'),h('button.icon-btn',{type:'button','aria-label':'Toggle slippage settings',on:{click:()=>{const d=form.querySelector('.trade-settings');d.open=!d.open;}}},icon('sliders-horizontal','icon-sm'))),
+    form,!connected?h('p.hint','Connect your wallet using the button above.'):null,
     h('p.small.muted.tk-trade-note', token.tax ? `Buy tax ${token.tax.buyBps/100}% / sell tax ${token.tax.sellBps/100}%, fixed at launch. Tax revenue: 30% Elpida / 70% creator allocations. ${token.graduated?'The V2 pool fee is additional; the curve fee has stopped. LP fees compound in locked liquidity. Creator tax claims are paid in this token.':'The 1.25% curve fee remains additional, split 50/50. First-minute protection adds locked liquidity.'}` : token.graduated ? `Trading on ${dex === 'test' ? 'the locked test pool' : dex}. Liquidity is locked permanently. The curve fee has stopped; the DEX pool fee applies.${token.venue === 'PumpSwap' ? ' Pool trading fees pay the creator share and any buyback when they are harvested.' : ''}` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'));
   // Lets the phone buy bar open the panel on the right side.
-  section.selectSide = next => { if (next !== side) setSide(next); amount.focus({ preventScroll: true }); };
+  section.selectCurrency = value => {if(!['native','pair'].includes(value)||submitting)return;settlement=value;setSide(side);};
+  section.selectSide = (next,{focus=true}={}) => { if (next !== side) setSide(next); if(focus)amount.focus({ preventScroll: true }); };
   return section;
 }

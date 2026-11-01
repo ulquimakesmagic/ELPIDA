@@ -1,4 +1,4 @@
-import { h, icon, short, number, compact, avatar, pricing, fmtValue, progressOf, usdRate, bar, storage } from './ui.mjs';
+import { h, icon, short, number, compact, avatar, pricing, fmtMarketCap, fmtValue, progressOf, usdRate, bar, storage } from './ui.mjs';
 import { chainIcon } from './chain-ui.mjs';
 import { holdingRows, withPosition, summarize, sumFees, crossChainTokens, networkCounts } from './portfolio-model.mjs';
 
@@ -114,7 +114,7 @@ export function portfolioView(ctx, { connect, rerender }) {
       const status = t => { const pct = progressOf(t); return t.graduated ? h('span.pf-status.up', 'Graduated') : t.complete ? h('span.pf-status', 'Graduating') : h('span.pf-curve', bar(pct, false, `Bonding curve ${number(pct, 1)}%`), h('small', `${number(pct, 1)}%`)); };
       const tbody = h('tbody', created.map(t => {
         const fees = h('td.num', { 'data-label': 'Creator fees' }, h('span.muted', 'Loading…')); feeCells.set(`${t.network}:${t.address.toLowerCase()}`, fees);
-        return h('tr.tk-row', h('td.pf-cell-token', tokenCell(t)), h('td.pf-cell-status', { 'data-label': 'Curve' }, status(t)), h('td.num.pf-cell-main', { 'data-label': 'Market cap' }, h('strong', fmtValue(pricing(t).marketCap, t))), h('td.num', { 'data-label': '24h volume' }, t.volume24h != null ? fmtValue(Number(t.volume24h), t) : '—'), h('td.num', { 'data-label': 'You hold' }, t.devHoldingPct != null ? `${number(t.devHoldingPct, 2)}%` : '—'), fees, h('td.num', { 'data-label': '24h' }, change(t)), h('td.num.pf-cell-action', h('a.btn.btn-secondary.btn-sm', { href: href(t) }, 'Open')));
+        return h('tr.tk-row', h('td.pf-cell-token', tokenCell(t)), h('td.pf-cell-status', { 'data-label': 'Curve' }, status(t)), h('td.num.pf-cell-main', { 'data-label': 'Market cap' }, h('strong', fmtMarketCap(t))), h('td.num', { 'data-label': '24h volume' }, t.volume24h != null ? fmtValue(Number(t.volume24h), t) : '—'), h('td.num', { 'data-label': 'You hold' }, t.devHoldingPct != null ? `${number(t.devHoldingPct, 2)}%` : '—'), fees, h('td.num', { 'data-label': '24h' }, change(t)), h('td.num.pf-cell-action', h('a.btn.btn-secondary.btn-sm', { href: href(t) }, 'Open')));
       }));
       body = h('div.tk-card.pf-card', h('div.table-scroll', h('table.market-table.tk-table.pf-table',
         h('thead', h('tr', ...['Token', 'Status', 'Market cap', '24h volume', 'You hold', 'Creator fees', '24h', ''].map((label, i) => h('th', { scope: 'col', class: i > 1 ? 'num' : '' }, label)))), tbody)),
@@ -158,7 +158,7 @@ export function portfolioView(ctx, { connect, rerender }) {
       rows = withPosition(rows, t.address, p, t.network);
       drawSummary();
       if (!cells) return;
-      cells.entry.textContent = p?.entryMarketCapQuote ? fmtValue(Number(p.entryMarketCapQuote), t) : '—';
+      cells.entry.textContent = p?.entryMarketCapQuote ? fmtMarketCap(t,Number(p.entryMarketCapQuote)) : '—';
       if (p?.basisKnown) {
         const u = Number(p.unrealizedQuote), dir = u > 0 ? 'up' : u < 0 ? 'down' : '';
         cells.pnl.replaceChildren(h(`span${dir ? '.' + dir : ''}`, row.rate !== null ? signed(u * row.rate) : `${u > 0 ? '+' : ''}${number(u, 6)} ${t.quoteSymbol ?? ''}`), h('small.pf-pct', ` ${Number(p.unrealizedPercent) > 0 ? '+' : ''}${number(p.unrealizedPercent, 2)}%`));

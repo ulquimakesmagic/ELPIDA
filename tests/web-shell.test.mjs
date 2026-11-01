@@ -32,6 +32,8 @@ test('the shell ships its own fonts, theme and scripts, served same-origin under
   assert.match(html, /<script src="\/theme-boot\.js"><\/script>/);
   const csp = (await fetch(`${app.url}/`)).headers.get('content-security-policy');
   assert.match(csp, /script-src 'self'/);
+  assert.ok(csp.includes('https://1rpc.io/sepolia'),'configured simulation fallback is allowed by CSP');
+  assert.doesNotMatch(csp,/connect-src[^;]*\s\*/,'fallback does not open unrestricted connections');
   // Icons the shell uses are in the sprite.
   const sprite = web('assets/icons.svg');
   for (const name of [...html.matchAll(/icons\.svg#i-([a-z0-9-]+)/g)].map(m => m[1])) assert.match(sprite, new RegExp(`id="i-${name}"`), `icon ${name}`);
