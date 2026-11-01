@@ -19,6 +19,13 @@ The launch flow shows the fee in the native coin, and adds it to the purchase wh
 - **Solana:** run `solana-upgrade.cmd` (`npm run solana:deploy -- --upgrade`). It upgrades the program and creates the SOL and TEST-MEME configs. The TEST-MEME faucet appears under *Network and funds*.
 - **Base Sepolia:** the launchpad owner (its treasury wallet) opens *Network and funds* and chooses **Add test xStock and token pairs**. That takes six confirmations and costs only gas: each test asset is deployed, gets a Uniswap migration adapter, and is approved with a curve starting at 20 TEST-STOCK or 500,000 TEST-MEME FDV.
 
+## Solana: new launches pair with SOL only (1 November 2026)
+
+Every new Solana launch pairs with SOL and graduates to Raydium CPMM. The site no longer offers USDC, token or stock
+pairs for new Solana launches, even where the program has their configs (`SOLANA_LAUNCH_KINDS` in
+`packages/core/pairs.mjs`). The program itself is unchanged. Tokens already launched on other pairs keep trading on
+their PumpSwap pools, and stay indexed and claimable.
+
 ## Why xStocks are not on Solana yet
 
 Real xStocks are Token-2022 mints with an issuer permanent delegate. PumpSwap rejects permanent-delegate quote mints (`UnsupportedQuoteMint`, checked against the real program on a local validator). An xStock-paired curve could therefore fill up but never graduate, so the program refuses such configs. Meteora DAMM v2 accepts the badged xStock mints, so the way to add them is a DAMM v2 graduation path for xStock pairs.
