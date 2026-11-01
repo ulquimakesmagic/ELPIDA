@@ -33,3 +33,13 @@ Local real-V3 tests cover ordinary-wallet buy/sell before and after graduation, 
 Read-only Sepolia preflight on 1 November 2026 confirms the current factory deployer is `0xcf539Ad67a6Ae5C0F4F137Ca0D188DfDa6B3dF60`; STKTEST's curve proof is nonce **4** and derives token `0xc717BBd54d052FF45AFC73578b8e340D99541c11`. Constructor gas estimation against the current factory/DEX succeeds. No public router deployment or native STKTEST trade has been sent for this PR. No mainnet actions or real funds.
 
 Validation: the full-suite checkpoint passed **644 tests**, with **33 intentional skips** and no failures (677 total). After the final provider-reconnect guard and regression test, the focused router, native conversion, public signer and web-shell run passed **20/20**, with no skips or failures. Router verification is repeated when the public read provider changes.
+
+## Public Sepolia evidence — 1 November 2026
+
+- Router `0xDDCc87C34eD8D8bEB6D5fAFc6C14e7cE8578fd41` deployed in `0x2843b435316c72830356f414bab1bd6b4ed6a77ae951a08f9ac05db9cd75eb61`, block 12041511, successful receipt. Exact creation data was verified against the deployed build artifact and immutable constructor configuration.
+- Ordinary-wallet native buy `0xb5256e299f415fc5e6b056550da19923a0eeb07dd5d2810a83180aef5fd03451`, block 12041918, succeeded: **0.001 test ETH → 558707.153679830635398185 STKTEST** delivered to `0xf5B0cE04241f9518dfA3CBfbaafC7E40638E639D`. Gas used 633874. `NativeTrade` settlement matches the token delivery. The public index attributes it to the actual wallet, with the router-settlement proof recorded.
+- Post-buy router STKTEST, tNVDAon and WETH balances and temporary approvals to the curve/swap router are all zero.
+- Earlier buy `0xfcfb8bafc1439d9691d0493489b0e4f69cd170e72bbe807fc23d44b8a155feac` reverted after its deadline; replay confirmed `amount/minimum/deadline`. Purchase principal was not spent; gas was charged.
+- Still open: public native sell rehearsal; shared router registration for other browsers; the earlier one-raw-unit liquidity-manager approval cleanup. No mainnet actions or real funds.
+
+The accompanying CSS fix keeps the complete Ethereum diamond inside a circular badge, including when that image is used as token artwork. Verified locally in a 390px-wide swap fixture: both image bounds are 24×24 with `object-fit: contain`. Other uploaded artwork retains cover behavior. Web-shell checks: 3/3 passed; `git diff --check` clean.
