@@ -1,7 +1,8 @@
 // Display prices never authorize a payment. EVM factories independently validate their USD oracle.
 import { Interface } from 'ethers';
 import { evmTestnets } from '../../packages/core/networks.mjs';
-import { usdOracles } from '../../packages/core/usd-oracles.mjs';
+import {parsePriceUpdate,PYTH_RECEIVER} from '../../packages/solana/client.mjs';
+import { usdOracles,SOLANA_ORACLES } from '../../packages/core/usd-oracles.mjs';
 const oracleAbi=new Interface(['function decimals() view returns(uint8)','function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)']);
 export const PRICE_MAX_AGE = 180;
 export const CHAIN_ASSET = Object.freeze({local:'ETH','base-sepolia':'ETH','ethereum-sepolia':'ETH','bnb-testnet':'BNB','robinhood-testnet':'ETH','solana-devnet':'SOL','solana-localnet':'SOL','solana-mainnet':'SOL'});
@@ -21,6 +22,17 @@ export class PriceKeeper {
     if(round[0]<=0n||round[1]<=0n||round[4]<round[0]||d>18)throw new Error('Invalid oracle');
     this.chainValues[net.key]=validatePrice({usd:Number(round[1])/10**d,updatedAt:Number(round[3]),source:'On-chain USD oracle',feed:oracle.feed,maxAge:oracle.maxAge,referenceOnly:false},this.now());
   }
+  async readSolanaOracle(){
+    try{validatePrice(this.values.SOL,this.now()+60);return;}catch{}
+    const oracle=SOLANA_ORACLES.devnet;
+    const r=await this.fetcher('https://api.devnet.solana.com',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({id:1,jsonrpc:'2.0',method:'getAccountInfo',params:[oracle.priceAccount,{encoding:'base64',commitment:'confirmed'}]}),signal:AbortSignal.timeout(8000)});
+    if(!r.ok)throw Error('Solana price RPC unavailable');
+    const data=await r.json(),account=data.result?.value;
+    if(account?.owner!==PYTH_RECEIVER||account.data?.[1]!=='base64')throw Error('Invalid Pyth account');
+    const p=parsePriceUpdate(Buffer.from(account.data[0],'base64'));
+    if(!p||p.feedId!==oracle.feedId||p.price<=0n||p.exponent< -18||p.exponent>0||p.conf*10000n>p.price*BigInt(oracle.maxConfBps))throw Error('Invalid Pyth observation');
+    this.chainValues['solana-devnet']=validatePrice({symbol:'SOL',usd:Number(p.price)*10**p.exponent,updatedAt:p.publishTime,maxAge:oracle.maxAgeSecs,source:'Pyth SOL/USD (verified on-chain, devnet)',feed:oracle.priceAccount,referenceOnly:true},this.now());
+  }
   async refresh(){
     if(this.pending)return this.pending;
     if(this.now()-this.lastAttempt<30)return this.snapshot();
@@ -38,21 +50,35 @@ export class PriceKeeper {
         if(!p||!Number.isInteger(p.expo)||p.expo< -18||p.expo>0||!Number.isFinite(Number(p.conf))||p.conf==null||Number(p.conf)<0||Number(p.conf)/Number(p.price)>.02)throw new Error('Uncertain price');
         this.values[symbol]=validatePrice({usd:Number(p.price)*10**p.expo,updatedAt:p.publish_time,source:'Pyth Hermes',symbol,feed:this.ids[symbol]},this.now());
       }));
-      // Independent fallback; retain the upstream timestamp, never fabricate freshness.
-      const missing=['ETH','BNB','SOL'].filter(s=>{try{validatePrice(this.values[s],this.now());return false;}catch{return true;}});
+      // Renew before expiry so a one-minute polling tick cannot leave a stale display gap.
+      // Retain the upstream timestamp, never fabricate freshness.
+      const missing=['ETH','BNB','SOL'].filter(s=>{try{validatePrice(this.values[s],this.now()+60);return false;}catch{return true;}});
       if(missing.length){try{
         const names={ETH:'ethereum',BNB:'binancecoin',SOL:'solana'};
         const data=await this.json(`https://api.coingecko.com/api/v3/simple/price?ids=${missing.map(s=>names[s]).join(',')}&vs_currencies=usd&include_last_updated_at=true`);
         for(const s of missing){try{this.values[s]=validatePrice({symbol:s,usd:data[names[s]]?.usd,updatedAt:data[names[s]]?.last_updated_at,source:'CoinGecko'},this.now());}catch{}}
       }catch{}}
-      await Promise.allSettled(evmTestnets.map(net=>this.readOracle(net)));
+      await Promise.allSettled([...evmTestnets.map(net=>this.readOracle(net)),this.readSolanaOracle()]);
       return this.snapshot();
     })();
     try{return await this.pending;}finally{this.pending=null;}
   }
   snapshot(){
     return Object.fromEntries(Object.entries(CHAIN_ASSET).map(([chain,symbol])=>{
-      const pyth=this.values[symbol];let value=pyth;try{validatePrice(pyth,this.now());}catch{value=this.chainValues[chain]??pyth;}let fresh=false;try{validatePrice(value,this.now());fresh=true;}catch{}
+      const pyth=this.values[symbol];let value=pyth;
+      try{validatePrice(pyth,this.now());}catch{
+        value=this.chainValues[chain]??pyth;
+        try{validatePrice(value,this.now());}catch{
+          // ETH has the same USD denomination across these chains. Keep the actual source,
+          // timestamp and heartbeat; this display fallback never changes a factory's oracle.
+          const shared=Object.entries(this.chainValues).filter(([key,p])=>{
+            if(symbol!=='ETH'||CHAIN_ASSET[key]!==symbol)return false;
+            try{validatePrice(p,this.now());return true;}catch{return false;}
+          }).sort((a,b)=>b[1].updatedAt-a[1].updatedAt)[0];
+          if(shared)value={...shared[1],sourceChain:shared[0],referenceOnly:true};
+        }
+      }
+      let fresh=false;try{validatePrice(value,this.now());fresh=true;}catch{}
       return [chain,{symbol,maxAge:PRICE_MAX_AGE,referenceOnly:true,...value,status:fresh?'fresh':value?'stale':'unavailable'}];
     }));
   }
