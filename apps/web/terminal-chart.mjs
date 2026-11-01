@@ -215,6 +215,7 @@ export function terminalChart(ctx,token,q){
       lastSignature=signature;
       plot.classList.remove('is-loading');
       const shaped=shape(rows,interval);
+      if(pref.basis==='cap'&&usdRate(token)===null){cleanup();plot.replaceChildren();legend.replaceChildren();empty('USD market cap unavailable','A fresh USD price reference is required.');status.textContent='Market cap is shown in USD only.';return;}
       if(!shaped.bars.length){
         cleanup();plot.replaceChildren();legend.replaceChildren();empty('No trades yet','Candles start with the first buy or sell.');
         status.textContent='Executed trades only. Nothing is shown until someone trades.';
