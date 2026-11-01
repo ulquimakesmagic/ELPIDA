@@ -57,3 +57,7 @@ The read-only check on 1 November found `automaticGraduation = true`, no pool ye
 5. The earlier liquidity-manager allowance is still **1 raw unit** of tNVDAon (read-only rechecked). Revoke through the existing liquidity recovery/cleanup flow; do not redeploy or remint liquidity.
 
 The shared router record does not upgrade existing contracts, change pricing, alter creator/protocol recipients, or combine chain wallets. Public post-graduation evidence remains open until these receipts exist.
+
+Funding mint confirmed: `0x79eb2b33ff32bd2934f0994964662fb479ea21f2898a1243c658353ae6264525`, block 12042310, successful 25 tNVDAon mint to the test wallet. Observed balance afterward: 48.403769994929974261 tNVDAon. The completing purchase has not yet been confirmed.
+
+Shared-registration validation: full `npm test` passed **649**, skipped **33**, failed **0** (682 total); focused API, router EVM, registry/model and web-shell checks **38/38 passed**. No source edits followed those checks; this final addition records the funding receipt.
