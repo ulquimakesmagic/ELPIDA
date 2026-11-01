@@ -657,8 +657,10 @@ pub mod elpida_launchpad {
     /// Permissionless: withdraws only the LP tokens that represent trading-fee growth since migration
     /// (liquidity units above the migrated principal) and splits the proceeds 50/50 between the
     /// protocol treasury and the creator reward wallet. The principal liquidity stays locked.
-    /// Partner pools: the burn share comes out of the protocol half. Its token side is burned now; its quote side
-    /// stays with the LP authority, recorded as pending buyback (the mint must be passed writable to burn).
+    /// Partner pools: the burn share comes out of the protocol half. Its token side is burned now (the mint must be
+    /// passed writable to burn). PumpSwap pools have no buyback, so the quote side of that share goes to the treasury
+    /// with the rest of the protocol half instead of waiting forever (review finding S-2), and any quote an earlier
+    /// build left queued here is released to the treasury too.
     pub fn harvest_lp_fees(ctx: Context<HarvestLpFees>) -> Result<()> {
         ctx.accounts.check_token_accounts()?;
         let a = &ctx.accounts;
@@ -705,18 +707,20 @@ pub mod elpida_launchpad {
         let base_out = token_amount(&a.authority_base.to_account_info())?.checked_sub(base_before).ok_or(ElpidaError::MathOverflow)?;
         let quote_out = token_amount(&a.authority_quote.to_account_info())?.checked_sub(quote_before).ok_or(ElpidaError::MathOverflow)?;
         let buyback_bps = PoolExt::read(&a.pool.to_account_info().try_borrow_data()?).buyback_bps as u128;
-        let split = HarvestPayout {
+        let payout = HarvestPayout {
             token_program: a.token_program.to_account_info(), quote_program: a.quote_program_info(), mint: a.mint.to_account_info(), quote_mint: a.quote_mint.to_account_info(),
             quote_decimals: a.curve_config.quote_decimals, lp_authority: a.lp_authority.to_account_info(), seeds: authority_seeds,
             authority_base: a.authority_base.to_account_info(), authority_quote: a.authority_quote.to_account_info(), treasury_base: a.treasury_base.to_account_info(),
             treasury_quote: a.treasury_quote.to_account_info(), reward_base: a.reward_base.to_account_info(), reward_quote: a.reward_quote.to_account_info(),
-        }.pay(base_out, quote_out, buyback_bps)?;
+        };
+        let split = payout.pay(base_out, quote_out, buyback_bps, 0)?;
         let (protocol_base, protocol_quote) = (split.protocol_base, split.protocol_quote);
         let after = PumpState::read(&a.pump_pool.to_account_info(), &a.pump_pool_base.to_account_info(), &a.pump_pool_quote.to_account_info())?;
         let lp_after = token_amount(&a.authority_lp.to_account_info())?;
         require!(liquidity_units(lp_after, &after)? >= a.migration.principal, ElpidaError::PrincipalBreached);
         let (pool_key, pump_pool) = (a.pool.key(), a.pump_pool.key());
         if buyback_bps > 0 { split.record(&ctx.accounts.migration.to_account_info(), pool_key)?; }
+        payout.release_stranded(&ctx.accounts.migration.to_account_info(), pool_key)?;
         let migration = &mut ctx.accounts.migration;
         migration.lp_locked = lp_after;
         migration.harvested_lp = migration.harvested_lp.checked_add(harvest).ok_or(ElpidaError::MathOverflow)?;
@@ -862,7 +866,7 @@ pub mod elpida_launchpad {
             quote_decimals: a.curve_config.quote_decimals, lp_authority: a.lp_authority.to_account_info(), seeds: authority_seeds,
             authority_base: a.authority_base.to_account_info(), authority_quote: a.authority_quote.to_account_info(), treasury_base: a.treasury_base.to_account_info(),
             treasury_quote: a.treasury_quote.to_account_info(), reward_base: a.reward_base.to_account_info(), reward_quote: a.reward_quote.to_account_info(),
-        }.pay(base_out, quote_out, buyback_bps)?;
+        }.pay(base_out, quote_out, buyback_bps, buyback_bps)?;
         let (after, _) = read_raydium(&a.ray_pool.to_account_info(), &a.ray_vault_0.to_account_info(), &a.ray_vault_1.to_account_info(), &mint_key)?;
         let lp_after = token_amount(&a.authority_lp.to_account_info())?;
         require!(liquidity_units(lp_after, &after)? >= a.migration.principal, ElpidaError::PrincipalBreached);
@@ -987,9 +991,11 @@ struct HarvestPayout<'a, 'info> {
 struct HarvestSplit { protocol_base: u64, protocol_quote: u64, burn_base: u64, queue_quote: u64 }
 impl<'a, 'info> HarvestPayout<'a, 'info> {
     #[inline(never)]
-    fn pay(&self, base_out: u64, quote_out: u64, buyback_bps: u128) -> Result<HarvestSplit> {
+    /// `burn_bps` of the token side is burned; `queue_bps` of the quote side waits for a buyback (0 where the venue
+    /// has none, so that share stays in the protocol half).
+    fn pay(&self, base_out: u64, quote_out: u64, burn_bps: u128, queue_bps: u128) -> Result<HarvestSplit> {
         let (half_base, half_quote) = (base_out / 2, quote_out / 2);
-        let (burn_base, queue_quote) = ((base_out as u128 * buyback_bps / BPS) as u64, (quote_out as u128 * buyback_bps / BPS) as u64);
+        let (burn_base, queue_quote) = ((base_out as u128 * burn_bps / BPS) as u64, (quote_out as u128 * queue_bps / BPS) as u64);
         let (protocol_base, protocol_quote) = (half_base - burn_base, half_quote - queue_quote);
         if burn_base > 0 {
             token::burn(
@@ -1014,6 +1020,24 @@ impl<'a, 'info> HarvestPayout<'a, 'info> {
             }
         }
         Ok(HarvestSplit { protocol_base, protocol_quote, burn_base, queue_quote })
+    }
+}
+impl<'a, 'info> HarvestPayout<'a, 'info> {
+    /// PumpSwap pools: quote an earlier build queued for a buyback that this venue cannot run goes to the treasury.
+    fn release_stranded(&self, migration: &AccountInfo<'info>, pool: Pubkey) -> Result<()> {
+        let mut ext = match MigrationExt::read(&migration.try_borrow_data()?) { Some(ext) => ext, None => return Ok(()) };
+        if ext.venue == VENUE_RAYDIUM || ext.pending_buyback == 0 { return Ok(()); }
+        let amount = ext.pending_buyback.min(token_amount(&self.authority_quote)?);
+        if amount > 0 {
+            ti::transfer_checked(
+                CpiContext::new_with_signer(self.quote_program.clone(), ti::TransferChecked { from: self.authority_quote.clone(), mint: self.quote_mint.clone(), to: self.treasury_quote.clone(), authority: self.lp_authority.clone() }, &[self.seeds]),
+                amount, self.quote_decimals,
+            )?;
+        }
+        ext.pending_buyback = 0;
+        ext.write(&mut migration.try_borrow_mut_data()?)?;
+        emit!(StrandedBuybackReleased { pool, amount });
+        Ok(())
     }
 }
 impl HarvestSplit {
@@ -2148,6 +2172,8 @@ pub struct PartnerBuyback { pub pool: Pubkey, pub quote_in: u64, pub tokens_burn
 pub struct PartnerHarvest { pub pool: Pubkey, pub base_burned: u64, pub quote_queued: u64, pub pending_buyback: u64 }
 #[event]
 pub struct RaydiumMigrated { pub pool: Pubkey, pub ray_pool: Pubkey, pub lp_mint: Pubkey, pub raised: u64, pub creation_cost: u64, pub repaid: u64 }
+#[event]
+pub struct StrandedBuybackReleased { pub pool: Pubkey, pub amount: u64 }
 #[event]
 pub struct PartnerLpBuyback { pub pool: Pubkey, pub quote_in: u64, pub tokens_burned: u64, pub pending_buyback: u64, pub total_burned: u64 }
 #[event]

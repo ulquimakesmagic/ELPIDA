@@ -38,8 +38,12 @@ test('EVM: one run collects the pool fees and spends the queued share on a buyba
   assert.equal(await worker.run(listing, { spent: 0n }), null, 'nothing to do before anyone trades on the pool');
   await buy(f.signers[1], parseEther('0.3'));
   const deadBefore = await l.token.balanceOf(DEAD), burnedBefore = await splitter.burned();
+  const collected = await worker.run(listing, { spent: 0n });
+  assert.equal(collected.hashes.length, 1, 'collectFees; right after trading the buyback waits for the price to settle (E-1)');
+  assert.equal(collected.burned, undefined);
+  await f.advance(601);
   const result = await worker.run(listing, { spent: 0n });
-  assert.equal(result.hashes.length, 2, 'collectFees, then buyback');
+  assert.equal(result.hashes.length, 1, 'then the buyback, on a later run');
   assert.ok(result.cost > 0n);
   assert.ok(BigInt(result.burned) > 0n, 'the buyback bought tokens');
   assert.ok(await splitter.burned() > burnedBefore);
@@ -51,11 +55,12 @@ test('EVM: one run collects the pool fees and spends the queued share on a buyba
 test('EVM: the per-transaction cap and the daily budget stop the worker before it signs', async t => {
   const { f, buy, listing, splitter } = await graduatedPartner(t);
   await buy(f.signers[1], parseEther('0.3'));
+  const queued = await splitter.pendingBuyback(f.dex.weth.target);   // graduation's quote dust share (E-3), if any
   const capped = evmBuybackWorker({ chain: 'local', chainId: 31337, signer: f.signers[3], listings: async () => [listing], maxCost: 1n });
   await assert.rejects(capped.run(listing, { spent: 0n }), { code: 'transaction_cost' });
   const spentOut = evmBuybackWorker({ chain: 'local', chainId: 31337, signer: f.signers[3], listings: async () => [listing], maxCost: parseEther('0.05'), dailyBudget: parseEther('0.1') });
   await assert.rejects(spentOut.run(listing, { spent: parseEther('0.1') }), { code: 'daily_budget' });
-  assert.equal(await splitter.pendingBuyback(f.dex.weth.target), 0n, 'nothing was collected or queued');
+  assert.equal(await splitter.pendingBuyback(f.dex.weth.target), queued, 'nothing was collected or queued');
   assert.throws(() => evmBuybackWorker({ chain: 'base', chainId: 8453, signer: f.signers[3], listings: async () => [] }), /not an allowed testnet/, 'mainnets are refused');
   for (const id of [1, 56, 8453, 4663]) assert.equal(BUYBACK_EVM_CHAINS.has(id), false);
 });

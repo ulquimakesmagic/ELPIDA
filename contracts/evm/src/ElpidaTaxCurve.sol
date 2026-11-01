@@ -53,6 +53,7 @@ contract ElpidaTaxCurve {
     event CurveCompleted(uint256 realQuote);
     event CurveReopened(uint256 completedAt, uint256 reopenedAt);
     event Graduated(address indexed pool, uint256 quoteLiquidity, uint256 tokenLiquidity, uint256 burned);
+    event QuoteDustForwarded(address indexed splitter, uint256 amount);
     modifier nonReentrant() { require(!entered, "reentrancy"); entered = true; _; entered = false; }
     struct Domain {address quote;address token;address factory;address treasury;address reward;uint256 virtualQuote;uint256 virtualToken;address adapter;uint256 grace;uint16 buyTax;uint16 sellTax;}
     constructor(Domain memory d) {
@@ -221,7 +222,23 @@ contract ElpidaTaxCurve {
         if (burned > 0) require(token.transfer(address(0xdead), burned), "dust burn");
         // Native migration refunds are wrapped ETH. Retain separate dust accounting; never label it trading reserve.
         quoteDust = total - result.quoteUsed;
-        emit Graduated(pool, result.quoteUsed, result.tokenUsed, burned); return pool;
+        emit Graduated(pool, result.quoteUsed, result.tokenUsed, burned);
+        _forwardQuoteDust(); return pool;
+    }
+    /// Permissionless: pays quote left over from graduation (the part the pool could not take, for example after the
+    /// adapter repriced a pre-created pool) into this token's fee splitter, where it is split like LP fees, so it
+    /// is never stranded here (review finding E-3). Graduation does this itself; this is the retry if that failed.
+    function forwardQuoteDust() external nonReentrant { _forwardQuoteDust(); }
+    function _forwardQuoteDust() private {
+        address splitter = feeSplitter; uint256 dust = quoteDust;
+        if (dust == 0 || splitter == address(0)) return;
+        IERC20Minimal asset = address(quote) == address(0) ? IERC20Minimal(migrationAdapter.weth()) : quote;
+        // Dust is accounted apart from fees; never send more of the asset than the curve holds.
+        uint256 held = asset.balanceOf(address(this)); if (dust > held) dust = held;
+        if (dust == 0) return;
+        require(asset.approve(splitter, dust), "dust approval");
+        try ElpidaFeeSplitter(splitter).depositToken(address(asset), dust) { quoteDust -= dust; emit QuoteDustForwarded(splitter, dust); }
+        catch { require(asset.approve(splitter, 0), "dust approval cleanup"); }
     }
     function _pay(address recipient, uint256 value) private {
         if (address(quote) == address(0)) { (bool ok,) = recipient.call{value: value}(""); require(ok, "native payout"); }

@@ -7,7 +7,9 @@
 // buyback, and the payouts can only go to the recipients fixed at launch. The worker's wallet pays network fees only.
 //
 // - EVM: `locker.collectFees()` (credits the creator and the treasury and queues the quote-side burn share), then
-//   `splitter.buyback()` (spends at most 1% of the pool's quote balance per call; a backlog drains over later runs).
+//   `splitter.buyback()` (spends at most 0.5% of the pool's quote balance per call, once per block, and only while the
+//   pool's price is near its 10-minute average, so a sandwich makes it wait instead of overpay; a backlog drains over
+//   later runs).
 // - Solana: one transaction with `harvest_raydium_fees` (or `harvest_lp_fees` on PumpSwap) and, on Raydium,
 //   `raydium_buyback` (also capped at 1% of the pool's SOL depth).
 //
@@ -91,6 +93,9 @@ export class BuybackKeeper {
   async close() { this.stopping = true; clearInterval(this.timer); while (this.running) await new Promise(r => setTimeout(r, 50)); this.db.close(); }
 }
 
+/** Splitter refusals that mean "not now": nothing queued, the price guard (review finding E-1) or a buyback this block. */
+export const BUYBACK_WAIT = /nothing to buy back|price away from average|price history too short|one buyback per block/;
+
 /** Errors that only mean the index or the pool read is not ready yet; the token is retried on the next tick. */
 export const TRANSIENT = new Set(['config_unavailable', 'pool_unavailable']);
 const errorCode = error => String(error?.code && typeof error.code === 'string' ? error.code : error?.message ?? 'error').replace(/[^a-zA-Z0-9_ .:-]/g, '').slice(0, 80);
@@ -132,11 +137,12 @@ export function evmBuybackWorker({ chain, chainId, signer, listings, maxCost = p
       const quoteOut = token.tokenFirst ? a1 : a0, tokenOut = token.tokenFirst ? a0 : a1, native = token.pair === 'native';
       const worth = quoteOut + parseEther((Number(formatEther(tokenOut)) * (Number(token.spotPrice) || 0)).toFixed(12));
       if (quoteOut > 0n || tokenOut > 0n) await send(locker, 'collectFees', worst => !native || worth >= worst);
-      // 2. Spend the queued burn share (capped at 1% of depth per call by the contract).
+      // 2. Spend the queued burn share (capped at 0.5% of depth per call by the contract). The contract refuses while
+      //    the price is away from its recent average or has too little history; that is a wait, not an error.
       if (await splitter.pendingBuyback(token.quoteAsset) > 0n) {
         let receipt;
         try { receipt = await send(splitter, 'buyback'); }
-        catch (error) { if (/nothing to buy back/.test(String(error?.shortMessage ?? error?.message))) receipt = null; else throw error; }
+        catch (error) { if (BUYBACK_WAIT.test(String(error?.reason ?? error?.shortMessage ?? error?.message))) receipt = null; else throw error; }
         if (receipt) {
           const burned = receipt.logs.map(l => { try { return splitter.interface.parseLog(l); } catch { return null; } }).find(e => e?.name === 'BuybackBurned');
           if (burned) return { cost, hashes, burned: burned.args[2].toString() };
