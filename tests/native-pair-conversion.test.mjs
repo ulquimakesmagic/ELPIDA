@@ -45,4 +45,33 @@ test('real V3 liquidity converts native to a pair asset and cashes it back out w
  const receipt=await mined(signer.sendTransaction({to:d.router.target,data:back}));
  assert.ok(await f.provider.getBalance(owner)+receipt.gasUsed*receipt.gasPrice>=nativeBefore+reverse.minimum);
  assert.equal(await f.usdc.allowance(owner,d.router.target),0n);
+ // Execute the browser's actual atomic composition from a smart wallet, then force a late failure.
+ await import('./helpers/browser-modules.mjs');
+ const {TestnetWallet}=await import('../apps/web/wallet.mjs');
+ const {launch}=await import('./helpers/dex-fixture.mjs');
+ const {ContractFactory}=await import('ethers');const solc=(await import('solc')).default;
+ const source='pragma solidity ^0.8.24; contract Account {address immutable owner;constructor(){owner=msg.sender;}receive()external payable{} function execute(address[] calldata t,bytes[] calldata d,uint256[] calldata v)external{require(msg.sender==owner);for(uint i;i<t.length;i++){(bool ok,)=t[i].call{value:v[i]}(d[i]);require(ok,"batch failed");}}}';
+ const artifact=JSON.parse(solc.compile(JSON.stringify({language:'Solidity',sources:{'A.sol':{content:source}},settings:{outputSelection:{'*':{'*':['abi','evm.bytecode.object']}}}}))).contracts['A.sol'].Account;
+ const account=await new ContractFactory(artifact.abi,artifact.evm.bytecode.object,signer).deploy();await account.waitForDeployment();await mined(signer.sendTransaction({to:account.target,value:parseEther('.1')}));
+ const l=await launch(f,{native:false,firstBuy:0n});await f.advance(61);
+ const wallet=Object.create(TestnetWallet.prototype),item={address:l.token.target,curve:l.curve.target,pair:'usdc',quoteAddress:f.usdc.target,quoteDecimals:6,symbol:'HOPE'};
+ Object.assign(wallet,{provider:f.provider,address:account.target,net:{chainId:31337},launches:new Map([[item.address.toLowerCase(),item]]),checkNetwork:async()=>{},verifyFactory:async()=>f.factory,canBatch:async()=>true,stockPreflight:async()=>{}});
+ Object.defineProperties(wallet,{dex:{value:d.config},artifacts:{value:{curve:{abi:l.curve.interface.fragments}}}});
+ let fail=false;
+ wallet.sendCalls=async(calls,message,options)=>{assert.equal(options.atomicRequired,true);const txs=fail?[...calls,{to:account.target,data:'0xdeadbeef'}]:calls;const receipt=await mined(account.execute(txs.map(c=>c.to),txs.map(c=>c.data),txs.map(c=>c.value??0n)));return {tx:{hash:receipt.hash},receipt};};
+ let atomicQuote=await wallet.getNativePairTradeQuote({token:item.address,side:'buy',amount:'0.0000000001'});
+ await wallet.tradeNativePair(atomicQuote);assert.ok(await l.token.balanceOf(account.target)>0n);assert.equal(await f.usdc.allowance(account.target,l.curve.target),0n);
+ atomicQuote=await wallet.getNativePairTradeQuote({token:item.address,side:'sell',amount:'1000000'});await wallet.tradeNativePair(atomicQuote);
+ assert.equal(await l.token.allowance(account.target,l.curve.target),0n);assert.equal(await f.usdc.allowance(account.target,d.router.target),0n);
+ const beforeTokens=await l.token.balanceOf(account.target),beforeQuote=await f.usdc.balanceOf(account.target),beforeNative=await f.provider.getBalance(account.target);
+ atomicQuote=await wallet.getNativePairTradeQuote({token:item.address,side:'buy',amount:'0.0000000001'});fail=true;await assert.rejects(wallet.tradeNativePair(atomicQuote),/batch failed/);
+ assert.equal(await l.token.balanceOf(account.target),beforeTokens);assert.equal(await f.usdc.balanceOf(account.target),beforeQuote);assert.equal(await f.provider.getBalance(account.target),beforeNative);
+ fail=false;const {complete}=await import('./helpers/dex-fixture.mjs');await complete(f,l);await mined(l.curve.graduate());
+ wallet.config={contracts:{quoter:{abi:d.quoter.interface.fragments},pool:{abi:[]}}};
+ atomicQuote=await wallet.getNativePairTradeQuote({token:item.address,side:'buy',amount:'0.0000000001'});await wallet.tradeNativePair(atomicQuote);
+ atomicQuote=await wallet.getNativePairTradeQuote({token:item.address,side:'sell',amount:'1000000'});await wallet.tradeNativePair(atomicQuote);
+ assert.notEqual(await l.curve.pool(),'0x0000000000000000000000000000000000000000');
+ const unsupported=Object.create(TestnetWallet.prototype);unsupported.canBatch=async()=>false;
+ await assert.rejects(unsupported.sendCalls([{to:owner,data:'0x'},{to:owner,data:'0x'}],'test',{atomicRequired:true}),/no transactions were submitted/);
+
 });

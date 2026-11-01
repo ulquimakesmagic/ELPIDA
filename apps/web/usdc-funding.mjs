@@ -51,3 +51,20 @@ export function nativePairFunding(ctx,token){
   }}},'Get native/pair conversion quote');
   return h('details',h('summary',`Fund with ${native} / cash out to ${native}`),h('div.stack',h('p.hint',`Your token stays paired with ${asset}. Convert native coin into the pair asset before buying; after selling, convert the pair asset back to native coin. Each step has separate fees and confirmation. Cancelling a later step leaves earlier proceeds in your wallet. Routes require funded liquidity and issuer permission.`),direction,amount,getQuote,status,confirm,error));
 }
+
+export function atomicNativeTrade(ctx,token){
+  if(ctx.mode!=='testnet'||token.pair==='native'||typeof ctx.wallet.getNativePairTradeQuote!=='function')return null;
+  let q=null,busy=false;
+  const native=ctx.wallet.net.nativeCurrency.symbol,side=h('select',{'aria-label':'Atomic native trade side'},h('option',{value:'buy'},`Buy with ${native}`),h('option',{value:'sell'},`Sell for ${native}`));
+  const amount=h('input',{type:'number',min:'0',step:'any','aria-label':'Atomic native trade amount'}),status=h('p.small',{role:'status'}),error=h('p.error-text',{role:'alert'});
+  const clear=()=>{q=null;confirm.hidden=true;status.textContent='';};amount.addEventListener('input',clear);side.addEventListener('change',clear);
+  const confirm=h('button.btn.btn-secondary',{type:'button',hidden:true,on:{click:async()=>{
+    if(busy||!q)return;if(q.amount!==amount.value||q.side!==side.value){clear();return;}busy=true;confirm.disabled=true;
+    try{await ctx.run('trade-native-pair',q);clear();status.textContent='Atomic native trade confirmed.';}catch(e){error.textContent=errorText(e);}finally{busy=false;confirm.disabled=false;}
+  }}},'Confirm atomic native trade');
+  const quote=h('button.btn.btn-secondary',{type:'button',on:{click:async()=>{
+    if(busy)return;busy=true;quote.disabled=true;error.textContent='';clear();
+    try{const request={token:token.address,side:side.value,amount:amount.value},result=await ctx.wallet.getNativePairTradeQuote(request);if(request.amount!==amount.value||request.side!==side.value)return;q=result;status.textContent=`Estimated output: ${number(q.output,8)} ${q.side==='buy'?token.symbol:native}. Both hops have 1% slippage protection; any excess pair asset stays in your wallet. Expires in 60 seconds.`;confirm.hidden=false;}catch(e){error.textContent=errorText(e);}finally{busy=false;quote.disabled=false;}
+  }}},'Quote atomic native trade');
+  return h('details',h('summary',`Atomic buy/sell with ${native}`),h('div.stack',h('p.hint',`Buy amount is in ${native}; sell amount is in ${token.symbol}. Requires an atomic-capable wallet and funded native/pair liquidity. All steps succeed together or revert. The underlying pair stays unchanged. Any excess intermediate pair asset remains in your wallet.`),side,amount,quote,status,confirm,error));
+}

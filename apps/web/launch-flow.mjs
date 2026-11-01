@@ -131,7 +131,7 @@ export function renderLaunch(ctx) {
     if (!curve || !(curve.vt > 0)) return '';
     const quote = curve.vq * 1e9 / curve.vt, usd = asset.symbol === 'USDC' ? 1 : asset.id === 'native' && freshPrice(launchPrice()) ? launchPrice().usd : null;
     const testNote = draft.chain === 'local' ? ' · simulation' : draft.chain && !net()?.mainnet ? ' · test size' : '';
-    return usd !== null ? `$${number(quote * usd, 0)} market cap${testNote}` : `${number(quote, 4)} ${asset.symbol} market cap${testNote}`;
+    return usd !== null ? `$${number(quote * usd, 0)} market cap${testNote}` : `USD market cap unavailable${testNote}`;
   }
   function youPay() {
     if(feeAmount()===null)return 'Quote unavailable';

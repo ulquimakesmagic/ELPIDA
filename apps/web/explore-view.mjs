@@ -2,7 +2,7 @@
 // chips, the Live feed column, pagination and URL state. One persistent controller per visit: refreshes
 // update cards in place (keyed by network and address), so rolling numbers and flashes show real changes.
 // Every figure comes from the indexers; a module with nothing to show is hidden, never filled in.
-import { h, icon, short, number, avatar, pricing, fmtValue, progressOf, toast } from './ui.mjs';
+import { h, icon, short, number, avatar, pricing, fmtMarketCap, fmtValue, progressOf, toast } from './ui.mjs';
 import { odometer, setOdometer, changeDirection } from './odometer.mjs';
 import { assetIcon, chainIcon } from './chain-ui.mjs';
 import { nowSeconds } from './clock.mjs';
@@ -75,7 +75,7 @@ function updateCurve(node, token) {
 /** Figures shown on cards, with the raw numbers used to decide which way a change rolls. */
 function figures(token) {
   const cap = pricing(token).marketCap, volume = token.volume24h;
-  return { cap, capText: cap > 0 ? fmtValue(cap, token) : '—', volume: volume == null ? null : Number(volume), volumeText: volume == null ? '—' : fmtValue(Number(volume), token) };
+  return { cap, capText: cap > 0 ? fmtMarketCap(token) : '—', volume: volume == null ? null : Number(volume), volumeText: volume == null ? '—' : fmtValue(Number(volume), token) };
 }
 function devBadge(token) {
   if (token.devBoughtPct == null) return null;

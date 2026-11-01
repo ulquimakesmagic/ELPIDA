@@ -312,6 +312,52 @@ export class TestnetWallet {
     const result=await this.wait(this.signer.sendTransaction({to:this.dex.router,data,value:toNative?0n:input}),'Confirm the separate native/pair conversion...');
     return {hash:result.tx.hash,message:'Conversion confirmed. Funds are in your wallet; the token trade is separate.'};
   }
+  async getNativePairTradeQuote(body) {
+    await this.checkNetwork();await this.verifyFactory();
+    if(!await this.canBatch())throw new Error('Atomic native trading requires an atomic-capable wallet. Use separate conversion instead.');
+    const item=this.launches.get(String(body.token).toLowerCase());
+    if(!item||item.pair==='native'||item.tax)throw new Error('Atomic native trading requires a standard non-native pair.');
+    if(!['buy','sell'].includes(body.side))throw new Error('Invalid native trade side.');
+    const asset=this.qaddr(item),buy=body.side==='buy',input=parseUnits(this.nativeAmount(body.amount),18),market=await this.market(item);
+    let route,pairAmount,output;
+    if(buy){
+      route=await quoteNativePairConversion({Contract,provider:this.provider,dex:this.dex,asset,amountIn:input});
+      pairAmount=route.minimum;
+      output=market.target.toLowerCase()===item.curve.toLowerCase()?(await market.quoteBuy(pairAmount))[0]:await this.dexQuote(item,'buy',pairAmount);
+    }else{
+      const pairOut=market.target.toLowerCase()===item.curve.toLowerCase()?(await market.quoteSell(input))[0]:await this.dexQuote(item,'sell',input);
+      pairAmount=pairOut*9900n/10000n;
+      route=await quoteNativePairConversion({Contract,provider:this.provider,dex:this.dex,asset,amountIn:pairAmount,toNative:true});
+      output=route.amountOut;
+    }
+    const minimum=output*9900n/10000n;
+    if(minimum<=0n)throw new Error('Trade amount is too small.');
+    return {token:body.token,side:body.side,amount:body.amount,minimum:minimum.toString(),output:formatUnits(output,18),quotedAt:Date.now(),pairAmount:pairAmount.toString(),route,market:market.target};
+  }
+  async tradeNativePair(body) {
+    if(!Number.isFinite(body.quotedAt)||Date.now()-body.quotedAt>60000||body.quotedAt>Date.now())throw new Error('Native trade quote expired.');
+    const q=await this.getNativePairTradeQuote(body),minimum=BigInt(body.minimum);
+    if(minimum<=0n||BigInt(q.minimum)<minimum)throw new Error('Native trade price moved. Get a fresh quote.');
+    const item=this.launches.get(String(body.token).toLowerCase()),buy=body.side==='buy',asset=this.qaddr(item),input=parseUnits(body.amount,18),pairAmount=BigInt(q.pairAmount);
+    const original=new Contract(item.curve,this.artifacts.curve.abi,this.provider);
+    await this.stockPreflight(item,body.side,{input:buy?pairAmount:input,curve:original});
+    const deadline=BigInt((await this.provider.getBlock('latest')).timestamp+300),calls=[];
+    const approval=(token,spender,amount)=>{const i=new Interface(['function approve(address,uint256) returns(bool)']);return {to:token,data:i.encodeFunctionData('approve',[spender,amount])};};
+    const conversion={to:this.dex.router,value:buy?input:0n,data:swapCalldata(Interface,this.dex.routerVersion??2,this.dex.router,{tokenIn:q.route.tokenIn,tokenOut:q.route.tokenOut,fee:q.route.fee,recipient:this.address,amountIn:buy?input:pairAmount,amountOutMinimum:buy?pairAmount:minimum},{deadline,unwrapTo:buy?null:this.address,refundETH:buy})};
+    if(buy)calls.push(conversion);
+    const payment=buy?asset:item.address,spend=buy?pairAmount:input,onCurve=q.market.toLowerCase()===item.curve.toLowerCase(),spender=onCurve?q.market:this.dex.router;
+    calls.push(approval(payment,spender,spend));
+    if(onCurve){
+      const i=new Interface(['function buy(uint256,uint256)','function sell(uint256,uint256)']);
+      calls.push({to:q.market,data:i.encodeFunctionData(body.side,[spend,buy?minimum:pairAmount])});
+    }else{
+      calls.push({to:this.dex.router,data:swapCalldata(Interface,this.dex.routerVersion??2,this.dex.router,{tokenIn:payment,tokenOut:buy?item.address:asset,fee:this.dex.fee??10000,recipient:this.address,amountIn:spend,amountOutMinimum:buy?minimum:pairAmount},{deadline})});
+    }
+    calls.push(approval(payment,spender,0n));
+    if(!buy){calls.push(approval(asset,this.dex.router,pairAmount),conversion,approval(asset,this.dex.router,0n));}
+    const result=await this.sendCalls(calls,'Confirm the atomic native trade.',{atomicRequired:true});
+    return {hash:result.tx.hash,message:'Atomic native trade confirmed. Any excess pair asset remains in your wallet.'};
+  }
   async getUsdcConversionQuote(body) {
     await this.checkNetwork();await this.verifyFactory();
     const nativeAmount=this.nativeAmount(body?.nativeAmount);
@@ -504,10 +550,12 @@ export class TestnetWallet {
     if (this.batchSupport?.key !== key) this.batchSupport = { key, value: await supportsAtomicLaunch(args => this.eth.request(args), this.address, this.net.chainId) };
     return this.batchSupport.value;
   }
-  async sendCalls(calls, message) {
+  async sendCalls(calls, message, {atomicRequired=false} = {}) {
     if (!calls.length) throw new Error('Nothing to send.');
     const request = args => this.eth.request(args);
-    if (calls.length > 1 && await this.canBatch()) {
+    const batchAvailable=calls.length>1&&await this.canBatch();
+    if(atomicRequired&&!batchAvailable)throw new Error('Atomic wallet support is required; no transactions were submitted.');
+    if (batchAvailable) {
       await this.checkNetwork();
       this.onProgress(`${message} One confirmation covers all ${calls.length} steps.`);
       const sent = await withWalletTimeout(request(atomicBatchRequest({ from: this.address, chainId: this.net.chainId, calls, id: crypto.randomUUID() })), this.walletName);
@@ -792,6 +840,7 @@ export class TestnetWallet {
     if (action === 'setup-pairs') return this.setupTestPairs(body);
     if (action === 'test-stock') return this.testStockControl(body ?? {});
     if (action === 'setup-usdc-pair') return this.setupUsdcPair();
+    if (action === 'trade-native-pair') return this.tradeNativePair(body);
     if (action === 'convert-native-pair') return this.convertNativePair(body);
     if (action === 'convert-usdc') return this.convertUsdc(body);
     if (action === 'apply-pricing') return this.applyPricing();
