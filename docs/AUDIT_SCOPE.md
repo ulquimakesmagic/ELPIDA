@@ -207,7 +207,8 @@ the local chain). No way to take user funds, locked liquidity or creator fees wa
   balance per call. The first queued buyback asks the pool to keep 16 price observations. Replayed, the attack
   loses at every size (`tests/buyback-sandwich.test.mjs`, `partner-tiers-lp.test.mjs`).
 - **S-1 (Medium): the same on Solana's `raydium_buyback`** (cap read live, minimum output 1). **Fix:** the same band
-  against the average price from Raydium's own observation account (10 minutes, at least 60 s of history), checked
+  against the average price from Raydium's own observation account (the latest stretch of at least 60 s; Raydium
+  records a point at most every 15 s), checked
   before and after the swap; minimum output 96% of the amount the average price gives; at most 0.5% of the pool's
   SOL depth per call. The keeper dry-runs the buyback and keeps the harvest when the guard says "wait".
 - **S-2 (Medium): partner pools on PumpSwap queued a quote share that could never be spent** (only Raydium has a

@@ -159,6 +159,8 @@ export const EVENTS = {
   PartnerHarvest: { discriminator: [115, 237, 236, 148, 151, 13, 153, 2], fields: [['pool', 'key'], ['baseBurned', 'u64'], ['quoteQueued', 'u64'], ['pendingBuyback', 'u64']] },
   // SOL pairs: graduation into Raydium CPMM (CurveMigrated is emitted too, with the Raydium pool as pumpPool).
   RaydiumMigrated: { discriminator: [208, 19, 236, 186, 149, 156, 226, 92], fields: [['pool', 'key'], ['rayPool', 'key'], ['lpMint', 'key'], ['raised', 'u64'], ['creationCost', 'u64'], ['repaid', 'u64']] },
+  // PumpSwap partner pools: quote an earlier build queued, released to the treasury at a harvest (review finding S-2).
+  StrandedBuybackReleased: { discriminator: [191, 1, 27, 168, 214, 152, 26, 204], fields: [['pool', 'key'], ['amount', 'u64']] },
   PartnerLpBuyback: { discriminator: [48, 42, 185, 144, 180, 81, 42, 219], fields: [['pool', 'key'], ['quoteIn', 'u64'], ['tokensBurned', 'u64'], ['pendingBuyback', 'u64'], ['totalBurned', 'u64']] },
 };
 

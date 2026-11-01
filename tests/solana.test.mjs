@@ -959,6 +959,9 @@ test('Solana partner tiers on Raydium: the harvest share is burned or queued, an
   await failsWith(send(f.connection, f.outsider, [f.client.raydiumBuyback({ mint })]), /0x1794/);
   assert.equal((await migration(mint)).pendingBuyback, m1.pendingBuyback, 'nothing was spent');
   await raySwap(trader, mint, 'sell', front);
+  // The guard averages the last minute or so: another minute later, a small trade records the settled price.
+  await sleep(62_000);
+  await raySwap(trader, mint, 'buy', SOL / 1000n);
   // Buybacks: each spends the queue, at most 0.5% of the pool's SOL depth, and burns every token it buys. Each moves
   // the price about 1%, so back-to-back calls stop at the band until the average catches up.
   let pending = m1.pendingBuyback, burnedTotal = 0n, ran = 0;

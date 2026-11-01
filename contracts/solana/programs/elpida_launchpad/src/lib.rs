@@ -114,11 +114,11 @@ const RAY_POOL_CREATOR_FEES_0: usize = 397;
 /// price by about 1%, inside the band below.
 pub const BUYBACK_DEPTH_DIVISOR: u64 = 200;
 /// Sandwich guard for `raydium_buyback` (review finding S-1). The pool price must be within MAX_TWAP_DEVIATION_BPS of
-/// its time-weighted average from Raydium's own observation account, over the last TWAP_WINDOW_SECS (or all the
-/// history it keeps, at least MIN_TWAP_SECS), both before and after the buyback's swap. A front-run that moves the
-/// price makes the buyback refuse instead of overpaying, and the swap's minimum output follows the average price.
-pub const TWAP_WINDOW_SECS: u64 = 600;
-pub const MIN_TWAP_SECS: u64 = 60;
+/// its time-weighted average from Raydium's own observation account, over the most recent stretch of at least
+/// TWAP_SECS (Raydium records a point at most every 15 s, on trades), both before and after the buyback's swap. A
+/// front-run that moves the price makes the buyback refuse instead of overpaying, unless the attacker holds the moved
+/// price for a minute against other traders; the swap's minimum output follows the average price.
+pub const TWAP_SECS: u64 = 60;
 pub const MAX_TWAP_DEVIATION_BPS: u128 = 150;
 /// Minimum output of a buyback swap, below the amount the average price gives: the 1% fee, the swap's own price
 /// impact and the band, with margin.
@@ -901,7 +901,7 @@ pub mod elpida_launchpad {
 
     /// Permissionless: spends a partner pool's queued SOL (the quote side of its harvests) on its own token through the
     /// Raydium pool and burns what it buys. One call spends at most 0.5% of the pool's SOL depth, and only while the
-    /// pool's price is near its recent average (see TWAP_WINDOW_SECS).
+    /// pool's price is near its recent average (see TWAP_SECS).
     pub fn raydium_buyback(ctx: Context<RaydiumBuyback>) -> Result<()> {
         let a = &ctx.accounts;
         let mint_key = a.mint.key();
@@ -969,8 +969,9 @@ impl PumpState {
 /// Raydium CPMM pool state, in the same terms as `PumpState`: LP supply and the reserves a withdrawal pays from (vault
 /// balances less the protocol, fund and creator fees Raydium keeps in them), mapped to base (the curve's token) and
 /// quote (SOL). Also returns whether the token is Raydium's token 0 (mints are ordered by address).
-/// The pool's average price over TWAP_WINDOW_SECS ending at its latest observation, as tokens per SOL (base per
-/// quote) shifted left 32 bits. The larger of the two ratios keeps precision for low-priced tokens.
+/// The pool's average price over the most recent stretch of at least TWAP_SECS ending at its latest observation, as
+/// tokens per SOL (base per quote) shifted left 32 bits. The larger of the two ratios keeps precision for low-priced
+/// tokens.
 pub fn raydium_average_base_per_quote(observation: &AccountInfo, ray_pool: &Pubkey, base_is_0: bool) -> Result<u128> {
     require_keys_eq!(*observation.owner, raydium::PROGRAM, ElpidaError::RaydiumAccount);
     let data = observation.try_borrow_data()?;
@@ -989,12 +990,10 @@ pub fn raydium_average_base_per_quote(observation: &AccountInfo, ray_pool: &Pubk
     for back in 1..RAY_OBS_COUNT {
         let (ts, cum) = at((index + RAY_OBS_COUNT - back) % RAY_OBS_COUNT);
         if ts == 0 || ts >= latest_ts { break; }
-        older = Some((ts, cum));
-        if latest_ts - ts >= TWAP_WINDOW_SECS { break; }
+        if latest_ts - ts >= TWAP_SECS { older = Some((ts, cum)); break; }
     }
     let (older_ts, older_cum) = older.ok_or(ElpidaError::PriceHistoryTooShort)?;
     let span = latest_ts - older_ts;
-    require!(span >= MIN_TWAP_SECS, ElpidaError::PriceHistoryTooShort);
     Ok(latest_cum.wrapping_sub(older_cum) / span as u128)
 }
 
