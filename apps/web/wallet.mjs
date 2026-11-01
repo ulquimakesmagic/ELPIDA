@@ -1,8 +1,9 @@
 import {prepareTestLiquidity,testLiquidityCalls,TEST_MANAGER_ABI} from './test-stock-liquidity.mjs';
+import {verifyNativeRouter,findCurveNonce} from './native-trade-router.mjs';
 import { nowSeconds } from './clock.mjs';
 import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
-import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, ZeroAddress } from '/vendor/ethers.js';
+import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress } from '/vendor/ethers.js';
 import { routerAbi, swapCalldata } from '/dex-router.mjs';
 
 import { normalizeMetadata, withSavedMetadata } from './metadata.mjs';
@@ -313,9 +314,28 @@ export class TestnetWallet {
     const result=await this.wait(this.signer.sendTransaction({to:this.dex.router,data,value:toNative?0n:input}),'Confirm the separate native/pair conversion...');
     return {hash:result.tx.hash,message:'Conversion confirmed. Funds are in your wallet; the token trade is separate.'};
   }
+  nativeRouterRecord(){return this.net.nativeTradeRouter??read(`elpida:native-router:v1:${this.net.chainId}:${this.deployment?.factory?.toLowerCase()}`);}
+  async nativeTradeRouter(){
+    const record=this.nativeRouterRecord();if(!record?.address)return null;
+    if(this.net.chainId!==11155111||this.net.mainnet||this.dex?.routerVersion!==2)throw Error('Ordinary-wallet native routing is enabled only for the Sepolia rehearsal.');
+    const artifact=this.config.contracts.nativeTradeRouter,args=[this.deployment.factory,this.dex.router,this.dex.factory,this.dex.weth];
+    const key=JSON.stringify([record,args,artifact.bytecode]);
+    if(this.verifiedNativeRouter?.key===key&&this.verifiedNativeRouter.provider===this.provider)return this.verifiedNativeRouter.contract;
+    const contract=await verifyNativeRouter({Contract,ContractFactory,provider:this.provider,artifact,record,args,chainId:this.net.chainId});this.verifiedNativeRouter={key,contract,provider:this.provider};return contract;
+  }
+  async deployNativeTradeRouter(){
+    await this.checkNetwork();await this.verifyFactory();
+    if(this.net.chainId!==11155111||this.net.mainnet||this.dex?.routerVersion!==2)throw Error('Router deployment is restricted to Ethereum Sepolia.');
+    const artifact=this.config.contracts.nativeTradeRouter,args=[this.deployment.factory,this.dex.router,this.dex.factory,this.dex.weth],key=`elpida:native-router:v1:${this.net.chainId}:${this.deployment.factory.toLowerCase()}`;
+    this.onProgress('Confirm the ordinary-wallet native router deployment on Ethereum Sepolia. Test gas only.');
+    await resumeSetupDeployment({provider:this.provider,storage:localStorage,key,deploy:()=>new ContractFactory(artifact.abi,artifact.bytecode,this.signer).deploy(...args)});
+    const router=await this.nativeTradeRouter(),record=read(key);
+    return {hash:record.hash,message:`Native router verified at ${router.target}. Native trades can now use an ordinary wallet.`};
+  }
   async getNativePairTradeQuote(body) {
     await this.checkNetwork();await this.verifyFactory();
-    if(!await this.canBatch())throw new Error('Atomic native trading requires an atomic-capable wallet. Use separate conversion instead.');
+    const nativeRouter=await this.nativeTradeRouter();
+    if(!nativeRouter&&!await this.canBatch())throw new Error(this.net.chainId===11155111?'Set up the ordinary-wallet native router in Network and test funds before trading with native coin.':'Native trading on this network currently requires an atomic-capable wallet. Direct pair-asset trading remains available.');
     const item=this.launches.get(String(body.token).toLowerCase());
     if(!item||item.pair==='native'||item.tax)throw new Error('Atomic native trading requires a standard non-native pair.');
     if(!['buy','sell'].includes(body.side))throw new Error('Invalid native trade side.');
@@ -333,7 +353,8 @@ export class TestnetWallet {
     }
     const minimum=output*9900n/10000n;
     if(minimum<=0n)throw new Error('Trade amount is too small.');
-    return {token:body.token,side:body.side,amount:body.amount,minimum:minimum.toString(),output:formatUnits(output,18),quotedAt:Date.now(),pairAmount:pairAmount.toString(),route,market:market.target};
+    let curveNonce=null;if(nativeRouter){const deployer=await nativeRouter.curveDeployer();curveNonce=findCurveNonce(getCreateAddress,deployer,item.curve,await this.provider.getTransactionCount(deployer));await nativeRouter.market(item.curve,curveNonce);}
+    return {token:body.token,side:body.side,amount:body.amount,minimum:minimum.toString(),output:formatUnits(output,18),quotedAt:Date.now(),pairAmount:pairAmount.toString(),route,market:market.target,execution:nativeRouter?'router':'batch',nativeRouter:nativeRouter?.target??null,curveNonce};
   }
   async tradeNativePair(body) {
     if(!Number.isFinite(body.quotedAt)||Date.now()-body.quotedAt>60000||body.quotedAt>Date.now())throw new Error('Native trade quote expired.');
@@ -343,6 +364,14 @@ export class TestnetWallet {
     const original=new Contract(item.curve,this.artifacts.curve.abi,this.provider);
     await this.stockPreflight(item,body.side,{input:buy?pairAmount:input,curve:original});
     const deadline=BigInt((await this.provider.getBlock('latest')).timestamp+300),calls=[];
+    if(q.execution==='router'){
+      const router=await this.nativeTradeRouter();
+      if(!buy){const coin=new Contract(item.address,['function allowance(address,address) view returns(uint256)','function approve(address,uint256) returns(bool)'],this.signer);if(await coin.allowance(this.address,router.target)!==input){if(await coin.allowance(this.address,router.target)>0n)await this.wait(coin.approve(router.target,0n),'Reset native sell approval…');await this.wait(coin.approve(router.target,input),'Approve this token amount for the native sell…');}}
+      await this.checkNetwork();
+      const request={curve:item.curve,curveNonce:q.curveNonce,conversionFee:q.route.fee,amount:input,pairMinimum:pairAmount,minimum,deadline};
+      const connected=router.connect(this.signer),result=await this.wait(buy?connected.buy(request,{value:input}):connected.sell(request),'Confirm the native trade. Conversion and token trade succeed together or revert.');
+      return {hash:result.tx.hash,message:'Native trade confirmed. Any unused pair asset was returned to your wallet.'};
+    }
     const approval=(token,spender,amount)=>{const i=new Interface(['function approve(address,uint256) returns(bool)']);return {to:token,data:i.encodeFunctionData('approve',[spender,amount])};};
     const conversion={to:this.dex.router,value:buy?input:0n,data:swapCalldata(Interface,this.dex.routerVersion??2,this.dex.router,{tokenIn:q.route.tokenIn,tokenOut:q.route.tokenOut,fee:q.route.fee,recipient:this.address,amountIn:buy?input:pairAmount,amountOutMinimum:buy?pairAmount:minimum},{deadline,unwrapTo:buy?null:this.address,refundETH:buy})};
     if(buy)calls.push(conversion);
@@ -869,6 +898,7 @@ export class TestnetWallet {
     if(action==='launch'&&body.tax)return launchPublicTax(this,body);
     const factory = (await this.verifyFactory()).connect(this.signer);
     let result;
+    if (action === 'deploy-native-router') return this.deployNativeTradeRouter();
     if (action === 'setup-test-liquidity') return this.setupTestStockLiquidity(body);
     if (action === 'setup-pairs') return this.setupTestPairs(body);
     if (action === 'test-stock') return this.testStockControl(body ?? {});

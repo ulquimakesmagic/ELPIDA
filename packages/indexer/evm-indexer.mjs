@@ -1,3 +1,4 @@
+import {nativeRouterAccount,NATIVE_TRADE_TOPIC} from './native-router-attribution.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
@@ -209,6 +210,9 @@ export class EvmIndexer {
     // Refuse to commit an inconsistent history if the block was replaced mid-read.
     if((await this.provider.getBlock(height))?.hash!==block.hash)throw new Error('Chain changed during indexing; retry.');
     logs.push(...launches);logs.sort((a,b)=>a.transactionIndex-b.transactionIndex || a.index-b.index);
+    const hasMarketTrades=logs.some(l=>{const info=addressMap.get(l.address.toLowerCase());return info&&['Bought','Sold','Swap'].includes(this.parse(info.kind,l)?.name);});
+    const nativeLogs=hasMarketTrades?await this.provider.getLogs({fromBlock:height,toBlock:height,topics:[NATIVE_TRADE_TOPIC]}):[];
+    if(nativeLogs.some(l=>l.blockHash&&l.blockHash!==block.hash))throw Error('Chain changed during native attribution; retry.');
     this.db.exec('BEGIN IMMEDIATE');
     try {
       this.db.prepare('INSERT INTO blocks VALUES(?,?,?,?)').run(height,block.hash,block.parentHash,block.timestamp);
@@ -223,6 +227,7 @@ export class EvmIndexer {
           const buy=dex?quoteDelta>0n:e.name==='Bought',q=dex?(quoteDelta<0n?-quoteDelta:quoteDelta):buy?e.args.quoteIn:e.args.quoteOut,t=dex?(tokenDelta<0n?-tokenDelta:tokenDelta):buy?e.args.tokensOut:e.args.tokensIn,d=info.r.quoteDecimals;
           if(q===0n||t===0n)continue;
           const trade={hash:l.transactionHash,index:l.index,token:info.r.address,market:l.address,venue:kind,side:buy?'buy':'sell',account:dex?(e.args.recipient??e.args.to):buy?e.args.recipient:e.args.seller,sender:dex?e.args.sender:null,accountBasis:dex?'pool recipient; payer may be a router':null,quoteRaw:q.toString(),tokenRaw:t.toString(),quoteAmount:formatUnits(q,d),tokenAmount:formatUnits(t,18),quoteSymbol:info.r.quoteSymbol,priceQuote:ratio(q*10n**18n,t*10n**BigInt(d)),priceBasis:'execution, including trader fees',timestamp:block.timestamp,blockNumber:height};
+          const routedAccount=nativeRouterAccount({trade,curve:info.r.curve,logs,nativeLogs});if(routedAccount){trade.account=routedAccount;trade.accountBasis='router settlement matched to token transfer';trade.priceBasis='underlying pair execution; native conversion fee excluded';}
           this.db.prepare('INSERT OR IGNORE INTO trades VALUES(?,?,?,?,?,?)').run(l.transactionHash,l.index,info.r.address,height,block.timestamp,json(trade));
         }
       }
