@@ -49,3 +49,19 @@ test('HTTP 429 is retried; a refusal that never clears still fails after the ret
   await assert.rejects(read(provider));
   provider.destroy();
 });
+
+test('empty simulation errors use only fresh same-chain read fallbacks; broadcasts and real revert bytes never retry',async()=>{
+ const {recoverEmptySimulation}=await import('../apps/web/paced-rpc.mjs');
+ const original={id:7,error:{code:3,message:'execution reverted'}},payload={jsonrpc:'2.0',id:7,method:'eth_estimateGas',params:[{to:'0x'+'1'.repeat(40)}]},seen=[];
+ const request=async(url,p)=>{seen.push([url,p.method]);if(p.method==='eth_chainId')return {result:url.includes('wrong')?'0x1':'0xaa36a7'};if(p.method==='eth_getBlockByNumber')return {result:{timestamp:url.includes('stale')?'0x1':'0x3e8',gasLimit:'0xbebc200'}};assert.equal(p.params[0].gas,'0xbebc200');return {id:p.id,result:'0x12345'};};
+ const opts={urls:['https://wrong.test','https://stale.test','https://good.test'],chainId:11155111,request,now:()=>1000};
+ assert.equal((await recoverEmptySimulation(payload,original,opts)).result,'0x12345');
+ assert.equal(seen.filter(x=>x[1]==='eth_estimateGas').length,1);
+ seen.length=0;
+ assert.equal(await recoverEmptySimulation({...payload,method:'eth_sendTransaction'},original,opts),original);assert.equal(seen.length,0);
+ const real={id:7,error:{code:3,message:'execution reverted',data:'0x08c379a0'}};
+ assert.equal(await recoverEmptySimulation(payload,real,opts),real);assert.equal(seen.length,0);
+ const useful=await recoverEmptySimulation(payload,original,{...opts,urls:['https://good.test','https://later.test'],request:async(u,p)=>p.method==='eth_estimateGas'?real:request(u,p)});
+ assert.equal(useful,real);assert.ok(!seen.some(x=>x[0].includes('later')));
+ assert.equal(await recoverEmptySimulation(payload,original,{...opts,urls:['https://wrong.test','https://stale.test']}),original);
+});

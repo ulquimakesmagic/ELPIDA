@@ -176,7 +176,7 @@ export class TestnetWallet {
     if (!this.provider || this.readEndpoint !== `${net.chainId}:${net.rpcUrl}`) {
       retire(this.provider);
       const rpc=new FetchRequest(net.rpcUrl);rpc.timeout=15000;
-      this.provider = new PacedJsonRpcProvider(rpc, net.chainId, { staticNetwork:true,cacheTimeout: -1, batchMaxCount: 1 });
+      this.provider = new PacedJsonRpcProvider(rpc, net.chainId, { staticNetwork:true,cacheTimeout: -1, batchMaxCount: 1 }, { fallbacks: net.rpcFallbacks ?? [] });
       this.readEndpoint = `${net.chainId}:${net.rpcUrl}`;
     }
     this.signer = new PublicRpcSigner(await this.signerProvider.getSigner(), this.provider, { onSlow: message => this.onProgress?.(message) });

@@ -24,8 +24,8 @@ export class PublicRpcSigner extends AbstractSigner {
   signTransaction() { throw new Error('Browser wallets submit transactions themselves; use sendTransaction.'); }
 
   /** Shows a hint if the wallet has not answered in time; never cancels the request. */
-  async slow(pending) {
-    const timer = setTimeout(() => this.onSlow('Still waiting for your wallet. If no wallet window opened, open the wallet extension: an earlier request may be waiting there, or reconnect the wallet.'), this.slowMs);
+  async slow(pending, message = 'Still waiting for your wallet. If no wallet window opened, open the wallet extension: an earlier request may be waiting there, or reconnect the wallet.') {
+    const timer = setTimeout(() => this.onSlow(message), this.slowMs);
     try { return await pending; } finally { clearTimeout(timer); }
   }
 
@@ -41,7 +41,8 @@ export class PublicRpcSigner extends AbstractSigner {
   }
 
   async sendTransaction(tx) {
-    const hash = await this.slow(this.walletSigner.sendUncheckedTransaction(await this.withGasLimit(tx)));
+    const prepared=await this.slow(this.withGasLimit(tx),'Checking transaction simulation and gas on this network. No wallet request has been sent yet.');
+    const hash = await this.slow(this.walletSigner.sendUncheckedTransaction(prepared));
     // The wallet broadcast it; find it on the public RPC (propagation takes a few seconds).
     for (const started = Date.now(); ;) {
       const found = await this.provider.getTransaction(hash).catch(() => null);
