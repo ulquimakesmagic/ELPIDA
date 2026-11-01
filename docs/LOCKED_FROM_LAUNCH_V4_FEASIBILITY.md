@@ -126,3 +126,11 @@ Model 10 stays live everywhere it is today; Model 11 would be added beside it, n
 4. Then: indexer and UI support, and a Sepolia rehearsal on a labelled test launchpad.
 
 Sources: [Uniswap v4 deployments](https://developers.uniswap.org/contracts/v4/deployments), `LOCKED_FROM_LAUNCH_DESIGN.md`.
+
+## Phase 2 done (1 November 2026)
+
+The local prototype is built and tested against Uniswap's own PoolManager: see `MODEL_11_V4_PROTOTYPE.md`.
+- **Model 10 match:** across 30 random trades, the largest difference was 1 wei of ETH.
+- **Milestone:** it runs inside the crossing buy.
+- **Fix found while building:** a donation could have blocked the milestone; that is now fixed.
+- **Shape:** tick spacing 10 makes the sale range 10.003× rather than 10×.

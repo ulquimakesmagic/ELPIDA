@@ -38,7 +38,9 @@
     "backup:offsite": "node --env-file-if-exists=.env scripts/offsite-backup.mjs",
     "test:indexer": "node --test tests/indexer.test.mjs tests/public-indexer.test.mjs tests/solana-indexer.test.mjs",
     "test:dex": "node --test --test-concurrency=1 tests/dex-migration.test.mjs tests/dex-runtime.test.mjs",
-    "test:solana-host": "cargo test --release --manifest-path contracts/solana/host-tests/Cargo.toml"
+    "test:solana-host": "cargo test --release --manifest-path contracts/solana/host-tests/Cargo.toml",
+    "compile:v4": "node scripts/compile-v4.mjs",
+    "test:v4": "node --test tests/v4-locked-launch.test.mjs"
   },
   "overrides": {
     "solc": {
@@ -59,9 +61,12 @@
     "@solana/web3.js": "1.98.4",
     "@uniswap/v3-core": "^1.0.1",
     "@uniswap/v3-periphery": "^1.4.4",
+    "@uniswap/v4-core": "1.0.2",
+    "@uniswap/v4-periphery": "1.0.3",
     "ethers": "6.17.0",
     "hardhat": "3.19.0",
     "lightweight-charts": "5.2.1",
-    "solc": "0.8.24"
+    "solc": "0.8.24",
+    "solc-0.8.26": "npm:solc@0.8.26"
   }
 }
