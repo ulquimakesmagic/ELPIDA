@@ -1,4 +1,4 @@
-// Home / Explore: the Trending strip, Top creators, and the Explore list with sort tabs, pair and chain
+// Home / Explore: the Trending strip and the Explore list with sort tabs, pair and chain
 // chips, the Live feed column, pagination and URL state. One persistent controller per visit: refreshes
 // update cards in place (keyed by network and address), so rolling numbers and flashes show real changes.
 // Every figure comes from the indexers; a module with nothing to show is hidden, never filled in.
@@ -9,7 +9,7 @@ import { nowSeconds } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
 import { PAIR_LIMITS } from '/pairs.mjs';
 import { partnerChip } from './partner-labels.mjs';
-import { exploreModel, pageOf, pageButtons, trendingTokens, topCreators, feedRows, exploreStateFromHash, exploreHash, PER_PAGE, PER_PAGE_WIDE } from './discovery.mjs';
+import { exploreModel, pageOf, pageButtons, trendingTokens, feedRows, exploreStateFromHash, exploreHash, PER_PAGE, PER_PAGE_WIDE } from './discovery.mjs';
 
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
@@ -17,7 +17,6 @@ const store = {
 };
 const reducedMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
 const keyOf = t => `${t.network ?? 'local'}:${String(t.address).toLowerCase()}`;
-const usd = value => `$${Number(value).toLocaleString('en-US', { notation: 'compact', maximumFractionDigits: 2 })}`;
 
 /* ---------- Relative times ---------- */
 function ago(seconds, { long = false } = {}) {
@@ -208,18 +207,6 @@ export function createExplore(source) {
     h('div.scroll-fade', trendTrack));
   const syncTrend = scroller(trendTrack, trendPrev, trendNext);
 
-  /* Top creators */
-  const creatorTrack = h('ol.creator-track', { 'aria-label': 'Top creators' });
-  const creatorPrev = h('button.round-button', { type: 'button', 'aria-label': 'Previous creators' }, icon('chevron-left', 'icon-sm'));
-  const creatorNext = h('button.round-button', { type: 'button', 'aria-label': 'Next creators' }, icon('chevron-right', 'icon-sm'));
-  const creators = h('section.home-section.creators', { 'aria-labelledby': 'creators-title', hidden: true },
-    h('div.section-head', h('div.section-title', h('h2#creators-title', 'Top creators'),
-      h('span.info-dot', { tabIndex: 0, role: 'note', 'aria-label': 'Ranked by the dollar volume their launches traded in the last 24 hours. Volume in pairs without a dollar price is left out.', title: 'Ranked by the dollar volume their launches traded in the last 24 hours. Volume in pairs without a dollar price is left out.' }, icon('info', 'icon-xs')),
-      h('span.section-sub', 'Launch volume, last 24 hours')),
-    h('div.section-actions', creatorPrev, creatorNext)),
-    h('div.scroll-fade', creatorTrack));
-  const syncCreators = scroller(creatorTrack, creatorPrev, creatorNext);
-
   /* Explore list */
   const launched = h('span.launched');
   const tabs = h('div.sort-tabs', { role: 'group', 'aria-label': 'Sort tokens' },
@@ -259,7 +246,7 @@ export function createExplore(source) {
       h('div.explore-list', meta, grid, empty, pager),
       feed)),
     prices);
-  const root = h('div.explore', h('h1.visually-hidden', 'Explore tokens'), trending, creators, listSection);
+  const root = h('div.explore', h('h1.visually-hidden', 'Explore tokens'), trending, listSection);
 
   function jumpToList() { listSection.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' }); }
   function writeUrl() { const next = exploreHash(state); if (location.hash !== next && (location.hash || '#/') !== next) history.replaceState(history.state, '', next); }
@@ -284,13 +271,6 @@ export function createExplore(source) {
     if (!list.length) { trendTrack.replaceChildren(); trendCache.clear(); return; }
     reconcile(trendTrack, list, trendCache, (t, i) => trendCard(t, i + 1, ctx), (node, t, i) => node._update(t, i + 1));
     requestAnimationFrame(syncTrend);
-  }
-  function drawCreators(tokens) {
-    const list = topCreators(tokens, 10);
-    creators.hidden = !list.length;
-    creatorTrack.replaceChildren(...list.map((row, i) => h('li', h('button.creator-pill', { type: 'button', 'data-first': i === 0 ? '' : undefined, title: `Show tokens launched by ${row.creator}`, 'aria-label': `Rank ${i + 1}: ${row.creator}, ${usd(row.volumeUsd)} launch volume in 24 hours${row.partial ? ', partial total' : ''}. Show their tokens.`, on: { click: () => { set({ query: row.creator, page: 1, tab: 'trending' }); jumpToList(); } } },
-      h('span.creator-rank', String(i + 1)), h('span.creator-address.mono', short(row.creator)), h('span.creator-amount', usd(row.volumeUsd), row.partial ? '+' : ''), h('span.creator-unit', '24h vol')))));
-    requestAnimationFrame(syncCreators);
   }
   function drawChips(counts) {
     const nets = source.networks();
@@ -357,7 +337,6 @@ export function createExplore(source) {
     const view = { ...pageOf(model.items, state.page, perPage()), total: model.items.length };
     if (view.page !== state.page) { state.page = view.page; writeUrl(); }
     drawTrending(tokens);
-    drawCreators(tokens);
     drawChips(model.counts);
     const failed = source.errors();
     errors.textContent = failed.length ? `Some networks could not load: ${failed.join(', ')}. Refresh to retry.` : '';

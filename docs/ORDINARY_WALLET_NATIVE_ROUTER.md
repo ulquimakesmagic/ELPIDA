@@ -42,9 +42,9 @@ Validation: the full-suite checkpoint passed **644 tests**, with **33 intentiona
 - Earlier buy `0xfcfb8bafc1439d9691d0493489b0e4f69cd170e72bbe807fc23d44b8a155feac` reverted after its deadline; replay confirmed `amount/minimum/deadline`. Purchase principal was not spent; gas was charged.
 - Ordinary-wallet native sell `0x0eccd80d917d9101f72c6ecd8bdb59477e934c0aeb8df7308d40b15154ab7d85`, block 12042229, succeeded: **1000000 STKTEST → 0.001709492503277334 test ETH** before gas. Gas used 441394. The wallet balance increase plus gas paid exactly matches the event payout. Public history attributes the sell to the actual wallet. Router token/quote/WETH/native balances, temporary approvals and the wallet's consumed router sell allowance are zero.
 - The Sepolia registry now shares the verified router address and creation hash with every browser, scoped to factory `0x5aA283B8B12786314e76ac4E977B1E9275b407f6`. Browsers still verify creation provenance and fixed DEX identities. A browser selecting a different factory uses its own factory-scoped local record; it is never sent to the pinned router silently.
-- Still open: public native buy/sell after the now-confirmed graduation; the earlier one-raw-unit liquidity-manager approval cleanup. No mainnet actions or real funds.
+- Post-graduation native buy/sell is now confirmed below. Still open: the earlier one-raw-unit liquidity-manager approval cleanup. No mainnet actions or real funds.
 
-The accompanying CSS fix keeps the complete Ethereum diamond inside a circular badge, including when that image is used as token artwork. Verified locally in a 390px-wide swap fixture: both image bounds are 24×24 with `object-fit: contain`. Other uploaded artwork retains cover behavior. Web-shell checks: 3/3 passed; `git diff --check` clean.
+The accompanying CSS fix keeps the complete Ethereum diamond inside a circular badge, including when that image is used as token artwork. Verified locally in a 390px-wide swap fixture: both image bounds are 24Ã—24 with `object-fit: contain`. Other uploaded artwork retains cover behavior. Web-shell checks: 3/3 passed; `git diff --check` clean.
 
 ## Next public rehearsal: automatic graduation and routed pool trading
 
@@ -56,7 +56,7 @@ The read-only check on 1 November found `automaticGraduation = true`, no pool ye
 4. With the pool confirmed, perform another small **ETH → STKTEST** buy and **STKTEST → ETH** sell. Verify wallet deltas, settlement events, public attribution, temporary allowance cleanup and preserved fee rules. The former curve fee stops; pool and conversion fees remain separate.
 5. The earlier liquidity-manager allowance is still **1 raw unit** of tNVDAon (read-only rechecked). Revoke through the existing liquidity recovery/cleanup flow; do not redeploy or remint liquidity.
 
-The shared router record does not upgrade existing contracts, change pricing, alter creator/protocol recipients, or combine chain wallets. Public post-graduation evidence remains open until these receipts exist.
+The shared router record does not upgrade existing contracts, change pricing, alter creator/protocol recipients, or combine chain wallets. The post-graduation receipts are now recorded below; the historical instructions remain for future rehearsals.
 
 Funding mint confirmed: `0x79eb2b33ff32bd2934f0994964662fb479ea21f2898a1243c658353ae6264525`, block 12042310, successful 25 tNVDAon mint to the test wallet. Observed balance afterward: 48.403769994929974261 tNVDAon. The completing purchase subsequently confirmed; see the evidence below.
 
@@ -74,4 +74,15 @@ The completing purchase and graduation occurred in the same successful transacti
 - LP NFT **233970**: position manager `0x1238536071E1c677A632429e3655c799b22cDA52` reports owner `0x1eE587D21B79F6818dC5195eE03418bfe4A182aC`. That locker reports the same token ID and `locked = true`; its fixed manager and adapter match the configured manager and curve migration adapter.
 - Fee splitter: `0xc2B1b48DF993Cff883D8718BE02A72f8478a278c`.
 
-Public post-graduation native buy/sell receipts and the earlier raw-unit LP approval cleanup remain open. The pool exists and LP custody is verified; this is testnet integration evidence, not a mainnet safety approval. No mainnet or real funds.
+Public post-graduation native buy/sell receipts are recorded below. The earlier raw-unit LP approval cleanup remains open. The pool exists and LP custody is verified; this is testnet integration evidence, not a mainnet safety approval. No mainnet or real funds.
+
+
+## Confirmed post-graduation routing and distinct-recipient claims - 1 November 2026
+
+Receipts and public index attribution were read back in this session; these are Ethereum Sepolia test assets, not real funds or mainnet approval.
+
+- Native pool buy `0x9b652faf2ec6b38b13fea0c97a1bd244295a7584e5ecd787227a71554eb9d787`, block 12042890, status 1, gas 474385: 0.2 test ETH to 2512163.212702234362824523 STKTEST.
+- Native pool sell `0xf415368fa7ac28298e882d14765cdb9feb821fb5906eeb2f955f5cf933f3d9d8`, block 12042915, status 1, gas 514430: 190564772.46516505859070613 STKTEST to 0.247224350562136108 test ETH before gas.
+- Both emit matched NativeTrade settlement events and Swap logs from the conversion pool `0x6391Be5cA5A590317091856D7387c249E435a6C0` and the graduated STKTEST pool. Public history attributes both to `0xf5B0cE04241f9518dfA3CBfbaafC7E40638E639D`, with token-transfer matching. Router token, stock, WETH and native balances, temporary curve/DEX allowances, and consumed wallet sell allowance were zero at the post-trade read.
+- STKTEST claim `0xc04ca8fb053bfb8ad7f17178562b3b69dfa638989d39aefbb2af31be5adcca03`, block 12042937, status 1: curve fees 0.596559440876324796 tNVDAon; LP fees 0.005128704577829545 tNVDAon plus 1905647.724651650585907061 STKTEST. FeesFunded events record half protocol/half creator, with the indivisible raw-unit remainder on creator share. The same recipient holds both roles on this test launch, so claims combine. Locker still reports locked=true.
+- Sakura claim `0x08271ef3e38e17912f807438fe29b24d8761bf2867b5e1d506c956073440302f`, block 12042992, status 1, gas 958830: different creator and treasury recipients successfully paid in one Multicall3 transaction. Creator `0x97f1B036D26dDDFD60906Bf54e70e39F6Be6c16B`; treasury `0xf5B0cE04241f9518dfA3CBfbaafC7E40638E639D`. Each received 0.000338139142440032 test ETH curve fees, 0.001 WETH and 5000.000000000000000044 SAKURA LP fees. Splitter `0x0BC3E3AAedBceca81fFb9E7d7405E42bdBDCD8ff` getters match those roles; transfer and claim logs match the payouts. Locker `0xBDDb7Ff08fFD3A48aB482bCA4A65426C606f75a2` remains locked=true. Thus distinct-recipient curve and post-graduation LP distribution is publicly exercised; no replacement token is needed just to repeat that check.

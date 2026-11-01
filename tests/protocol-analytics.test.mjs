@@ -33,3 +33,30 @@ test('recent graduations list completed curves newest first and ignore future or
  const r=protocolAnalytics({sources:[{...source,tokens:[g('Old',now-500),g('New',now-10),g('Future',now+99),g('Open',0,false),g('NoTime',0)],trades:[]}],prices,now});
  assert.deepEqual(r.graduations.map(x=>x.address),['New','Old']);
 });
+
+
+test('creator rankings use selected-period token volume and keep chain wallet identities separate',()=>{
+ const old={...token,address:'Old',creator:'Creator',created:(now-90000)*1000};
+ const fresh={...token,address:'New',creator:'Other'};
+ const r=protocolAnalytics({sources:[{...source,tokens:[old,fresh],trades:[{...trade,token:'Old',quoteAmount:'3',side:'buy',venue:'curve'},{...trade,token:'New',side:'sell',venue:'dexPool'},{...trade,token:'Old',timestamp:now-90001,quoteAmount:'999'}]},{...source,key:'sol',tokens:[{...token,creator:'Creator'}],trades:[trade]}],prices:{...prices,sol:prices.base},period:'24h',now});
+ assert.deepEqual(r.topCreators.map(c=>[c.network,c.creator,c.volumeUsd,c.launches]),[['base','Creator',6000,0],['base','Other',2000,1],['sol','Creator',2000,1]]);
+ assert.equal(r.totals.creators,3);assert.equal(r.totals.buys,1);assert.equal(r.totals.sells,1);
+ assert.equal(r.venues.find(v=>v.venue==='dexPool').volumeUsd,2000);
+ assert.equal(r.venues.find(v=>v.venue==='unknown').trades,1);
+});
+
+test('stock and average-trade metrics exclude unpriced volume and preserve its activity counts',()=>{
+ const stock={...token,address:'Stock',creator:'Creator',pair:'xstock',quoteSymbol:'tNVDAon'};
+ const r=protocolAnalytics({sources:[{...source,tokens:[{...token,creator:'Creator'},stock],trades:[{...trade,side:'buy'},{...trade,token:'Stock',quoteAmount:'50',side:'sell'}]}],prices,now});
+ assert.equal(r.totals.averageTradeUsd,2000);assert.equal(r.totals.stockTrades,1);assert.equal(r.totals.stockLaunches,1);assert.equal(r.totals.stockVolumeUsd,0);assert.equal(r.totals.stockVolumeShare,0);
+ assert.equal(r.topCreators[0].unpricedTrades,1);assert.equal(r.assets.find(a=>a.symbol==='tNVDAon').launches,1);
+ assert.equal(r.series.reduce((n,b)=>n+b.stockVolumeUsd,0),0);
+ const empty=protocolAnalytics({sources:[],prices:{},now});assert.equal(empty.totals.averageTradeUsd,null);assert.equal(empty.totals.stockVolumeShare,null);assert.deepEqual(empty.topCreators,[]);
+});
+
+test('priced stock activity reconciles to series, pair and protocol totals',()=>{
+ const stock={...token,address:'Stock',pair:'xstock',quoteSymbol:'NVDA',usdReference:{status:'fresh',usd:180,updatedAt:now,maxAge:180}};
+ const r=protocolAnalytics({sources:[{...source,tokens:[stock],trades:[{...trade,token:'Stock',quoteAmount:'2',venue:'dexPool'}]}],prices,now});
+ assert.equal(r.totals.stockVolumeUsd,360);assert.equal(r.totals.volumeUsd,360);assert.equal(r.totals.stockVolumeShare,1);
+ assert.equal(r.series.reduce((n,b)=>n+b.stockVolumeUsd,0),360);assert.equal(r.assets[0].volumeUsd,360);
+});
