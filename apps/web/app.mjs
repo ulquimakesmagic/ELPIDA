@@ -403,7 +403,7 @@ function applyLiveTrades(trades) {
   exploreView?.setTrades(recentBuys);
 }
 async function openTools() {
-  const body = $('#tools-body'); const error = h('p.error-text', { role: 'alert' });
+  const body = $('#tools-body'); const recoveryInput=h('input',{id:'test-pair-recovery',type:'text',placeholder:'0x...'}); const error = h('p.error-text', { role: 'alert' });
   const fail = e => { error.textContent = errorText(e); };
   const local = mode === 'local';
   if(!local&&wallet.address&&wallet.deployment){try{await wallet.checkFeeAccounting?.();await wallet.checkLaunchFeatures?.();}catch(e){fail(e);}}
@@ -448,8 +448,8 @@ async function openTools() {
         wallet.feeFixUpgradeAvailable?h('p.small.muted','The current Model 10 factory predates the shared-recipient fee fix. Deploy a corrected testnet factory using test ETH for gas. Pricing stays unchanged. Existing tokens keep their original contracts. After deployment, share the factory address so it can be registered for all visitors.'):null,
         deployed ? h('div.stack', h('p.small.muted', state?.pricing?.verified ? `$10 launch fee, converted by the on-chain price feed at execution. Starting FDV: $${Number(wallet.startFdvUsd ?? 5000).toLocaleString()} before the first purchase.` : 'USD pricing must be activated before launching.'), !state?.pricing?.verified ? h('button.btn.btn-secondary',{type:'button',on:{click:()=>act('apply-pricing',{}).then(r=>{downloadSafeBatch(r);openTools();})}},wallet.deployment?.treasury&&wallet.deployment.treasury.toLowerCase()!==String(wallet.address).toLowerCase()?'Download the Safe setup file':'Activate price feed') : null) : null,
         deployed && wallet.dex && wallet.address && pairs && (pairs.xstock.unavailable || pairs.token.unavailable || (wallet.missingTestPairs?.() ?? []).length) ? h('div.stack', h('p.small.muted', 'xStock and paired-token launches need approved assets. The launchpad owner can deploy the labelled test assets (TEST-STOCK and TEST-MEME) and approve them: six confirmations, gas only.'),
-          h('label.field', h('span', 'Previous TEST-STOCK deployment hash (optional, recover interrupted setup)'), h('input', { id: 'test-pair-recovery', type: 'text', placeholder: '0x…' })),
-          h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('setup-pairs', { recoveryHash: $('#test-pair-recovery')?.value.trim() || undefined }); openTools(); } catch (e) { fail(e); } } } }, (m => m.length ? `Add test pairs: ${m.map(t => t.symbol).join(', ')}` : 'Add test xStock and token pairs')((wallet.missingTestPairs?.() ?? [])))) : null,
+          h('label.field', h('span', 'Previous TEST-STOCK deployment hash (optional, recover interrupted setup)'), recoveryInput),
+          h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('setup-pairs', { recoveryHash: recoveryInput.value.trim() || undefined }); openTools(); } catch (e) { fail(e); } } } }, (m => m.length ? `Add test pairs: ${m.map(t => t.symbol).join(', ')}` : 'Add test xStock and token pairs')((wallet.missingTestPairs?.() ?? [])))) : null,
         deployed && wallet.dex && wallet.address ? testStockControls(wallet, run, fail) : null));
     } else funds.append(h('p.small.muted', wallet.deployment ? `Solana program: ${short(wallet.deployment.programId)}.${state?.pricing ? ` Creation fee ${number(state.pricing.launchFee, 6)} SOL. New USD-priced launches are pending a verified-oracle program upgrade.` : ''}` : 'The Solana program is not deployed. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.'));
   }

@@ -272,7 +272,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   let diagnosticWindow=Date.now(),diagnosticCount=0;
   let metadataWindow=Date.now(),metadataCount=0;
   const solana = solanaConfig();
-  const connectSources = [...evmTestnets.map(net => net.rpcUrl), solana.rpcUrl, solana.wsUrl].filter(url => /^(https?|wss?):/.test(url ?? '')).join(' ');
+  const connectSources = [...evmTestnets.flatMap(net => [net.rpcUrl,...(net.rpcFallbacks??[])]), solana.rpcUrl, solana.wsUrl].filter(url => /^(https?|wss?):/.test(url ?? '')).join(' ');
   const rpcProxy = solana.mainnet ? createRpcProxy(process.env.SOLANA_RPC_URL) : null;
   const operationsStartedAt=Date.now();
   const backupRunner=configuredBackup({env:port===0?{}:process.env,dataDir,statePath:port===0?null:dataFile('ops-backup-state.json'),workDir:process.env.ELPIDA_BACKUP_WORK_DIR??resolve(tmpdir(),'elpida-backups-'+dataPrefix.replace(/[^a-z0-9-]/gi,'')),log:console.log});

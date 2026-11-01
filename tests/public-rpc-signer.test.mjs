@@ -103,3 +103,8 @@ test('setup resumes a confirmed deployment without resending and preserves pendi
   receipt = { status: 1, contractAddress: address }; args.provider.getCode = async () => '0x';
   await assert.rejects(resumeSetupDeployment(args), /no code/);
 });
+
+test('a slow gas preflight is labelled before requesting the wallet',async()=>{
+ const {signer,log}=setup({estimate:async()=>{await new Promise(r=>setTimeout(r,70));return 100000n;}});
+ await signer.sendTransaction({to:ME});assert.equal(log.sent.length,1);assert.ok(log.slow.some(m=>/No wallet request has been sent/.test(m)));
+});
