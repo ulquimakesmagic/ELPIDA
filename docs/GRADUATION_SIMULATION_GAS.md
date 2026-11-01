@@ -31,3 +31,5 @@ The public RPC cap explanation is consistent with Geth's configurable `rpc.gasca
 Refresh Elpida so the new browser module and endpoint order load. On Ethereum Sepolia choose STKTEST → Buy → tNVDAon → Complete curve. Review the newly fetched quote and let the app obtain verified gas. The previously observed estimate with headroom was about 65.25 million, not 900000; do not manually reuse the earlier small limit. If estimation cannot be verified, the app reports an error and sends no wallet request. Do not repeatedly click Buy.
 
 After a successful receipt, verify atomic graduation, genuine V3 pool and permanent LP lock, then repeat a small native buy/sell through the registered router. Graduation is not yet publicly confirmed by this fix.
+
+Validation: full `npm test` passed **651**, skipped **33**, failed **0** (684 total). Focused router/RPC/signer run passed **21/21**; after tightening transport-failure handling, final RPC/signer checks passed **13/13**, and the full run included that final behavior. The actual revised provider/signer read-only preflight returned 65246623 gas. No public buy was submitted during diagnosis or validation.
