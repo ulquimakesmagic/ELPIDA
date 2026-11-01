@@ -1,3 +1,4 @@
+import {prepareTestLiquidity,testLiquidityCalls,TEST_MANAGER_ABI} from './test-stock-liquidity.mjs';
 import { nowSeconds } from './clock.mjs';
 import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
@@ -428,6 +429,37 @@ export class TestnetWallet {
     else throw new Error('Unknown test stock control.');
     return { hash: r.tx.hash, message: `${quote.symbol}: done. The token pages pick it up within about a minute.` };
   }
+  async getTestStockLiquidityQuote({asset,nativeAmount='0.05'}={}) {
+    await this.checkNetwork();await this.verifyFactory();
+    if(this.net.chainId!==11155111||this.net.mainnet)throw Error('This rehearsal is restricted to Ethereum Sepolia.');
+    const approved=(this.approvedQuotes??[]).find(a=>a.address.toLowerCase()===String(asset).toLowerCase()&&a.test&&a.stock?.provider==='ondo-test');
+    if(!approved)throw Error('Choose an approved simulated Ondo-style test stock.');
+    const nativeWei=parseUnits(String(nativeAmount),18),price=await this.oraclePrice();
+    const plan=await prepareTestLiquidity({Contract,provider:this.provider,dex:this.dex,chainId:this.net.chainId,asset,account:this.address,nativeAmount:nativeWei,nativeUsd8:parseUnits(price.usd.toFixed(8),8)});
+    return {asset,nativeAmount:String(nativeAmount),stockAmount:formatUnits(plan.stockAmount,18),quotedAt:plan.quotedAt,funded:plan.funded,pool:plan.pool,symbol:approved.symbol,account:this.address,factory:this.deployment.factory,pending:localStorage.getItem(`elpida:test-conversion:${this.net.chainId}:${String(asset).toLowerCase()}:${this.address.toLowerCase()}`)};
+  }
+  async setupTestStockLiquidity(body) {
+    await this.checkNetwork();if(this.net.chainId!==11155111||this.net.mainnet)throw Error('This rehearsal is restricted to Ethereum Sepolia.');
+    if(!Number.isFinite(body.quotedAt)||Date.now()-body.quotedAt>60000||body.quotedAt>Date.now()||String(body.account).toLowerCase()!==this.address.toLowerCase()||String(body.factory).toLowerCase()!==this.deployment.factory.toLowerCase())throw Error('Liquidity quote expired or wallet changed. Get a fresh quote.');
+    const key=`elpida:test-conversion:${this.net.chainId}:${String(body.asset).toLowerCase()}:${this.address.toLowerCase()}`;
+    const pending=localStorage.getItem(key);
+    if(pending){const receipt=await this.provider.getTransactionReceipt(pending);if(!receipt)throw Error(`Liquidity transaction ${pending} is still pending. Check its status before retrying.`);if(receipt.status===1){const stock=new Contract(body.asset,['function allowance(address,address) view returns(uint256)','function approve(address,uint256) returns(bool)'],this.signer);if(await stock.allowance(this.address,this.dex.manager)>0n)await this.wait(stock.approve(this.dex.manager,0n),'Clear unused test stock liquidity approval…');localStorage.removeItem(key);return {hash:pending,message:'Previously submitted conversion liquidity is confirmed.'};}localStorage.removeItem(key);}
+    const current=await this.getTestStockLiquidityQuote(body);
+    if(current.funded)return {message:'The conversion pool is already funded. No additional liquidity was sent.'};
+    if(parseUnits(current.stockAmount,18)>parseUnits(body.stockAmount,18))throw Error('Test stock funding amount increased. Get a fresh quote.');
+    const stock=new Contract(body.asset,['function allowance(address,address) view returns(uint256)','function approve(address,uint256) returns(bool)'],this.signer),maximum=parseUnits(body.stockAmount,18);
+    const allowance=await stock.allowance(this.address,this.dex.manager);
+    if(allowance!==maximum){if(allowance>0n)await this.wait(stock.approve(this.dex.manager,0n),'Reset the test liquidity allowance…');await this.wait(stock.approve(this.dex.manager,maximum),'Approve the bounded test stock liquidity amount…');}
+    // Recheck issuer state, price and pool after the approval, before spending native coin.
+    const price=await this.oraclePrice(),plan=await prepareTestLiquidity({Contract,provider:this.provider,dex:this.dex,chainId:this.net.chainId,asset:body.asset,account:this.address,nativeAmount:parseUnits(body.nativeAmount,18),nativeUsd8:parseUnits(price.usd.toFixed(8),8)});
+    if(plan.funded)throw Error('Pool was funded while approval was pending. No extra liquidity was sent.');
+    if(plan.stockAmount>maximum)throw Error('Price moved while approval was pending. Get a new funding quote.');
+    const manager=new Contract(this.dex.manager,TEST_MANAGER_ABI,this.signer);
+    const tx=await manager.multicall(testLiquidityCalls(Interface,plan),{value:plan.nativeAmount});localStorage.setItem(key,tx.hash);
+    const result=await this.wait(Promise.resolve(tx),'Fund the ETH/test-stock conversion pool…');
+    if(await stock.allowance(this.address,this.dex.manager)>0n)await this.wait(stock.approve(this.dex.manager,0n),'Clear unused test stock liquidity approval…');
+    localStorage.removeItem(key);return {hash:result.tx.hash,message:'Test conversion liquidity confirmed. The LP position stays in your wallet; underlying token pairs are unchanged.'};
+  }
   /** Treasury only, DEX launchpads: deploys the labelled test assets (EVM_TEST_PAIRS) and approves them as pairs. */
   async setupTestPairs({ recoveryHash } = {}) {
     await this.checkNetwork();
@@ -837,6 +869,7 @@ export class TestnetWallet {
     if(action==='launch'&&body.tax)return launchPublicTax(this,body);
     const factory = (await this.verifyFactory()).connect(this.signer);
     let result;
+    if (action === 'setup-test-liquidity') return this.setupTestStockLiquidity(body);
     if (action === 'setup-pairs') return this.setupTestPairs(body);
     if (action === 'test-stock') return this.testStockControl(body ?? {});
     if (action === 'setup-usdc-pair') return this.setupUsdcPair();

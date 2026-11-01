@@ -355,7 +355,7 @@ export function tradePanel(ctx, token, { dex, solana }) {
     return ctx.state.balanceSymbol===q?`${number(ctx.state.balance,4)} ${q}`:null;
   };
   function setSide(next) {
-    if(submitting)return; side = next; nativeQuote=null; slippage.disabled=routed();if(routed())slippage.value='1'; revision++; clearTimeout(timer);
+    if(submitting)return; side = next; amount.dataset.settlement=settlement;amount.dataset.context=[ctx.mode,token.network??ctx.wallet?.net?.key,token.address,ctx.wallet?.address??ctx.state.wallet??''].join(':').toLowerCase(); nativeQuote=null; slippage.disabled=routed();if(routed())slippage.value='1'; revision++; clearTimeout(timer);
     if(funding)funding.hidden=side!=='buy';
     form?.querySelectorAll('.swap-slippage button').forEach(b=>{b.disabled=routed();b.setAttribute('aria-pressed',String(b.dataset.value===slippage.value));});
     quoteReady = false; updateSubmit(); useRemaining.hidden = true; remainingHint.hidden = side !== 'buy' || routed();
@@ -459,6 +459,7 @@ export function tradePanel(ctx, token, { dex, solana }) {
     form,ctx.state.disconnected?ctx.walletButtons(ctx.wallet.net,{onDone:()=>ctx.refresh(),onError:e=>toast(errorText(e),{kind:'error'})}):null,
     h('p.small.muted.tk-trade-note', token.tax ? `Buy tax ${token.tax.buyBps/100}% / sell tax ${token.tax.sellBps/100}%, fixed at launch. Tax revenue: 30% Elpida / 70% creator allocations. ${token.graduated?'The V2 pool fee is additional; the curve fee has stopped. LP fees compound in locked liquidity. Creator tax claims are paid in this token.':'The 1.25% curve fee remains additional, split 50/50. First-minute protection adds locked liquidity.'}` : token.graduated ? `Trading on ${dex === 'test' ? 'the locked test pool' : dex}. Liquidity is locked permanently. The curve fee has stopped; the DEX pool fee applies.${token.venue === 'PumpSwap' ? ' Pool trading fees pay the creator share and any buyback when they are harvested.' : ''}` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'));
   // Lets the phone buy bar open the panel on the right side.
-  section.selectSide = next => { if (next !== side) setSide(next); amount.focus({ preventScroll: true }); };
+  section.selectCurrency = value => {if(!['native','pair'].includes(value)||submitting)return;settlement=value;setSide(side);};
+  section.selectSide = (next,{focus=true}={}) => { if (next !== side) setSide(next); if(focus)amount.focus({ preventScroll: true }); };
   return section;
 }
