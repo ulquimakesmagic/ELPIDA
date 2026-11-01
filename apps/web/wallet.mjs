@@ -314,7 +314,11 @@ export class TestnetWallet {
     const result=await this.wait(this.signer.sendTransaction({to:this.dex.router,data,value:toNative?0n:input}),'Confirm the separate native/pair conversion...');
     return {hash:result.tx.hash,message:'Conversion confirmed. Funds are in your wallet; the token trade is separate.'};
   }
-  nativeRouterRecord(){return this.net.nativeTradeRouter??read(`elpida:native-router:v1:${this.net.chainId}:${this.deployment?.factory?.toLowerCase()}`);}
+  nativeRouterRecord(){
+    const factory=this.deployment?.factory?.toLowerCase(),shared=this.net.nativeTradeRouter;
+    if(factory&&shared?.factory?.toLowerCase()===factory)return shared;
+    return read(`elpida:native-router:v1:${this.net.chainId}:${factory}`);
+  }
   async nativeTradeRouter(){
     const record=this.nativeRouterRecord();if(!record?.address)return null;
     if(this.net.chainId!==11155111||this.net.mainnet||this.dex?.routerVersion!==2)throw Error('Ordinary-wallet native routing is enabled only for the Sepolia rehearsal.');

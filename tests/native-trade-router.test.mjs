@@ -104,3 +104,17 @@ test('router verification is repeated after the public read provider changes',as
  const wallet=Object.create(TestnetWallet.prototype);Object.assign(wallet,{provider:wrapper(),net:{chainId:11155111},config:{contracts:{nativeTradeRouter:artifact}},nativeRouterRecord:()=>record});Object.defineProperties(wallet,{dex:{value:f.dex.config},deployment:{value:{factory:f.factory.target}}});
  const original=await wallet.nativeTradeRouter();assert.equal(await wallet.nativeTradeRouter(),original);wallet.provider=wrapper();const replacement=await wallet.nativeTradeRouter();assert.notEqual(replacement,original);assert.equal(replacement.runner,wallet.provider);
 });
+
+test('a fresh browser uses the registered router only for its verified factory and keeps private deployments isolated',async()=>{
+ await import('./helpers/browser-modules.mjs');const {TestnetWallet}=await import('../apps/web/wallet.mjs');const {testnets}=await import('../packages/core/networks.mjs');
+ const net=testnets.find(n=>n.key==='ethereum-sepolia'),shared=net.nativeTradeRouter;
+ assert.equal(shared.factory.toLowerCase(),net.shared.factory.toLowerCase());
+ const w=Object.create(TestnetWallet.prototype);w.net=net;Object.defineProperty(w,'deployment',{value:{factory:net.shared.factory},configurable:true});
+ const old=globalThis.localStorage,values=new Map();globalThis.localStorage={getItem:key=>values.get(key)??null};
+ try{
+  assert.equal(w.nativeRouterRecord(),shared); // No browser-local record required.
+  const privateFactory='0x0000000000000000000000000000000000000011';Object.defineProperty(w,'deployment',{value:{factory:privateFactory},configurable:true});assert.equal(w.nativeRouterRecord(),null);
+  const record={address:'0x0000000000000000000000000000000000000022',hash:'0x'+'a'.repeat(64)};values.set(`elpida:native-router:v1:11155111:${privateFactory}`,JSON.stringify(record));assert.deepEqual(w.nativeRouterRecord(),record);
+  w.net={...net,chainId:84532};assert.equal(w.nativeRouterRecord(),null);
+ }finally{if(old===undefined)delete globalThis.localStorage;else globalThis.localStorage=old;}
+});
