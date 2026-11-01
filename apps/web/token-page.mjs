@@ -1,12 +1,11 @@
 import { nowSeconds } from './clock.mjs';
 import { snipeLabel } from '/curve-model.mjs';
 import { assetIcon, chainIcon } from './chain-ui.mjs';
-import { usdcFunding } from './usdc-funding.mjs';
 // Token detail page: market figures with plain definitions, bonding-curve progress, trade panel,
 // graduation actions, creator-fee summary and technical details.
 import { h, icon, short, number, compact, avatar, pricing, fmtMarketCap, fmtPrice, fmtValue, progressOf, lifecycle, copyButton, errorText, toast, usdRate, formatPrice, bar } from './ui.mjs';
 import { withWalletTimeout, walletErrorText } from './wallet.mjs';
-import { exceedsRemaining } from './amounts.mjs';
+import { compactTradeAmount, exceedsRemaining } from './amounts.mjs';
 import {terminalChart} from './terminal-chart.mjs';
 import { testStockStatus } from './test-stock.mjs';
 const STOCK_LABELS = { fresh: 'Price fresh', 'market-closed': 'Market closed', stale: 'Price stale', 'corporate-action': 'Corporate action', paused: 'Issuer paused', outage: 'No price' };
@@ -323,7 +322,7 @@ export function tradePanel(ctx, token, { dex, solana }) {
   }
   const balance = h('p.hint#trade-balance');
   const shortcuts = h('div.shortcuts', { role: 'group', 'aria-label': 'Amount shortcuts' });
-  const out = h('strong', 'Enter an amount'), fee = h('strong', '—'), minOut = h('strong', '—'), feeNote = h('p.hint');
+  const out = h('strong', '0.00'), fee = h('strong', '—'), minOut = h('strong', '—'), feeNote = h('p.hint');
   // Live anti-snipe countdown ("Launch fee window: 47% → 1.25% in 31 s") while the first minute lasts.
   const feeWindow = h('p.hint.fee-window', { role: 'status', 'aria-live': 'off' });
   let feeTicks = 0;
@@ -341,12 +340,13 @@ export function tradePanel(ctx, token, { dex, solana }) {
   const error = h('p.error-text', { role: 'alert' });
   const slippage = h('select.select#trade-slippage', [['0.1', '0.1%'], ['0.5', '0.5%'], ['1', '1%'], ['3', '3%'], ['5', '5%']].map(([v, l]) => h('option', { value: v, selected: v === '1' }, l)));
   const submit = h('button.btn.btn-block.btn-lg', { type: 'submit', disabled:true });
-  const updateSubmit = () => { submit.disabled = !quoteReady || submitting; submit.hidden=!!ctx.state.disconnected; };
+  const connected=ctx.mode!=='testnet'||!!ctx.wallet?.address;
+  const updateSubmit = () => { submit.disabled = !quoteReady || submitting || !connected; };
   const remainingDisplay = token.remainingBase ?? token.remainingBuy;
   const remaining = !token.complete && !token.graduated && Number(token.remainingBuy) > 0;
-  const remainingHint = h('p.hint', remaining ? `About ${number(remainingDisplay,8)} ${q} remains to complete the curve. Further trading continues after graduation into the locked pool.` : '');
+  const remainingHint = h('p.hint.swap-remaining', {title:remaining?`${remainingDisplay} ${q} remains to complete the curve`:''}, remaining ? `Curve remaining: ${compactTradeAmount(remainingDisplay)} ${q}` : '');
   const useRemaining = h('button.btn.btn-secondary.btn-sm.curve-limit-action', {type:'button',hidden:true,on:{click:()=>{amount.value=token.remainingBuy;quote();}}}, 'Use remaining amount');
-  const funding=token.pair==='native'?usdcFunding(ctx,{amount:()=>amount.value,symbol:q,context:token.address}):null;
+
   const tabs = h('div.segmented', { role: 'tablist', 'aria-label': 'Trade side' }, ['buy', 'sell'].map(s => h('button', { type: 'button', role: 'tab', 'data-side': s, 'aria-selected': String(s === side), on: { click: () => setSide(s) } }, s === 'buy' ? 'Buy' : 'Sell')));
   const quoteBalance = () => {
     if(token.pair === 'native') return `${number(ctx.state.nativeBalance ?? 0, 6)} ${q}`;
@@ -356,7 +356,6 @@ export function tradePanel(ctx, token, { dex, solana }) {
   };
   function setSide(next) {
     if(submitting)return; side = next; amount.dataset.settlement=settlement;amount.dataset.context=[ctx.mode,token.network??ctx.wallet?.net?.key,token.address,ctx.wallet?.address??ctx.state.wallet??''].join(':').toLowerCase(); nativeQuote=null; slippage.disabled=routed();if(routed())slippage.value='1'; revision++; clearTimeout(timer);
-    if(funding)funding.hidden=side!=='buy';
     form?.querySelectorAll('.swap-slippage button').forEach(b=>{b.disabled=routed();b.setAttribute('aria-pressed',String(b.dataset.value===slippage.value));});
     quoteReady = false; updateSubmit(); useRemaining.hidden = true; remainingHint.hidden = side !== 'buy' || routed();
     tabs.querySelectorAll('button').forEach(b => { b.setAttribute('aria-selected', String(b.dataset.side === side)); b.tabIndex = b.dataset.side === side ? 0 : -1; });
@@ -364,7 +363,7 @@ export function tradePanel(ctx, token, { dex, solana }) {
     unit.replaceChildren(side==='buy'?picker():chip(token.symbol,true));receiveUnit.replaceChildren(side==='buy'?chip(token.symbol,true):picker());routeLabel.textContent=side==='buy'?`${currency()} → ${token.symbol}`:`${token.symbol} → ${currency()}`;
     submit.textContent = `${side === 'buy' ? 'Buy' : 'Sell'} ${token.symbol}`;
     submit.className = `btn btn-block btn-lg ${side === 'buy' ? 'btn-buy' : 'btn-sell'}`;
-    amount.value = ''; out.textContent = 'Enter an amount'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = ''; error.textContent = '';
+    amount.value = ''; out.textContent = '0.00'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = ''; error.textContent = '';
     const qb=routed()?`${number(ctx.state.nativeBalance??0,6)} ${native}`:quoteBalance();
     balance.textContent = side === 'buy' ? (qb ? `Available: ${qb}` : '') : `Available: ${number(token.balance, 4)} ${token.symbol}`;
     // 25/50/75/Max of the spendable balance. Buys keep a small native reserve for network fees.
@@ -395,7 +394,7 @@ export function tradePanel(ctx, token, { dex, solana }) {
   function quote() {
     nativeQuote=null; const value = amount.value, rev = ++revision; clearTimeout(timer); error.textContent = '';
     quoteReady = false; updateSubmit(); useRemaining.hidden = true;
-    if (!(Number(value) > 0)) { out.textContent = 'Enter an amount'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = ''; return; }
+    if (!connected || !(Number(value) > 0)) { out.textContent = '0.00'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = ''; return; }
     // A curve reopened after its graduation grace is fully sold: selling works, buying resumes once a holder sells.
     if (side === 'buy' && token.soldOut && !token.complete && !token.graduated) {
       out.textContent = 'Nothing left to buy'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = '';
@@ -408,18 +407,18 @@ export function tradePanel(ctx, token, { dex, solana }) {
       useRemaining.hidden = false; return;
     }
     fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = '';
-    out.textContent = 'Getting quote…';
+    out.textContent = '…';
     timer = setTimeout(async () => {
       try {
         if(routed()&&typeof ctx.wallet?.getNativePairTradeQuote!=='function')throw new Error('Native routing is not supported by this wallet or network. Choose the paired token.');
         const result = routed() ? await ctx.wallet.getNativePairTradeQuote({token:token.address,side,amount:value}) : ctx.mode === 'local' ? await ctx.api('quote', { token: token.address, side, amount: value }) : await ctx.wallet.getQuote({ token: token.address, side, amount: value });
         if (rev !== revision) return;
         nativeQuote=routed()?result:null; quoteReady = true; updateSubmit();
-        out.textContent = number(routed()?result.output:result.out, side === 'buy' ? 2 : 6);
-        fee.textContent=routed()?'Included in route':`${number(result.fee,6)} ${result.feeSymbol??q}`;
-        minOut.textContent = `${number(Number(routed()?result.output:result.out) * (1 - (routed()?1:Number(slippage.value)) / 100), side === 'buy' ? 2 : 6)} ${side === 'buy' ? token.symbol : currency()}`;
+        out.textContent = compactTradeAmount(routed()?result.output:result.out);out.title=String(routed()?result.output:result.out);
+        fee.textContent=routed()?'Included in route':`${compactTradeAmount(result.fee)} ${result.feeSymbol??q}`;
+        minOut.textContent = `${compactTradeAmount(Number(routed()?result.output:result.out) * (1 - (routed()?1:Number(slippage.value)) / 100))} ${side === 'buy' ? token.symbol : currency()}`;
         feeNote.textContent = routed() ? 'Native routes protect each hop with 1% slippage. Any unused pair asset stays in your wallet. Requires an atomic-capable wallet and funded liquidity.' : result.antiSnipeActive ? `Launch protection is active: the fee is ${number(result.feeBps / 100, 2)}% right now and falls to 1.25% by the end of the first minute. The amount above 1.25% is added to the token's locked liquidity.` : result.completesCurve ? `This purchase completes the curve. Only ${number(result.spend, 4)} ${q} will be charged.` : '';
-      } catch (e) { if (rev !== revision) return; out.textContent = 'Quote unavailable'; fee.textContent = '—'; minOut.textContent = '—'; error.textContent = errorText(e); }
+      } catch (e) { if (rev !== revision) return; out.textContent = '—'; fee.textContent = '—'; minOut.textContent = '—'; error.textContent = errorText(e); }
     }, 300);
   }
   amount.addEventListener('input', quote);
@@ -436,7 +435,6 @@ export function tradePanel(ctx, token, { dex, solana }) {
   } } },
     tabs,
     h('div.pay-box',h('div.swap-card-top',h('label',{for:'trade-amount'},'You pay'),balance),h('div.pay-input',amount,unit),shortcuts),
-    funding,
     h('div.swap-direction',icon('chevron-down','icon-sm')),h('div.receive',h('div.swap-card-top',h('span','You receive'),h('span','Estimated')),h('div.swap-receive-row',out,receiveUnit)),routeLabel,remainingHint,useRemaining,
     h('div.trade-meta', h('span', 'Trading fee'), fee),
     h('div.trade-meta', h('span', 'Minimum received'), minOut),
@@ -456,7 +454,7 @@ export function tradePanel(ctx, token, { dex, solana }) {
   setSide('buy');
   tickFeeWindow();
   const section = h('section.panel.trade-panel.tk-trade', { 'aria-labelledby': 'trade-title' }, h('div.swap-heading',h('h2#trade-title','Swap'),h('button.icon-btn',{type:'button','aria-label':'Toggle slippage settings',on:{click:()=>{const d=form.querySelector('.trade-settings');d.open=!d.open;}}},icon('sliders-horizontal','icon-sm'))),
-    form,ctx.state.disconnected?ctx.walletButtons(ctx.wallet.net,{onDone:()=>ctx.refresh(),onError:e=>toast(errorText(e),{kind:'error'})}):null,
+    form,!connected?h('p.hint','Connect your wallet using the button above.'):null,
     h('p.small.muted.tk-trade-note', token.tax ? `Buy tax ${token.tax.buyBps/100}% / sell tax ${token.tax.sellBps/100}%, fixed at launch. Tax revenue: 30% Elpida / 70% creator allocations. ${token.graduated?'The V2 pool fee is additional; the curve fee has stopped. LP fees compound in locked liquidity. Creator tax claims are paid in this token.':'The 1.25% curve fee remains additional, split 50/50. First-minute protection adds locked liquidity.'}` : token.graduated ? `Trading on ${dex === 'test' ? 'the locked test pool' : dex}. Liquidity is locked permanently. The curve fee has stopped; the DEX pool fee applies.${token.venue === 'PumpSwap' ? ' Pool trading fees pay the creator share and any buyback when they are harvested.' : ''}` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'));
   // Lets the phone buy bar open the panel on the right side.
   section.selectCurrency = value => {if(!['native','pair'].includes(value)||submitting)return;settlement=value;setSide(side);};

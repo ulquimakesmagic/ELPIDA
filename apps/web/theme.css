@@ -497,7 +497,7 @@ main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; 
 .chain-option > .asset-icon[src*="ethereum"] { background: #eceefb; }
 .chain-option > .asset-icon[src*="solana"] { background: #0c0d12; }
 .app-shell:not([data-dock="open"]) .dock-env > .asset-icon[src*="ethereum"], .app-shell:not([data-dock="open"]) .dock-env > .asset-icon[src*="solana"],
-.mobile-chain .env-button .asset-icon[src*="ethereum"], .mobile-chain .env-button .asset-icon[src*="solana"] { box-sizing: border-box; padding: 22%; object-fit: contain; border-radius: 50%; }
+.mobile-chain .env-button .asset-icon[src*="ethereum"], .mobile-chain .env-button .asset-icon[src*="solana"] { box-sizing: border-box; padding: 8%; object-fit: contain; border-radius: 50%; }
 .app-shell:not([data-dock="open"]) .dock-env > .asset-icon[src*="ethereum"] { background: #eceefb; }
 .app-shell:not([data-dock="open"]) .dock-env > .asset-icon[src*="solana"] { background: #0c0d12; }
 
