@@ -40,6 +40,24 @@ Validation: the full-suite checkpoint passed **644 tests**, with **33 intentiona
 - Ordinary-wallet native buy `0xb5256e299f415fc5e6b056550da19923a0eeb07dd5d2810a83180aef5fd03451`, block 12041918, succeeded: **0.001 test ETH → 558707.153679830635398185 STKTEST** delivered to `0xf5B0cE04241f9518dfA3CBfbaafC7E40638E639D`. Gas used 633874. `NativeTrade` settlement matches the token delivery. The public index attributes it to the actual wallet, with the router-settlement proof recorded.
 - Post-buy router STKTEST, tNVDAon and WETH balances and temporary approvals to the curve/swap router are all zero.
 - Earlier buy `0xfcfb8bafc1439d9691d0493489b0e4f69cd170e72bbe807fc23d44b8a155feac` reverted after its deadline; replay confirmed `amount/minimum/deadline`. Purchase principal was not spent; gas was charged.
-- Still open: public native sell rehearsal; shared router registration for other browsers; the earlier one-raw-unit liquidity-manager approval cleanup. No mainnet actions or real funds.
+- Ordinary-wallet native sell `0x0eccd80d917d9101f72c6ecd8bdb59477e934c0aeb8df7308d40b15154ab7d85`, block 12042229, succeeded: **1000000 STKTEST → 0.001709492503277334 test ETH** before gas. Gas used 441394. The wallet balance increase plus gas paid exactly matches the event payout. Public history attributes the sell to the actual wallet. Router token/quote/WETH/native balances, temporary approvals and the wallet's consumed router sell allowance are zero.
+- The Sepolia registry now shares the verified router address and creation hash with every browser, scoped to factory `0x5aA283B8B12786314e76ac4E977B1E9275b407f6`. Browsers still verify creation provenance and fixed DEX identities. A browser selecting a different factory uses its own factory-scoped local record; it is never sent to the pinned router silently.
+- Still open: public native buy/sell after graduation; the earlier one-raw-unit liquidity-manager approval cleanup. No mainnet actions or real funds.
 
 The accompanying CSS fix keeps the complete Ethereum diamond inside a circular badge, including when that image is used as token artwork. Verified locally in a 390px-wide swap fixture: both image bounds are 24×24 with `object-fit: contain`. Other uploaded artwork retains cover behavior. Web-shell checks: 3/3 passed; `git diff --check` clean.
+
+## Next public rehearsal: automatic graduation and routed pool trading
+
+The read-only check on 1 November found `automaticGraduation = true`, no pool yet, **47.690649927832016425 tNVDAon** gross remaining at the base fee, and **23.403769994929974261 tNVDAon** in the test wallet. These are observations, not a fixed future quote.
+
+1. On Ethereum Sepolia, use **Network and test funds → Get 25 tNVDAon**, then confirm the test mint. It needs test ETH for gas only.
+2. On STKTEST choose **Buy → tNVDAon (paired token) → Complete curve**. Review the newly fetched amount; approve only the required stock amount if prompted, then confirm the buy. Do not try to source the entire completion amount through the small ETH/test-stock conversion pool.
+3. Verify the successful completing receipt, registered V3 pool and permanently locked LP. The final buy must graduate atomically; a migration failure must revert that buy.
+4. With the pool confirmed, perform another small **ETH → STKTEST** buy and **STKTEST → ETH** sell. Verify wallet deltas, settlement events, public attribution, temporary allowance cleanup and preserved fee rules. The former curve fee stops; pool and conversion fees remain separate.
+5. The earlier liquidity-manager allowance is still **1 raw unit** of tNVDAon (read-only rechecked). Revoke through the existing liquidity recovery/cleanup flow; do not redeploy or remint liquidity.
+
+The shared router record does not upgrade existing contracts, change pricing, alter creator/protocol recipients, or combine chain wallets. Public post-graduation evidence remains open until these receipts exist.
+
+Funding mint confirmed: `0x79eb2b33ff32bd2934f0994964662fb479ea21f2898a1243c658353ae6264525`, block 12042310, successful 25 tNVDAon mint to the test wallet. Observed balance afterward: 48.403769994929974261 tNVDAon. The completing purchase has not yet been confirmed.
+
+Shared-registration validation: full `npm test` passed **649**, skipped **33**, failed **0** (682 total); focused API, router EVM, registry/model and web-shell checks **38/38 passed**. No source edits followed those checks; this final addition records the funding receipt.
