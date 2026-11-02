@@ -1,6 +1,6 @@
-# Model 11 prototype: locked liquidity from launch on Uniswap v4 (phase 2)
+# Model 11 prototype: locked liquidity from launch on Uniswap v4 (phases 2 and 3)
 
-1 November 2026. This is phase 2 of `LOCKED_FROM_LAUNCH_V4_FEASIBILITY.md`, EVM only. **It is a prototype on a local
+Phase 2: 1 November 2026. Phase 3: 2 November 2026 (see below). This is phase 2 of `LOCKED_FROM_LAUNCH_V4_FEASIBILITY.md`, EVM only. **It is a prototype on a local
 chain.** Nothing is deployed, nothing touches a testnet or mainnet, and the contracts are **not audited**. Model 10 stays
 live everywhere unchanged.
 
@@ -8,8 +8,8 @@ live everywhere unchanged.
 
 | File | What it is |
 |---|---|
-| `contracts/evm/v4/ElpidaV4Hook.sol` (291 lines) | One hook for all launches. It owns every pool's positions, charges the fees, runs the partner burn and moves the liquidity at the milestone. |
-| `contracts/evm/v4/ElpidaV4Factory.sol` (62 lines) | Creates the token. The hook then creates the pool and both positions, and runs the optional creator first buy, all in one transaction. The factory also handles partner tiers, as in Model 10. Also contains a minimal CREATE2 deployer (prototype tooling). |
+| `contracts/evm/v4/ElpidaV4Hook.sol` (311 lines after phase 3) | One hook for all launches. It owns every pool's positions, charges the fees, runs the partner burn and moves the liquidity at the milestone. |
+| `contracts/evm/v4/ElpidaV4Factory.sol` (117 lines after phase 3) | Creates the token. The hook then creates the pool and both positions, and runs the optional creator first buy, all in one transaction. The factory also handles partner tiers, as in Model 10. Also contains a minimal CREATE2 deployer (prototype tooling). |
 | `scripts/compile-v4.mjs` | Solidity 0.8.26 for the `cancun` EVM, via IR. It runs separately from the 0.8.24 / `shanghai` build used for everything deployed today. |
 | `hardhat.config.js` | Adds a `localCancun` network (v4 needs transient storage). `localTest` stays on shanghai. |
 | `tests/v4-locked-launch.test.mjs` | 12 tests that run against **Uniswap's own published PoolManager**, from the pinned `@uniswap/v4-core@1.0.2`. |
@@ -21,7 +21,7 @@ Pinned dependencies: `@uniswap/v4-core@1.0.2`, `@uniswap/v4-periphery@1.0.3` and
 ## How it works
 
 - **Currencies:**
-  - currency0 is ETH and currency1 is the token.
+  - currency0 is the quote (ETH, or USDC since phase 3) and currency1 is the token.
   - The pool's own LP fee is 0 and its tick spacing is 10.
 - **Positions at launch.** Both are owned by the hook for ever:
   - **Sale range** `[lower, upper]` with liquidity `L`, holding only tokens.
@@ -29,10 +29,10 @@ Pinned dependencies: `@uniswap/v4-core@1.0.2`, `@uniswap/v4-periphery@1.0.3` and
   - `upper` is the launch price, Model 10's `vT / vQ`, rounded to the tick spacing.
   - `lower` is 23,030 ticks away, which is **10.003×** the launch price.
 - **Milestone.** When a buy takes the price to 10×:
-  - The hook's after-swap step removes the sale position, which then holds only ETH.
-  - It adds that ETH, plus the anti-snipe bonus, as `[lower, max]`.
+  - The hook's after-swap step removes the sale position, which then holds only quote.
+  - It adds that quote, plus the anti-snipe bonus, as `[lower, max]`.
   - The result is the same liquidity on both sides of 10×. That is one full-range position, in the same pool, at the same price, with no migration.
-- **Fees.** The hook charges every swap in ETH through v4 custom accounting:
+- **Fees.** The hook charges every swap in the quote through v4 custom accounting:
   - Before the milestone: 1.25%, with anti-snipe falling from 90% over 60 s.
   - After the milestone: 1%.
   - The split is Model 10's:
@@ -40,9 +40,9 @@ Pinned dependencies: `@uniswap/v4-core@1.0.2`, `@uniswap/v4-periphery@1.0.3` and
     - partner burn from Elpida's half;
     - Elpida the rest;
     - anti-snipe surplus to the locked liquidity.
-  - Fees are held as ERC-6909 claims in the PoolManager. They are paid in ETH to the treasury and the creator vault, and a recipient that cannot receive never blocks the other.
+  - Fees are held as ERC-6909 claims in the PoolManager. They are paid in the quote to the treasury and the creator vault, and a recipient that cannot receive never blocks the other.
 - **Lock:**
-  - Third-party liquidity adds are refused before the milestone (they are allowed after it).
+  - Third-party liquidity is refused, after the milestone too, unless the treasury opens the token (phase 3).
   - Only the hook can create pools that use it.
   - The hook has no function that removes principal; a test checks its whole external surface.
 
@@ -86,7 +86,7 @@ With tick spacing 1, a swap across the whole curve would walk about ninety bitma
 1. **Ticks:** the launch price rounds by up to 0.1%, and the sale ends at 10.003× instead of 10×. Tick spacing 1 would make both exact but costs about ten times more gas on large swaps.
 2. **The buy that crosses 10×** pays the 1.25% curve fee on its whole amount. Model 10 instead fills it partially, refunds the rest, and the buyer then pays 1% in the v3 pool.
 3. **After the milestone:**
-   - The hook charges 1% in ETH on both sides. The v3 pool today charges 1% in the input token.
+   - The hook charges 1% in the quote on both sides. The v3 pool today charges 1% in the input token.
    - The partner burn runs in each swap, not through the keeper with its TWAP guard. Sandwiching it costs the attacker two fees, as on the curve.
 4. **No graduation step:**
    - There is no `graduate()`, grace period or `reopen()`.
@@ -96,19 +96,46 @@ With tick spacing 1, a swap across the whole curve would walk about ninety bitma
 
 - **Audit:** a hook with custom accounting is the highest-risk kind of v4 code. It adds about 350 lines to the audit scope.
 - **Uniswap's protocol-fee switch:** Uniswap governance may set a protocol fee of up to 0.1% of input on any v4 pool, this one included. That would take a little from each trade before the curve sees it.
-- **Native pairs only.** USDC and other ERC-20 quotes need the currency order handled. Stock and tax tokens are excluded until each one has its own proof.
+- **Quotes:** native and USDC are done (phase 3). Stock and tax tokens are excluded until each one has its own proof; the factory accepts only team-approved quotes.
 - **Routers and aggregators:** the PoolSwapTest router handles the hook's deltas. Uniswap's Universal Router should too, but aggregator support must be checked on a testnet.
 - **Indexer:** the PoolManager's `Swap` event does not include the hook's fee. The hook emits `Fee`, `BuybackBurned` and `Milestone` for the indexer.
 
-## Decisions needed (Malik)
+## Decisions (Malik, 2 November 2026)
 
-1. **Tick spacing:** 10 (10.003×, cheaper gas; the prototype's choice) or 1 (exact 10×, about ten times the gas on full-curve swaps).
-2. **Fee after the milestone:** 1% in ETH (prototype), or another rate.
-3. **Third-party liquidity after the milestone:** allowed (prototype) or refused.
+1. **Tick spacing: 10.** The sale range is 10.003×, and the launch price rounds by at most 0.1%, never cheaper.
+2. **Fee after the milestone: 1%**, in the pair's quote.
+3. **Third-party liquidity:** yes, but as a separate feature for selected tokens. So the hook refuses third-party liquidity by default, including after the milestone.
+   - `openLiquidity(token)` lets the treasury open a token's pool:
+     - only after that token's milestone;
+     - once, and never closed again.
+   - The switch had to be in the hook from the start: a deployed hook cannot be changed, so without it the feature could never be added.
+   - The page where people add liquidity is the separate feature, still to build.
 
-## Next (phase 3, still no mainnet)
+## Phase 3 (2 November 2026, local chain only)
 
-1. Starting FDV from the USD oracle (`ElpidaUsdPricing`), as in Model 10.
-2. USDC pairs.
-3. Indexer and UI support.
-4. A labelled test launchpad on Base Sepolia and Ethereum Sepolia, the two testnets with official Uniswap v4.
+- **Quote assets:**
+  - The hook handles any approved quote: the native coin or an ERC-20 such as USDC.
+  - The factory deploys each token with CREATE2 at an address above the quote's, so the quote is always the pool's `currency0` and the curve maths stays the same.
+  - Fees and their payouts are in the pair's quote.
+  - Claims are tracked per quote asset (`totalOwed(quote)`).
+- **`ElpidaV4Factory` now has Model 10's commercial terms** (it inherits `ElpidaUsdPricing`):
+  - **Pricing:** an oracle-priced $10 launch fee (or 10 USDC), and a `startFdvUsd` starting FDV for native pairs ($5,000 on mainnet, $50 on testnets).
+  - **Quotes:** team-approved ERC-20 quote templates (USDC), set once.
+  - **Token details:** an `ipfs://` URI published only in the launch transaction, and required where `requiresMetadata()`.
+  - **Entry point:** Model 10's `launchWithPayment` shape, so the app can call both factories the same way.
+- **Tests:** `tests/v4-factory.test.mjs` (6 tests) covers:
+  - the oracle start and fee, refunds and a stale feed;
+  - testnet terms;
+  - a USDC pair, with trades against Model 10, a raise of about $12,000 at 10× and fees paid in USDC;
+  - the fee paid in USDC;
+  - token details;
+  - quote approval.
+
+  `tests/v4-locked-launch.test.mjs` (13 tests) adds the liquidity switch.
+- **Gas:** about the same as phase 2. Launch is 946k, because of the CREATE2 token and the oracle read.
+
+## Next (phase 4, still no mainnet)
+
+1. **Indexer:** read the hook's `Launched`, `Fee`, `BuybackBurned`, `Milestone` and `LiquidityOpened` events beside the PoolManager's `Swap`.
+2. **App:** launch, buy and sell on Model 11. Buy and sell go through a router, because v4 has no per-token curve contract.
+3. **Testnets:** a labelled test launchpad on Base Sepolia and Ethereum Sepolia, which have Uniswap v4. Malik deploys it from the browser, as with "Deploy reviewed launchpad". The hook address is mined in the browser before the deploy.
