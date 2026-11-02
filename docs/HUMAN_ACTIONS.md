@@ -19,7 +19,22 @@ The app-side fix (E-2) works as soon as this is merged. The contract fixes only 
 so tokens already launched keep their current contracts and stay listed and tradable. Testnets only; nothing on
 mainnet.
 
-**EVM (each testnet you want fixed: Base Sepolia, Ethereum Sepolia, BNB Testnet, Robinhood Testnet):**
+**EVM: done on all four testnets, 2 November 2026.** Malik deployed them, and each factory and adapter was checked on-chain:
+it reports `REVIEW_FIXES_VERSION` 1, the treasury `0xf5B0…639D`, a $50 start and automatic graduation. Each one is now
+pinned in `packages/core/networks.mjs`, and the previous factories stay indexed as legacy.
+
+| Network | Factory | Pricing turned on (block) |
+|---|---|---|
+| Base Sepolia | `0x381c26893322cbadFbf83D0f2de69f52aA9Ab94c` | 53536219 |
+| Ethereum Sepolia | `0x37Ca07Eb2A14E30051DbF78e4adCc7fBc1430477` | 12048655 |
+| BNB Testnet | `0x4CabA05067171DbA4B840aDae1e652B8279dE499` | 140398704 |
+| Robinhood Testnet | `0xEC353bfBCb22424aF0fA5E93dFA1728bfE702Ea8` | 147096680 |
+
+Still open on the new launchpads:
+- **Test pairs:** press **Add test pairs** again where you use them.
+- **Partner tiers:** re-register active partners, your own Elite tier included, from the Partners tab.
+
+The steps below are kept for reference:
 
 1. On elpida.fun, open **Network and test funds** on that network and connect the **treasury wallet**.
 2. Press **Deploy reviewed launchpad**. It deploys a new graduation adapter, then the factory, then turns on USD
