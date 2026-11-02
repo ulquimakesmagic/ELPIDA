@@ -17,7 +17,9 @@ the wallet's balance is the budget, and what goes in is decided by the treasury,
 
 `apps/api/flywheel-keeper.mjs`, testnets only (Base Sepolia, Ethereum Sepolia, BNB Testnet, Robinhood Testnet, local):
 
-- **Cadence:** one cycle per chain every 24 hours (`ELPIDA_FLYWHEEL_EVERY_HOURS`).
+- **Cadence:** one cycle per chain every 24 hours (`ELPIDA_FLYWHEEL_EVERY_HOURS`). A cycle that placed no order (no
+  budget, or no eligible token) is retried after an hour instead of waiting a day (fix of 2 November 2026: the first live
+  cycle found no eligible token, because the index's market caps carry more than 18 decimals and were read as 0).
 - **Budget:** the wallet balance less a gas reserve (`ELPIDA_FLYWHEEL_GAS_RESERVE_ETH`, 0.005), at most
   `ELPIDA_FLYWHEEL_MAX_PER_CYCLE_ETH` (0.05) per cycle, split into **ten equal slots**.
 - **Eligible:** Elpida tokens from the public index on that chain, paired with the native coin, at least a day old,

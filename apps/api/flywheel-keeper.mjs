@@ -49,10 +49,16 @@ export async function poolPriceCheck(pool, now) {
  * EVM worker for one chain. `listings()` returns the public index's records for the chain; `dex` is that chain's DEX
  * configuration (router, WETH, fee tier, router version).
  */
+/** How soon a cycle that placed no order (no budget, no eligible token) is tried again. */
+export const EMPTY_RETRY_MS = 3_600_000;
+
 export function evmFlywheelWorker({ chain, chainId, signer, listings, dex, explorer = null, name = chain, slippageBps = 100, contract = (a, abi, r) => new Contract(a, abi, r) }) {
   if (!FLYWHEEL_EVM_CHAINS.has(Number(chainId))) throw new Error('Flywheel keeper: chain is not an allowed testnet');
   const provider = signer.provider;
-  const wei = v => { try { return parseEther(String(v ?? '0')); } catch { return 0n; } };
+  // The index stores amounts as decimal strings, and market caps can carry more than 18 decimals (a cap is a price
+  // times a supply). parseEther rejects those, which used to turn every market cap into 0 and leave no eligible token.
+  // Keep 18 decimals (the native unit) and drop the rest.
+  const wei = v => { try { const [whole, fraction = ''] = String(v ?? '0').trim().split('.'); return parseEther(fraction ? `${whole}.${fraction.slice(0, 18)}` : whole); } catch { return 0n; } };
   const send = async promise => { const receipt = await (await promise).wait(); if (receipt.status !== 1) throw fail('reverted'); return receipt; };
   return {
     chain, name, explorer, format: v => formatEther(v),
@@ -130,8 +136,11 @@ export class FlywheelKeeper {
     this.running = true;
     try {
       for (const worker of this.workers) {
-        const last = this.db.prepare('SELECT at FROM flywheel_cycles WHERE chain=? ORDER BY at DESC LIMIT 1').get(worker.chain)?.at ?? 0;
-        if (this.now() - last >= this.everyMs) await this.runCycle(worker);
+        // The cadence counts cycles that placed orders. A cycle that found no budget or no eligible token is retried
+        // after an hour, so a top-up (or a fix) does not wait a whole day.
+        const lastOrders = this.db.prepare("SELECT at FROM flywheel_cycles WHERE chain=? AND status IN ('done','running') ORDER BY at DESC LIMIT 1").get(worker.chain)?.at ?? 0;
+        const lastAny = this.db.prepare('SELECT at FROM flywheel_cycles WHERE chain=? ORDER BY at DESC LIMIT 1').get(worker.chain)?.at ?? 0;
+        if (this.now() - lastOrders >= this.everyMs && this.now() - lastAny >= EMPTY_RETRY_MS) await this.runCycle(worker);
       }
     } finally { this.running = false; }
   }

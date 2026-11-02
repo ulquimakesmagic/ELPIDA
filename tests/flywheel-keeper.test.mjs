@@ -118,6 +118,22 @@ test('tokens left by an interrupted order are sent to the dead address at the ne
   // The gas reserve is larger than the wallet: nothing to spend.
   assert.equal(k.db.prepare('SELECT status FROM flywheel_cycles').get().status, 'no_budget');
   assert.equal(k.db.prepare("SELECT COUNT(*) AS n FROM flywheel_orders WHERE cycle>0").get().n, 0);
+  // An empty cycle does not hold the wallet for a day: within the hour nothing runs, after it the cycle is retried.
+  const cycles = () => k.db.prepare('SELECT COUNT(*) AS n FROM flywheel_cycles').get().n;
+  now += 30 * 60_000; await k.tick(); assert.equal(cycles(), 1);
+  now += 31 * 60_000; await k.tick(); assert.equal(cycles(), 2, 'retried after an hour');
+});
+
+test('index amounts with more than 18 decimals still rank (live listings carry 24-decimal market caps)', async () => {
+  const listing = { address: '0x' + '1'.repeat(40), symbol: 'AKAZA', pair: 'native', graduated: true, complete: true, pool: '0x' + '2'.repeat(40), curve: '0x' + '3'.repeat(40),
+    created: 1792967176000, circulatingMarketCapQuote: '0.162257321671398521848335', remainingBuy: '0', reserve: '0.051310270352021586' };
+  const worker = evmFlywheelWorker({ chain: 'local', chainId: 31337, signer: { provider: {} }, listings: async () => [listing], dex: {} });
+  const [t] = await worker.tokens();
+  assert.equal(t.marketCap, 162257321671398521n, 'truncated to 18 decimals, not 0');
+  assert.equal(t.poolReserve, 51310270352021586n);
+  const plan = planFlywheelCycle({ chain: 'local', budget: parseEther('0.045'), tokens: [t], now: Math.floor(1792967176 + 2 * DAY) });
+  assert.equal(plan.orders.length, 1, 'eligible: a native, graduated, two-day-old token with a pool');
+  assert.equal(plan.orders[0].spend, 51310270352021586n * 50n / 10_000n, '0.5% of the pool');
 });
 
 test('configuration: off without a key; refuses mainnets and a Railway service without a volume', () => {
