@@ -102,3 +102,79 @@ test('F-1 fix: no extra step when nothing blocks graduation, or when the buy doe
   assert.deepEqual(await w.graduationUnblock(item, curve, await curve.completionQuote(), 0n), []);
   assert.deepEqual(await w.graduationUnblock(item, curve, 10n ** 15n, 0n), []);
 });
+
+/**
+ * Review finding E-2, the mirror of F-1: quote (WETH) placed in a pre-created pool just ABOVE the graduation price,
+ * more than the adapter's 2% budget can sell into, blocks the completing buy the same way.
+ */
+async function overpricedCurve(t, bandEth) {
+  const f = await dexFixture(t, { factoryName: 'ElpidaAtomicDexFactory' }), l = await launch(f);
+  await f.advance(61);
+  const holder = f.signers[2];
+  await mined(l.curve.connect(holder).buy(parseEther('0.8'), 0, { value: parseEther('0.8') }));
+  const griefer = f.signers[1], weth = f.dex.weth.connect(griefer), token = l.token;
+  const manager = new Contract(f.dex.manager.target, v3Artifacts.manager.abi, griefer);
+  const tokenFirst = BigInt(token.target) < BigInt(weth.target), [t0, t1] = tokenFirst ? [token.target, weth.target] : [weth.target, token.target];
+  const P = 9 * Number(await l.curve.virtualQuote()) / 1e27;
+  const p01 = m => tokenFirst ? m * P : 1 / (m * P);
+  const tick = p => Math.floor(Math.log(p) / Math.log(1.0001) / 200) * 200;
+  const sqrtX96 = p => BigInt(Math.floor(Math.sqrt(p) * 2 ** 48)) * (1n << 48n);
+  await mined(manager.createAndInitializePoolIfNecessary(t0, t1, 10000, sqrtX96(p01(1.03))));
+  const band = parseEther(bandEth);
+  await mined(weth.deposit({ value: band })); await mined(weth.approve(manager.target, band));
+  const [lo, hi] = tokenFirst ? [tick(p01(1.004)), tick(p01(1.024))] : [tick(p01(1.024)) + 200, tick(p01(1.004)) + 200];
+  await mined(manager.mint({ token0: t0, token1: t1, fee: 10000, tickLower: lo, tickUpper: hi, amount0Desired: tokenFirst ? 0n : band, amount1Desired: tokenFirst ? band : 0n, amount0Min: 0, amount1Min: 0, recipient: f.addresses[1], deadline: BigInt(await f.now() + 600) }));
+  return { f, l, holder };
+}
+
+test('E-2: quote placed just above the graduation price blocks the completing buy; the curve stays open', async t => {
+  const { f, l } = await overpricedCurve(t, '0.3');
+  const gross = await l.curve.completionQuote();
+  await assert.rejects(mined(l.curve.connect(f.signers[0]).buy(gross, 0, { value: gross, gasLimit: 15_000_000 })), /pool price mismatch|revert/);
+  assert.equal(await l.curve.complete(), false);
+});
+
+test('E-2 fix: a holder completing the curve first sells into the over-priced pool (never below the graduation price), then graduates', async t => {
+  const { f, l, holder } = await overpricedCurve(t, '0.3');
+  const { w, item, curve } = await walletFor(f, l, holder);
+  const input = await curve.completionQuote();
+  const steps = await w.graduationUnblock(item, curve, input, 0n);
+  assert.equal(steps.length, 2, 'approve, then sell');
+  assert.match(steps[1].label, /never below the graduation price/);
+  assert.ok(w.progress.some(m => /priced .* above the curve/.test(m)));
+  const held = await l.token.balanceOf(w.address), ethBefore = await f.provider.getBalance(w.address);
+  let gas = 0n;
+  for (const step of steps) { const r = await (await w.signer.sendTransaction({ to: step.to, data: step.data, value: step.value ?? 0n })).wait(); gas += r.gasUsed * r.gasPrice; }
+  const sold = held - await l.token.balanceOf(w.address), received = (await f.provider.getBalance(w.address)) + gas - ethBefore;
+  assert.ok(sold > 0n && sold < held, 'only part of the holding was sold; the price limit stopped the rest');
+  const graduationPrice = 9n * await l.curve.virtualQuote() * 10n ** 18n / 10n ** 27n;   // quote-wei per whole token, about
+  assert.ok(received * 10n ** 18n / sold >= graduationPrice * 99n / 100n, 'sold at about the graduation price or better (net of the 1% pool fee)');
+  assert.equal(await f.dex.weth.balanceOf(w.address), 0n, 'paid out as native ETH, not WETH');
+  const gross = await curve.completionQuote();
+  await mined(curve.buy(gross, 0, { value: gross }));
+  assert.equal(await l.curve.complete(), true); assert.notEqual(await l.curve.pool(), '0x0000000000000000000000000000000000000000');
+});
+
+test('E-2 fix: a buyer holding no tokens gets the explanation, and nothing is sent', async t => {
+  const { f, l } = await overpricedCurve(t, '0.3');
+  const { w, item, curve } = await walletFor(f, l, f.signers[3]);
+  await assert.rejects(w.graduationUnblock(item, curve, await curve.completionQuote(), 0n), /priced above the curve. Holders can sell/);
+});
+
+test('E-3 fix: quote the pool could not take at graduation goes to the fee splitter, not stranded in the curve', async t => {
+  // A band too small to block (the adapter's 2% budget sells into it) but large enough to leave WETH over at the mint.
+  const { f, l } = await overpricedCurve(t, '0.05');
+  const gross = await l.curve.completionQuote();
+  const receipt = await mined(l.curve.connect(f.signers[0]).buy(gross, 0, { value: gross }));
+  assert.equal(await l.curve.complete(), true);
+  const forwarded = receipt.logs.map(log => { try { return l.curve.interface.parseLog(log); } catch { return null; } }).find(e => e?.name === 'QuoteDustForwarded');
+  assert.ok(forwarded && forwarded.args.amount > 10n ** 15n, 'a meaningful amount was forwarded');
+  assert.equal(forwarded.args.splitter, await l.curve.feeSplitter());
+  assert.equal(await l.curve.quoteDust(), 0n, 'nothing left recorded as dust');
+  assert.equal(await f.dex.weth.balanceOf(l.curve.target), 0n, 'the curve holds no WETH');
+  const splitter = new Contract(await l.curve.feeSplitter(), art('ElpidaFeeSplitter').abi, f.provider), weth = f.dex.weth.target;
+  const owed = (await splitter.claimable(weth, await splitter.treasury())) + (await splitter.claimable(weth, await splitter.creator())) + (await splitter.pendingBuyback(weth));
+  assert.equal(owed, forwarded.args.amount, 'the splitter owes exactly what it received, split like LP fees');
+  assert.equal(await f.dex.weth.balanceOf(splitter.target), owed);
+  await mined(l.curve.forwardQuoteDust());   // a retry with nothing to do is harmless
+});

@@ -1,7 +1,8 @@
 // Early-partner tiers after graduation (docs/DESIGN_PARTNER_TIERS.md 2.3): the LP fee splitter gives the creator 50%,
 // burns the tier's share of token-side fees at deposit, and queues the quote-side share for `buyback()`, which swaps
-// at most 1% of the pool's quote balance per call through the pool and sends the tokens to the dead address. Only the
-// pool may call the swap callback, and only during the splitter's own buyback.
+// at most 0.5% of the pool's quote balance per call through the pool and sends the tokens to the dead address. Only the
+// pool may call the swap callback, and only during the splitter's own buyback. A buyback runs at most once per block
+// and only while the pool price is within 150 ticks of its 10-minute average (review finding E-1: sandwiching).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Contract, ZeroAddress, parseEther } from 'ethers';
@@ -28,7 +29,7 @@ async function graduated(t, tier) {
   return { f, l, pool, locker, splitter, weth, token, swap };
 }
 
-test('partner pool fees: creator keeps 50%, token side burns at deposit, quote side queues, buyback burns within 1% of depth', async t => {
+test('partner pool fees: creator keeps 50%, token side burns at deposit, quote side queues, buyback burns within 0.5% of depth', async t => {
   const { f, pool, locker, splitter, weth, token, swap } = await graduated(t, 2000);
   assert.equal(await splitter.buybackBps(), 2000n);
   assert.equal((await splitter.pool()).toLowerCase(), pool.toLowerCase());
@@ -38,7 +39,8 @@ test('partner pool fees: creator keeps 50%, token side burns at deposit, quote s
   await mined(token.connect(f.signers[1]).approve(f.dex.router.target, held / 3n));
   await swap(f.signers[1], token.target, weth.target, held / 3n);
 
-  const deadBefore = await token.balanceOf(DEAD), burnedBefore = await splitter.burned();
+  // Graduation already paid its quote dust into the splitter (review finding E-3), so compare against what was queued before.
+  const deadBefore = await token.balanceOf(DEAD), burnedBefore = await splitter.burned(), queuedBefore = await splitter.pendingBuyback(weth.target);
   const receipt = await mined(locker.collectFees());
   const funded = receipt.logs.map(log => { try { return splitter.interface.parseLog(log); } catch { return null; } }).filter(e => e?.name === 'FeesFunded');
   assert.equal(funded.length, 2, 'fees in both assets');
@@ -49,7 +51,7 @@ test('partner pool fees: creator keeps 50%, token side burns at deposit, quote s
     if (asset.toLowerCase() === token.target.toLowerCase()) {
       assert.equal(await splitter.burned() - burnedBefore, burn, 'token-side share burned at deposit');
       assert.equal(await token.balanceOf(DEAD) - deadBefore, burn);
-    } else assert.equal(await splitter.pendingBuyback(asset), burn, 'quote-side share queued');
+    } else assert.equal(await splitter.pendingBuyback(asset) - queuedBefore, burn, 'quote-side share queued');
   }
   const ledger = async asset => (await splitter.claimable(asset, f.addresses[2])) + (await splitter.claimable(asset, await splitter.creator())) + (await splitter.pendingBuyback(asset));
   assert.equal(await weth.balanceOf(splitter.target), await ledger(weth.target), 'splitter WETH = claims + pending buyback');
@@ -57,17 +59,20 @@ test('partner pool fees: creator keeps 50%, token side burns at deposit, quote s
   // An outsider cannot fake the swap callback to drain the queue.
   await assert.rejects(splitter.connect(f.signers[3]).uniswapV3SwapCallback(1n, 0n, '0x'), /callback/);
 
+  // Right after graduation the pool has no price history yet; once the price has settled for a while it does.
+  await assert.rejects(splitter.buyback(), /price history too short/);
+  await f.advance(601);
   const pending = await splitter.pendingBuyback(weth.target), depth = await weth.balanceOf(pool);
-  const cap = depth * 100n / 10000n, deadMid = await token.balanceOf(DEAD);
+  const cap = depth * 50n / 10000n, deadMid = await token.balanceOf(DEAD);
   await mined(splitter.connect(f.signers[3]).buyback());
   const spent = pending - await splitter.pendingBuyback(weth.target);
-  assert.equal(spent, pending < cap ? pending : cap, 'spends the queue, capped at 1% of the pool quote balance');
+  assert.equal(spent, pending < cap ? pending : cap, 'spends the queue, capped at 0.5% of the pool quote balance');
   assert.ok(await token.balanceOf(DEAD) > deadMid, 'bought tokens went to the dead address');
   assert.equal(await weth.balanceOf(splitter.target), await ledger(weth.target), 'still exactly backed');
   if (pending <= cap) await assert.rejects(splitter.buyback(), /nothing to buy back/);
 });
 
-test('a large queue is bought back over several calls, each within 1% of the pool', async t => {
+test('a large queue is bought back over several calls, each within 0.5% of the pool', async t => {
   const { f, pool, locker, splitter, weth, token, swap } = await graduated(t, 2000);
   // Heavy two-way trading builds a quote-side queue larger than 1% of the pool.
   for (let i = 0; i < 12; i++) {
@@ -78,15 +83,50 @@ test('a large queue is bought back over several calls, each within 1% of the poo
   }
   await mined(locker.collectFees());
   let calls = 0;
-  while ((await splitter.pendingBuyback(weth.target)) > 0n && calls < 40) {
-    const before = await splitter.pendingBuyback(weth.target), cap = (await weth.balanceOf(pool)) * 100n / 10000n;
+  while ((await splitter.pendingBuyback(weth.target)) > 0n && calls < 60) {
+    // A keeper-like cadence: the average catches up with the price between calls.
+    await f.advance(601);
+    const before = await splitter.pendingBuyback(weth.target), cap = (await weth.balanceOf(pool)) * 50n / 10000n;
     await mined(splitter.buyback()); calls++;
     const spent = before - await splitter.pendingBuyback(weth.target);
-    assert.ok(spent > 0n && spent <= cap, `call ${calls}: within 1% of the pool`);
+    assert.ok(spent > 0n && spent <= cap, `call ${calls}: within 0.5% of the pool`);
   }
   assert.equal(await splitter.pendingBuyback(weth.target), 0n, 'queue cleared');
   assert.ok(calls > 1, 'the queue was larger than 1% of the pool, so it took more than one call');
   assert.ok(await token.balanceOf(DEAD) > 0n);
+});
+
+test('E-1: pushing the price up in front of a buyback makes it revert; it cannot repeat in one block', async t => {
+  const { f, pool, locker, splitter, weth, token, swap } = await graduated(t, 2000);
+  for (let i = 0; i < 12; i++) {
+    await swap(f.signers[3], weth.target, token.target, parseEther('8'), parseEther('8'));
+    const bag = await token.balanceOf(f.addresses[3]);
+    await mined(token.connect(f.signers[3]).approve(f.dex.router.target, bag));
+    await swap(f.signers[3], token.target, weth.target, bag);
+  }
+  await mined(locker.collectFees());
+  await f.advance(601);
+  const pending = await splitter.pendingBuyback(weth.target);
+  assert.ok(pending > (await weth.balanceOf(pool)) * 50n / 10000n, 'a backlog several calls deep');
+  // The attacker's front-run: buy the token, moving the price well past 1.5%.
+  const atk = f.signers[1];
+  await swap(atk, weth.target, token.target, parseEther('6'), parseEther('6'));
+  await assert.rejects(splitter.connect(atk).buyback(), /price away from average/, 'the buyback refuses the inflated price');
+  assert.equal(await splitter.pendingBuyback(weth.target), pending, 'nothing was spent');
+  // The attacker sells back; once the price is back near its average, the buyback works again.
+  const bag = await token.balanceOf(f.addresses[1]);
+  await mined(token.connect(atk).approve(f.dex.router.target, bag));
+  await swap(atk, token.target, weth.target, bag);
+  await f.advance(601);
+  // Two buybacks in one block: the second is refused.
+  await f.provider.send('evm_setAutomine', [false]);
+  try {
+    const first = await splitter.buyback({ gasLimit: 3_000_000n }), second = await splitter.buyback({ gasLimit: 3_000_000n });
+    await f.provider.send('evm_mine', []);
+    const [a, b] = await Promise.all([first.wait().then(r => r.status, () => 0), second.wait().then(r => r.status, () => 0)]);
+    assert.deepEqual([a, b], [1, 0], 'one buyback per block');
+  } finally { await f.provider.send('evm_setAutomine', [true]); }
+  assert.ok(await splitter.pendingBuyback(weth.target) < pending, 'the first one spent part of the queue');
 });
 
 test('standard tokens: 50/50 LP fees, nothing burned or queued, buyback refused', async t => {

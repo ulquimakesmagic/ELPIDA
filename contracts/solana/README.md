@@ -94,12 +94,14 @@ cp /tmp/sbf-main/elpida_launchpad.so build/elpida_launchpad-mainnet.so
 
 `Cargo.lock` pins dependencies compatible with the Solana toolchain's Rust 1.84 (for example `blake3` 1.5.5). The program ID is fixed by `declare_id!` and `keys/elpida_launchpad-keypair.json` (private, git-ignored).
 
-Release builds (28 October 2026, SOL pairs graduate to Raydium CPMM; Agave / Solana CLI **2.3.13**, platform-tools v1.48), each reproduced byte for byte from a clean `target`:
+Release builds (1 November 2026, review fixes S-1 and S-2: Raydium buyback once a minute at 0.5% of depth, PumpSwap harvests no longer queue an unspendable share; Agave / Solana CLI **2.3.13**, platform-tools v1.48), each reproduced byte for byte from a clean `target`:
 
 | File | Build | sha256 |
 |---|---|---|
-| `build/elpida_launchpad.so` | `--features testnet` (devnet, localnet) | `5134736605be538111c05991af495028debcc77f2ed536b33ef869c768a45a0d` |
-| `build/elpida_launchpad-mainnet.so` | mainnet (test instructions refused) | `363e69c68ca88466ae09acd37a33ca50eccc925840470d0f7dbdeed8eeb8c7f4` |
+| `build/elpida_launchpad.so` | `--features testnet` (devnet, localnet) | `3caabce1b7019f99244fd8cac4b845edd1b5e8001e0791eef6efcc369927e1c9` |
+| `build/elpida_launchpad-mainnet.so` | mainnet (test instructions refused) | `b3e254cbafdd3d88a634c8989a7c57caa1da6e1ccd6d7d03f04b9c94c9afda7f` |
+
+Previous release (28 October, SOL pairs graduate to Raydium CPMM): test `51347366…a45a0d`, mainnet `363e69c6…c8c7f4`.
 
 The previous devnet build (`319e2ffe…`, before metadata and reopen) is kept as `fixtures/elpida_launchpad-pre-metadata.so` for the compatibility test. Browsers detect which build a cluster runs (`client.supportsMetadata`, a simulated `reopen_curve`) and use the earlier launch layout until the program is upgraded.
 

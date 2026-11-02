@@ -98,9 +98,10 @@ async function lifecycle(t, { native, seed, tier = 0 }) {
     } else if (action < 0.93) {
       await mined(locker.connect(pick(rand, f.signers)).collectFees());
     } else if (tier && action < 0.965) {
-      // Anyone can run the LP-fee buyback; it burns what it buys, or refuses when nothing is pending.
+      // Anyone can run the LP-fee buyback; it burns what it buys, or refuses when nothing is pending or while the
+      // price is away from its recent average (review finding E-1).
       const deadBefore = await token.balanceOf(DEAD);
-      const done = await mined(splitter.connect(pick(rand, f.signers)).buyback()).then(() => true, e => { assert.match(String(e.message), /nothing to buy back/, `${label}: only an empty queue is refused`); return false; });
+      const done = await mined(splitter.connect(pick(rand, f.signers)).buyback()).then(() => true, e => { assert.match(String(e.message), /nothing to buy back|price away from average|price history too short/, `${label}: only an empty queue or the price guard refuses`); return false; });
       if (done) assert.ok(await token.balanceOf(DEAD) > deadBefore, `${label}: the buyback burned tokens`);
     } else {
       const recipient = rand() < 0.5 ? f.addresses[2] : await splitter.creator(), asset = rand() < 0.5 ? token : quote;
@@ -116,8 +117,9 @@ async function lifecycle(t, { native, seed, tier = 0 }) {
   // 4. Everything owed is paid out; the curve and the splitter end empty.
   await mined(locker.collectFees()); await mined(curve.withdrawFees());
   for (const asset of [token, quote]) for (const r of [f.addresses[2], await splitter.creator()]) await mined(splitter.claim(asset.target, r));
-  // Partner tokens: run the buyback until the queue is empty (each call spends at most 1% of the pool's quote side).
-  for (let i = 0; tier && i < 50 && (await splitter.pendingBuyback(quote.target)) > 0n; i++) await mined(splitter.buyback());
+  // Partner tokens: run the buyback until the queue is empty (each call spends at most 0.5% of the pool's quote side,
+  // and the price must settle near its 10-minute average between calls, as it does between keeper runs).
+  for (let i = 0; tier && i < 120 && (await splitter.pendingBuyback(quote.target)) > 0n; i++) { await f.advance(601); await mined(splitter.buyback()); }
   assert.equal(await quoteBalance(f, l), 0n, `${tag}: curve fully paid out`);
   if (tier) { const burned = await curve.buybackBurned(); assert.ok(burned > 0n, `${tag}: trades bought back and burned`); assert.ok(await token.balanceOf(DEAD) >= burned, `${tag}: burned tokens sit at the dead address`); }
   for (const asset of [token, quote]) assert.equal(await asset.balanceOf(splitter.target), 0n, `${tag}: splitter fully paid out`);

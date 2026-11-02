@@ -110,6 +110,7 @@ export class TestnetWallet {
     // Team deployment is authoritative across visitors; saved private deployments remain intact.
     // A model 10 record saved by this browser takes precedence over a pinned legacy model 9 team deployment.
     const shared=this.net.shared, model=modelOf(this.net.chainId, !!this.dex), saved=read(deploymentKey(this.net.chainId, !!this.dex));
+    if(saved?.reviewFixesVersion===1&&saved.model===DEX_MODEL&&(shared?.reviewFixesVersion??0)<1)return saved;
     if(saved?.partnerTiersVersion===1&&saved.model===DEX_MODEL&&(shared?.partnerTiersVersion??0)<1)return saved;
     if(saved?.launchFeaturesVersion===1&&saved.model===DEX_MODEL&&(shared?.launchFeaturesVersion??0)<1)return saved;
     if(this.net.key==='base-sepolia'&&saved?.model===DEX_MODEL&&saved.feeAccountingVersion===1&&(shared?.feeAccountingVersion??0)<1)return saved;
@@ -124,13 +125,17 @@ export class TestnetWallet {
   get feeFixUpgradeAvailable(){return this.net.key==='base-sepolia'&&this.model===DEX_MODEL&&!!this.deployment&&this.feeAccountingVersion===0;}
   /** True when this network's launchpad predates the partner-tier registry (docs/DESIGN_PARTNER_TIERS.md). */
   get partnerUpgradeAvailable(){return !!(this.model===DEX_MODEL&&this.deployment&&this.launchFeaturesChecked&&this.partnerTiersVersion===0&&!this.launchUpgradeAvailable&&!this.feeFixUpgradeAvailable);}
+  /** True when this network's launchpad predates the 1 November review fixes (buyback price guard, graduation dust). */
+  get reviewUpgradeAvailable(){return !!(this.model===DEX_MODEL&&this.deployment&&this.launchFeaturesChecked&&this.partnerTiersVersion>=1&&this.reviewFixesVersion===0&&!this.launchUpgradeAvailable&&!this.feeFixUpgradeAvailable);}
   get launchUpgradeAvailable(){return this.net.key==='base-sepolia'&&this.model===DEX_MODEL&&!!this.deployment&&this.launchFeaturesChecked&&!this.automaticGraduationSupported;}
   async checkLaunchFeatures(factory=this.factoryContract()){
     if(this.launchFeaturesChecked&&this._launchFeaturesFactory===factory.target)return;
-    this.launchFeaturesChecked=false;this.automaticGraduationSupported=false;this.partnerTiersVersion=undefined;
+    this.launchFeaturesChecked=false;this.automaticGraduationSupported=false;this.partnerTiersVersion=undefined;this.reviewFixesVersion=undefined;
     if(this.model===DEX_MODEL){
       try{this.partnerTiersVersion=Number(await new Contract(factory.target,['function PARTNER_TIERS_VERSION() pure returns(uint256)'],this.provider).PARTNER_TIERS_VERSION());}
       catch(error){if(error.code!=='CALL_EXCEPTION'||(error.data&&error.data!=='0x'))throw error;this.partnerTiersVersion=0;}
+      try{this.reviewFixesVersion=Number(await new Contract(factory.target,['function REVIEW_FIXES_VERSION() pure returns(uint256)'],this.provider).REVIEW_FIXES_VERSION());}
+      catch(error){if(error.code!=='CALL_EXCEPTION'||(error.data&&error.data!=='0x'))throw error;this.reviewFixesVersion=0;}
       try{this.automaticGraduationSupported=await new Contract(factory.target,['function automaticGraduation() view returns(bool)'],this.provider).automaticGraduation();}
       catch(error){if(error.code!=='CALL_EXCEPTION'||(error.data&&error.data!=='0x'))throw error;}
     }
@@ -562,8 +567,9 @@ export class TestnetWallet {
    */
   /** True when the connected wallet advertises atomic batches on this chain (checked once per network). */
   /**
-   * Steps that clear a pre-created pool blocking graduation (audit finding F-1), or none. Only for a buy that would
-   * complete an automatically graduating curve and that a dry run shows failing with "pool price mismatch".
+   * Steps that clear a pre-created pool blocking graduation, or none: buying a cheap band below the graduation price
+   * (audit finding F-1), or selling the buyer's own tokens into quote placed above it (review finding E-2). Only for a
+   * buy that would complete an automatically graduating curve and that a dry run shows failing with "pool price mismatch".
    */
   async graduationUnblock(item, curve, input, minimum) {
     const native = item.pair === 'native';
@@ -578,13 +584,26 @@ export class TestnetWallet {
     const pool = await new Contract(this.dex.factory, ['function getPool(address,address,uint24) view returns(address)'], this.provider).getPool(token, quoteAsset, fee);
     const [poolSqrtPriceX96] = await new Contract(pool, this.config.contracts.dexPool.abi, this.provider).slot0();
     const symbol = item.symbol ?? 'this token', unit = native ? this.net.nativeCurrency.symbol : this.qsym(item, true), dex = this.dex.name ?? 'DEX';
-    if (!tokenCheaperInPool({ poolSqrtPriceX96, graduationSqrtPriceX96: limit, tokenIsToken0 })) throw new Error(`Graduation is waiting on ${symbol}'s ${dex} pool, which someone priced above the curve. Holders can sell into that pool at a profit, and completion works once it is back near the curve price. Nothing was sent.`);
-    // Up to the completing buy's size again; the price limit decides how much is actually spent, and the rest stays
-    // with you (refunded in the same transaction for native coin).
     // A UI flow that quotes, approves and then sends can take minutes on a loaded machine, and it expired its own
     // transaction at 300 s (seen in the full suite: the F-1 unblock test reverted with "Transaction too old"). The
     // swap is bounded by sqrtPriceLimitX96, so the deadline is not the safety mechanism here; give it half an hour.
-    const budget = input, router = this.dex.router, deadline = BigInt((await this.provider.getBlock('latest')).timestamp + 1800);
+    const router = this.dex.router, deadline = BigInt((await this.provider.getBlock('latest')).timestamp + 1800);
+    if (!tokenCheaperInPool({ poolSqrtPriceX96, graduationSqrtPriceX96: limit, tokenIsToken0 })) {
+      // Review finding E-2, the mirror of F-1: quote placed in the pool ABOVE the graduation price. Selling the token
+      // into it, never below the graduation price, clears it, and the seller gets more than the curve would pay.
+      const coin = new Contract(token, this.config.contracts.quote.abi, this.signer), held = await coin.balanceOf(this.address);
+      if (held === 0n) throw new Error(`Graduation is waiting on ${symbol}'s ${dex} pool, which someone priced above the curve. Holders can sell into that pool at a profit, and completion works once it is back near the curve price. Nothing was sent.`);
+      const steps = [];
+      if (await coin.allowance(this.address, router) < held) steps.push({ to: token, data: coin.interface.encodeFunctionData('approve', [router, held]), label: `Approve selling your ${symbol} on ${dex}…` });
+      // Up to everything you hold; the price limit decides how much is actually sold, and the rest stays with you.
+      steps.push({ to: router, value: 0n, label: `Sell ${symbol} into its ${dex} pool, which someone priced above the curve (never below the graduation price)…`,
+        data: swapCalldata(Interface, this.dex.routerVersion ?? 2, router, { tokenIn: token, tokenOut: quoteAsset, fee, recipient: this.address, amountIn: held, amountOutMinimum: 0n, sqrtPriceLimitX96: limit }, { deadline, unwrapTo: native ? this.address : null }) });
+      this.onProgress(`Someone priced ${symbol}'s ${dex} pool above the curve, which would block graduation. This sells some of your ${symbol} into it first, above the curve price, then completes the curve.`);
+      return steps;
+    }
+    // Up to the completing buy's size again; the price limit decides how much is actually spent, and the rest stays
+    // with you (refunded in the same transaction for native coin).
+    const budget = input;
     if (native && await this.provider.getBalance(this.address) < budget + input) throw new Error(`Someone placed cheap ${symbol} in its ${dex} pool below the curve price, which blocks graduation. Clearing it first needs up to ${formatUnits(budget, 18)} ${unit} more than this buy; you receive those tokens, at or below the curve price. Nothing was sent.`);
     const steps = [];
     if (!native) { const coin = new Contract(quoteAsset, this.config.contracts.quote.abi, this.signer); if (await coin.allowance(this.address, router) < budget) steps.push({ to: quoteAsset, data: coin.interface.encodeFunctionData('approve', [router, budget]), label: `Approve the ${dex} purchase exactly…` }); }
@@ -708,7 +727,7 @@ export class TestnetWallet {
     const treasuryProblem = treasuryError({ mainnet: !!this.net.mainnet, treasury, connected: this.address, safe });
     if (treasuryProblem) throw new Error(treasuryProblem);
     if (external && !this.dex) throw new Error('A multisig treasury needs the DEX launchpad on this network. Nothing was deployed.');
-    if (this.deployment && !this.needsMetadataUpgrade && !this.modelUpgradeAvailable && !this.feeFixUpgradeAvailable && !this.launchUpgradeAvailable && !this.partnerUpgradeAvailable) throw new Error(`This ${this.net.name} launchpad is already set up. Use it for your launches.`);
+    if (this.deployment && !this.needsMetadataUpgrade && !this.modelUpgradeAvailable && !this.feeFixUpgradeAvailable && !this.launchUpgradeAvailable && !this.partnerUpgradeAvailable && !this.reviewUpgradeAvailable) throw new Error(`This ${this.net.name} launchpad is already set up. Use it for your launches.`);
     const previousDeployment=this.deployment;
     await this.oraclePrice();
     if (await this.provider.getBalance(this.address) === 0n) throw new Error(`Get ${this.net.nativeCurrency.symbol} on ${this.net.name} from a faucet to pay deployment gas.`);
@@ -719,7 +738,7 @@ export class TestnetWallet {
       if((await manager.factory()).toLowerCase()!==this.dex.factory.toLowerCase()||(await manager.WETH9()).toLowerCase()!==this.dex.weth.toLowerCase())throw new Error(`Unexpected ${this.dex.name??'DEX'} position manager configuration.`);
       // Native pairs graduate through an adapter whose ERC-20 side is WETH.
       const key='elpida:dex-adapter:'+this.net.chainId+':native',saved=read(key);
-      if(saved&&isAddress(saved)&&await this.provider.getCode(saved)!=='0x'&&await adapterHasPartnerTiers(saved,this.provider)){
+      if(saved&&isAddress(saved)&&await this.provider.getCode(saved)!=='0x'&&await adapterHasPartnerTiers(saved,this.provider)&&await adapterHasReviewFixes(saved,this.provider)){
         const existing=new Contract(saved,this.config.contracts.adapter.abi,this.provider);
         if((await existing.manager()).toLowerCase()!==this.dex.manager.toLowerCase()||(await existing.usdc()).toLowerCase()!==this.dex.weth.toLowerCase()||await existing.fee()!==10000n)throw new Error('Saved adapter configuration mismatch.');migrationAdapter=saved;
       }else{this.onProgress(`Step 1 of 2: confirm the ${this.dex.name??'DEX'} migration adapter deployment…`);const a=this.config.contracts.adapter,c=await new ContractFactory(a.abi,a.bytecode,this.signer).deploy(this.dex.manager,this.dex.weth,10000);await c.waitForDeployment();migrationAdapter=c.target;write(key,migrationAdapter);}
@@ -731,7 +750,7 @@ export class TestnetWallet {
     this.onProgress('Deployment submitted. Waiting for confirmation…');
     await contract.waitForDeployment();
     const receipt = await contract.deploymentTransaction().wait();
-    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, treasury, migrationAdapter, model: modelOf(this.net.chainId, !!this.dex), metadataVersion:this.dex?1:undefined,feeAccountingVersion:this.dex?Number(await contract.FEE_ACCOUNTING_VERSION()):undefined,launchFeaturesVersion:this.dex&&this.config.contracts.atomicFactory?1:undefined,partnerTiersVersion:this.dex?Number(await contract.PARTNER_TIERS_VERSION()):undefined };
+    const record = { factory: await contract.getAddress(), block: receipt.blockNumber, hash: receipt.hash, treasury, migrationAdapter, model: modelOf(this.net.chainId, !!this.dex), metadataVersion:this.dex?1:undefined,feeAccountingVersion:this.dex?Number(await contract.FEE_ACCOUNTING_VERSION()):undefined,launchFeaturesVersion:this.dex&&this.config.contracts.atomicFactory?1:undefined,partnerTiersVersion:this.dex?Number(await contract.PARTNER_TIERS_VERSION()):undefined,reviewFixesVersion:this.dex?Number(await contract.REVIEW_FIXES_VERSION()):undefined };
     if(previousDeployment && !write('elpida:previous-factory:'+this.net.chainId+':'+previousDeployment.factory,previousDeployment))throw new Error('Factory deployed, but previous deployment could not be archived. Save the new factory '+record.factory+' manually.');
     this.launches.clear(); this.scannedBlock = undefined; this.factoryStartFdvUsd = undefined;this.pairsScanned=undefined;this.approvedQuotes=[];this.nativeVirtualQuote=undefined;this.launchFee=undefined;
     if (!write(deploymentKey(this.net.chainId, !!this.dex), record)) throw new Error(`Deployed, but this browser blocks storage. Save factory ${record.factory} (block ${record.block}) in packages/core/networks.mjs.`);
@@ -1070,8 +1089,9 @@ export class TestnetWallet {
         const payment = action === 'buy' ? new Contract(this.qaddr(item) ?? ZeroAddress, this.config.contracts.quote.abi, this.signer) : new Contract(item.address, this.config.contracts.token.abi, this.signer);
         const marketAddress = await curve.getAddress();
         const steps = [];
-        // Audit finding F-1: a completing buy can be blocked by cheap tokens placed in a pre-created pool. Buy them
-        // out first (never above the graduation price), so this one action still completes and graduates.
+        // Audit findings F-1 and E-2: a completing buy can be blocked by a pre-created pool priced away from the curve.
+        // Clear it first (buy cheap tokens below, or sell into quote above, never past the graduation price), so this
+        // one action still completes and graduates.
         if (action === 'buy' && this.dex) steps.push(...await this.graduationUnblock(item, original, input, out * (10000n - BigInt(Math.round(percent * 100))) / 10000n));
         if (!(action === 'buy' && item.pair === 'native')) { const approval = approvalFor({ allowance: await payment.allowance(this.address, marketAddress), input, sellingLaunchedToken: action === 'sell', symbol: item.symbol }); if (approval) steps.push({ to: payment.target, data: payment.interface.encodeFunctionData('approve', [marketAddress, approval.amount]), label: approval.label }); }
         const minimum = out * (10000n - BigInt(Math.round(percent * 100))) / 10000n;
@@ -1083,6 +1103,11 @@ export class TestnetWallet {
   }
 }
 
+/** A saved graduation adapter is reused only if its fee splitter has the buyback price guard (review finding E-1). */
+async function adapterHasReviewFixes(address,provider){
+  try{return Number(await new Contract(address,['function REVIEW_FIXES_VERSION() pure returns(uint256)'],provider).REVIEW_FIXES_VERSION())===1;}
+  catch(error){if(error.code==='CALL_EXCEPTION'&&(!error.data||error.data==='0x'))return false;throw error;}
+}
 /** A saved graduation adapter is reused only if it passes the partner burn share to the LP fee splitter. */
 async function adapterHasPartnerTiers(address,provider){
   try{return Number(await new Contract(address,['function PARTNER_TIERS_VERSION() pure returns(uint256)'],provider).PARTNER_TIERS_VERSION())===1;}

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { Contract, ZeroAddress, parseEther } from 'ethers';
 import { routerAbi } from '../packages/core/dex-router.mjs';
 import { dexFixture, launch, complete, mined, art } from './helpers/dex-fixture.mjs';
-import { BuybackKeeper, evmBuybackWorker, solanaBuybackWorker, withinBudget, configuredBuybackKeeper, BUYBACK_EVM_CHAINS } from '../apps/api/buyback-keeper.mjs';
+import { BuybackKeeper, evmBuybackWorker, solanaBuybackWorker, withinBudget, configuredBuybackKeeper, BUYBACK_EVM_CHAINS, guardRefused } from '../apps/api/buyback-keeper.mjs';
 
 const DEAD = '0x000000000000000000000000000000000000dEaD';
 
@@ -38,8 +38,12 @@ test('EVM: one run collects the pool fees and spends the queued share on a buyba
   assert.equal(await worker.run(listing, { spent: 0n }), null, 'nothing to do before anyone trades on the pool');
   await buy(f.signers[1], parseEther('0.3'));
   const deadBefore = await l.token.balanceOf(DEAD), burnedBefore = await splitter.burned();
+  const collected = await worker.run(listing, { spent: 0n });
+  assert.equal(collected.hashes.length, 1, 'collectFees; right after trading the buyback waits for the price to settle (E-1)');
+  assert.equal(collected.burned, undefined);
+  await f.advance(601);
   const result = await worker.run(listing, { spent: 0n });
-  assert.equal(result.hashes.length, 2, 'collectFees, then buyback');
+  assert.equal(result.hashes.length, 1, 'then the buyback, on a later run');
   assert.ok(result.cost > 0n);
   assert.ok(BigInt(result.burned) > 0n, 'the buyback bought tokens');
   assert.ok(await splitter.burned() > burnedBefore);
@@ -51,11 +55,12 @@ test('EVM: one run collects the pool fees and spends the queued share on a buyba
 test('EVM: the per-transaction cap and the daily budget stop the worker before it signs', async t => {
   const { f, buy, listing, splitter } = await graduatedPartner(t);
   await buy(f.signers[1], parseEther('0.3'));
+  const queued = await splitter.pendingBuyback(f.dex.weth.target);   // graduation's quote dust share (E-3), if any
   const capped = evmBuybackWorker({ chain: 'local', chainId: 31337, signer: f.signers[3], listings: async () => [listing], maxCost: 1n });
   await assert.rejects(capped.run(listing, { spent: 0n }), { code: 'transaction_cost' });
   const spentOut = evmBuybackWorker({ chain: 'local', chainId: 31337, signer: f.signers[3], listings: async () => [listing], maxCost: parseEther('0.05'), dailyBudget: parseEther('0.1') });
   await assert.rejects(spentOut.run(listing, { spent: parseEther('0.1') }), { code: 'daily_budget' });
-  assert.equal(await splitter.pendingBuyback(f.dex.weth.target), 0n, 'nothing was collected or queued');
+  assert.equal(await splitter.pendingBuyback(f.dex.weth.target), queued, 'nothing was collected or queued');
   assert.throws(() => evmBuybackWorker({ chain: 'base', chainId: 8453, signer: f.signers[3], listings: async () => [] }), /not an allowed testnet/, 'mainnets are refused');
   for (const id of [1, 56, 8453, 4663]) assert.equal(BUYBACK_EVM_CHAINS.has(id), false);
 });
@@ -133,7 +138,7 @@ function solanaFakes({ lpLocked = 1_000n, principal = 900n, pendingBuyback = 0n,
   const token = { address: 'MINT', symbol: 'MASHLE', config: 'CFG', reward: 'CREATOR', graduated: true, buybackBps: 2000, pumpPool: 'p', venue };
   const worker = opts => solanaBuybackWorker({ chain: 'solana-devnet', web3, connection, payer: { publicKey: new PublicKey('KEEPER') }, client, listings: async () => [token, { ...token, address: 'STD', buybackBps: 0 }, { ...token, address: 'CURVE', graduated: false }],
     configs: () => new Map([['CFG', { quoteMint: 'WSOL', treasury: 'TREASURY' }]]), quoteProgramOf: () => 'TOKEN', helpers, ...opts });
-  return { worker, token, sent };
+  return { worker, token, sent, connection };
 }
 
 test('Solana: a Raydium partner pool with fees is harvested and bought back in one transaction', async () => {
@@ -156,6 +161,13 @@ test('Solana: below the harvest minimum only a queued buyback runs; with nothing
   f = solanaFakes({ venue: 'PumpSwap' });
   await f.worker().run(f.token, { spent: 0n });
   assert.deepEqual(f.sent, [['budget', 'ata', 'harvestPump']], 'PumpSwap: harvest burns the token side; no PumpSwap buyback');
+});
+
+test('Solana: when the buyback refuses (S-1, too soon after the last), the harvest still runs and the buyback waits', async () => {
+  const run = async err => { const g = solanaFakes(); g.connection.simulateTransaction = async () => ({ value: { err } }); await g.worker().run(g.token, { spent: 0n }); return g.sent; };
+  assert.deepEqual(await run({ InstructionError: [3, { Custom: 6036 }] }), [['budget', 'ata', 'harvestRaydium']], 'too soon: harvest only');
+  assert.deepEqual(await run(null), [['budget', 'ata', 'harvestRaydium', 'raydiumBuyback']], 'a passing dry run keeps the buyback');
+  assert.equal(guardRefused({ InstructionError: [0, { Custom: 6035 }] }), false, 'other errors are not treated as a wait');
 });
 
 test('Solana: the daily budget stops the worker before it signs', async () => {

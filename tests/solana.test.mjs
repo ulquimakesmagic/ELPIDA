@@ -924,7 +924,7 @@ test('Solana completing SOL buy and Raydium migration in ONE transaction', { ski
   assert.equal((await migration(mint)).venue, VENUE_RAYDIUM);
 });
 
-test('Solana partner tiers on Raydium: the harvest share is burned or queued, and queued SOL buys back and burns at most 1% of depth per call', { skip: raySkip }, async () => {
+test('Solana partner tiers on Raydium: the harvest share is burned or queued, and queued SOL buys back and burns at most 0.5% of depth, once a minute (S-1)', { skip: raySkip }, async () => {
   const partner = Keypair.generate(), now = async () => f.connection.getBlockTime(await f.connection.getSlot('confirmed'));
   await airdrop(f.connection, partner.publicKey, 20 * web3.LAMPORTS_PER_SOL);
   await airdrop(f.connection, f.treasury, web3.LAMPORTS_PER_SOL);
@@ -949,17 +949,23 @@ test('Solana partner tiers on Raydium: the harvest share is burned or queued, an
   assert.equal(m1.pendingBuyback, queueQuote); assert.equal(m1.baseBurned, burnBase);
   assert.equal((await eventsOf(signature)).find(e => e.name === 'PartnerHarvest').quoteQueued, queueQuote);
 
-  // Buybacks: each spends the queue, at most 1% of the pool's SOL depth, and burns every token it buys.
-  let pending = m1.pendingBuyback, burnedTotal = 0n;
+  // Buybacks: each spends the queue, at most 0.5% of the pool's SOL depth, and burns every token it buys. A second
+  // call within a minute is refused (review finding S-1), so a sandwich cannot repeat the buyback.
+  let pending = m1.pendingBuyback, burnedTotal = 0n, ran = 0;
   for (let i = 0; pending > 0n && i < 5; i++) {
     const st = await rayState(mint), spend = raydiumBuybackAmount(pending, st.quote), expected = raydiumQuote(spend, st.quote, st.base).out;
-    const s0 = await supply(), sig = await send(f.connection, f.outsider, [f.client.raydiumBuyback({ mint })]);
+    const s0 = await supply();
+    let sig;
+    try { sig = await send(f.connection, f.outsider, [f.client.raydiumBuyback({ mint })]); }
+    catch (error) { assert.match(String(error?.message) + (error?.logs ?? []).join(' '), /0x1794|BuybackTooSoon/); break; }
+    ran++;
     assert.equal(s0 - await supply(), expected, 'bought at the pool price and burned');
     assert.equal(await balance(r.authorityBase), 0n);
     const ev = (await eventsOf(sig)).find(e => e.name === 'PartnerLpBuyback');
     pending -= spend; burnedTotal += expected;
     assert.equal(ev.quoteIn, spend); assert.equal(ev.tokensBurned, expected); assert.equal(ev.pendingBuyback, pending); assert.equal(ev.totalBurned, burnedTotal);
   }
+  assert.equal(ran, 1, 'exactly one buyback ran; the next call came too soon');
   const m2 = await migration(mint);
   assert.equal(m2.pendingBuyback, pending); assert.equal(m2.buybackBurned, burnedTotal); assert.equal(m2.buybackQuoteSpent, m1.pendingBuyback - pending);
   assert.ok(liquidityUnits(m2.lpLocked, await rayState(mint)) >= m0.principal, 'buybacks never touch the locked liquidity');
@@ -1273,7 +1279,7 @@ test('Solana partner tiers: treasury-only registry, burn on every trade, creator
   assert.equal((await pool((await launch({ symbol: 'LATE', creator: partner })).mint)).buybackBps, 0, 'expired before the launch');
 });
 
-test('Solana partner tiers: a buyback never completes the curve, and after migration the harvest share is burned or queued', { skip: pumpSkip }, async () => {
+test('Solana partner tiers: a buyback never completes the curve; on PumpSwap the token-side share burns and the quote side goes to the treasury (S-2)', { skip: pumpSkip }, async () => {
   const partner = Keypair.generate(), now = async () => f.connection.getBlockTime(await f.connection.getSlot('confirmed'));
   await airdrop(f.connection, partner.publicKey, 5 * web3.LAMPORTS_PER_SOL);
   await send(f.connection, f.authority, [f.client.createAtaIdempotent(f.authority.publicKey, partner.publicKey, f.quoteMint), f.spl.mintTo(f.quoteMint, f.client.ata(partner.publicKey, f.quoteMint), f.authority.publicKey, 50_000n * USDC)]);
@@ -1294,7 +1300,8 @@ test('Solana partner tiers: a buyback never completes the curve, and after migra
   const transferIx = (from, to, amount) => new web3.TransactionInstruction({ programId: f.client.tokenProgram, keys: [{ pubkey: from, isSigner: false, isWritable: true }, { pubkey: to, isSigner: false, isWritable: true }, { pubkey: f.trader.publicKey, isSigner: true, isWritable: false }], data: Buffer.from([3, ...new Uint8Array(new BigUint64Array([amount]).buffer)]) });
   await send(f.connection, f.trader, [transferIx(f.client.ata(f.trader.publicKey, f.quoteMint), p.poolQuote, 1_200n * USDC)]);
   const state = await pumpState(mint), lp = harvestNow(m0.lpLocked, m0.principal, state), out = withdrawOut(lp, state);
-  const burnBase = out.base * 1000n / 10_000n, queueQuote = out.quote * 1000n / 10_000n;
+  // PumpSwap has no buyback, so nothing is queued there (review finding S-2): the quote side stays in the treasury half.
+  const burnBase = out.base * 1000n / 10_000n, queueQuote = 0n;
   const balances = async () => Promise.all([f.client.ata(f.treasury, mint), f.client.ata(f.treasury, f.quoteMint), f.client.ata(f.rewardWallet.publicKey, mint), f.client.ata(f.rewardWallet.publicKey, f.quoteMint), p.authorityQuote].map(balance));
   const [tb0, tq0, rb0, rq0, aq0] = await balances(), supply0 = BigInt((await f.connection.getTokenSupply(mint)).value.amount);
   const signature = await harvest(f.outsider, mint);
@@ -1303,7 +1310,7 @@ test('Solana partner tiers: a buyback never completes the curve, and after migra
   assert.equal(rq1 - rq0, out.quote - out.quote / 2n, 'creator half of the quote side');
   assert.equal(tb1 - tb0, out.base / 2n - burnBase); assert.equal(tq1 - tq0, out.quote / 2n - queueQuote);
   assert.equal(supply0 - BigInt((await f.connection.getTokenSupply(mint)).value.amount), burnBase, 'the token-side share is burned');
-  assert.equal(aq1 - aq0, queueQuote, 'the quote-side share stays with the LP authority');
+  assert.equal(aq1 - aq0, 0n, 'no quote waits with the LP authority');
   const m1 = await migration(mint);
   assert.equal(m1.pendingBuyback, queueQuote); assert.equal(m1.baseBurned, burnBase);
   const ev = (await eventsOf(signature)).find(e => e.name === 'PartnerHarvest');

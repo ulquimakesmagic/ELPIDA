@@ -17,7 +17,7 @@ function wallet({ net, saved = null, Contract = class {} }) {
   Object.assign(w, { net, model: DEX_MODEL, dex: {}, provider: {}, feeAccountingVersion: 1 });
   return w;
 }
-const chain = (version, failure) => class { async automaticGraduation() { return true; } async PARTNER_TIERS_VERSION() { if (failure) throw failure; if (version === null) throw { code: 'CALL_EXCEPTION', data: '0x' }; return BigInt(version); } };
+const chain = (version, failure) => class { async automaticGraduation() { return true; } async REVIEW_FIXES_VERSION() { throw { code: 'CALL_EXCEPTION', data: '0x' }; } async PARTNER_TIERS_VERSION() { if (failure) throw failure; if (version === null) throw { code: 'CALL_EXCEPTION', data: '0x' }; return BigInt(version); } };
 
 test('a launchpad without the registry offers the partner-tier upgrade on any EVM testnet', async () => {
   for (const key of ['base-sepolia', 'ethereum-sepolia', 'bsc-testnet', 'robinhood-testnet']) {
@@ -48,7 +48,24 @@ test('a partner-tier deployment saved in this browser wins until the team pins o
 test('deploying records the version and reuses a saved adapter only if it supports partner tiers', () => {
   assert.match(source, /partnerTiersVersion:this\.dex\?Number\(await contract\.PARTNER_TIERS_VERSION\(\)\):undefined/);
   assert.match(source, /getCode\(saved\)!=='0x'&&await adapterHasPartnerTiers\(saved,this\.provider\)/);
-  assert.match(source, /!this\.launchUpgradeAvailable && !this\.partnerUpgradeAvailable\) throw/);
+  assert.match(source, /!this\.launchUpgradeAvailable && !this\.partnerUpgradeAvailable && !this\.reviewUpgradeAvailable\) throw/);
   const adapter = readFileSync(new URL('../contracts/evm/src/ElpidaV3MigrationAdapter.sol', import.meta.url), 'utf8');
   assert.match(adapter, /function PARTNER_TIERS_VERSION\(\) external pure returns\(uint256\)\{return 1;\}/);
+});
+
+test('review fixes (1 Nov): a partner-tier launchpad without them offers the upgrade; a saved reviewed deployment wins until pinned', async () => {
+  const versions = (partner, review) => class { async automaticGraduation() { return true; } async PARTNER_TIERS_VERSION() { return BigInt(partner); } async REVIEW_FIXES_VERSION() { if (review === null) throw { code: 'CALL_EXCEPTION', data: '0x' }; return BigInt(review); } };
+  const old = wallet({ net: { key: 'ethereum-sepolia', chainId: 11155111, shared: { factory: 'partner', model: DEX_MODEL } }, Contract: versions(1, null) });
+  await old.checkLaunchFeatures({ target: 'partner' });
+  assert.equal(old.reviewFixesVersion, 0);
+  assert.equal(old.reviewUpgradeAvailable, true);
+  assert.equal(old.partnerUpgradeAvailable, false, 'one upgrade offered at a time');
+  const fixed = wallet({ net: { key: 'ethereum-sepolia', chainId: 11155111, shared: { factory: 'reviewed', model: DEX_MODEL } }, Contract: versions(1, 1) });
+  await fixed.checkLaunchFeatures({ target: 'reviewed' });
+  assert.equal(fixed.reviewUpgradeAvailable, false);
+  const pinned = { factory: 'partner', model: DEX_MODEL, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, saved = { ...pinned, factory: 'reviewed', reviewFixesVersion: 1 };
+  assert.equal(wallet({ net: { key: 'bsc-testnet', chainId: 97, shared: pinned }, saved }).deployment.factory, 'reviewed');
+  assert.equal(wallet({ net: { key: 'bsc-testnet', chainId: 97, shared: { ...pinned, factory: 'team-reviewed', reviewFixesVersion: 1 } }, saved }).deployment.factory, 'team-reviewed');
+  assert.match(source, /await adapterHasPartnerTiers\(saved,this\.provider\)&&await adapterHasReviewFixes\(saved,this\.provider\)/);
+  assert.match(source, /reviewFixesVersion:this\.dex\?Number\(await contract\.REVIEW_FIXES_VERSION\(\)\):undefined/);
 });

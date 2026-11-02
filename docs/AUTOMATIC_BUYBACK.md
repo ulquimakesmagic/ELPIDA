@@ -23,14 +23,18 @@ The keeper checks every graduated partner token about every 10 minutes (`ELPIDA_
 
 1. `locker.collectFees()`. This credits the creator and the treasury and queues the quote-side burn share. The
    token-side share is burned at once.
-2. `splitter.buyback()` when anything is queued. The contract spends at most 1% of the pool's quote balance per
-   call; a larger backlog drains over later runs.
+2. `splitter.buyback()` when anything is queued. The contract spends at most 0.5% of the pool's quote balance per
+   call, once per block, and only while the pool price is within about 1.5% of its 10-minute average (review finding
+   E-1, sandwiching). When it refuses ("price away from average", "price history too short"), the keeper waits for
+   its next run; a larger backlog drains over later runs.
 
 **Solana** (devnet only): one transaction.
 
-- On **Raydium**, `harvest_raydium_fees` followed by `raydium_buyback`. The buyback is capped at 1% of the pool's
-  SOL depth. This is the same pair of instructions verified live with MASHLE (`DESIGN_PARTNER_TIERS.md` section 7).
-- On **PumpSwap**, `harvest_lp_fees` only. Its token-side share burns; PumpSwap has no buyback.
+- On **Raydium**, `harvest_raydium_fees` followed by `raydium_buyback`. The buyback is capped at 0.5% of the pool's
+  SOL depth and runs at most once a minute (review finding S-1). The keeper dry-runs it first; when it is too soon, it
+  sends the harvest alone and the buyback waits. This is the same pair of instructions verified live with MASHLE (`DESIGN_PARTNER_TIERS.md` section 7).
+- On **PumpSwap**, `harvest_lp_fees` only. Its token-side share burns; PumpSwap has no buyback, so since the
+  1 November build the quote side of the share goes to the treasury instead of waiting (review finding S-2).
 
 The keeper only calls permissionless instructions. Payouts can only go to the recipients fixed at launch, so the
 keeper's wallet cannot redirect anything; it just pays network fees.
