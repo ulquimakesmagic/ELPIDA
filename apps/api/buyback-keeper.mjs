@@ -7,9 +7,12 @@
 // buyback, and the payouts can only go to the recipients fixed at launch. The worker's wallet pays network fees only.
 //
 // - EVM: `locker.collectFees()` (credits the creator and the treasury and queues the quote-side burn share), then
-//   `splitter.buyback()` (spends at most 1% of the pool's quote balance per call; a backlog drains over later runs).
+//   `splitter.buyback()` (spends at most 0.5% of the pool's quote balance per call, once per block, and only while the
+//   pool's price is near its 10-minute average, so a sandwich makes it wait instead of overpay; a backlog drains over
+//   later runs).
 // - Solana: one transaction with `harvest_raydium_fees` (or `harvest_lp_fees` on PumpSwap) and, on Raydium,
-//   `raydium_buyback` (also capped at 1% of the pool's SOL depth).
+//   `raydium_buyback` (capped at 0.5% of the pool's SOL depth, at most once a minute; when it refuses, the harvest
+//   still runs and the buyback waits for a later run).
 //
 // Testnets only. Every transaction and every rolling 24 hours of gas are capped; the worker never spends more gas
 // than the fees it collects on native-quote pools; only public addresses appear in its status.
@@ -91,6 +94,9 @@ export class BuybackKeeper {
   async close() { this.stopping = true; clearInterval(this.timer); while (this.running) await new Promise(r => setTimeout(r, 50)); this.db.close(); }
 }
 
+/** Splitter refusals that mean "not now": nothing queued, the price guard (review finding E-1) or a buyback this block. */
+export const BUYBACK_WAIT = /nothing to buy back|price away from average|price history too short|one buyback per block/;
+
 /** Errors that only mean the index or the pool read is not ready yet; the token is retried on the next tick. */
 export const TRANSIENT = new Set(['config_unavailable', 'pool_unavailable']);
 const errorCode = error => String(error?.code && typeof error.code === 'string' ? error.code : error?.message ?? 'error').replace(/[^a-zA-Z0-9_ .:-]/g, '').slice(0, 80);
@@ -132,11 +138,12 @@ export function evmBuybackWorker({ chain, chainId, signer, listings, maxCost = p
       const quoteOut = token.tokenFirst ? a1 : a0, tokenOut = token.tokenFirst ? a0 : a1, native = token.pair === 'native';
       const worth = quoteOut + parseEther((Number(formatEther(tokenOut)) * (Number(token.spotPrice) || 0)).toFixed(12));
       if (quoteOut > 0n || tokenOut > 0n) await send(locker, 'collectFees', worst => !native || worth >= worst);
-      // 2. Spend the queued burn share (capped at 1% of depth per call by the contract).
+      // 2. Spend the queued burn share (capped at 0.5% of depth per call by the contract). The contract refuses while
+      //    the price is away from its recent average or has too little history; that is a wait, not an error.
       if (await splitter.pendingBuyback(token.quoteAsset) > 0n) {
         let receipt;
         try { receipt = await send(splitter, 'buyback'); }
-        catch (error) { if (/nothing to buy back/.test(String(error?.shortMessage ?? error?.message))) receipt = null; else throw error; }
+        catch (error) { if (BUYBACK_WAIT.test(String(error?.reason ?? error?.shortMessage ?? error?.message))) receipt = null; else throw error; }
         if (receipt) {
           const burned = receipt.logs.map(l => { try { return splitter.interface.parseLog(l); } catch { return null; } }).find(e => e?.name === 'BuybackBurned');
           if (burned) return { cost, hashes, burned: burned.args[2].toString() };
@@ -175,11 +182,18 @@ export function solanaBuybackWorker({ chain, web3, connection, payer, client, li
       const reward = new web3.PublicKey(token.reward);
       if (lp > 0n && out.quote >= minHarvestLamports) instructions.push(...(raydium ? client.harvestRaydiumFees({ payer: payer.publicKey, config, mint, reward }) : client.harvestLpFees({ payer: payer.publicKey, config, mint, reward })));
       const queued = BigInt(migration.pendingBuyback ?? 0n) + (instructions.length ? out.quote * BigInt(token.buybackBps) / 10_000n : 0n);
-      if (raydium && raydiumBuybackAmount(queued, state.quote) > 0n) instructions.push(client.raydiumBuyback({ mint }));
+      const buyback = raydium && raydiumBuybackAmount(queued, state.quote) > 0n;
+      if (buyback) instructions.push(client.raydiumBuyback({ mint }));
       if (!instructions.length) return null;
-      const tx = new web3.Transaction().add(client.computeBudget(HARVEST_COMPUTE_UNITS + 100_000), ...instructions);
-      tx.feePayer = payer.publicKey;
-      tx.recentBlockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+      const blockhash = (await connection.getLatestBlockhash('confirmed')).blockhash;
+      const build = () => { const t = new web3.Transaction().add(client.computeBudget(HARVEST_COMPUTE_UNITS + 100_000), ...instructions); t.feePayer = payer.publicKey; t.recentBlockhash = blockhash; return t; };
+      // The buyback refuses within a minute of the previous one (review finding S-1). That must not cost the harvest,
+      // so a dry run decides whether the buyback goes in this transaction or waits for a later run.
+      if (buyback && connection.simulateTransaction) {
+        const sim = await connection.simulateTransaction(build());
+        if (guardRefused(sim?.value?.err)) { instructions.pop(); if (!instructions.length) return null; }
+      }
+      const tx = build();
       const fee = BigInt((await connection.getFeeForMessage(tx.compileMessage(), 'confirmed')).value ?? 0);
       withinBudget(fee, { spent, maxCost, dailyBudget });
       // A first harvest may create up to five token accounts (rent, paid once); the measured cost below records it.
@@ -190,6 +204,11 @@ export function solanaBuybackWorker({ chain, web3, connection, payer, client, li
       return { cost: before > after ? before - after : fee, hashes: [signature] };
     },
   };
+}
+
+/** True when a simulation failed only because a buyback ran less than a minute ago (Anchor error 6036). */
+export function guardRefused(err) {
+  return Number(JSON.stringify(err ?? null).match(/"Custom":(\d+)/)?.[1]) === 6036;
 }
 
 /** Reads a key from `<NAME>_FILE` (a mounted secret) or `<NAME>` (a host secret variable). Never logged or returned. */

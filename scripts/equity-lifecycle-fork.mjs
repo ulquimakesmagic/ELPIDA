@@ -171,7 +171,9 @@ export async function runLifecycle({ provider, stockAddress, fund, virtualQuote,
     const p = await splitter.claimable(feeAsset.target, treasury), c = await splitter.claimable(feeAsset.target, creator);
     const total = await feeAsset.balanceOf(splitter.target);
     assert.ok(total > 0n, 'pool swaps must generate fees on each side');
-    assert.equal(p + c, total); assert.equal(p, total / 2n); assert.equal(c, total - total / 2n);
+    // Each deposit gives the creator half plus its odd unit; graduation's quote dust (review finding E-3) is a deposit
+    // of its own, so the halves may differ by one unit per deposit.
+    assert.equal(p + c, total); assert.ok(c >= p && c - p <= 2n, 'a 50/50 split, up to rounding');
     for (const recipient of [treasury, creator]) {
       const owed = await splitter.claimable(feeAsset.target, recipient), before = await feeAsset.balanceOf(recipient);
       if (feeAsset.target === stockAddress) await restrict('pool fee claim ' + recipient, () => splitter.claim(feeAsset.target, recipient, { gasLimit: 15000000 }), recipient, async () => ({ pool: await poolState(), splitterBalance: await stock.balanceOf(splitter.target), owed: await splitter.claimable(feeAsset.target, recipient) }));

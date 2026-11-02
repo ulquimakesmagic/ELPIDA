@@ -6,18 +6,18 @@ will run on mainnet. **Nothing here is audited yet.** Commit to audit: the `main
 
 ## 1. Scope
 
-**EVM, in scope: 9 files, 719 source lines** (Solidity 0.8.24, optimizer on with 1 run, `shanghai`). Everything that
+**EVM, in scope: 9 files, 768 source lines** (Solidity 0.8.24, optimizer on with 1 run, `shanghai`). Everything that
 `ElpidaAtomicDexFactory` deploys or calls:
 
 | File | SLOC | Role |
 |---|---|---|
 | `contracts/evm/src/ElpidaAtomicDexFactory.sol` | 8 | Mainnet factory: `ElpidaDexFactory` with graduation inside the completing buy, and token details required at launch |
-| `contracts/evm/src/ElpidaDexFactory.sol` | 125 | Launch (native or approved-asset pair), $10 fee, metadata URI once, curve deployer, partner-tier registry |
+| `contracts/evm/src/ElpidaDexFactory.sol` | 126 | Launch (native or approved-asset pair), $10 fee, metadata URI once, curve deployer, partner-tier registry |
 | `contracts/evm/src/ElpidaUsdPricing.sol` | 63 | Chainlink-compatible USD pricing, configured once, staleness checks |
-| `contracts/evm/src/ElpidaDexCurve.sol` | 212 | Virtual constant-product curve, anti-snipe fee, fees, partner buyback and burn, completion, graduation, reopen |
-| `contracts/evm/src/ElpidaV3MigrationAdapter.sol` | 128 | Uniswap v3 / PancakeSwap v3 pool creation, repricing a pre-created pool, full-range mint, passes the curve's buyback share to the locker |
+| `contracts/evm/src/ElpidaDexCurve.sol` | 225 | Virtual constant-product curve, anti-snipe fee, fees, partner buyback and burn, completion, graduation, reopen |
+| `contracts/evm/src/ElpidaV3MigrationAdapter.sol` | 129 | Uniswap v3 / PancakeSwap v3 pool creation, repricing a pre-created pool, full-range mint, passes the curve's buyback share to the locker |
 | `contracts/evm/src/ElpidaV3FeeLocker.sol` | 53 | Holds the LP position forever; anyone can collect fees into the splitter |
-| `contracts/evm/src/ElpidaFeeSplitter.sol` | 83 | Pool fees: 50% to the creator; for partner tokens a fixed share bought back and burned; the rest to the treasury |
+| `contracts/evm/src/ElpidaFeeSplitter.sol` | 117 | Pool fees: 50% to the creator; for partner tokens a fixed share bought back and burned (price-guarded against sandwiches); the rest to the treasury |
 | `contracts/evm/src/ElpidaToken.sol` | 40 | Fixed-supply ERC-20 (1B, no mint, no owner, no hooks) |
 | `contracts/evm/src/ElpidaInterfaces.sol` | 7 | Shared minimal ERC-20 interface |
 
@@ -25,7 +25,7 @@ will run on mainnet. **Nothing here is audited yet.** Commit to audit: the `main
 epochs; none is deployed on mainnet); OpenZeppelin `Math`; Uniswap v3 and PancakeSwap v3; Chainlink; the web app
 and server.
 
-**Solana (separate engagement):** `contracts/solana/programs/elpida_launchpad/src/lib.rs`, 2,194 lines
+**Solana (separate engagement):** `contracts/solana/programs/elpida_launchpad/src/lib.rs`, 2,287 lines
 (Anchor, 23 instructions). It has the same curve as the EVM, and the same early-partner tiers: `set_partner` (the SOL
 pair's treasury only), the share fixed in each pool at launch, the curve buy-and-burn on every trade, and the burn
 or queue of the share at each LP-fee harvest. SOL pairs graduate into Raydium CPMM's 1% tier through raw CPIs
@@ -168,7 +168,8 @@ Our findings:
   graduation, the same action first buys the pool up to the exact graduation price (a v3 price limit, so never above
   it; unused native coin is refunded), then completes (`apps/web/graduation-unblock.mjs`, tests in
   `graduation-griefing.test.mjs`). A pool priced above the curve clears itself, because holders profit by selling
-  into it; the app explains this instead of sending. The contracts are unchanged. Auditors may still recommend (b).
+  into it; the app explains this instead of sending (since 1 November it sells a holder's tokens into it, see E-2).
+  The contracts are unchanged. Auditors may still recommend (b).
 - **F-2 (Low): order of calls in launch.** `_chargeLaunchFee` pays the treasury and refunds `msg.sender` before the
   token and curve are created. It is guarded by `entered`, and no state another call could use is pending. Moving
   the refund to the end would make the order conventional.
@@ -192,6 +193,41 @@ Our findings:
   curves, never trade prices or payouts. Options: accept (staleness bounds it), or add an optional uptime feed with a
   grace period. Noted 23 Oct while adding the Robinhood mainnet fork check.
 - **F-5 (Informational, operations):** the treasury is immutable and must accept the native coin (see section 3).
+
+Independent review, 30 October 2026 (a separate reviewer with no part in writing the code; proofs of concept run on
+the local chain). No way to take user funds, locked liquidity or creator fees was found. Fixed in source on
+1 November; the fixes reach the testnets only when the factories are redeployed and the devnet program is upgraded
+(`HUMAN_ACTIONS.md`):
+
+- **E-1 (Medium): the EVM partner buyback could be sandwiched.** `ElpidaFeeSplitter.buyback()` had no price limit,
+  its 1% cap was per call and measured on a balance the attacker moves, and several calls fit in one transaction.
+  Proof: a front-run, ten buybacks and a back-run took 0.061 of 0.19 WETH queued. **Fix:** a buyback runs only while
+  the pool's tick is within 150 (about 1.5%) of its time-weighted average over the last 10 minutes (at least
+  2 minutes of history), before and after its own swap; at most once per block; at most 0.5% of the pool's quote
+  balance per call. The first queued buyback asks the pool to keep 16 price observations. Replayed, the attack
+  loses at every size (`tests/buyback-sandwich.test.mjs`, `partner-tiers-lp.test.mjs`).
+- **S-1 (Medium): the same on Solana's `raydium_buyback`** (cap read live, minimum output 1, repeatable in one
+  transaction). **Fix:** at most 0.5% of the pool's SOL depth per call and at most one buyback every 150 slots (about
+  a minute, recorded in the migration record), so a front-run, many buybacks and a back-run cannot share a
+  transaction or a bundle. One buyback moves the price about 1%, less than the 2% of pool fees a sandwich pays. An
+  average-price band like E-1's was tried against Raydium's observation account and dropped: its accumulated price
+  did not match the reserves between observations on the local validator, so it could not be relied on. The keeper
+  dry-runs the buyback and keeps the harvest when it is too soon. Weaker than the EVM guard; worth an auditor's view.
+- **S-2 (Medium): partner pools on PumpSwap queued a quote share that could never be spent** (only Raydium has a
+  buyback). **Fix:** PumpSwap harvests burn the token-side share and leave the quote side in the treasury half; any
+  quote an earlier build queued is released to the treasury at the next harvest (`StrandedBuybackReleased`).
+- **E-2 (Medium, extends F-1): quote placed just above the graduation price blocks completion too** (proof: a
+  WETH band at 1.004–1.024× the price). The app's unblock only handled the cheaper-pool case. **Fix (app, in line
+  with decision (a)):** when the buyer holds the token, the same action first sells it into that pool down to the
+  graduation price (a price limit, so never below it), then completes. A buyer without tokens gets the explanation.
+- **E-3 (Low): quote left over at graduation stayed in the curve forever** (`quoteDust`; proof: 0.04–0.08 ETH with a
+  griefer's band). **Fix:** graduation pays it into the token's fee splitter, split like LP fees;
+  `forwardQuoteDust()` retries if that payment ever fails. Same change in `ElpidaTaxCurve`.
+- Informational, not changed: the Solana harvest pays treasury and creator in one instruction (I-1); Token-2022
+  extension authorities are checked only when a pair is configured (I-2); the fee feed binding could be pinned to
+  SOL/USD (I-3); partner expiry is inclusive on EVM and exclusive on Solana (I-4); a vault that cannot receive can
+  delay its own `withdrawFees` (I-5); the creator's first buy is uncapped on EVM by design (I-6,
+  `SELF_AUDIT_2026-10.md`); rebasing quote tokens are refused by the exact-balance checks (I-7).
 
 ## 6. Deployments for reference (testnets)
 

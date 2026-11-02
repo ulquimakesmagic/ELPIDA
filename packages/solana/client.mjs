@@ -72,8 +72,10 @@ export function raydiumQuote(amountIn, reserveIn, reserveOut, feeRate = RAYDIUM_
   const input = BigInt(amountIn), fee = (input * BigInt(feeRate) + 999_999n) / 1_000_000n, net = input - fee;
   return { fee, out: net * BigInt(reserveOut) / (BigInt(reserveIn) + net) };
 }
-/** Mirrors `buyback_amount`: queued SOL, at most 1% of the pool's SOL depth per call. */
-export const raydiumBuybackAmount = (pending, quoteReserve) => { const cap = BigInt(quoteReserve) / 100n; return BigInt(pending) < cap ? BigInt(pending) : cap; };
+/** Mirrors `buyback_amount`: queued SOL, at most 0.5% of the pool's SOL depth per call. */
+export const raydiumBuybackAmount = (pending, quoteReserve) => { const cap = BigInt(quoteReserve) / 200n; return BigInt(pending) < cap ? BigInt(pending) : cap; };
+/** `raydium_buyback` refusal that means "not now" (review finding S-1): a buyback ran less than a minute ago. */
+export const BUYBACK_GUARD_ERRORS = [6036];
 /** Fees PumpSwap charges on pools it did not create itself: 0.25% to LP holders, 0.05% to pump. */
 export const PUMPSWAP_FEES = { lpFeeBps: 25, protocolFeeBps: 5, creatorFeeBps: 0 };
 export const LAUNCH_COMPUTE_UNITS = 400_000;
@@ -157,6 +159,8 @@ export const EVENTS = {
   PartnerHarvest: { discriminator: [115, 237, 236, 148, 151, 13, 153, 2], fields: [['pool', 'key'], ['baseBurned', 'u64'], ['quoteQueued', 'u64'], ['pendingBuyback', 'u64']] },
   // SOL pairs: graduation into Raydium CPMM (CurveMigrated is emitted too, with the Raydium pool as pumpPool).
   RaydiumMigrated: { discriminator: [208, 19, 236, 186, 149, 156, 226, 92], fields: [['pool', 'key'], ['rayPool', 'key'], ['lpMint', 'key'], ['raised', 'u64'], ['creationCost', 'u64'], ['repaid', 'u64']] },
+  // PumpSwap partner pools: quote an earlier build queued, released to the treasury at a harvest (review finding S-2).
+  StrandedBuybackReleased: { discriminator: [191, 1, 27, 168, 214, 152, 26, 204], fields: [['pool', 'key'], ['amount', 'u64']] },
   PartnerLpBuyback: { discriminator: [48, 42, 185, 144, 180, 81, 42, 219], fields: [['pool', 'key'], ['quoteIn', 'u64'], ['tokensBurned', 'u64'], ['pendingBuyback', 'u64'], ['totalBurned', 'u64']] },
 };
 
@@ -242,6 +246,7 @@ export const PROGRAM_ERRORS = [
   'SOL pairs graduate to Raydium; other pairs graduate to PumpSwap.',
   'Unexpected Raydium account.',
   'No queued partner buyback to spend yet.',
+  'A buyback ran less than a minute ago; the next one waits. Try again shortly.',
 ];
 
 /** Turns a Solana/Anchor error into a readable message. */

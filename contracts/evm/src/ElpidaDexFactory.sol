@@ -65,6 +65,9 @@ contract ElpidaDexFactory is ElpidaUsdPricing {
     }
     function pricingOwner() internal view override returns(address){return treasury;}
     function PARTNER_TIERS_VERSION() external pure returns(uint256){return 1;}
+    /// 1: curves pay graduation's leftover quote to the fee splitter, and the splitter's buyback is price-guarded
+    /// (review findings E-1 and E-3, 1 November 2026). Lets the site offer the upgrade and never reuse an older adapter.
+    function REVIEW_FIXES_VERSION() external pure returns(uint256){return 1;}
     /// Register, change or end (0, 0) a tier: 1000 (Partner, 10% of the fee) or 2000 (Elite, 20%) buy back and burn.
     function setPartner(address creator,uint16 buybackBps,uint64 expiresAt) external {
         require(msg.sender == treasury, "owner only");

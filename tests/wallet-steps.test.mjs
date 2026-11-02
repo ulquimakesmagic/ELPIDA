@@ -76,6 +76,8 @@ test('on-chain: every fee-claim step succeeds with nothing owed, so a claim batc
   const splitter = new Contract(await l.curve.feeSplitter(), art('ElpidaFeeSplitter').abi, anyone);
   await mined(curve.withdrawFees());
   assert.equal(await l.curve.protocolFees() + await l.curve.creatorFees(), 0n);
+  // Graduation pays its leftover quote into the splitter (review finding E-3); claim that once first.
+  for (const asset of [l.token.target, l.quote]) for (const recipient of [f.addresses[2], f.addresses[0]]) await mined(splitter.claim(asset, recipient));
   for (let round = 0; round < 2; round++) {
     await mined(curve.withdrawFees());                       // nothing owed on the curve
     const [a0, a1] = await locker.collectFees.staticCall();   // the dry run used to skip an empty collect

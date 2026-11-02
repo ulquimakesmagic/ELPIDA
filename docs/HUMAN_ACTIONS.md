@@ -12,6 +12,37 @@ wallet you top up with 10% of the protocol fees the treasury received (`REVENUE_
    gas. The first cycle runs within a minute of the redeploy, then every 24 hours.
 4. Optional variables: `ELPIDA_FLYWHEEL_EVERY_HOURS` (24), `ELPIDA_FLYWHEEL_MAX_PER_CYCLE_ETH` (0.05),
    `ELPIDA_FLYWHEEL_GAS_RESERVE_ETH` (0.005).
+## Security review fixes: redeploy the EVM launchpads and upgrade devnet, 1 November 2026
+
+The independent review's fixes (E-1, E-2, E-3, S-1, S-2; details in `AUDIT_SCOPE.md` section 5) are in the source.
+The app-side fix (E-2) works as soon as this is merged. The contract fixes only apply to launches on new launchpads,
+so tokens already launched keep their current contracts and stay listed and tradable. Testnets only; nothing on
+mainnet.
+
+**EVM (each testnet you want fixed: Base Sepolia, Ethereum Sepolia, BNB Testnet, Robinhood Testnet):**
+
+1. On elpida.fun, open **Network and test funds** on that network and connect the **treasury wallet**.
+2. Press **Deploy reviewed launchpad**. It deploys a new graduation adapter, then the factory, then turns on USD
+   pricing. Test gas only, no deposit.
+3. If you use test pairs there, press **Add test pairs** again: the new launchpad gets its own tNVDAon and adapters.
+4. Send Claude the factory address and its deployment block for each network, so they can be pinned for every
+   visitor. Partner tiers are per launchpad: re-register active partners (your own Elite tier included) on the new
+   one from the Partners tab.
+
+**Solana devnet program upgrade:**
+
+New SHA256 (Solana CLI 2.3.13, reproduced byte for byte from a fresh target): test build
+`3caabce1b7019f99244fd8cac4b845edd1b5e8001e0791eef6efcc369927e1c9`, mainnet build
+`b3e254cbafdd3d88a634c8989a7c57caa1da6e1ccd6d7d03f04b9c94c9afda7f`.
+
+1. From `elpida-fork`, `git pull`, then check the build:
+   `certutil -hashfile contracts\solana\build\elpida_launchpad.so SHA256` must print
+   `3caabce1b7019f99244fd8cac4b845edd1b5e8001e0791eef6efcc369927e1c9`.
+2. Make sure the deployer `FeUWF…KaH8` holds about **6.5 devnet SOL**. The program grows by about 5 KB (about
+   0.04 SOL of rent, kept); the rest is an upload buffer refunded after the upgrade.
+3. Run `node scripts/solana-deploy.mjs --upgrade --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`.
+4. Send Claude the output. If the script rewrites `deployments/solana-devnet.json`, do not commit it
+   (`git checkout -- deployments/solana-devnet.json`).
 
 ## Operator panel (`elpida.fun/#/monkey`), 26 October 2026
 
