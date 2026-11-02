@@ -134,3 +134,16 @@ The local prototype is built and tested against Uniswap's own PoolManager: see `
 - **Milestone:** it runs inside the crossing buy.
 - **Fix found while building:** a donation could have blocked the milestone; that is now fixed.
 - **Shape:** tick spacing 10 makes the sale range 10.003× rather than 10×.
+
+## Phase 3 done (2 November 2026)
+
+- **Decisions:**
+  - tick spacing 10;
+  - 1% fee after the milestone;
+  - third-party liquidity only for tokens the treasury opens, after their milestone.
+- **Built:**
+  - USDC pairs;
+  - the oracle-priced $5,000 start and $10 fee;
+  - token details at launch.
+
+Details are in `MODEL_11_V4_PROTOTYPE.md`.

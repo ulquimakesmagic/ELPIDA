@@ -58,9 +58,10 @@ test('launch: both positions hold the whole supply at the Model 10 price; nobody
   const other = await f.deploy(v4Art('ElpidaToken'), 'X', 'X', SUPPLY, f.addresses[1]);
   await assert.rejects(f.manager.initialize([ZeroAddress, other.target, 0, 10, f.hook.target], sqrtU));
   // And no way to take out principal: besides Uniswap's hook callbacks (the remove-liquidity ones are not enabled and
-  // revert), the only state-changing functions are the launch, the payout of fees and the PoolManager callback.
+  // revert), the only state-changing functions are the launch, the payout of fees, the treasury's liquidity switch
+  // and the PoolManager callback.
   const writes = f.hook.interface.fragments.filter(x => x.type === 'function' && !['view', 'pure'].includes(x.stateMutability) && !/^(before|after)/.test(x.name)).map(x => x.name).sort();
-  assert.deepEqual(writes, ['claimFees', 'launch', 'payoutStep', 'unlockCallback', 'withdrawFees']);
+  assert.deepEqual(writes, ['claimFees', 'launch', 'openLiquidity', 'payoutStep', 'unlockCallback', 'withdrawFees']);
   assert.equal(await f.hook.getHookPermissions().then(p => p.beforeRemoveLiquidity || p.afterRemoveLiquidity), false);
 });
 
@@ -97,7 +98,7 @@ test('buys and sells match Model 10 to the wei across a random sequence, with th
   }
   const launch = await f.hook.launches(l.token.target);
   assert.equal(launch.creatorFees, creator); assert.equal(launch.protocolFees, protocol); assert.equal(launch.liquidityBonus, 0n);
-  assert.equal(await f.hook.totalOwed(), creator + protocol);
+  assert.equal(await f.hook.totalOwed(ZeroAddress), creator + protocol);
   assert.equal(await f.manager.balanceOf(f.hook.target, 0n), creator + protocol, "the hook's ETH claims equal its ledgers");
   t.diagnostic(`largest difference from Model 10 over 30 trades: ${worst} wei of ETH`);
   assert.ok(worst <= 32n);
@@ -168,11 +169,27 @@ test('the milestone runs inside the buy that reaches 10x: same pool, continuous 
   const above = await poolPrice(f, l);
   assert.ok(above.sqrtPrice > sqrtL, 'the sell took the price back below 10x');
   assert.equal(above.liquidity, launch.milestoneLiquidity);
-  // After the milestone: the 1% pool fee, and third parties may add liquidity.
+  // After the milestone: the 1% pool fee.
   const after = await swap(f, l, { buy: true, amount: parseEther('0.1') });
   assert.equal(parse(f.hook, after, 'Fee')[0].args.feeBps, 100n);
+});
+
+test('third-party liquidity stays refused until the treasury opens a token, only after its milestone, once', async t => {
+  const { f, l } = await setup(t);
+  await afterWindow(f, l);
+  const add = () => f.liquidityRouter.connect(f.signers[1])['modifyLiquidity((address,address,uint24,int24,address),(int24,int24,int256,bytes32),bytes)'](l.key, [-887270, 887270, 10n ** 15n, '0x' + '00'.repeat(32)], '0x', { value: parseEther('1') });
   await mined(l.token.connect(f.signers[1]).approve(f.liquidityRouter.target, 2n ** 255n));
-  await mined(f.liquidityRouter.connect(f.signers[1])['modifyLiquidity((address,address,uint24,int24,address),(int24,int24,int256,bytes32),bytes)'](l.key, [-887270, 887270, 10n ** 15n, '0x' + '00'.repeat(32)], '0x', { value: parseEther('1') }));
+  await assert.rejects(f.hook.connect(f.signers[2]).openLiquidity(l.token.target), /milestone first/, 'not before the milestone');
+  await swap(f, l, { buy: true, amount: parseEther('6') });
+  await assert.rejects(add(), 'refused after the milestone too, by default');
+  await assert.rejects(f.hook.connect(f.signers[1]).openLiquidity(l.token.target), /owner only/);
+  const r = await mined(f.hook.connect(f.signers[2]).openLiquidity(l.token.target));
+  assert.equal(parse(f.hook, r, 'LiquidityOpened').length, 1);
+  assert.equal((await f.hook.launches(l.token.target)).liquidityOpen, true);
+  await mined(add());
+  await assert.rejects(f.hook.connect(f.signers[2]).openLiquidity(l.token.target), /already open/, 'once, and never closed');
+  // The hook's own positions are unaffected: the pool still charges the hook's 1% and the milestone position stays.
+  assert.equal(parse(f.hook, await swap(f, l, { buy: true, amount: parseEther('0.1') }), 'Fee')[0].args.feeBps, 100n);
 });
 
 test('a donation before the milestone cannot block it: donated tokens are burned, donated ETH joins the locked liquidity', async t => {
@@ -200,7 +217,7 @@ test('sells never take the price above the launch price; selling everything retu
   for (const i of [1, 3]) await swap(f, l, { buy: false, amount: await l.token.balanceOf(f.addresses[i]), signer: f.signers[i] });
   const p = await poolPrice(f, l), left = new Model10(l.launched.saleLiquidity, sqrtU).sync(p.sqrtPrice).R;
   assert.ok(p.sqrtPrice <= sqrtU && left < 100n, `back at the launch price; ${left} wei of rounding left in the curve`);
-  const owed = await f.hook.totalOwed(), pmEth = await f.provider.getBalance(f.manager.target);
+  const owed = await f.hook.totalOwed(ZeroAddress), pmEth = await f.provider.getBalance(f.manager.target);
   assert.ok(pmEth >= owed && pmEth - owed < 100n, `the PoolManager holds the fee claims plus ${pmEth - owed} wei of rounding`);
 });
 
@@ -224,7 +241,7 @@ test('partner tier: 20% of the base fee buys the token in the same swap and send
   const launch = await f.hook.launches(l.token.target);
   assert.equal(launch.buybackBurned, burned); assert.equal(launch.buybackQuoteSpent, spent); assert.equal(launch.protocolFees, protocol);
   assert.equal(await l.token.balanceOf('0x000000000000000000000000000000000000dEaD'), burned + l.launched.dustBurned);
-  assert.equal(await f.manager.balanceOf(f.hook.target, 0n), await f.hook.totalOwed());
+  assert.equal(await f.manager.balanceOf(f.hook.target, 0n), await f.hook.totalOwed(ZeroAddress));
 });
 
 test('fee payouts: the treasury and creator are paid in ETH; one that cannot receive never blocks the other', async t => {
@@ -285,7 +302,7 @@ test('invariant across a mixed sequence through the milestone: the hook\'s ETH c
     else if (held > 10n ** 18n && kind < 0.4) await swap(f, l, { signer, buy: false, amount: parseEther('0.0001'), exactOut: true });
     else if (kind < 0.5) await swap(f, l, { signer, buy: true, amount: 10n ** 21n, exactOut: true, value: parseEther('0.1') });
     else await swap(f, l, { signer, buy: true, amount: parseEther('0.1') + BigInt(Math.floor(next() * 1200)) * parseEther('0.001') });
-    const launch = await f.hook.launches(l.token.target), owed = await f.hook.totalOwed();
+    const launch = await f.hook.launches(l.token.target), owed = await f.hook.totalOwed(ZeroAddress);
     assert.equal(await f.manager.balanceOf(f.hook.target, 0n), owed, `step ${i}: claims equal the ledgers`);
     assert.equal(owed, launch.creatorFees + launch.protocolFees + launch.liquidityBonus, `step ${i}: one launch, so the ledgers add up`);
     if (launch.graduated) { assert.equal(launch.liquidityBonus, 0n); crossed = true; }

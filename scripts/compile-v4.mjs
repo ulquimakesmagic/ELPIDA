@@ -11,18 +11,22 @@ const require = createRequire(import.meta.url);
 const solc = require('solc-0.8.26');
 const root = fileURLToPath(new URL('../', import.meta.url));
 const CACHE_DIR = join(root, 'cache', 'solc-v4');
-const ALLOWED = ['@uniswap/v4-core/', '@uniswap/v4-periphery/'];
+const ALLOWED = ['@uniswap/v4-core/', '@uniswap/v4-periphery/', '@openzeppelin/contracts/'];
 
 export const V4_SETTINGS = {
   optimizer: { enabled: true, runs: 200 }, evmVersion: 'cancun', viaIR: true,
   outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object', 'evm.deployedBytecode.object'] } },
 };
 
-function sources() {
+/** Contracts from today's build that Model 11 reuses unchanged, and (for tests) the shared mocks. */
+const SHARED = ['contracts/evm/src/ElpidaToken.sol', 'contracts/evm/src/ElpidaUsdPricing.sol'];
+const MOCKS = ['tests/fixtures/MockUsdFeed.sol', 'tests/fixtures/MockUSDC.sol'];
+
+function sources(includeMocks) {
   const out = {};
   for (const file of readdirSync(join(root, 'contracts/evm/v4')).filter(n => n.endsWith('.sol')))
     out[`contracts/evm/v4/${file}`] = { content: readFileSync(join(root, 'contracts/evm/v4', file), 'utf8') };
-  out['contracts/evm/src/ElpidaToken.sol'] = { content: readFileSync(join(root, 'contracts/evm/src/ElpidaToken.sol'), 'utf8') };
+  for (const file of [...SHARED, ...(includeMocks ? MOCKS : [])]) out[file] = { content: readFileSync(join(root, file), 'utf8') };
   return out;
 }
 
@@ -32,10 +36,10 @@ function resolveImport(path) {
   catch { return { error: `Missing dependency: ${path}` }; }
 }
 
-export function compileV4() {
-  const input = { language: 'Solidity', sources: sources(), settings: V4_SETTINGS };
+export function compileV4({ includeMocks = false } = {}) {
+  const input = { language: 'Solidity', sources: sources(includeMocks), settings: V4_SETTINGS };
   const hash = createHash('sha256').update(solc.version()).update(JSON.stringify(input));
-  for (const pkg of ['v4-core', 'v4-periphery']) hash.update(readFileSync(join(root, 'node_modules/@uniswap', pkg, 'package.json')));
+  for (const pkg of ['@uniswap/v4-core', '@uniswap/v4-periphery', '@openzeppelin/contracts']) hash.update(readFileSync(join(root, 'node_modules', pkg, 'package.json')));
   const path = join(CACHE_DIR, hash.digest('hex') + '.json');
   if (process.env.ELPIDA_SOLC_CACHE !== '0') { try { return JSON.parse(readFileSync(path, 'utf8')); } catch { /* miss */ } }
   const output = JSON.parse(solc.compile(JSON.stringify(input), { import: resolveImport }));
