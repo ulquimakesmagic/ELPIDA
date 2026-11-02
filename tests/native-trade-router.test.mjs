@@ -107,8 +107,10 @@ test('router verification is repeated after the public read provider changes',as
 
 test('a fresh browser uses the registered router only for its verified factory and keeps private deployments isolated',async()=>{
  await import('./helpers/browser-modules.mjs');const {TestnetWallet}=await import('../apps/web/wallet.mjs');const {testnets}=await import('../packages/core/networks.mjs');
- const net=testnets.find(n=>n.key==='ethereum-sepolia'),shared=net.nativeTradeRouter;
- assert.equal(shared.factory.toLowerCase(),net.shared.factory.toLowerCase());
+ // A router is bound to one factory: when one is pinned, it must be the pinned launchpad's.
+ for(const n of testnets.filter(n=>n.nativeTradeRouter))assert.equal(n.nativeTradeRouter.factory.toLowerCase(),n.shared.factory.toLowerCase(),n.key);
+ const base=testnets.find(n=>n.key==='ethereum-sepolia');
+ const net={...base,nativeTradeRouter:base.nativeTradeRouter??{factory:base.shared.factory,address:'0x0000000000000000000000000000000000000033',hash:'0x'+'b'.repeat(64)}},shared=net.nativeTradeRouter;
  const w=Object.create(TestnetWallet.prototype);w.net=net;Object.defineProperty(w,'deployment',{value:{factory:net.shared.factory},configurable:true});
  const old=globalThis.localStorage,values=new Map();globalThis.localStorage={getItem:key=>values.get(key)??null};
  try{

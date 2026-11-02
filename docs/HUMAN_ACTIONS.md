@@ -19,7 +19,26 @@ The app-side fix (E-2) works as soon as this is merged. The contract fixes only 
 so tokens already launched keep their current contracts and stay listed and tradable. Testnets only; nothing on
 mainnet.
 
-**EVM (each testnet you want fixed: Base Sepolia, Ethereum Sepolia, BNB Testnet, Robinhood Testnet):**
+**EVM: done on all four testnets, 2 November 2026.** Malik deployed them, and each factory and adapter was checked on-chain:
+it reports `REVIEW_FIXES_VERSION` 1, the treasury `0xf5B0…639D`, a $50 start and automatic graduation. Each one is now
+pinned in `packages/core/networks.mjs`, and the previous factories stay indexed as legacy.
+
+| Network | Factory | Pricing turned on (block) |
+|---|---|---|
+| Base Sepolia | `0x381c26893322cbadFbf83D0f2de69f52aA9Ab94c` | 53536219 |
+| Ethereum Sepolia | `0x37Ca07Eb2A14E30051DbF78e4adCc7fBc1430477` | 12048655 |
+| BNB Testnet | `0x4CabA05067171DbA4B840aDae1e652B8279dE499` | 140398704 |
+| Robinhood Testnet | `0xEC353bfBCb22424aF0fA5E93dFA1728bfE702Ea8` | 147096680 |
+
+Still open on the new launchpads:
+- **Test pairs:** press **Add test pairs** again where you use them.
+- **Ethereum Sepolia native router:**
+  - The ordinary-wallet native router is bound to one factory, so the 1 November router (`0xDDCc…fd41`) serves only the now-legacy factory and is no longer pinned.
+  - Until a new one is deployed, native-coin trades of USDC- or stock-paired tokens on the new launchpad need a wallet that can batch.
+  - To fix it, after **Add test pairs**, open **Network and test funds → Deploy ordinary-wallet native router**. Then send Claude its address and creation hash to pin.
+- **Partner tiers:** re-register active partners, your own Elite tier included, from the Partners tab.
+
+The steps below are kept for reference:
 
 1. On elpida.fun, open **Network and test funds** on that network and connect the **treasury wallet**.
 2. Press **Deploy reviewed launchpad**. It deploys a new graduation adapter, then the factory, then turns on USD
@@ -29,7 +48,13 @@ mainnet.
    visitor. Partner tiers are per launchpad: re-register active partners (your own Elite tier included) on the new
    one from the Partners tab.
 
-**Solana devnet program upgrade:**
+**Solana devnet program upgrade: done, 2 November 2026.**
+- Malik ran the upgrade; the program data was extended by 10,240 bytes.
+- The on-chain program data (`EoihUf…PpcV`, last deployed at slot 517891944) hashes to
+  `3caabce1b7019f99244fd8cac4b845edd1b5e8001e0791eef6efcc369927e1c9`. That is exactly the reviewed test build.
+- The pair configs and USD pricing were already up to date.
+
+The steps below are kept for reference:
 
 New SHA256 (Solana CLI 2.3.13, reproduced byte for byte from a fresh target): test build
 `3caabce1b7019f99244fd8cac4b845edd1b5e8001e0791eef6efcc369927e1c9`, mainnet build

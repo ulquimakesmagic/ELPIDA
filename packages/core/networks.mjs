@@ -17,9 +17,12 @@ export const testnets = [
     gasFaucet: 'https://docs.base.org/get-started/get-funds',
     // Partner-tier atomic Model 10 factory, deployed by Malik 26 Oct 2026 (block 50624512); graduation adapter
     // 0xe828…5659 reports PARTNER_TIERS_VERSION 1. Treasury 0xf5B0…639D.
-    shared: { factory: '0xb5dAE15BCCe080a49e8b776E59B3d982269aC74C', block: 50624512, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 },
+    // Reviewed launchpad (security review fixes E-1 to E-3), deployed by Malik 2 Nov 2026; pricing turned on in tx
+    // 0x1e42d8f5…a827b (block 53536219; no launch can precede it). Factory and adapter 0x12b4…0713 both report
+    // REVIEW_FIXES_VERSION 1. The 50624512 factory moves to legacy and stays indexed. No new launches go there.
+    shared: { factory: '0x381c26893322cbadFbf83D0f2de69f52aA9Ab94c', block: 53536219, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1, reviewFixesVersion: 1 },
     // Earlier team launchpads stay indexed so their tokens remain listed and tradable. No new launches go here.
-    legacy: [{ factory: '0x98a0E75dbBe9EdA5D228319C72D496b814bA7145', block: 48289973, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }, { factory: '0x8194285faC2aFa04867a1C421EFee9f28ab0290f', block: 48272244, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1 }, { factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 48209837, model: 'curve-dex-v10', metadataVersion: 1 }, { factory: '0xe605787F7260F5Dae2768d2F9E93E7F18EE14f91', block: 47994800, model: 'curve-dex-v9', metadataVersion: 1 }],
+    legacy: [{ factory: '0xb5dAE15BCCe080a49e8b776E59B3d982269aC74C', block: 50624512, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0x98a0E75dbBe9EdA5D228319C72D496b814bA7145', block: 48289973, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }, { factory: '0x8194285faC2aFa04867a1C421EFee9f28ab0290f', block: 48272244, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1 }, { factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 48209837, model: 'curve-dex-v10', metadataVersion: 1 }, { factory: '0xe605787F7260F5Dae2768d2F9E93E7F18EE14f91', block: 47994800, model: 'curve-dex-v9', metadataVersion: 1 }],
   },
   {
     key: 'ethereum-sepolia', name: 'Ethereum Sepolia', short: 'ETH SEPOLIA', kind: 'evm', enabled: true,
@@ -28,11 +31,15 @@ export const testnets = [
     nativeCurrency: { name: 'Sepolia Ether', symbol: 'ETH', decimals: 18 },
     gasFaucet: 'https://cloud.google.com/application/web3/faucet/ethereum/sepolia',
     // Partner-tier atomic Model 10 factory (Uniswap v3), deployed by Malik 26 Oct 2026 (block 12000324); adapter 0x2a0f…b79a.
-    shared: { factory: '0x5aA283B8B12786314e76ac4E977B1E9275b407f6', block: 12000324, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 },
-    // Ownerless native/pair router, verified with public ordinary-wallet buy and sell on 1 Nov 2026.
-    nativeTradeRouter: { factory: '0x5aA283B8B12786314e76ac4E977B1E9275b407f6', address: '0xDDCc87C34eD8D8bEB6D5fAFc6C14e7cE8578fd41', hash: '0x2843b435316c72830356f414bab1bd6b4ed6a77ae951a08f9ac05db9cd75eb61' },
+    // Reviewed launchpad (security review fixes E-1 to E-3), deployed by Malik 2 Nov 2026; pricing turned on in tx
+    // 0x517086cb…2928c (block 12048655; no launch can precede it). Factory and adapter 0xdd6e…6262 both report
+    // REVIEW_FIXES_VERSION 1. The 12000324 factory moves to legacy and stays indexed. No new launches go there.
+    shared: { factory: '0x37Ca07Eb2A14E30051DbF78e4adCc7fBc1430477', block: 12048655, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1, reviewFixesVersion: 1 },
+    // Ordinary-wallet native/pair router: each one is bound to one factory. The 1 Nov 2026 router (0xDDCc…fd41, tx
+    // 0x2843b435…5eb61, verified with a public buy and sell) serves the now-legacy 0x5aA2…07f6 factory only, so it is
+    // no longer pinned. Pin the reviewed factory's router here once Malik deploys it (HUMAN_ACTIONS).
     // The 22 Oct factory (tx 0xdad271f4…82be9; first launch VEGETA) stays indexed. No new launches go here.
-    legacy: [{ factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 11972040, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
+    legacy: [{ factory: '0x5aA283B8B12786314e76ac4E977B1E9275b407f6', block: 12000324, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 11972040, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },
   {
     key: 'bnb-testnet', name: 'BNB Chain Testnet', short: 'BNB TESTNET', kind: 'evm', enabled: true,
@@ -44,8 +51,11 @@ export const testnets = [
     // on-chain at launch. Its graduation adapter is 0xD641…6d2 (same address as other chains' contracts: nonce match).
     // Partner-tier factory, deployed by Malik 26 Oct 2026 (block 139102664); adapter 0x33ce…b9a6. The 23 Oct factory
     // stays indexed (first launch MIDORIYA). No new launches go there.
-    shared: { factory: '0x5795b25C7fA37638eEacd29848522f8Cd48a1156', block: 139102664, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 },
-    legacy: [{ factory: '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE', block: 138485798, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
+    // Reviewed launchpad (security review fixes E-1 to E-3), deployed by Malik 2 Nov 2026; pricing turned on in tx
+    // 0x17e922cb…c5e6 (block 140398704; no launch can precede it). Factory and adapter 0x5343…ed9a both report
+    // REVIEW_FIXES_VERSION 1. The 139102664 factory moves to legacy and stays indexed. No new launches go there.
+    shared: { factory: '0x4CabA05067171DbA4B840aDae1e652B8279dE499', block: 140398704, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1, reviewFixesVersion: 1 },
+    legacy: [{ factory: '0x5795b25C7fA37638eEacd29848522f8Cd48a1156', block: 139102664, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE', block: 138485798, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },
   {
     key: 'robinhood-testnet', name: 'Robinhood Chain Testnet', short: 'ROBINHOOD TESTNET', kind: 'evm', enabled: true,
@@ -62,8 +72,11 @@ export const testnets = [
     // adapter 0xa37F…106A (WETH, 1%). Priced by the relay feed. Requires token details on-chain at launch.
     // Partner-tier factory, deployed by Malik 26 Oct 2026 (block 143196574) on the same test DEX and relay feed; adapter
     // 0x8a9f…c031. The 24 Oct factory above stays indexed. No new launches go there.
-    shared: { factory: '0x4CabA05067171DbA4B840aDae1e652B8279dE499', block: 143196574, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 },
-    legacy: [{ factory: '0x64d93212adc10d28E867Db44EBC1480AFaeaAD97', block: 141864043, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
+    // Reviewed launchpad (security review fixes E-1 to E-3), deployed by Malik 2 Nov 2026; pricing turned on in tx
+    // 0x16fab606…1667f (block 147096680; no launch can precede it). Factory and adapter 0x905d…cacd both report
+    // REVIEW_FIXES_VERSION 1. The 143196574 factory moves to legacy and stays indexed. No new launches go there.
+    shared: { factory: '0xEC353bfBCb22424aF0fA5E93dFA1728bfE702Ea8', block: 147096680, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1, reviewFixesVersion: 1 },
+    legacy: [{ factory: '0x4CabA05067171DbA4B840aDae1e652B8279dE499', block: 143196574, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0x64d93212adc10d28E867Db44EBC1480AFaeaAD97', block: 141864043, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },
 ];
 
