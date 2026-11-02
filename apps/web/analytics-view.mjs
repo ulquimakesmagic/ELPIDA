@@ -1,7 +1,7 @@
 import {h,icon,number,compact,short,avatar} from './ui.mjs';
 
 export function renderAnalytics({api}){
-  let period='7d',network='all',metric='volumeUsd',revision=0,data=null;
+  let period='7d',network='all',metric='volumeUsd',revision=0,data=null,flywheel=null;
   const root=h('div.analytics-page'), body=h('div.analytics-body'), status=h('p.small.muted',{'role':'status'});
   const periods=h('div.analytics-filters',{'aria-label':'Analytics period'},['24h','7d','30d','all'].map(p=>h('button.btn.btn-secondary.btn-sm',{type:'button','aria-pressed':String(p===period),on:{click:()=>{period=p;for(const b of periods.children)b.setAttribute('aria-pressed',b.dataset.period===p);load();}},'data-period':p},p==='all'?'All time':p)));
   const chain=h('select',{ 'aria-label':'Analytics chain',on:{change:()=>{network=chain.value;load();}}},h('option',{value:'all'},'All chains'));
@@ -39,15 +39,26 @@ export function renderAnalytics({api}){
       h('section.panel',h('h2','Top tokens'),h('p.small.muted','Ranked by reference USD volume, then trade count.'),table(['Token','Chain','Volume','Trades'],data.topTokens.filter(r=>r.trades).map(r=>h('tr',h('td',tokenCell(r)),h('td',r.chain),h('td',r.priced?usd(r.volumeUsd):'USD unavailable'),h('td',number(r.trades)))))) ,
       h('section.panel',h('h2','Recent graduations'),h('p.small.muted','Tokens whose curve completed, newest first. All time, not limited to the period above.'),table(['Token','Chain','Graduated'],(data.graduations??[]).map(g=>h('tr',h('td',h('a',{href:`#/token/${g.address}?network=${encodeURIComponent(g.network)}`},g.name||g.symbol),h('span.small.muted',` $${g.symbol}`)),h('td',g.chain),h('td',new Date(g.graduatedAt*1000).toLocaleDateString()))),'No tokens have graduated yet.')),
       h('section.panel',h('h2','Reserves & unclaimed fees'),h('p.small.muted','Current indexed balances across all time. Fees below are outstanding claims, not cumulative revenue. Uncollected DEX position fees are excluded.'),table(['Chain / asset','Trading reserve','Creator fees','Protocol fees'],data.assets.map(a=>h('tr',h('td',`${a.chain} · ${a.symbol}`),...['reserve','creatorFees','protocolFees'].map(k=>h('td',`${number(a[k],8)} ${a.symbol}`)))))) ,
-      h('section.panel.analytics-flywheel',h('div.analytics-section-head',h('h2','Revenue flywheel'),h('span.badge','Planned · execution disabled')),
-        h('p','10% of received Elpida protocol fees is earmarked in the proposed design for buybacks and burns of up to ten eligible Elpida tokens, ranked by market capitalization.'),
-        h('div.analytics-policy',h('div',h('strong','10%'),h('span','Received protocol fees')),h('div',h('strong','Top 10'),h('span','Eligible tokens by market cap')),h('div',h('strong','Buy & burn'),h('span','Verified execution required'))),
-        h('p.small.muted','Creator fees and locked liquidity are excluded. Existing partner buyback allocations come first. Received-revenue and burn accounting are not connected to this page yet; no budget, spend or burn totals are claimed here.')),
+      flywheelSection(),
       h('section.analytics-notes',h('h3','About these figures'),h('p.small.muted',data.basis),h('p.small.muted',`${t.unpricedTrades} trades have no verified USD reference. Testnet tokens have no monetary value. Local simulations are excluded. Chains without configured indexers are shown above and excluded from totals.`)));
+  }
+  /** Revenue flywheel (docs/REVENUE_FLYWHEEL.md): the policy, and what the keeper actually bought and burned. */
+  function flywheelSection(){
+    const live=!!flywheel?.enabled, chains=flywheel?.chains??[], recent=(flywheel?.recent??[]).filter(r=>r.status==='burned').slice(0,10);
+    const explorer=key=>chains.find(c=>c.chain===key)?.explorer, nameOf=key=>chains.find(c=>c.chain===key)?.name??key;
+    return h('section.panel.analytics-flywheel',h('div.analytics-section-head',h('h2','Revenue flywheel'),h('span.badge',live?'Running on test networks':'Planned · not running')),
+      h('p','10% of the protocol fees Elpida receives funds a flywheel wallet. Each cycle it buys the ten eligible Elpida tokens with the highest market cap on each chain, in equal shares, and sends what it buys to the dead address.'),
+      h('div.analytics-policy',h('div',h('strong','10%'),h('span','Received protocol fees')),h('div',h('strong','Top 10'),h('span','Eligible tokens by market cap')),h('div',h('strong','Buy & burn'),h('span','Sent to the dead address'))),
+      live?h('div.table-scroll',h('table.market-table',h('thead',h('tr',...['Chain','Burn orders','Spent','Last cycle'].map(l=>h('th',{scope:'col'},l)))),
+        h('tbody',chains.map(c=>h('tr',h('td',c.name),h('td',number(c.orders,0)),h('td',`${number(c.spent,6)}`),h('td',c.lastCycle?new Date(c.lastCycle).toLocaleString():'—')))))):null,
+      live&&recent.length?h('div.table-scroll',h('table.market-table',h('thead',h('tr',...['Token','Chain','Spent','Burn'].map(l=>h('th',{scope:'col'},l)))),
+        h('tbody',recent.map(r=>h('tr',h('td',h('a',{href:`#/token/${r.token}?network=${encodeURIComponent(r.chain)}`},r.symbol?`$${r.symbol}`:short(r.token))),h('td',nameOf(r.chain)),h('td',number(Number(r.spend)/1e18,6)),
+          h('td',explorer(r.chain)?h('a.mono',{href:`${explorer(r.chain)}/tx/${r.burnTx}`,target:'_blank',rel:'noopener noreferrer'},short(r.burnTx)):h('span.mono',short(r.burnTx)))))))):null,
+      h('p.small.muted',live?'Native-pair tokens at least a day old. Each order is capped by depth (25% of what completes a curve, 0.5% of a pool) and a pool order waits while the price is away from its 10-minute average. Test networks only; test tokens have no monetary value.':'The keeper is not running on this server, so no spending or burns are shown. Creator fees, locked liquidity and partner buybacks are never used.'));
   }
   async function load(){
     const id=++revision;refresh.disabled=true;body.setAttribute('aria-busy','true');status.textContent='Updating public analytics…';
-    try{const next=await api(`public/analytics?period=${period}&network=${encodeURIComponent(network)}`);if(id!==revision)return;data=next;
+    try{const [next,fw]=await Promise.all([api(`public/analytics?period=${period}&network=${encodeURIComponent(network)}`),api('public/flywheel').catch(()=>null)]);if(id!==revision)return;data=next;flywheel=fw;
       if(chain.options.length===1)for(const c of data.coverage)chain.append(h('option',{value:c.key},c.name));
       status.textContent=`Updated ${new Date(data.updatedAt*1000).toLocaleString()} · confirmed indexed activity`;draw();
     }catch(e){if(id!==revision)return;status.textContent=`Analytics unavailable. ${e.message} Use Refresh to retry.`;if(!data)body.replaceChildren(h('div.panel',h('h2','Unable to load analytics'),h('p','The indexer may be starting or temporarily unavailable.')));}
