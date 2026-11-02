@@ -99,4 +99,14 @@ export const EVM_TEST_PAIRS = [
   // total-return price feed, so the stock gate can be rehearsed end to end. Not an Ondo token; no value.
   { kind: 'xstock', key: 'test-ondo-nvda', symbol: 'tNVDAon', name: 'Elpida test Ondo-style NVDA stock (no value)', decimals: 18, startFdv: '20', faucet: '25',
     ondo: { feed: 'tNVDAon / USD (test total-return)', price: '180' } },
+  // More Ondo-style stand-ins (2 November 2026), so the stock dropdown can be tried with several stocks. Same contracts
+  // and controls as tNVDAon; prices are round test values near the real stocks', posted by the treasury afterwards.
+  { kind: 'xstock', key: 'test-ondo-tsla', symbol: 'tTSLAon', name: 'Elpida test Ondo-style TSLA stock (no value)', decimals: 18, startFdv: '20', faucet: '25',
+    ondo: { feed: 'tTSLAon / USD (test total-return)', price: '410' } },
+  { kind: 'xstock', key: 'test-ondo-spy', symbol: 'tSPYon', name: 'Elpida test Ondo-style SPY ETF (no value)', decimals: 18, startFdv: '20', faucet: '25',
+    ondo: { feed: 'tSPYon / USD (test total-return)', price: '765' } },
+  { kind: 'xstock', key: 'test-ondo-qqq', symbol: 'tQQQon', name: 'Elpida test Ondo-style QQQ ETF (no value)', decimals: 18, startFdv: '20', faucet: '25',
+    ondo: { feed: 'tQQQon / USD (test total-return)', price: '695' } },
+  { kind: 'xstock', key: 'test-ondo-aapl', symbol: 'tAAPLon', name: 'Elpida test Ondo-style AAPL stock (no value)', decimals: 18, startFdv: '20', faucet: '25',
+    ondo: { feed: 'tAAPLon / USD (test total-return)', price: '340' } },
 ];

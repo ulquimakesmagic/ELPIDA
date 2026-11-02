@@ -1,5 +1,24 @@
 # Actions that need Malik
 
+## Tokenized stocks: TSLAon and SPYon first, 2 November 2026
+
+1. **Fork rehearsal:**
+   - In `elpida-fork` (with the archive RPC in `.env.ondo.local`), run
+     `node --env-file=.env.ondo.local scripts/equity-lifecycle-fork.mjs ethereum TSLAon ondo`. Run it again with
+     `SPYon`.
+   - It runs only on a local fork: nothing is sent to Ethereum, and no wallet or key is used.
+   - Send Claude the two reports from `backups/equity-fork/`. They include the candidate Chainlink feeds at that block.
+   - Optional: repeat with `$env:ELPIDA_EQUITY_RESTRICTIONS='1'` for the issuer pause and blocklist checks.
+2. **Questions:** send the questions in `ONDO_PROVIDER_QUESTIONS.md` to Ondo and Chainlink. The priority is which
+   TSLAon/SPYon feed variant to use and where the corporate-action status is published.
+3. **Legal:** start the review of eligibility (who may hold and trade the stocks, and whether our contracts may hold them).
+4. **Test pairs:** on the reviewed launchpads (Ethereum Sepolia and BNB Testnet), press **Add test pairs**.
+   - It now deploys five Ondo-style stand-ins: tNVDAon, tTSLAon, tSPYon, tQQQon and tAAPLon.
+   - Each one needs four confirmations (feed, stock, adapter, approval), all test gas.
+   - It resumes where it stopped if you close the page.
+5. **Icons:** stock icons are Ondo's own token icons, fetched by the server. Their use is covered by Ondo's terms for
+   integrators, so check those before mainnet.
+
 ## Revenue flywheel wallet (testnets), 1 November 2026
 
 The flywheel keeper buys the top ten tokens by market cap on each testnet and sends them to the dead address, from a

@@ -1,6 +1,22 @@
 import {h,icon} from './ui.mjs';
+import {stockIdentity,looksLikeStock} from '/stock-catalog.mjs';
 const ASSET_ICONS={ETH:'/assets/chains/ethereum.png',WETH:'/assets/chains/ethereum.png',BNB:'/assets/chains/bnb.svg',tBNB:'/assets/chains/bnb.svg',WBNB:'/assets/chains/bnb.svg',SOL:'/assets/chains/solana.svg',WSOL:'/assets/chains/solana.svg',USDC:'/assets/tokens/usdc.png',tUSDC:'/assets/tokens/usdc.png'};
-export function assetIcon(symbol,stock=false){if(stock||['tNVDAon','NVDAon','TSLAon','SPYon','TEST-STOCK'].includes(symbol))return h('span.stock-asset-icon',{'aria-hidden':'true','data-asset':symbol},symbol==='TEST-STOCK'?'TEST':symbol.replace(/^t/,'').replace(/on$/,''));const src=ASSET_ICONS[symbol];return src?h('img.asset-icon',{src,alt:'',width:20,height:20,'data-asset':String(symbol).toLowerCase()}):icon('coins','icon-sm');}
+/**
+ * A tokenized stock's tile: its ticker on a colour of its own (or an operator-supplied logo), with a small issuer mark
+ * (Ondo "on", xStocks "x", a flask for a test stand-in). `size` is 'sm' (inline, 20px), 'md' (32px) or 'lg' (44px).
+ */
+export function stockTile(symbol,{size='sm',provider=null,name=null,catalog=null}={}){
+  const id=stockIdentity(symbol,{provider,name,catalog});
+  // Ondo's own icons already carry Ondo's mark, so only a test stand-in gets a corner badge (a flask); a ticker tile
+  // keeps a small issuer mark so it still reads as a tokenized stock.
+  const ticker=()=>h('span.stock-tile-ticker',id.ticker);
+  const mark=id.test?icon('flask-conical','stock-tile-mark-icon'):!id.logo&&id.issuer==='Ondo'?'on':!id.logo&&id.issuer==='xStocks'?'x':null;
+  const tile=h('span.stock-tile',{'aria-hidden':'true','data-asset':id.symbol,'data-tone':String(id.tone),'data-size':size,'data-letters':String(Math.min(id.ticker.length,5)),'data-test':id.test?'true':undefined,'data-logo':id.logo?'true':undefined},
+    id.logo?h('img.stock-tile-logo',{src:id.logo,alt:'',width:44,height:44,loading:'lazy',decoding:'async',on:{error:e=>{const t=e.currentTarget.closest('.stock-tile');t?.removeAttribute('data-logo');e.currentTarget.replaceWith(ticker());}}}):ticker(),
+    mark?h('span.stock-tile-mark',{title:id.issuer??''},mark):null);
+  return tile;
+}
+export function assetIcon(symbol,stock=false,options={}){if(stock||looksLikeStock(symbol))return stockTile(symbol,options);const src=ASSET_ICONS[symbol];return src?h('img.asset-icon',{src,alt:'',width:20,height:20,'data-asset':String(symbol).toLowerCase()}):icon('coins','icon-sm');}
 export function chainIcon(key){const name=key?.startsWith('solana')?'solana':key?.startsWith('bnb')?'bnb':key?.startsWith('base')?'base':key?.startsWith('ethereum')?'ethereum':key?.startsWith('robinhood')?'robinhood':null;return name?h('img.asset-icon',{src:`/assets/chains/${name}.${['base','robinhood','ethereum'].includes(name)?'png':'svg'}`,alt:'',width:20,height:20}):icon('flask-conical','icon-sm');}
 export function chainSelector({button,networks,current,onSelect,listId='chain-options'}){
   const list=h('div.chain-options',{role:'listbox',id:listId,'aria-label':'Choose chain',hidden:true});button.after(list);button.setAttribute('aria-haspopup','listbox');button.setAttribute('aria-controls',list.id);
