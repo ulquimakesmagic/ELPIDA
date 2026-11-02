@@ -1,5 +1,45 @@
 # Ondo stock quote pairing — groundwork, 2026-10-28
 
+## Update, 2 November 2026: first stocks, chains, picker
+
+**First stocks: TSLAon and SPYon on Ethereum (decided by Malik, 2 November).** They replace NVDAon as the first targets.
+- **Feeds exist:** Chainlink feeds for TSLAon, SPYon and QQQon are live on Ethereum, and Euler accepts the tokens as
+  collateral against them. We found no NVDAon feed on Ethereum.
+- **Still open:** which variant to use (Ondo API or Calculated), and where the corporate-action status is published.
+  Both questions are in `ONDO_PROVIDER_QUESTIONS.md`, to be sent by Malik.
+- **The fork rehearsal records both variants:** `scripts/equity-lifecycle-fork.mjs` reads each candidate feed at the
+  fork block, with its price, its age against the heartbeat and the spread between the two variants. It approves none.
+
+**Chains:**
+| Chain | Ondo stocks | Status |
+|---|---|---|
+| Ethereum | Native (TSLAon, SPYon, NVDAon in the registry) | First. Feeds exist; NVDAon rehearsed on a fork on 28 Oct; TSLAon and SPYon next |
+| BNB Chain | Native (same three in the registry) | Second. No Ondo feed found yet; fork untested |
+| Robinhood Chain | Selected stocks, bridged | After a feed is confirmed. Our earlier fork tests there used Robinhood's own stock tokens |
+| Base | No canonical Ondo stock token | Not planned for Ondo (Coinbase's tokenized stocks are a separate provider) |
+| Solana | Token-2022 mints with issuer extensions | Not now. See "What Solana needs" below |
+
+So stock pairing is not "every chain except Solana". It is Ethereum first, then BNB, then Robinhood Chain once each has
+a feed and a passing fork rehearsal. Base has no Ondo stocks to pair with.
+
+**What Solana needs** (a separate project, several weeks):
+1. **A decision:** an exception to "new Solana launches pair with SOL only" (1 November) for stock pairs.
+2. **The program:** Token-2022 quote vaults and transfers (`transfer_checked`, plus the extra accounts a transfer hook
+   needs), with an allowlist of the issuer extensions we accept (pausable, permanent delegate, default account state).
+3. **A graduation venue that accepts those mints.** Raydium CPMM's support for these extensions is unverified. Meteora
+   DAMM v2 lists xStocks, which carry a permanent delegate, so it would be the candidate venue.
+4. **A reference feed on Solana** for the corporate-action and stale-price gate.
+5. **Before any upgrade:** a labelled Token-2022 stand-in on devnet, then a program upgrade (devnet SOL) and the added
+   code in the audit scope.
+
+**The picker:** each stock is a card showing:
+- its tile: the ticker on its own colour, an issuer mark, and a flask for test stand-ins;
+- its company or fund, Stock or ETF, and its issuer;
+- a check when it is chosen.
+
+The same tile is used in Explore and on token pages. Logos can be added in `apps/web/assets/stocks/`; see the README
+there.
+
 Update, 29 October: a [testnet Ondo-style stock pair (tNVDAon)](TESTNET_ONDO_STOCK.md) lets stock-paired launches, the issuer pause and blocklist, and the graduation price gate be tried end to end on Ethereum Sepolia and BNB Testnet. It is a labelled stand-in with no value; live Ondo pairing stays off.
 
 This phase adds Ondo as an explicitly selected provider alongside existing providers on Ethereum, BNB Chain, Solana and Robinhood Chain. It does not activate public stock launches, change Model 10, change wallet selection, or submit transactions. Base is not included. Nine issuer-sourced canonical records are imported: NVDAon, TSLAon and SPYon on Ethereum, BNB and Solana. Ticker matching and third-party address lists are insufficient. Contract transfer and price semantics remain unverified.

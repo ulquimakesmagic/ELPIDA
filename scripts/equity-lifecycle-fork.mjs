@@ -198,6 +198,32 @@ async function findHolder({ explorer, address, balanceOf, log }) {
   throw new Error('no holder with a balance; set ELPIDA_EQUITY_HOLDER=<address>');
 }
 
+/**
+ * Reads every candidate reference feed recorded for `symbol` in the feed-candidate evidence (Ethereum only today) on the
+ * fork: description, decimals and the latest round. Returns one record per candidate with the USD price, its age at the
+ * fork block and whether it is inside the directory heartbeat, plus the spread between candidates.
+ */
+export async function observeReferenceFeeds({ provider, network, symbol, blockTimestamp, evidence = null }) {
+  let data = evidence;
+  if (!data) { try { data = JSON.parse(readFileSync(new URL('../docs/evidence/ondo-ethereum-feed-candidates-2026-10-29.json', import.meta.url), 'utf8')); } catch { return []; } }
+  if (data.network !== network) return [];
+  const candidates = data.assets?.find(a => a.symbol === symbol)?.candidates ?? [];
+  const FEED = ['function description() view returns(string)', 'function decimals() view returns(uint8)', 'function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)'];
+  const out = [];
+  for (const c of candidates) {
+    try {
+      const feed = new Contract(c.proxy, FEED, provider);
+      const [description, decimals, round] = await Promise.all([feed.description(), feed.decimals(), feed.latestRoundData()]);
+      const updatedAt = Number(round[3]), age = blockTimestamp - updatedAt;
+      out.push({ name: c.name, proxy: c.proxy, description, decimals: Number(decimals), answer: String(round[1]), price: (Number(round[1]) / 10 ** Number(decimals)).toFixed(4),
+        startedAt: Number(round[2]), updatedAt, ageSec: age, heartbeatSec: c.heartbeatSec, fresh: round[1] > 0n && age >= 0 && age <= c.heartbeatSec, approved: false });
+    } catch (e) { out.push({ name: c.name, proxy: c.proxy, error: e.shortMessage ?? e.message, approved: false }); }
+  }
+  const prices = out.filter(f => !f.error).map(f => Number(f.price));
+  if (prices.length > 1) { const lo = Math.min(...prices), hi = Math.max(...prices); for (const f of out) f.candidateSpreadPct = Number(((hi - lo) / lo * 100).toFixed(4)); }
+  return out;
+}
+
 async function main() {
   const net = process.argv[2], symbol = process.argv[3] ?? 'AAPL';
   const providerId = process.argv[4] ?? config.networks[net]?.provider;
@@ -230,6 +256,11 @@ async function main() {
     assert.equal(await identity.symbol(), asset.symbol, 'canonical symbol');
     assert.equal(Number(await identity.decimals()), asset.decimals, 'canonical decimals');
     assert.notEqual(await provider.getCode(asset.address), '0x', 'canonical contract bytecode must exist');
+    // Record the candidate Chainlink reference feeds for this stock at the same block (read-only, informational: no
+    // feed is approved until the provider confirms its semantics; see docs/ONDO_PROVIDER_QUESTIONS.md).
+    report.referenceFeeds = await observeReferenceFeeds({ provider, network: net, symbol, blockTimestamp: Number((await provider.getBlock('latest')).timestamp) });
+    for (const f of report.referenceFeeds) console.log(`FEED  ${f.name}: ${f.error ? 'unreadable (' + f.error + ')' : `$${f.price} at ${new Date(f.updatedAt * 1000).toISOString()} (${f.fresh ? 'within' : 'outside'} its ${f.heartbeatSec / 3600} h heartbeat)`}`);
+    saveReport();
     const unit = 10n ** BigInt(asset.decimals ?? 18);
     // Size everything from what the holder has: the virtual quote is 20 whole tokens (test sizing, not a price).
     const virtualQuote = 20n * unit, firstBuy = providerId === 'ondo' ? 0n : unit, tradeBuy = unit;

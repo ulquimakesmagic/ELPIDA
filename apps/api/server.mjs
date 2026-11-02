@@ -121,6 +121,7 @@ const vendorFiles = new Map([
   ['/vendor/pumpswap.mjs', fileURLToPath(new URL('../web/vendor/pumpswap.mjs', import.meta.url))],
   ['/elpida-solana.mjs', fileURLToPath(new URL('../../packages/solana/client.mjs', import.meta.url))],
   ['/pairs.mjs', fileURLToPath(new URL('../../packages/core/pairs.mjs', import.meta.url))],
+  ['/stock-catalog.mjs', fileURLToPath(new URL('../../packages/core/stock-catalog.mjs', import.meta.url))],
   ['/dex-router.mjs', fileURLToPath(new URL('../../packages/core/dex-router.mjs', import.meta.url))],
   ['/curve-model.mjs', fileURLToPath(new URL('../../packages/core/curve-model.mjs', import.meta.url))],
 ]);

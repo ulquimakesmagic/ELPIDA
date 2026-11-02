@@ -10,6 +10,7 @@ import { launchProfile } from './launch-capabilities.mjs';
 import { STRATEGIES } from './rewards-view.mjs';
 import { usdcFunding } from './usdc-funding.mjs';
 import { PAIR_KINDS, PAIR_INFO, EQUITY_PROVIDERS, issuerNotice } from '/pairs.mjs';
+import { stockIdentity } from '/stock-catalog.mjs';
 import { curveShape, DEX_MODEL, BETA_MODEL, BASE_FEE_BPS, LOCAL_START_FDV_USD } from '/curve-model.mjs';
 import { launchTierNotice } from './partner-labels.mjs';
 
@@ -251,9 +252,18 @@ export function renderLaunch(ctx) {
     const fund = a => !a?.faucet ? null : a.faucet.href ? h('a.btn.btn-secondary.btn-sm', { href: a.faucet.href, target: '_blank', rel: 'noopener noreferrer' }, icon('droplet', 'icon-sm'), a.faucet.label, icon('external-link', 'icon-sm'))
       : h('button.btn.btn-secondary.btn-sm', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await ctx.run(a.faucet.action, a.faucet.body); draw(); } catch (e) { error.textContent = errorText(e); } } } }, icon('droplet', 'icon-sm'), a.faucet.label);
     const assetBox = asset && group?.assets.length ? h('div.reveal.stack',
-      draft.pair === 'xstock' ? h('div.stock-asset-picker', {role:'group','aria-label':'Tokenized stock asset'}, group.assets.map(a => h('button.stock-asset-choice', {type:'button','aria-pressed':String(a.id===asset.id),on:{click:()=>{draft.quoteAsset=a.id;draft.firstBuy=defaultBuy('xstock',a);save();draw();}}},assetIcon(a.symbol,true),h('span',h('strong',a.symbol),h('small',a.name)),a.test?h('span.chip','Test'):null))) :
+      draft.pair === 'xstock' ? h('div.stock-asset-picker', {role:'radiogroup','aria-label':'Tokenized stock to pair with'}, group.assets.map(a => {
+        const id=stockIdentity(a.symbol,{provider:a.stock?.provider,name:a.name}),selected=a.id===asset.id;
+        return h('button.stock-asset-choice', {type:'button',role:'radio','aria-checked':String(selected),'aria-pressed':String(selected),'aria-label':`${a.symbol}${id.company?', '+id.company:''}${a.test?', test asset with no value':''}`,on:{click:()=>{draft.quoteAsset=a.id;draft.firstBuy=defaultBuy('xstock',a);save();draw();}}},
+          assetIcon(a.symbol,true,{size:'lg',provider:a.stock?.provider,name:a.name}),
+          h('span.stock-asset-text',
+            h('span.stock-asset-head',h('strong',a.symbol),h('span.chip.chip-xs',id.type),a.test?h('span.chip.chip-xs.chip-test','Test'):null),
+            h('span.stock-asset-company',id.company??a.name),
+            h('span.stock-asset-issuer',[id.issuer?`Issuer: ${id.issuer}`:null,a.test?'no value':null].filter(Boolean).join(' · '))),
+          h('span.stock-asset-check',{'aria-hidden':'true'},selected?icon('check','icon-sm'):null));
+      })) :
       group.assets.length > 1 ? field({ label: `${PAIR_INFO[draft.pair].title} asset`, control: h('select.select', { on: { change: e => { draft.quoteAsset = e.target.value; draft.firstBuy = defaultBuy(draft.pair, selectedAsset()); save(); draw(); } } }, group.assets.map(a => h('option', { value: a.id, selected: a.id === asset.id }, `${a.symbol} · ${a.name}`))) }) : null,
-      h('div.connection-row', assetIcon(asset.symbol,draft.pair==='xstock'), h('div.grow', h('strong', asset.symbol), h('p.small.muted', [asset.name, balanceOf(asset) != null ? `Balance: ${number(balanceOf(asset), 4)} ${asset.symbol}` : null, `Creation fee: ${number(Number(asset.feeAmount ?? 0), 6)} ${asset.feeSymbol ?? nativeSymbol()}`].filter(Boolean).join(' · '))), fund(asset)),
+      h('div.connection-row', assetIcon(asset.symbol,draft.pair==='xstock',{size:'md',provider:asset.stock?.provider,name:asset.name}), h('div.grow', h('strong', asset.symbol), h('p.small.muted', [asset.name, balanceOf(asset) != null ? `Balance: ${number(balanceOf(asset), 4)} ${asset.symbol}` : null, `Creation fee: ${number(Number(asset.feeAmount ?? 0), 6)} ${asset.feeSymbol ?? nativeSymbol()}`].filter(Boolean).join(' · '))), fund(asset)),
       asset.test && draft.pair === 'xstock' && asset.stock?.provider === 'ondo-test' ? callout('warn', 'flask-conical', `${asset.symbol} is a test stand-in for an Ondo stock, with no value and no real-world backing. Like the real token, its (test) issuer can pause it or block wallets, which halts trading in it; and the buy that completes the curve waits for a fresh stock price, so graduation pauses during a corporate action or a stale price. Live Ondo stocks stay off until the provider and our checks are verified.`) : null,
       asset.test && draft.pair === 'xstock' && asset.stock?.provider !== 'ondo-test' ? callout('warn', 'flask-conical', `${asset.symbol} is a simulated stock for testing. It is not an issued token from ${EQUITY_PROVIDERS[draft.chain] ?? 'any provider'} and has no real-world backing. Live tokenized stocks stay off until the provider and our checks are verified.`) : null,
       !asset.test && draft.pair === 'xstock' ? callout('warn', 'triangle-alert', issuerNotice(EQUITY_PROVIDERS[draft.chain])) : null,
