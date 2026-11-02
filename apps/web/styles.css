@@ -780,7 +780,8 @@ dialog{max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contai
 .stock-tile[data-size="lg"][data-letters="4"] .stock-tile-ticker{font-size:12px}
 .stock-tile[data-size="lg"][data-letters="5"] .stock-tile-ticker{font-size:10px}
 .stock-tile[data-size="md"][data-letters="4"] .stock-tile-ticker,.stock-tile[data-size="md"][data-letters="5"] .stock-tile-ticker{font-size:9px}
-.stock-tile-logo{width:100%;height:100%;border-radius:inherit;object-fit:cover}
+.stock-tile[data-logo]{background:transparent;border-radius:50%}
+.stock-tile-logo{width:100%;height:100%;border-radius:50%;object-fit:cover}
 .stock-tile-mark{position:absolute;right:-5px;bottom:-5px;display:none;align-items:center;justify-content:center;min-width:16px;height:16px;padding:0 3px;border-radius:8px;border:2px solid var(--bg,#0d0f12);background:var(--accent);color:var(--accent-ink,#0d0f12);font-size:9px;font-weight:800}
 .stock-tile[data-size="md"] .stock-tile-mark,.stock-tile[data-size="lg"] .stock-tile-mark{display:inline-flex}
 .stock-tile[data-test="true"] .stock-tile-mark{background:var(--warn,#f5b041)}

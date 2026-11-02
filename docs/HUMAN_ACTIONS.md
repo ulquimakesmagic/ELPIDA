@@ -12,8 +12,12 @@
 2. **Questions:** send the questions in `ONDO_PROVIDER_QUESTIONS.md` to Ondo and Chainlink. The priority is which
    TSLAon/SPYon feed variant to use and where the corporate-action status is published.
 3. **Legal:** start the review of eligibility (who may hold and trade the stocks, and whether our contracts may hold them).
-4. **Optional logos:** add square PNGs to `apps/web/assets/stocks/` (see the README there) to replace the ticker tiles.
-   Only use images you are entitled to use.
+4. **Test pairs:** on the reviewed launchpads (Ethereum Sepolia and BNB Testnet), press **Add test pairs**.
+   - It now deploys five Ondo-style stand-ins: tNVDAon, tTSLAon, tSPYon, tQQQon and tAAPLon.
+   - Each one needs four confirmations (feed, stock, adapter, approval), all test gas.
+   - It resumes where it stopped if you close the page.
+5. **Icons:** stock icons are Ondo's own token icons, fetched by the server. Their use is covered by Ondo's terms for
+   integrators, so check those before mainnet.
 
 ## Revenue flywheel wallet (testnets), 1 November 2026
 

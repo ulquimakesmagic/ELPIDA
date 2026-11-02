@@ -32,13 +32,18 @@ a feed and a passing fork rehearsal. Base has no Ondo stocks to pair with.
 5. **Before any upgrade:** a labelled Token-2022 stand-in on devnet, then a program upgrade (devnet SOL) and the added
    code in the audit scope.
 
-**The picker:** each stock is a card showing:
-- its tile: the ticker on its own colour, an issuer mark, and a flask for test stand-ins;
-- its company or fund, Stock or ETF, and its issuer;
-- a check when it is chosen.
-
-The same tile is used in Explore and on token pages. Logos can be added in `apps/web/assets/stocks/`; see the README
-there.
+**The picker** (`apps/web/stock-picker.mjs`) is a searchable dropdown, so it scales to Ondo's full list:
+- **The button** shows the chosen stock: its icon, symbol, Stock/ETF, company and the number of stocks available.
+- **The list** has a search box that matches the ticker, the symbol or the company name, and supports arrow keys,
+  Enter and Escape. Only stocks the launchpad has approved are listed.
+- **Icons:** Ondo's own token icons, through `/api/public/stock-icon/<SYMBOL>.png`. A test stand-in shows the icon of
+  the stock it imitates, with a flask badge and a Test label. Without an icon, the stock gets a ticker tile.
+- **Catalog:** company names and types come from Ondo's public asset list (476 assets on 2 November 2026, 473 of them
+  stocks, ETFs or funds). The server fetches it every 6 hours and caches it on the volume (`/api/public/stock-catalog`).
+  It is display only.
+- **Test stand-ins:** testnets now have five Ondo-style stand-ins (tNVDAon, tTSLAon, tSPYon, tQQQon and tAAPLon)
+  after **Add test pairs**.
+- **Mainnet:** each real stock still needs its own approval on the launchpad, once its feed and checks pass.
 
 Update, 29 October: a [testnet Ondo-style stock pair (tNVDAon)](TESTNET_ONDO_STOCK.md) lets stock-paired launches, the issuer pause and blocklist, and the graduation price gate be tried end to end on Ethereum Sepolia and BNB Testnet. It is a labelled stand-in with no value; live Ondo pairing stays off.
 
