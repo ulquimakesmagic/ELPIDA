@@ -440,7 +440,8 @@ export class TestnetWallet {
       const response=await fetch('/api/public/quotes?network='+encodeURIComponent(this.net.key),{signal:AbortSignal.timeout(15000)});
       if(!response.ok)throw new Error('Trading pair discovery is temporarily unavailable. Refresh shortly.');
       const data=await response.json();
-      if(data.factory?.toLowerCase()!==this.deployment.factory.toLowerCase()||data.chainId!==this.net.chainId||!Number.isSafeInteger(data.indexedBlock)||data.indexedBlock>latest||data.indexedBlock<this.deployment.block||!Array.isArray(data.assets)||data.assets.some(a=>!isAddress(a)))throw new Error('Trading pair index does not match this launchpad.');
+      // The server's index may be a few blocks ahead of this page's public RPC; that is not a mismatch.
+      if(data.factory?.toLowerCase()!==this.deployment.factory.toLowerCase()||data.chainId!==this.net.chainId||!Number.isSafeInteger(data.indexedBlock)||data.indexedBlock>latest+30||data.indexedBlock<this.deployment.block||!Array.isArray(data.assets)||data.assets.some(a=>!isAddress(a)))throw new Error('Trading pair index does not match this launchpad.');
       for(const address of new Set(data.assets))await add(address);
       this.pairsScanned=data.indexedBlock;
     }
@@ -506,7 +507,7 @@ export class TestnetWallet {
     if ((await factory.treasury()).toLowerCase() !== this.address.toLowerCase()) throw new Error('Only the launchpad owner (its treasury wallet) can approve trading pairs.');
     await this.loadPairs(factory);
     const supply = await factory.TOKEN_SUPPLY(), vt = await factory.VIRTUAL_TOKEN();
-    const deployStage = async (symbol, stage, artifact, args) => {
+    const deployStage = async (symbol, stage, artifact, args, matches = null) => {
       const key = `elpida:test-pair:${this.net.chainId}:${String(factory.target).toLowerCase()}:${this.address.toLowerCase()}:${symbol}:${stage}`;
       if (recoveryHash && symbol === 'TEST-STOCK' && stage === 'asset' && !localStorage.getItem(key)) {
         if (!/^0x[0-9a-f]{64}$/i.test(recoveryHash)) throw new Error('Enter a valid setup transaction hash.');
@@ -518,33 +519,42 @@ export class TestnetWallet {
         if (!receipt || receipt.status !== 1 || !receipt.contractAddress) throw new Error('Recovery deployment has not succeeded yet.');
         localStorage.setItem(key, JSON.stringify({ hash: recoveryHash, address: receipt.contractAddress }));
       }
-      const address = await resumeSetupDeployment({ provider: this.provider, storage: localStorage, key,
+      const address = await resumeSetupDeployment({ provider: this.provider, storage: localStorage, key, from: this.address,
+        matches: matches ? address => matches(new Contract(address, artifact.abi, this.provider)) : null,
         deploy: () => new ContractFactory(artifact.abi, artifact.bytecode, this.signer).deploy(...args) });
       return new Contract(address, artifact.abi, this.signer);
     };
-    let last;
-    for (const [i, t] of EVM_TEST_PAIRS.entries()) {
-      if (this.approvedQuotes.some(a => a.symbol === t.symbol && a.test)) continue;
-      const art = this.config.contracts.testAsset, adapterArt = this.config.contracts.adapter;
-      let asset;
-      if (t.ondo) {
-        // The Ondo-style test stock needs its test total-return feed first; the stock records the feed for good.
-        const feedArt = this.config.contracts.testStockFeed, stockArt = this.config.contracts.testOndoStock;
-        this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm the ${t.symbol} test price feed deployment…`);
-        const feed = await deployStage(t.symbol, 'feed', feedArt, [t.ondo.feed, parseUnits(t.ondo.price, 8)]);
-        this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm the ${t.symbol} test stock deployment…`);
-        asset = await deployStage(t.symbol, 'asset', stockArt, [t.name, t.symbol, BigInt(t.faucet), feed.target]);
-      } else {
-        this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm the ${t.symbol} test asset deployment…`);
-        asset = await deployStage(t.symbol, 'asset', art, [t.name, t.symbol, t.kind, t.decimals, BigInt(t.faucet)]);
-      }
-      this.onProgress(`Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: confirm its ${this.dex?.name??'DEX'} migration adapter…`);
-      const adapter = await deployStage(t.symbol, 'adapter', adapterArt, [this.dex.manager, asset.target, 10000]);
+    // One pair per press (2 November 2026): at most four wallet confirmations at a time, so a slow or stuck wallet
+    // costs one pair, not the whole set, and the button always says what comes next.
+    const missing = EVM_TEST_PAIRS.filter(t => !this.approvedQuotes.some(a => a.symbol === t.symbol && a.test));
+    const t = missing[0];
+    if (!t) return { message: 'All test pairs are already approved on this launchpad.' };
+    const i = EVM_TEST_PAIRS.indexOf(t), of = `Pair ${i + 1} of ${EVM_TEST_PAIRS.length} (${t.symbol})`;
+    const same = (a, b) => String(a).toLowerCase() === String(b).toLowerCase();
+    const art = this.config.contracts.testAsset, adapterArt = this.config.contracts.adapter;
+    let asset;
+    if (t.ondo) {
+      // The Ondo-style test stock needs its test total-return feed first; the stock records the feed for good.
+      const feedArt = this.config.contracts.testStockFeed, stockArt = this.config.contracts.testOndoStock;
+      this.onProgress(`${of}: confirm the test price feed deployment (1 of 4)…`);
+      const feed = await deployStage(t.symbol, 'feed', feedArt, [t.ondo.feed, parseUnits(t.ondo.price, 8)], async c => await c.description() === t.ondo.feed);
+      this.onProgress(`${of}: confirm the test stock deployment (2 of 4)…`);
+      asset = await deployStage(t.symbol, 'asset', stockArt, [t.name, t.symbol, BigInt(t.faucet), feed.target], async c => await c.symbol() === t.symbol && same(await c.referenceFeed(), feed.target));
+    } else {
+      this.onProgress(`${of}: confirm the test asset deployment (1 of 3)…`);
+      asset = await deployStage(t.symbol, 'asset', art, [t.name, t.symbol, t.kind, t.decimals, BigInt(t.faucet)], async c => await c.symbol() === t.symbol && await c.name() === t.name);
+    }
+    this.onProgress(`${of}: confirm its ${this.dex?.name ?? 'DEX'} migration adapter (${t.ondo ? '3 of 4' : '2 of 3'})…`);
+    const adapter = await deployStage(t.symbol, 'adapter', adapterArt, [this.dex.manager, asset.target, 10000], async c => same(await c.usdc(), asset.target));
+    // The public index can lag the chain: read the approval itself, so a repeat press never sends a doomed approval.
+    let last = null;
+    if ((await factory.approvedQuotes(asset.target)).adapter === ZeroAddress) {
       const virtualQuote = parseUnits(t.startFdv, t.decimals) * vt / supply;
-      last = await this.wait(factory.approveQuote(asset.target, virtualQuote, adapter.target), `Pair ${i + 1} of ${EVM_TEST_PAIRS.length}: approve ${t.symbol} as a trading pair…`);
+      last = await this.wait(factory.approveQuote(asset.target, virtualQuote, adapter.target), `${of}: approve ${t.symbol} as a trading pair (${t.ondo ? '4 of 4' : '3 of 3'})…`);
     }
     this.pairsScanned = undefined; this.approvedQuotes = undefined; await this.loadPairs(factory);
-    return { hash: last?.tx.hash, message: `${EVM_TEST_PAIRS.map(t => t.symbol).join(', ')} are now approved test trading pairs.` };
+    const left = EVM_TEST_PAIRS.filter(x => !this.approvedQuotes.some(a => a.symbol === x.symbol && a.test) && x.symbol !== t.symbol);
+    return { hash: last?.tx.hash, message: `${t.symbol} is now an approved test trading pair.${left.length ? ` ${left.length} more to add: ${left.map(x => x.symbol).join(', ')}. Press the button again for the next one.` : ' All test pairs are added.'}` };
   }
   factoryContract(runner = this.provider) {
     const deployment = this.deployment;

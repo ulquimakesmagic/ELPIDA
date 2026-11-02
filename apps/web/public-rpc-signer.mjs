@@ -3,7 +3,7 @@
 // testnet is slow or broken (seen with Zerion on Ethereum Sepolia), the window never opens and nothing is reported.
 // This signer keeps every signature and submission in the wallet but does the estimate and all reads through the
 // chain's public RPC, which the page already uses for everything else. It also says so when the wallet is slow.
-import { AbstractSigner } from '/vendor/ethers.js';
+import { AbstractSigner, getCreateAddress } from '/vendor/ethers.js';
 
 // Empty revert bytes can mean a node's simulation gas cap was hit. Never let a wallet
 // replace that unresolved simulation with its small default gas limit (graduation creates a pool).
@@ -60,16 +60,50 @@ export class PublicRpcSigner extends AbstractSigner {
 }
 
 /** Persist a setup transaction before waiting. A timeout never resubmits it. */
-export async function resumeSetupDeployment({ provider, storage, key, deploy, timeoutMs = 120000, pollMs = 2000, sleep = ms => new Promise(r => setTimeout(r, ms)) }) {
+/**
+ * Deploys one setup contract, or resumes it. The transaction hash is saved before waiting, so a closed page resumes the
+ * same deployment instead of sending a duplicate. With `from` (the sender) and `matches(address)` (does a contract at
+ * this address look like this step?) it also recovers from wallets that misbehave (2 November 2026: Trust Wallet on
+ * Ethereum Sepolia showed setup steps as pending that the network never received, and slow sends led to duplicates):
+ * - a send interrupted before its hash was saved: the contract this wallet created since then is found and reused;
+ * - a transaction replaced in the wallet (speed up or cancel): the contract at its nonce is reused, or the step reopens;
+ * - a transaction the network never received: after `droppedAfterMs` the step reopens with an explanation.
+ */
+export async function resumeSetupDeployment({ provider, storage, key, deploy, from = null, matches = null, timeoutMs = 120000, pollMs = 2000, droppedAfterMs = 180000, sleep = ms => new Promise(r => setTimeout(r, ms)), now = () => Date.now() }) {
+  const save = r => storage.setItem(key, JSON.stringify(r));
+  const clear = () => (storage.removeItem ? storage.removeItem(key) : storage.setItem(key, 'null'));
+  const nonceOf = async tag => (from && provider.getTransactionCount ? Number(await provider.getTransactionCount(from, tag)) : null);
+  const looksRight = async address => (await provider.getCode(address)) !== '0x' && (!matches || await matches(address).catch(() => false));
+  // A contract this wallet created at a nonce at or after `start` that matches this step: reuse it.
+  const adopt = async start => {
+    if (!from || !matches || start == null) return null;
+    const latest = await nonceOf('latest');
+    for (let n = latest - 1; n >= start && n >= latest - 30; n--) { const address = getCreateAddress({ from, nonce: n }); if (await looksRight(address)) return address; }
+    return null;
+  };
   let record = JSON.parse(storage.getItem(key) ?? 'null');
+  if (record?.adopted) {
+    if (await provider.getCode(record.address) !== '0x') return record.address;
+    clear(); record = null;
+  }
+  if (record && !record.hash) {
+    const found = await adopt(record.nonce);
+    if (found) { save({ hash: null, address: found, adopted: true }); return found; }
+    if (now() - (record.at ?? 0) < droppedAfterMs) throw new Error('Your wallet may still be sending this setup step. Check the wallet, wait a minute, then press the button again.');
+    clear(); record = null;
+  }
   if (!record) {
-    const contract = await deploy();
+    const nonce = await nonceOf('pending');
+    if (from) save({ intent: true, nonce, at: now() });
+    let contract;
+    try { contract = await deploy(); } catch (error) { if (from) clear(); throw error; }
     const tx = contract.deploymentTransaction();
-    record = { hash: tx.hash, address: contract.target };
-    storage.setItem(key, JSON.stringify(record));
+    record = { hash: tx.hash, address: contract.target, nonce: tx.nonce ?? nonce, from, at: now() };
+    save(record);
   }
   if (!/^0x[0-9a-f]{64}$/i.test(record.hash) || !/^0x[0-9a-f]{40}$/i.test(record.address)) throw new Error('Invalid saved setup transaction.');
-  const started = Date.now();
+  if (record.at == null) { record.at = now(); save(record); } // records saved before this version start their clock now
+  const started = now();
   for (;;) {
     const receipt = await provider.getTransactionReceipt(record.hash);
     if (receipt) {
@@ -78,7 +112,25 @@ export async function resumeSetupDeployment({ provider, storage, key, deploy, ti
       if (await provider.getCode(record.address) === '0x') throw new Error('Confirmed setup contract has no code.');
       return record.address;
     }
-    if (Date.now() - started >= timeoutMs) throw new Error(`Setup transaction ${record.hash} is awaiting confirmation. Reopen setup to resume; do not deploy again.`);
+    if (now() - started >= timeoutMs) {
+      const seen = provider.getTransaction ? await provider.getTransaction(record.hash).catch(() => undefined) : undefined;
+      const sender = record.from ?? from;
+      if (seen === null && sender) {
+        const latest = record.nonce == null ? null : Number(await provider.getTransactionCount(sender, 'latest'));
+        if (latest != null && latest > record.nonce) {
+          // That nonce was used by another transaction (the wallet sped it up or replaced it).
+          const at = getCreateAddress({ from: sender, nonce: record.nonce });
+          if (await looksRight(at)) { save({ hash: null, address: at, adopted: true }); return at; }
+          clear();
+          throw new Error(`Setup transaction ${record.hash} was replaced in your wallet and deployed nothing. Press the button again to send this step again.`);
+        }
+        if (now() - record.at >= droppedAfterMs) {
+          clear();
+          throw new Error(`The network never received setup transaction ${record.hash}. Your wallet may show it as pending, but it was not broadcast. Press the button again to resend this step. If your wallet keeps it pending, cancel it there or use another wallet.`);
+        }
+      }
+      throw new Error(`Setup transaction ${record.hash} is awaiting confirmation. Reopen setup to resume; do not deploy again.`);
+    }
     await sleep(pollMs);
   }
 }
