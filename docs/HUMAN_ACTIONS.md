@@ -44,7 +44,13 @@ The steps below are kept for reference:
    visitor. Partner tiers are per launchpad: re-register active partners (your own Elite tier included) on the new
    one from the Partners tab.
 
-**Solana devnet program upgrade:**
+**Solana devnet program upgrade: done, 2 November 2026.**
+- Malik ran the upgrade; the program data was extended by 10,240 bytes.
+- The on-chain program data (`EoihUf…PpcV`, last deployed at slot 517891944) hashes to
+  `3caabce1b7019f99244fd8cac4b845edd1b5e8001e0791eef6efcc369927e1c9`. That is exactly the reviewed test build.
+- The pair configs and USD pricing were already up to date.
+
+The steps below are kept for reference:
 
 New SHA256 (Solana CLI 2.3.13, reproduced byte for byte from a fresh target): test build
 `3caabce1b7019f99244fd8cac4b845edd1b5e8001e0791eef6efcc369927e1c9`, mainnet build
