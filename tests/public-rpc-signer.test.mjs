@@ -129,3 +129,42 @@ test('a capped primary simulation recovers a large graduation estimate and sends
   const estimate=seen.find(p=>p.method==='eth_estimateGas');assert.equal(estimate.params[0].gas,'0xbebc200');assert.equal(estimate.params[0].from,ME);
  }finally{provider.destroy();globalThis.fetch=original;}
 });
+
+test('setup recovers from a wallet that never broadcast, a replaced transaction and an interrupted send', async () => {
+  const { resumeSetupDeployment } = await import('../apps/web/public-rpc-signer.mjs');
+  const { getCreateAddress } = await import('ethers');
+  const from = '0x' + 'ab'.repeat(20), hashA = '0x' + '01'.repeat(32), hashB = '0x' + '02'.repeat(32);
+  const records = new Map(), storage = { getItem: k => records.get(k), setItem: (k, v) => records.set(k, v), removeItem: k => records.delete(k) };
+  let clock = 1_000_000, latest = 5, pending = 5, sent = 0, mined = new Map(), code = new Set();
+  const provider = {
+    getTransactionReceipt: async h => mined.get(h) ?? null, getTransaction: async () => null,
+    getTransactionCount: async (_, tag) => tag === 'pending' ? pending : latest, getCode: async a => code.has(a.toLowerCase()) ? '0x6000' : '0x',
+  };
+  const deploy = async () => { sent++; const nonce = pending; return { target: getCreateAddress({ from, nonce }), deploymentTransaction: () => ({ hash: sent === 1 ? hashA : hashB, nonce }) }; };
+  const args = { provider, storage, key: 'k', from, matches: async () => true, deploy, timeoutMs: 0, droppedAfterMs: 180_000, now: () => clock, sleep: async () => {} };
+  // 1. The wallet says "sent"; the network never sees it. Within three minutes: wait. After: the step reopens.
+  await assert.rejects(resumeSetupDeployment(args), /awaiting confirmation/);
+  assert.equal(sent, 1);
+  clock += 181_000;
+  await assert.rejects(resumeSetupDeployment(args), /never received/);
+  assert.equal(records.has('k'), false, 'the dead record is cleared');
+  // Pressing again sends a fresh transaction, which confirms.
+  const second = getCreateAddress({ from, nonce: 5 });
+  mined.set(hashB, { status: 1, contractAddress: second }); code.add(second.toLowerCase());
+  assert.equal(await resumeSetupDeployment(args), second); assert.equal(sent, 2);
+  // 2. A replaced transaction (wallet speed-up): the nonce is used, the contract exists at its address -> reused.
+  records.set('r', JSON.stringify({ hash: '0x' + '03'.repeat(32), address: '0x' + '04'.repeat(20), nonce: 7, from, at: clock }));
+  latest = 8; const replaced = getCreateAddress({ from, nonce: 7 }); code.add(replaced.toLowerCase());
+  assert.equal(await resumeSetupDeployment({ ...args, key: 'r' }), replaced);
+  assert.equal(await resumeSetupDeployment({ ...args, key: 'r' }), replaced, 'remembered');
+  // 3. An interrupted send (page closed before the hash was saved): the contract created since is found and reused.
+  records.set('i', JSON.stringify({ intent: true, nonce: 8, at: clock })); latest = 10;
+  const created = getCreateAddress({ from, nonce: 9 }); code.add(created.toLowerCase());
+  const before = sent;
+  assert.equal(await resumeSetupDeployment({ ...args, key: 'i', matches: async a => a === created }), created);
+  assert.equal(sent, before, 'nothing deployed again');
+  // An intent with nothing found yet, recently: wait rather than risk a duplicate.
+  records.set('j', JSON.stringify({ intent: true, nonce: 10, at: clock }));
+  await assert.rejects(resumeSetupDeployment({ ...args, key: 'j' }), /may still be sending/);
+  assert.equal(sent, before);
+});
