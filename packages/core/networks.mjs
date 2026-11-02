@@ -35,8 +35,9 @@ export const testnets = [
     // 0x517086cb…2928c (block 12048655; no launch can precede it). Factory and adapter 0xdd6e…6262 both report
     // REVIEW_FIXES_VERSION 1. The 12000324 factory moves to legacy and stays indexed. No new launches go there.
     shared: { factory: '0x37Ca07Eb2A14E30051DbF78e4adCc7fBc1430477', block: 12048655, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1, reviewFixesVersion: 1 },
-    // Ownerless native/pair router, verified with public ordinary-wallet buy and sell on 1 Nov 2026.
-    nativeTradeRouter: { factory: '0x5aA283B8B12786314e76ac4E977B1E9275b407f6', address: '0xDDCc87C34eD8D8bEB6D5fAFc6C14e7cE8578fd41', hash: '0x2843b435316c72830356f414bab1bd6b4ed6a77ae951a08f9ac05db9cd75eb61' },
+    // Ordinary-wallet native/pair router: each one is bound to one factory. The 1 Nov 2026 router (0xDDCc…fd41, tx
+    // 0x2843b435…5eb61, verified with a public buy and sell) serves the now-legacy 0x5aA2…07f6 factory only, so it is
+    // no longer pinned. Pin the reviewed factory's router here once Malik deploys it (HUMAN_ACTIONS).
     // The 22 Oct factory (tx 0xdad271f4…82be9; first launch VEGETA) stays indexed. No new launches go here.
     legacy: [{ factory: '0x5aA283B8B12786314e76ac4E977B1E9275b407f6', block: 12000324, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 11972040, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },

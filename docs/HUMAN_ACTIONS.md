@@ -32,6 +32,10 @@ pinned in `packages/core/networks.mjs`, and the previous factories stay indexed 
 
 Still open on the new launchpads:
 - **Test pairs:** press **Add test pairs** again where you use them.
+- **Ethereum Sepolia native router:**
+  - The ordinary-wallet native router is bound to one factory, so the 1 November router (`0xDDCc…fd41`) serves only the now-legacy factory and is no longer pinned.
+  - Until a new one is deployed, native-coin trades of USDC- or stock-paired tokens on the new launchpad need a wallet that can batch.
+  - To fix it, after **Add test pairs**, open **Network and test funds → Deploy ordinary-wallet native router**. Then send Claude its address and creation hash to pin.
 - **Partner tiers:** re-register active partners, your own Elite tier included, from the Partners tab.
 
 The steps below are kept for reference:

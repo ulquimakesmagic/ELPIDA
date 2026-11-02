@@ -22,10 +22,12 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal(defaults.provider, 'xstocks');
   });
   const config = await (await fetch(`${base}/api/config`)).json();
-  const nativeRouter=config.testnets.find(n=>n.key==='ethereum-sepolia').nativeTradeRouter;
-  assert.equal(nativeRouter.factory,config.testnets.find(n=>n.key==='ethereum-sepolia').shared.factory);
-  assert.match(nativeRouter.address,/^0x[0-9a-fA-F]{40}$/);
-  assert.match(nativeRouter.hash,/^0x[0-9a-fA-F]{64}$/);
+  // The ordinary-wallet router is bound to one factory; a pinned one must match the pinned launchpad.
+  for(const n of config.testnets.filter(n=>n.nativeTradeRouter)){
+    assert.equal(n.nativeTradeRouter.factory,n.shared.factory,n.key);
+    assert.match(n.nativeTradeRouter.address,/^0x[0-9a-fA-F]{40}$/);
+    assert.match(n.nativeTradeRouter.hash,/^0x[0-9a-fA-F]{64}$/);
+  }
   assert.ok(config.contracts.nativeTradeRouter.bytecode.startsWith('0x'));
   assert.ok(config.testnets.filter(n=>n.key!=='ethereum-sepolia').every(n=>!n.nativeTradeRouter));
   const graduation=await (await fetch(`${base}/api/graduation/status`)).json();
