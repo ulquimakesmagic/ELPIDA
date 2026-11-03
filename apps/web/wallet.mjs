@@ -18,6 +18,7 @@ import {supportsAtomicLaunch,waitAtomicLaunch,waitAtomicBatch,atomicBatchRequest
 import { PublicRpcSigner, resumeSetupDeployment } from './public-rpc-signer.mjs';
 import { MULTICALL3, multicallData, approvalFor, launchApproval, waitForAllowance } from './one-confirmation.mjs';
 import { readSafe, treasuryError, safeBatch } from './safe-batch.mjs';
+import { stockApprovalGate, stockVirtualQuote, freshFeedPrice } from './stock-approval.mjs';
 import { graduationSqrtPriceX96, blockedByPool, tokenCheaperInPool } from './graduation-unblock.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 
@@ -269,6 +270,37 @@ export class TestnetWallet {
     }
     if (!steps.length) return null;
     return safeBatch({ chainId: this.net.chainId, safe: await factory.treasury(), name: `Elpida ${this.net.name} launchpad setup`, description: `Treasury-only setup for launchpad ${factory.target}: ${steps.length} step(s), activating USD pricing and approving USDC trading.`, transactions: steps });
+  }
+  /**
+   * Operator panel only: approve a real tokenized stock as a trading pair on a mainnet launchpad, after every registry
+   * gate passes (stock-approval.mjs). Deploys its graduation adapter from the connected wallet (resumable), then
+   * approves it from the treasury: directly when the connected wallet is the treasury, otherwise as a Safe batch.
+   */
+  async approveStock({ asset }) {
+    await this.checkNetwork(); const factory = (await this.verifyFactory()).connect(this.signer);
+    const response = await fetch(`/api/public/tokenized-equity?network=${encodeURIComponent(this.net.key)}&provider=ondo`, { signal: AbortSignal.timeout(15000) });
+    const view = response.ok ? await response.json() : null, record = view?.assets?.find(a => a.address === String(asset ?? '').toLowerCase()) ?? null;
+    const gate = stockApprovalGate(record, { mainnet: !!this.net.mainnet }); if (gate) throw new Error(gate);
+    if (!this.dex) throw new Error('This launchpad has no DEX graduation configured.');
+    if ((await factory.approvedQuotes(record.address)).adapter !== ZeroAddress) return { message: `${record.symbol} is already an approved trading pair.` };
+    const feed = new Contract(record.feed, ['function decimals() view returns(uint8)', 'function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)'], this.provider);
+    const [round, feedDecimals, block] = await Promise.all([feed.latestRoundData(), feed.decimals(), this.provider.getBlock('latest')]);
+    const priceUsd8 = freshFeedPrice(round, feedDecimals, { now: block.timestamp, maxAge: 4 * 86400 });
+    const decimals = Number(await new Contract(record.address, ['function decimals() view returns(uint8)'], this.provider).decimals());
+    const virtualQuote = stockVirtualQuote({ startFdvUsd: await factory.startFdvUsd(), decimals, priceUsd8 });
+    const a = this.config.contracts.adapter, key = `elpida:stock-adapter:${this.net.chainId}:${factory.target.toLowerCase()}:${record.address}`;
+    this.onProgress(`Confirm the ${record.symbol} graduation adapter deployment…`);
+    const adapter = await resumeSetupDeployment({ provider: this.provider, storage: localStorage, key, from: this.address,
+      matches: async address => { const c = new Contract(address, ['function usdc() view returns(address)', 'function manager() view returns(address)'], this.provider); return (await c.usdc()).toLowerCase() === record.address && (await c.manager()).toLowerCase() === this.dex.manager.toLowerCase(); },
+      deploy: () => new ContractFactory(a.abi, a.bytecode, this.signer).deploy(this.dex.manager, record.address, 10000) });
+    const treasury = await factory.treasury(), call = { to: factory.target, data: factory.interface.encodeFunctionData('approveQuote', [record.address, virtualQuote, adapter]) };
+    const price = formatUnits(priceUsd8, 8);
+    if (treasury.toLowerCase() !== this.address.toLowerCase())
+      return { safeBatch: safeBatch({ chainId: this.net.chainId, safe: treasury, name: `Approve ${record.symbol} on ${this.net.name}`, description: `approveQuote(${record.symbol}) on launchpad ${factory.target}: starting valuation fixed at ${price} USD per ${record.symbol}, adapter ${adapter}.`, transactions: [call] }),
+        message: `The ${record.symbol} approval file is downloading. Import it in the Safe Transaction Builder for the treasury signers. Price used: $${price}.` };
+    const result = await this.wait(factory.approveQuote(record.address, virtualQuote, adapter), `Approve ${record.symbol} as a trading pair at $${price}…`);
+    this.pairsScanned = undefined; this.approvedQuotes = undefined; await this.loadPairs(factory);
+    return { hash: result.tx.hash, message: `${record.symbol} is an approved trading pair.` };
   }
   async setupUsdcPair(configuredFactory=null) {
     await this.checkNetwork(); const factory=(configuredFactory??await this.verifyFactory()).connect(this.signer);
@@ -936,6 +968,7 @@ export class TestnetWallet {
     if (action === 'setup-pairs') return this.setupTestPairs(body);
     if (action === 'test-stock') return this.testStockControl(body ?? {});
     if (action === 'setup-usdc-pair') return this.setupUsdcPair();
+    if (action === 'approve-stock') return this.approveStock(body);
     if (action === 'trade-native-pair') return this.tradeNativePair(body);
     if (action === 'convert-native-pair') return this.convertNativePair(body);
     if (action === 'convert-usdc') return this.convertUsdc(body);

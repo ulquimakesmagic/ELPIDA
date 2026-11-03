@@ -3,12 +3,14 @@ import { chainIcon } from './chain-ui.mjs';
 import { withWalletTimeout } from './wallet.mjs';
 import { renderPartners } from './admin-partners.mjs';
 import { renderVisitors } from './admin-visitors.mjs';
+import { renderPairs } from './admin-pairs.mjs';
 
 // Operator panel (#/monkey; deliberately not #/admin, the first path scanners try). The Operations tab is read-only:
 // health, treasury balances, activity, indexers, the price
 // relay, graduation and backups. The Partners tab (#/monkey?tab=partners) reviews early-partner applications; see
-// admin-partners.mjs. The Visitors tab (#/monkey?tab=visitors) shows opt-in site analytics; see admin-visitors.mjs. Sign-in is a wallet signature checked by the server against the factory treasuries and
-// ELPIDA_ADMIN_ADDRESSES; the session is an HttpOnly cookie the page never sees. Nothing here sends a transaction.
+// admin-partners.mjs. The Pairs tab (#/monkey?tab=pairs) holds every trading-pair approval and the test stock tools;
+// see admin-pairs.mjs. The Visitors tab (#/monkey?tab=visitors) shows opt-in site analytics; see admin-visitors.mjs. Sign-in is a wallet signature checked by the server against the factory treasuries and
+// ELPIDA_ADMIN_ADDRESSES; the session is an HttpOnly cookie the page never sees. The Operations tab sends nothing; Partners and Pairs send treasury calls only when the operator confirms them.
 
 const ago = iso => { const t = typeof iso === 'number' ? iso : Date.parse(iso ?? ''); if (!Number.isFinite(t) || t <= 0) return 'never'; const s = Math.max(0, Math.round((Date.now() - t) / 1000)); return s < 60 ? `${s}s ago` : s < 3600 ? `${Math.floor(s / 60)}m ago` : s < 86400 ? `${Math.floor(s / 3600)}h ago` : `${Math.floor(s / 86400)}d ago`; };
 const usd = v => Number.isFinite(Number(v)) ? `$${Number(v) < 1000 ? number(v, 2) : compact(v)}` : '—';
@@ -137,13 +139,15 @@ export function renderAdmin(ctx, { connect }) {
     try {
       const session = await getJson('admin/session');
       if (!session.signedIn) { root.replaceChildren(signInView()); return; }
-      const tab = { partners: 'partners', visitors: 'visitors' }[new URLSearchParams(location.hash.split('?')[1] ?? '').get('tab')] ?? 'ops';
+      const tab = { partners: 'partners', visitors: 'visitors', pairs: 'pairs' }[new URLSearchParams(location.hash.split('?')[1] ?? '').get('tab')] ?? 'ops';
       const tabs = h('nav.op-tabs', { 'aria-label': 'Admin sections' },
         h('a', { href: '#/monkey', 'aria-current': tab === 'ops' ? 'page' : undefined }, 'Operations'),
         h('a', { href: '#/monkey?tab=partners', 'aria-current': tab === 'partners' ? 'page' : undefined }, 'Partners'),
+        h('a', { href: '#/monkey?tab=pairs', 'aria-current': tab === 'pairs' ? 'page' : undefined }, 'Pairs'),
         h('a', { href: '#/monkey?tab=visitors', 'aria-current': tab === 'visitors' ? 'page' : undefined }, 'Visitors'));
       if (tab === 'partners') { root.replaceChildren(tabs, renderPartners(ctx, { getJson })); return; }
       if (tab === 'visitors') { root.replaceChildren(tabs, renderVisitors(ctx, { getJson })); return; }
+      if (tab === 'pairs') { const pairs = renderPairs(ctx, { connect }); root.replaceChildren(tabs, pairs.root); ctx.refresh?.().catch(() => {}).finally(pairs.update); return; }
       const data = await getJson('admin/overview');
       if (!root.isConnected) return;
       root.replaceChildren(tabs, dashboard(data, load));
