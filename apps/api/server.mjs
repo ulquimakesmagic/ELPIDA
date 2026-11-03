@@ -213,8 +213,17 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   let solanaIndex=null,solanaTimer=null,solanaTick=null;
   if(port!==0&&solanaNet.deployment&&solanaRpc&&process.env.ELPIDA_SOLANA_INDEXER!=='off'){
     try{
-      solanaIndex=new SolanaIndexer({web3:solanaWeb3,connection:new solanaWeb3.Connection(validateSolanaRpc(solanaRpc),'confirmed'),deployment:solanaNet.deployment,network:solanaNet,metadataStore,path:dataFile(`public-solana-${solanaNet.cluster}-${solanaNet.deployment.programId}.sqlite`)});
-      const fullTick=()=>solanaIndex.sync().then(()=>console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}))).catch(()=>console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,message:'Indexing unavailable; retrying.'})));
+      // The configured RPC first, then the cluster's public RPC: three failed full passes in a row move the index to
+      // the next one (3 Nov 2026: a failing devnet RPC stalled the Solana index for eight days).
+      const solanaRpcs=[...new Set([solanaRpc,...(/^https:\/\//.test(solanaNet.rpcUrl??'')?[solanaNet.rpcUrl]:[]),...(solanaNet.rpcFallbacks??[])])].map(u=>{try{return validateSolanaRpc(u);}catch{return null;}}).filter(Boolean);
+      const hostOf=u=>{try{return new URL(u).host;}catch{return null;}};
+      let solanaRpcAt=0,solanaFailures=0;
+      solanaIndex=new SolanaIndexer({web3:solanaWeb3,connection:new solanaWeb3.Connection(solanaRpcs[0],'confirmed'),deployment:solanaNet.deployment,network:solanaNet,metadataStore,path:dataFile(`public-solana-${solanaNet.cluster}-${solanaNet.deployment.programId}.sqlite`)});
+      solanaIndex.rpcHost=hostOf(solanaRpcs[0]);
+      const fullTick=()=>solanaIndex.sync().then(()=>{solanaFailures=0;console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}));}).catch(()=>{
+        console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,rpc:solanaIndex.rpcHost,message:'Indexing unavailable; retrying.'}));
+        if(++solanaFailures>=3&&solanaRpcs.length>1){solanaFailures=0;solanaRpcAt=(solanaRpcAt+1)%solanaRpcs.length;solanaIndex.useConnection(new solanaWeb3.Connection(solanaRpcs[solanaRpcAt],'confirmed'),hostOf(solanaRpcs[solanaRpcAt]));console.log(JSON.stringify({event:'public_indexer_rpc_switched',network:solanaNet.key,rpc:solanaIndex.rpcHost}));}
+      });
       // Fast pass every few seconds (new transactions, then pools only if something traded), full pass every 30 s.
       // New trades go to the live feed; the first pass after a restart only records where history ends.
       let fedRow=null,lastFull=0;
