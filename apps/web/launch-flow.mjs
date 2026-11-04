@@ -272,9 +272,9 @@ export function renderLaunch(ctx) {
       const reason = !draft.chain ? 'Choose a network first.' : !pairs ? 'Connect your wallet to see the assets on this network.' : group?.unavailable ?? (group?.assets.length ? null : 'Not available on this network.');
       const symbols = group?.assets.map(a => a.symbol).join(', ');
       const ownerSetup=kind==='usdc'&&!!reason&&draft.chain!=='local'&&!solana()&&connected()&&ctx.state?.pricing?.owner&&ctx.wallet.dex&&ctx.wallet.feeUsdc;
-      const finish=ownerSetup?h('button.btn.btn-secondary.btn-sm',{type:'button','data-busy-disable':'',on:{click:async e=>{e.preventDefault();networkError='';try{await ctx.run('setup-usdc-pair',{});const asset=ctx.wallet.pairOptions().usdc.assets[0];if(asset){draft.pair='usdc';draft.quoteAsset=asset.id;draft.firstBuy=defaultBuy('usdc',asset);save();}}catch(err){networkError=errorText(err);}draw();}}},'Finish USDC setup'):null;
+      const finish=ownerSetup?h('a.btn.btn-secondary.btn-sm',{href:'#/monkey?tab=pairs'},'Approve in the operator panel'):null;
       return h('div.choice', { 'data-unavailable': reason ? 'true' : undefined }, h('label',h('input', { type: 'radio', name: 'pair', value: kind, checked: draft.pair === kind, disabled: !!reason, on: { change: () => { draft.pair = kind; draft.quoteAsset = group.assets[0].id; draft.firstBuy = defaultBuy(kind, group.assets[0]); save(); draw(); } } }),
-        h('span.choice-title', pairIcon(kind, group), info.title, symbols ? h('span.chip', symbols) : null), h('p', ownerSetup?'Finish this existing deployment’s one-time USDC setup. Your wallet confirms the adapter and registration; creators do not repeat this.':reason ?? info.note(kind === 'native' ? group.assets[0].symbol : ''))),finish);
+        h('span.choice-title', pairIcon(kind, group), info.title, symbols ? h('span.chip', symbols) : null), h('p', ownerSetup?'This launchpad has not approved USDC yet. Pair approvals are made by the treasury in the operator panel (Pairs).':reason ?? info.note(kind === 'native' ? group.assets[0].symbol : ''))),finish);
     }));
     const asset = selectedAsset(), group = pairs?.[draft.pair];
     const balanceOf = a => ctx.state?.pairBalances?.[a.id] ?? (draft.pair === 'native' ? ctx.state?.nativeBalance : null);

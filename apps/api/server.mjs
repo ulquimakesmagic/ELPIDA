@@ -70,6 +70,8 @@ resources.set('/portfolio-view.mjs',['portfolio-view.mjs','text/javascript']);
 resources.set('/portfolio-model.mjs',['portfolio-model.mjs','text/javascript']);
 resources.set('/admin-view.mjs',['admin-view.mjs','text/javascript']);
 resources.set('/admin-partners.mjs',['admin-partners.mjs','text/javascript']);
+resources.set('/admin-pairs.mjs',['admin-pairs.mjs','text/javascript']);
+resources.set('/stock-approval.mjs',['stock-approval.mjs','text/javascript']);
 resources.set('/partners-view.mjs',['partners-view.mjs','text/javascript']);
 resources.set('/tax-policy.mjs',['tax-policy.mjs','text/javascript']);
 resources.set('/tax-wallet.mjs',['tax-wallet.mjs','text/javascript']);

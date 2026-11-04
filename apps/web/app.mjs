@@ -1,4 +1,3 @@
-import {testLiquidityTools} from './test-stock-liquidity-ui.mjs';
 import {restoreTradeDraft} from './trade-draft.mjs';
 import { nowSeconds, syncClock } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
@@ -126,25 +125,6 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
     refreshLastSale();
   }else{allTokens=next.tokens;refreshLastSale();}
   return state;
-}
-/** Treasury tools for Ondo-style test stocks: the test issuer's price, market status, pause and blocklist. */
-function testStockControls(wallet, run, fail) {
-  const stocks = (wallet.approvedQuotes ?? []).filter(a => a.stock?.provider === 'ondo-test');
-  if (!stocks.length) return null;
-  const act = async (body, after) => { try { await run('test-stock', body); after?.(); } catch (e) { fail(e); } };
-  return h('div.tools-section', h('h4', 'Test stock issuer controls'),
-    h('p.small.muted', 'Only the launchpad treasury that deployed them can use these. They rehearse what a real stock issuer can do: post the total-return price, freeze it for a corporate action, pause the stock or block a wallet. Token pages update within about a minute.'),
-    ...stocks.map(a => {
-      const price = h('input.input', { inputmode: 'decimal', placeholder: 'USD price, e.g. 180', 'aria-label': `${a.symbol} test price in USD` });
-      const status = h('select.input', { 'aria-label': `${a.symbol} market status` }, ['open', 'closed', 'corporate-action'].map(v => h('option', { value: v }, v === 'corporate-action' ? 'Corporate action' : v[0].toUpperCase() + v.slice(1))));
-      const account = h('input.input', { placeholder: '0x… wallet to block or unblock', spellcheck: false, autocomplete: 'off', 'aria-label': `Wallet to block on ${a.symbol}` });
-      const btn = (label, body) => h('button.btn.btn-secondary.btn-sm', { type: 'button', 'data-busy-disable': '', on: { click: () => act({ asset: a.address, ...body() }) } }, label);
-      return h('div.stack', h('p.small', h('strong', a.symbol), ` · ${short(a.address)}`),
-        h('div.wallet-choices', price, btn('Post price', () => ({ op: 'price', value: price.value }))),
-        h('div.wallet-choices', status, btn('Set market status', () => ({ op: 'status', value: status.value }))),
-        h('div.wallet-choices', btn('Pause stock', () => ({ op: 'pause', value: true })), btn('Unpause', () => ({ op: 'pause', value: false }))),
-        h('div.wallet-choices', account, btn('Block', () => ({ op: 'block', account: account.value.trim(), value: true })), btn('Unblock', () => ({ op: 'block', account: account.value.trim(), value: false }))));
-    }));
 }
 async function chooseChain(key){
   if(busy)throw new Error('Wait for the current request to finish.');
@@ -404,7 +384,7 @@ function applyLiveTrades(trades) {
   exploreView?.setTrades(recentBuys);
 }
 async function openTools() {
-  const body = $('#tools-body'); const recoveryInput=h('input',{id:'test-pair-recovery',type:'text',placeholder:'0x...'}); const error = h('p.error-text', { role: 'alert' });
+  const body = $('#tools-body'); const error = h('p.error-text', { role: 'alert' });
   const fail = e => { error.textContent = errorText(e); };
   const local = mode === 'local';
   if(!local&&wallet.address&&wallet.deployment){try{await wallet.checkFeeAccounting?.();await wallet.checkLaunchFeatures?.();}catch(e){fail(e);}}
@@ -441,7 +421,6 @@ async function openTools() {
         dexDone ? h('div.stack', h('p.small', 'Deployed from this browser. Send these addresses to the team to register them, then set up the launchpad:'), h('pre.small.selectable', JSON.stringify(savedDex, null, 2))) : null,
         !dexDone && wallet.address ? (config.relay?.address ? h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('deploy-test-dex', {}); openTools(); } catch (e) { fail(e); } } } }, savedDex ? 'Finish the test DEX setup' : 'Set up test DEX and price feed (6 confirmations)') : h('p.small.muted', 'The server price relay is not configured yet, so the price feed cannot be deployed.')) : null));
       funds.append(h('div.tools-section', h('h4', 'Launchpad on this network'),
-        deployed&&wallet.dex&&wallet.feeUsdc&&!/^0x0{40}$/i.test(wallet.feeUsdc)&&state?.pricing?.owner&&pairs?.usdc?.unavailable?h('div.stack',h('p.small.muted','Approve the configured USDC asset for trading. This creates its graduation adapter and fixes the starting valuation in USDC at the launchpad\u2019s starting FDV. Existing tokens are unchanged.'),h('button.btn.btn-secondary',{type:'button',on:{click:()=>act('setup-usdc-pair',{}).then(r=>{downloadSafeBatch(r);openTools();})}},'Enable USDC trading pair')):null,
         h('p.small.muted', deployed ? `${wallet.deployment.shared ? 'Shared team' : 'Your'} launchpad: ${short(wallet.deployment.factory)}.${wallet.modelUpgradeAvailable ? ' This is the older model 9 launchpad. Model 10 adds launch protection, the 10x curve and the graduation escape hatch; existing tokens keep trading on model 9.' : wallet.needsMetadataUpgrade ? ' A newer version with shared token metadata is available.' : ''}` : 'Each public testnet needs a one-time launchpad setup from your wallet before the first token.'),
         treasuryInput ? h('label.field', h('span.small.muted', 'Treasury: receives launch fees and alone can finish the setup. It can never be changed. Use a Safe multisig for anything beyond testing.'), treasuryInput) : null,
         (!deployed || wallet.needsMetadataUpgrade || wallet.modelUpgradeAvailable || wallet.feeFixUpgradeAvailable || wallet.launchUpgradeAvailable || wallet.partnerUpgradeAvailable || wallet.reviewUpgradeAvailable) && wallet.address ? h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { downloadSafeBatch(await run('deploy', { treasury: treasuryInput?.value ?? '' })); openTools(); } catch (e) { fail(e); } } } }, wallet.launchUpgradeAvailable?'Deploy automatic-graduation launchpad':wallet.partnerUpgradeAvailable?'Deploy partner-tier launchpad':wallet.reviewUpgradeAvailable?'Deploy reviewed launchpad':wallet.feeFixUpgradeAvailable?'Deploy corrected Base Sepolia launchpad':deployed ? 'Set up the newer launchpad' : 'Set up launchpad') : null,
@@ -449,10 +428,8 @@ async function openTools() {
         wallet.partnerUpgradeAvailable?h('p.small.muted','This launchpad predates partner tiers. Deploy the new version to register partners (10% or 20% of fees buy back and burn). Test gas only. Existing tokens keep their contracts and stay listed. After deployment, share the factory address so it can be pinned for all visitors.'):null,
         wallet.feeFixUpgradeAvailable?h('p.small.muted','The current Model 10 factory predates the shared-recipient fee fix. Deploy a corrected testnet factory using test ETH for gas. Pricing stays unchanged. Existing tokens keep their original contracts. After deployment, share the factory address so it can be registered for all visitors.'):null,
         deployed ? h('div.stack', h('p.small.muted', state?.pricing?.verified ? `$10 launch fee, converted by the on-chain price feed at execution. Starting FDV: $${Number(wallet.startFdvUsd ?? 5000).toLocaleString()} before the first purchase.` : state ? 'USD pricing must be activated before launching.' : 'Checking this launchpad’s USD pricing… If this stays, the network’s public RPC is slow: refresh in a minute.'), state && !state?.pricing?.verified ? h('button.btn.btn-secondary',{type:'button',on:{click:()=>act('apply-pricing',{}).then(r=>{downloadSafeBatch(r);openTools();})}},wallet.deployment?.treasury&&wallet.deployment.treasury.toLowerCase()!==String(wallet.address).toLowerCase()?'Download the Safe setup file':'Activate price feed') : null) : null,
-        deployed && wallet.dex && wallet.address && pairs && (pairs.xstock.unavailable || pairs.token.unavailable || (wallet.missingTestPairs?.() ?? []).length) ? h('div.stack', h('p.small.muted', 'Stock and paired-token launches need approved assets. The launchpad owner adds the labelled test assets one pair at a time: three or four wallet confirmations per pair, test gas only. If a step is interrupted, press the button again: it resumes, and it reuses anything already deployed.'),
-          h('label.field', h('span', 'Previous TEST-STOCK deployment hash (optional, recover interrupted setup)'), recoveryInput),
-          h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('setup-pairs', { recoveryHash: recoveryInput.value.trim() || undefined }); openTools(); } catch (e) { fail(e); } } } }, (m => m.length ? `Add test pair: ${m[0].symbol} (${m[0].ondo ? 4 : 3} confirmations)${m.length > 1 ? ` · ${m.length - 1} more after it` : ''}` : 'Add test xStock and token pairs')((wallet.missingTestPairs?.() ?? [])))) : null,
-        deployed && wallet.dex && wallet.address ? h('div.stack',testStockControls(wallet, run, fail),testLiquidityTools(wallet,run),wallet.net.chainId===11155111&&wallet.dex?.routerVersion===2?h('div.stack',h('p.hint',wallet.nativeRouterRecord()?.address?`Ordinary-wallet native router: ${short(wallet.nativeRouterRecord().address)}`:'Native trades on ordinary wallets need a fixed router deployment. One test-gas transaction, no deposit.'),!wallet.nativeRouterRecord()?.address?h('button.btn.btn-secondary',{type:'button','data-busy-disable':'',on:{click:()=>act('deploy-native-router',{}).then(()=>openTools())}},'Deploy ordinary-wallet native router'):null):null) : null));
+        deployed && wallet.dex && wallet.address && state?.pricing?.owner ? h('p.small.muted', 'Trading pairs, test stocks and their issuer controls are managed in the operator panel: ', h('a', { href: '#/monkey?tab=pairs', on: { click: () => $('#tools-dialog').close() } }, 'Pairs'), '.') : null,
+        null));
     } else funds.append(h('p.small.muted', wallet.deployment ? `Solana program: ${short(wallet.deployment.programId)}.${state?.pricing ? ` Creation fee ${number(state.pricing.launchFee, 6)} SOL. New USD-priced launches are pending a verified-oracle program upgrade.` : ''}` : 'The Solana program is not deployed. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.'));
   }
   body.replaceChildren(envSection, funds, circleFundingPanel({ config: config.circle, csrf: config.csrf, connected: mode === 'testnet' ? { address: wallet.address, network: wallet.net.key } : null }), error);
