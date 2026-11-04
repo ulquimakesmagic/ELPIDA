@@ -30,7 +30,7 @@ const STRATEGY_TEXT = {
   buyback: 'At the threshold, creator fees buy back your token and vest it to eligible holders over a period you set.',
   exclusive: 'Fees are allocated by percentage to wallets, X accounts or websites. X and website shares stay in the treasury until ownership is verified.',
 };
-const blankDraft = () => ({ name: '', symbol: '', description: '', image: '', imageUrl: '', website: '', twitter: '', telegram: '', discord: '', chain: '', pair: 'native', quoteAsset: '', rewardMode: 'creator', recipients: [{ kind: 'wallet', target: '', percent: '100' }], threshold: '0.01', minimumHolding: '1000', minimumHoldingUsd: '', vestingDays: '30', rewardToken: '', feeCurrency:'native', firstBuy: '0', taxBuy:'0', taxSell:'0' });
+const blankDraft = () => ({ name: '', symbol: '', description: '', image: '', imageUrl: '', website: '', twitter: '', telegram: '', discord: '', chain: '', pair: 'native', quoteAsset: '', rewardMode: 'creator', recipients: [{ kind: 'wallet', target: '', percent: '100' }], threshold: '0.01', minimumHolding: '1000', minimumHoldingUsd: '', vestingDays: '30', rewardToken: '', feeCurrency:'native', firstBuy: '0', buyWith: 'pair', nativeBuy: '0', taxBuy:'0', taxSell:'0' });
 
 export function renderLaunch(ctx) {
   const draft = { ...blankDraft(), ...(storage.get(DRAFT_KEY) ?? {}) };
@@ -95,6 +95,33 @@ export function renderLaunch(ctx) {
   const priceNote = () => {const p=launchPrice();return freshPrice(p)?`1 ${nativeSymbol()} ≈ USD ${number(p.usd,2)} · ${p.source} · Updated ${new Date(p.updatedAt*1000).toLocaleTimeString()}`:'Price feed unavailable or stale. Refresh before launching.';};
   const usdcAvailable = () => draft.chain==='local'||(connected()&&!!ctx.wallet.feeUsdc&&!/^0x0{40}$/.test(ctx.wallet.feeUsdc));
   const assetDecimals = () => selectedAsset()?.decimals ?? 18;
+  // Creator purchase paid in the native coin on a non-native pair: swapped into the pair asset before the launch
+  // (apps/web/launch-conversion.mjs). Public EVM testnets with a DEX only; the quote shows what the swap delivers.
+  const canPayNative = () => !solana() && isPublic() && draft.pair !== 'native' && connected() && !net()?.mainnet && typeof ctx.wallet.firstBuyConversionQuote === 'function' && !!selectedAsset();
+  const payNative = () => draft.buyWith === 'native' && canPayNative();
+  let conversion = { key: '', state: 'idle' };
+  const conversionFor = () => `${draft.chain}:${selectedAsset()?.id}:${draft.nativeBuy}`;
+  let conversionTimer = null, conversionDrawn = () => {};
+  function quoteConversion() {
+    const key = conversionFor();
+    if (!payNative() || conversion.key === key && conversion.state !== 'error') return;
+    clearTimeout(conversionTimer);
+    if (!(Number(draft.nativeBuy) > 0)) { conversion = { key, state: 'idle' }; conversionDrawn(); return; }
+    conversion = { key, state: 'loading' }; conversionDrawn();
+    conversionTimer = setTimeout(async () => {
+      try { const q = await ctx.wallet.firstBuyConversionQuote({ quoteAsset: selectedAsset().id, nativeAmount: draft.nativeBuy }); if (conversionFor() === key) conversion = { key, state: 'ok', ...q }; }
+      catch (error) { if (conversionFor() === key) conversion = { key, state: 'error', error: errorText(error) }; }
+      if (conversionFor() === key) conversionDrawn();
+    }, 400);
+  }
+  const converted = () => payNative() && conversion.key === conversionFor() && conversion.state === 'ok' ? conversion : null;
+  /** The pair-asset amount the first purchase spends (for estimates): converted output when paying natively. */
+  const buyAmount = () => payNative() ? Number(converted()?.pending ?? converted()?.output ?? 0) : Number(draft.firstBuy || 0);
+  const buyText = () => {
+    if (!payNative()) return `${number(draft.firstBuy, 6)} ${pairSymbol()}`;
+    const c = converted();
+    return c?.pending ? `${number(c.pending, 6)} ${pairSymbol()} (converted earlier)` : `${number(draft.nativeBuy, 6)} ${nativeSymbol()} → ${c ? `about ${number(c.output, 6)}` : '…'} ${pairSymbol()}`;
+  };
   const dexName = () => !draft.chain ? 'DEX' : solana() ? 'Raydium' : draft.chain === 'local' ? (ctx.config.dex ? 'Uniswap v3' : 'test') : draft.chain === 'base-sepolia' ? 'Uniswap v3' : ctx.config.publicDexes?.[draft.chain]?.name ?? 'test';
 
   async function loadRewards() {
@@ -120,7 +147,7 @@ export function renderLaunch(ctx) {
         h('div.chips', { class: 'links' }, h('span.chip',chainIcon(draft.chain), draft.chain ? (draft.chain === 'local' ? 'Local simulation' : net()?.name ?? draft.chain) : 'Network not chosen'), h('span.chip',assetIcon(pairSymbol()), `Pair: ${pairSymbol()}`))),
       h('div.summary-card', h('h4', 'Launch summary'), h('dl.kv',
         h('dt', 'Launch fee · $10'), h('dd', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`),
-        h('dt', 'First purchase'), h('dd', `${number(draft.firstBuy, 6)} ${pairSymbol()}`),
+        h('dt', 'First purchase'), h('dd', buyText()),
         h('dt', 'Estimated tokens'), h('dd', est ? `${compact(est.tokens)}` : '—'),
         h('dt', 'Creator rewards'), h('dd', strategy),
         h('dt.total', connected()?'You pay':'Estimated total'), h('dd.total', youPay())),
@@ -136,11 +163,12 @@ export function renderLaunch(ctx) {
   }
   function youPay() {
     if(feeAmount()===null)return 'Quote unavailable';
+    if (payNative()) { const buy = converted()?.pending ? 0 : Number(draft.nativeBuy || 0), fee = feeAmount(); return feeSymbol() === nativeSymbol() ? `${number(buy + fee, 6)} ${nativeSymbol()}` : `${number(fee, 6)} ${feeSymbol()} + ${number(buy, 6)} ${nativeSymbol()}`; }
     const buy = Number(draft.firstBuy || 0);
     return feeSymbol() === pairSymbol() ? `${number(buy + feeAmount(), 6)} ${pairSymbol()}` : `${number(feeAmount(), 6)} ${feeSymbol()} + ${number(buy, 6)} ${pairSymbol()}`;
   }
   function estimate() {
-    const buy = Number(draft.firstBuy), curve = selectedAsset()?.curve;
+    const buy = buyAmount(), curve = selectedAsset()?.curve;
     if (!(buy > 0) || !curve) return null;
     // Same virtual-reserve curve the contracts use: tokens = Vt × net / (Vq + net), net of the base fee.
     // The creator's first buy always pays the 1.25% base fee; the anti-snipe fee applies to other traders only.
@@ -342,11 +370,28 @@ export function renderLaunch(ctx) {
   function purchaseStep() {
     const est = estimate();
     const amount = input('firstBuy', { type: 'number', min: '0', step: 'any', inputmode: 'decimal', onInput: e => { draft.firstBuy = e.target.value; drawEstimate(); } });
+    const nativeAmount = input('nativeBuy', { type: 'number', min: '0', step: 'any', inputmode: 'decimal', onInput: e => { draft.nativeBuy = e.target.value; quoteConversion(); drawEstimate(); } });
+    const amountField = h('div');
+    const drawAmount = () => amountField.replaceChildren(payNative()
+      ? field({ label: 'Purchase amount', control: h('div.input-affix', nativeAmount, h('span.affix', nativeSymbol())), hint: `Optional. Swapped into ${pairSymbol()} on ${dexName()} at the live pool price, at most 1% below the quote, in a separate confirmation before the launch. If the launch then stops, the ${pairSymbol()} stays in your wallet and your next attempt uses it.` })
+      : field({ label: 'Purchase amount', control: h('div.input-affix', amount, h('span.affix', pairSymbol())), hint: 'Optional. Enter 0 to launch without buying. Launch fees and network gas still apply.' }));
+    const buyWith = canPayNative() ? h('select.select', { on: { change: e => { draft.buyWith = e.target.value; save(); drawAmount(); quoteConversion(); drawEstimate(); } } },
+      h('option', { value: 'pair', selected: !payNative() }, `${pairSymbol()} from your wallet`),
+      h('option', { value: 'native', selected: payNative() }, `${nativeSymbol()}, converted to ${pairSymbol()} first`)) : null;
+    const conversionRows = () => {
+      if (!payNative()) return [];
+      const c = conversion.key === conversionFor() ? conversion : { state: 'idle' };
+      if (c.state === 'ok' && c.pending) return [callout('', 'info', `You already converted ${number(c.pending, 6)} ${pairSymbol()} for an earlier launch attempt. This launch uses it as the first purchase; no new conversion is sent.`)];
+      if (c.state === 'ok') return [h('dl.kv', h('dt', 'You convert'), h('dd', `${number(draft.nativeBuy, 6)} ${nativeSymbol()}`), h('dt', 'You receive about'), h('dd', `${number(c.output, 6)} ${pairSymbol()} (at least ${number(c.minimum, 6)})`))];
+      if (c.state === 'loading') return [h('p.hint', `Quoting ${nativeSymbol()} → ${pairSymbol()} on ${dexName()}…`)];
+      if (c.state === 'error') return [callout('warn', 'triangle-alert', /No funded/.test(c.error) ? `There is no funded ${nativeSymbol()}/${pairSymbol()} market on ${net()?.name} yet, so the purchase cannot be paid in ${nativeSymbol()}. Pay with ${pairSymbol()} instead.` : c.error)];
+      return [];
+    };
     const estBox = h('div'),priceStatus=h('p.price-status',priceNote());
     const balance = () => { if (!connected()) return null; const a = selectedAsset(); const v = a ? ctx.state?.pairBalances?.[a.id] ?? (draft.pair === 'native' ? ctx.state?.nativeBalance : null) : null; return v == null ? null : `${number(v, 6)} ${pairSymbol()}`; };
     const drawEstimate = () => {
       const e = estimate();
-      estBox.replaceChildren(...[h('dl.kv', h('dt', 'Launch fee · $10'), h('dd', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), h('dt', 'First purchase'), h('dd', `${number(draft.firstBuy, 6)} ${pairSymbol()}`), h('dt', 'Trading fee included'), h('dd', `${number(Number(draft.firstBuy || 0) * 0.0125, 6)} ${pairSymbol()}`),
+      estBox.replaceChildren(...[...conversionRows(), h('dl.kv', h('dt', 'Launch fee · $10'), h('dd', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), h('dt', 'First purchase'), h('dd', buyText()), h('dt', 'Trading fee included'), h('dd', `${number(buyAmount() * 0.0125, 6)} ${pairSymbol()}`),
         h('dt', 'Estimated tokens'), h('dd', e ? `${compact(e.tokens)} (${number(e.share, 2)}% of supply)` : 'Shown after launch'), balance() ? [h('dt', 'Available balance'), h('dd', balance())] : null,
         connected()&&draft.chain!=='local'?[h('dt','Available for native payment and gas'),h('dd',`${number(ctx.state?.nativeBalance??0,8)} ${nativeSymbol()}`)]:null),
         connected()&&draft.chain!=='local'&&Number(ctx.state?.nativeBalance)===0?callout('warn','info',`This wallet has no ${nativeSymbol()} on ${net()?.name}. Add native currency for approval and launch gas, even when both payments use USDC.`):null,
@@ -354,19 +399,27 @@ export function renderLaunch(ctx) {
         !e ? h('p.hint', 'This network does not publish the curve for this pair before launch, so the exact amount appears on the token page.') : null].filter(Boolean));
       drawPreview();
     };
-    drawEstimate();
+    conversionDrawn = drawEstimate;
+    drawAmount(); quoteConversion(); drawEstimate();
     pricingRefresh=()=>{drawEstimate();priceStatus.textContent=priceNote();};
     const payment=h('select.select',{on:{change:e=>{draft.feeCurrency=e.target.value;save();drawEstimate();}}},h('option',{value:'native',selected:draft.feeCurrency!=='usdc'},nativeSymbol()+' · $10 equivalent'),h('option',{value:'usdc',disabled:!usdcAvailable(),selected:draft.feeCurrency==='usdc'},'USDC · 10 USDC'+(usdcAvailable()?'':' (unavailable on this network)')));
     if(draft.feeCurrency==='usdc'&&!usdcAvailable()){draft.feeCurrency='native';payment.value='native';drawEstimate();}
     return { body: [
       field({label:'Pay launch fee with',control:payment,hint:'Independent of the trading pair. USDC payment does not change your token’s pool.'}),
       priceStatus,
-      field({ label: 'Purchase amount', control: h('div.input-affix', amount, h('span.affix', pairSymbol())), hint: 'Optional. Enter 0 to launch without buying. Launch fees and network gas still apply.' }),
+      buyWith ? field({ label: 'Pay first purchase with', control: buyWith, hint: `Buyers always trade in ${pairSymbol()}. Paying in ${nativeSymbol()} adds one conversion confirmation before the launch.` }) : null,
+      amountField,
       estBox,
       draft.pair==='native'?usdcFunding(ctx,{amount:()=>String(draft.firstBuy),symbol:nativeSymbol()}):null,
       callout('', 'info', 'Native payment uses the on-chain price at execution, rounded up by at most one smallest unit. A 1% fee cap protects your total; unused native funds are refunded. The oracle price can differ from the live market. USDC payment is exactly 10 USDC, whose dollar value can move.'),
       callout('', 'info', `This is the first trade on the virtual bonding curve. The curve is not a funded pool: your purchase starts the trading reserve, which moves into a locked ${dexName()} pool when the curve sells out.${solana() ? ' Your first purchase pays the normal 1.25% fee; other buyers pay a higher launch-protection fee during the first minute.' : ''}`),
     ], validate: () => {
+      if (payNative()) {
+        if (!(Number(draft.nativeBuy) >= 0) || !/^\d+(\.\d{0,18})?$/.test(draft.nativeBuy)) { setError(nativeAmount, 'Enter zero or a positive amount, at most 18 decimal places.'); nativeAmount.focus(); return false; }
+        if (Number(draft.nativeBuy) > 0 && !converted()) { setError(nativeAmount, conversion.state === 'loading' ? 'Wait for the conversion quote.' : `This amount cannot be converted to ${pairSymbol()} right now.`); return false; }
+        if (estimate()?.exceeds) { setError(nativeAmount, 'This amount exceeds the curve. Reduce your first purchase.'); return false; }
+        return true;
+      }
       const control = amount;
       if(estimate()?.exceeds){setError(control,'This amount exceeds the curve. Reduce your first purchase.');control.focus();return false;}
       if (!(Number(draft.firstBuy) >= 0)) { setError(control, 'Enter zero or a positive amount.'); control.focus(); return false; }
@@ -400,7 +453,7 @@ export function renderLaunch(ctx) {
         block('Token', 0, row('Name', draft.name), row('Symbol', `$${draft.symbol.toUpperCase()}`), row('Description', draft.description), row('Logo', draft.image ? (draft.image.startsWith('data:') ? 'Uploaded image' : draft.image) : '—'), row('Links', ['website', 'twitter', 'telegram', 'discord'].filter(k => draft[k]).map(k => ({ website: 'Website', twitter: 'X', telegram: 'Telegram', discord: 'Discord' })[k]).join(', ') || 'None')),
         block('Network and trading pair', 1, row('Network', draft.chain === 'local' ? 'Local simulation' : net()?.name ?? '—'), row('Wallet', draft.chain === 'local' ? `Demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()}` : short(ctx.wallet.address)), row('Trading pair', `${PAIR_INFO[draft.pair]?.title ?? ''} · ${pairSymbol()}`), row('Graduates into', `A locked ${dexName()} pool`), notice?.live ? row('Partner tier', `${notice.tier} · ${notice.percent}% of fees buy back and burn`) : null),
         block('Creator rewards', 2, row('Strategy', STRATEGIES[draft.rewardMode].name), ...(['holders', 'paired', 'buyback'].includes(draft.rewardMode) ? [row('Distribution threshold', `${draft.threshold} ${pairSymbol()}`), row('Minimum token holding', `${number(draft.minimumHolding, 0)} ${draft.symbol.toUpperCase()}`)] : [row('Recipients', recipients)]), draft.rewardMode === 'paired' ? row('Reward asset', rewardData?.assets.find(a => a.address === draft.rewardToken)?.symbol ?? '—') : null, draft.rewardMode === 'buyback' ? row('Vesting', `${draft.vestingDays} days`) : null),
-        block('Creator purchase and costs', 3, row('Launch fee · $10', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), row('First purchase', `${number(draft.firstBuy, 6)} ${pairSymbol()}`), row('Buy / sell token tax', `${draft.taxBuy||0}% / ${draft.taxSell||0}% · additional to trading fees`), row('Estimated tokens', estimate() ? compact(estimate().tokens) : 'Shown after launch'), row('Conversion',priceNote()),row('Network gas', 'Estimated before signing; paid separately'))),
+        block('Creator purchase and costs', 3, row('Launch fee · $10', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), row('First purchase', buyText()), payNative() ? row('Paid with', `${nativeSymbol()}, converted to ${pairSymbol()} in a separate confirmation first`) : null, row('Buy / sell token tax', `${draft.taxBuy||0}% / ${draft.taxSell||0}% · additional to trading fees`), row('Estimated tokens', estimate() ? compact(estimate().tokens) : 'Shown after launch'), row('Conversion',priceNote()),row('Network gas', 'Estimated before signing; paid separately'))),
       notice ? callout(notice.live ? '' : 'warn', notice.live ? 'flame' : 'info', notice.text) : null,
       h('section.summary-card', h('h4', 'Fixed after launch'), h('ul.fixed-list', h('li', 'Name, symbol and the 1,000,000,000 fixed supply'), h('li', `Trading pair (${pairSymbol()})`), h('li', 'Creator reward strategy, recipients and percentages'), h('li', `Graduation into a ${dexName()} pool with permanently locked liquidity`), notice?.live ? h('li', `${notice.tier} tier: ${notice.percent}% of trading fees buy back and burn the token, for life`) : null)),
       ctx.mode!=='local'&&!solana() ? h('p.hint',draft.pair==='native'&&draft.feeCurrency!=='usdc' ? 'One launch confirmation pays the native fee, records supported metadata, creates your token and makes the first purchase. No token spending approval is needed.' : ctx.wallet.atomicLaunch ? 'Your wallet supports one atomic confirmation for payment approval, creation, supported metadata and the first purchase.' : 'Metadata uses the launch confirmation. This wallet may require a separate token payment approval; one-confirmation approval and launch requires an atomic-capable wallet.') : null,
@@ -412,7 +465,7 @@ export function renderLaunch(ctx) {
   /* ---------- Submission ---------- */
   const STATUS_STEPS = () => ctx.mode === 'local'
     ? [['submit', 'Create on the local simulation', 'Simulated funds, no wallet needed'], ['confirm', 'Confirmed', 'Your token is live']]
-    : [...(!solana() && !ctx.wallet.atomicLaunch && (draft.pair !== 'native'||draft.feeCurrency==='usdc') ? [['approve', 'Approve the payment if needed', 'Allows only the requested launch payment; no unlimited approval']] : []), ['wallet', 'Confirm in your wallet', `Pays the ${feeSymbol()} creation fee, records supported metadata, creates the token and makes your first purchase`], ['submit', 'Submitted', 'Waiting for the network to confirm'], ['confirm', 'Confirmed', 'Your token is live']];
+    : [...(payNative() && Number(draft.nativeBuy) > 0 ? [['convert', `Convert ${nativeSymbol()} to ${pairSymbol()}`, 'A separate swap at the live pool price. If the launch stops, you keep it and the next attempt uses it']] : []), ...(!solana() && !ctx.wallet.atomicLaunch && (draft.pair !== 'native'||draft.feeCurrency==='usdc') ? [['approve', 'Approve the payment if needed', 'Allows only the requested launch payment; no unlimited approval']] : []), ['wallet', 'Confirm in your wallet', `Pays the ${feeSymbol()} creation fee, records supported metadata, creates the token and makes your first purchase`], ['submit', 'Submitted', 'Waiting for the network to confirm'], ['confirm', 'Confirmed', 'Your token is live']];
   function statusView() {
     const steps = STATUS_STEPS();
     const at = steps.findIndex(s => s[0] === statusState.step);
@@ -423,7 +476,8 @@ export function renderLaunch(ctx) {
   }
   async function create() {
     const policy = buildPolicy();
-    const body = { ...normalizeMetadata(draft), name: draft.name.trim(), symbol: draft.symbol.trim().toUpperCase(), pair: draft.pair, quoteAsset: selectedAsset()?.id ?? draft.quoteAsset, firstBuy: String(draft.firstBuy), feeCurrency:draft.feeCurrency, reward: ctx.state?.wallet ?? '' };
+    const body = { ...normalizeMetadata(draft), name: draft.name.trim(), symbol: draft.symbol.trim().toUpperCase(), pair: draft.pair, quoteAsset: selectedAsset()?.id ?? draft.quoteAsset, firstBuy: payNative() ? '0' : String(draft.firstBuy), feeCurrency:draft.feeCurrency, reward: ctx.state?.wallet ?? '' };
+    if (payNative() && Number(draft.nativeBuy) > 0) { body.firstBuyPayment = 'native'; body.nativeBuy = String(draft.nativeBuy); }
     if(!solana())body.tax=taxPolicy({buy:draft.taxBuy,sell:draft.taxSell,recipients:draft.recipients,owner:ctx.state?.wallet});
     if (draft.chain === 'local' && (draft.pair === 'token' || draft.pair === 'xstock')) body.quoteToken = body.quoteAsset;
     if (draft.chain === 'local') body.rewardPolicy = policy;
@@ -431,7 +485,8 @@ export function renderLaunch(ctx) {
     phase = 'submitting'; statusState = { step: ctx.mode === 'local' ? 'submit' : STATUS_STEPS()[0][0], error: null, done: false }; draw();
     const onProgress = message => {
       statusState.message=message;
-      if (/approv/i.test(message)) statusState.step = 'approve';
+      if (/conver/i.test(message)) statusState.step = 'convert';
+      else if (/approv/i.test(message)) statusState.step = 'approve';
       else if (/submitted|waiting/i.test(message)) statusState.step = 'submit';
       else if (/confirm|sign|publishing/i.test(message)) statusState.step = 'wallet';
       draw();
@@ -480,5 +535,5 @@ export function renderLaunch(ctx) {
   }
   draw();
   loadRewards();
-  return { root, update: () => { if(phase==='edit'&&draft.chain!==ctx.currentChain()){draft.chain=ctx.currentChain();draft.pair='native';draft.quoteAsset='';draft.feeCurrency='native';maxStep=Math.min(maxStep,1);step=Math.min(step,1);networkError='Chain changed. Review the trading pair and reward availability before continuing. Your token details and reward draft are preserved.';save();draw();return;}  if (phase === 'edit' && STEPS[step].key === 'network') draw(); else if(phase==='edit'&&STEPS[step].key==='review')draw();else { drawStepper(); drawPreview();pricingRefresh(); } loadRewards(); } };
+  return { root, update: () => { if(phase==='edit'&&draft.chain!==ctx.currentChain()){draft.chain=ctx.currentChain();draft.pair='native';draft.quoteAsset='';draft.feeCurrency='native';draft.buyWith='pair';maxStep=Math.min(maxStep,1);step=Math.min(step,1);networkError='Chain changed. Review the trading pair and reward availability before continuing. Your token details and reward draft are preserved.';save();draw();return;}  if (phase === 'edit' && STEPS[step].key === 'network') draw(); else if(phase==='edit'&&STEPS[step].key==='review')draw();else { drawStepper(); drawPreview();pricingRefresh(); } loadRewards(); } };
 }
