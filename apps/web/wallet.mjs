@@ -13,6 +13,7 @@ import { EVM_TEST_PAIRS } from '/pairs.mjs';
 import { testStockHold, MARKET_STATUS } from './test-stock.mjs';
 import { DEX_MODEL, LEGACY_DEX_MODEL, BETA_MODEL, MODEL_VERSIONS, isDexModel, curveShape, startFdvUsdFor, assertDeploymentTerms, usdQuoteTemplate, GRADUATION_GRACE_SECONDS, BASE_FEE_BPS, SNIPE_START_BPS, SNIPE_WINDOW_SECONDS, SALE_CAP } from '/curve-model.mjs';
 import { quoteUsdcConversion, quoteNativePairConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
+import { conversionKey, convertForLaunch, pendingConversion } from './launch-conversion.mjs';
 import {nativeFundingError} from './payment-errors.mjs';
 import {supportsAtomicLaunch,waitAtomicLaunch,waitAtomicBatch,atomicBatchRequest} from './wallet-batch.mjs';
 import { PublicRpcSigner, resumeSetupDeployment } from './public-rpc-signer.mjs';
@@ -302,6 +303,19 @@ export class TestnetWallet {
     const amountIn=parseUnits(this.nativeAmount(body.amount),toNative?decimals:18);
     const result=await quoteNativePairConversion({Contract,provider:this.provider,dex:this.dex,asset,amountIn,toNative,slippageBps:100});
     return {token:body.token,direction:body.direction,amount:body.amount,minimum:result.minimum.toString(),output:formatUnits(result.amountOut,toNative?18:decimals),quotedAt:result.quotedAt};
+  }
+  /**
+   * Launch form: what a creator purchase paid in the native coin converts into on this pair, before anything is signed.
+   * { output, minimum, symbol, pending } as decimal strings; `pending` is an earlier conversion the next launch reuses.
+   */
+  async firstBuyConversionQuote({ quoteAsset, nativeAmount }) {
+    await this.checkNetwork();
+    if (this.net.mainnet) throw new Error('Paying the first purchase in the native coin is testnet-only for now.');
+    const asset = (this.approvedQuotes ?? []).find(a => a.address.toLowerCase() === String(quoteAsset ?? '').toLowerCase());
+    if (!asset || !this.dex) throw new Error('Choose an approved pair asset on a launchpad with DEX graduation.');
+    const pending = pendingConversion(localStorage, conversionKey({ chainId: this.net.chainId, factory: this.deployment.factory, account: this.address, asset: asset.address }));
+    const q = await quoteNativePairConversion({ Contract, provider: this.provider, dex: this.dex, asset: asset.address, amountIn: parseUnits(this.nativeAmount(nativeAmount), 18) });
+    return { output: formatUnits(q.amountOut, asset.decimals), minimum: formatUnits(q.minimum, asset.decimals), symbol: asset.symbol, pending: pending === null ? null : formatUnits(pending, asset.decimals) };
   }
   async convertNativePair(body) {
     if(!Number.isFinite(body.quotedAt)||Date.now()-body.quotedAt>60000||body.quotedAt>Date.now())throw new Error('Conversion quote expired.');
@@ -966,7 +980,15 @@ export class TestnetWallet {
       const asset = paired ? (this.approvedQuotes ?? []).find(a => a.kind === kind && a.address.toLowerCase() === String(body.quoteAsset ?? '').toLowerCase()) : null;
       if (paired && !asset) throw new Error(this.pairOptions()[kind].unavailable ?? 'Choose an approved asset for this pair.');
       if(body.tax)throw new Error('Public tax launches need a registered V2 tax factory. Use the local DEX rehearsal until that deployment is verified. Nothing was submitted.');
-      const firstBuy = parseUnits(body.firstBuy || '0', nativePair ? 18 : asset.decimals);
+      // First purchase paid in the native coin on a non-native pair: swapped into the pair asset first (launch-conversion.mjs).
+      const payNative = body.firstBuyPayment === 'native';
+      if (payNative && !paired) throw new Error('Native conversion is only for non-native trading pairs.');
+      if (payNative && this.net.mainnet) throw new Error('Paying the first purchase in the native coin is testnet-only until mainnet routing is reviewed. Nothing was submitted.');
+      const nativeBuy = payNative ? parseUnits(this.nativeAmount(body.nativeBuy), 18) : 0n;
+      const ckey = payNative ? conversionKey({ chainId: this.net.chainId, factory: this.deployment.factory, account: this.address, asset: asset.address }) : null;
+      const converted = payNative ? pendingConversion(localStorage, ckey) : null;
+      // Until the swap runs, its guaranteed minimum stands in for the first buy in every check below.
+      let firstBuy = payNative ? converted ?? (await quoteNativePairConversion({ Contract, provider: this.provider, dex: this.dex, asset: asset.address, amountIn: nativeBuy })).minimum : parseUnits(body.firstBuy || '0', nativePair ? 18 : asset.decimals);
       const name = body.name.trim(), symbol = body.symbol.trim().toUpperCase();
       if (firstBuy < 0n || !name || name.length > 40 || !/^[A-Z0-9]{1,10}$/.test(symbol)) throw new Error('Check the token name, symbol and creator buy.');
       if(firstBuy===0n){
@@ -976,19 +998,18 @@ export class TestnetWallet {
       }
       const reward = body.reward || this.address;
       if (!isAddress(reward) || reward === ZeroAddress) throw new Error('Enter a valid creator reward wallet.');
-      const net = firstBuy - firstBuy * 125n / 10000n;
-      const virtualQuote = paired ? asset.virtualQuote : await factory.nativeVirtualQuote();
-      const out = await factory.VIRTUAL_TOKEN() * net / (virtualQuote + net);
+      const virtualQuote = paired ? asset.virtualQuote : await factory.nativeVirtualQuote(), virtualToken = await factory.VIRTUAL_TOKEN();
       // Model 10 partially fills a first buy larger than the curve; it then receives exactly the sale cap.
-      const cappedOut = this.model === DEX_MODEL && out > SALE_CAP ? SALE_CAP : out;
+      const minimumOut = buy => { const net = buy - buy * 125n / 10000n, out = virtualToken * net / (virtualQuote + net); return this.model === DEX_MODEL && out > SALE_CAP ? SALE_CAP : out; };
+      let cappedOut = minimumOut(firstBuy);
       // Native fees include a refundable 1% cap; USDC approvals are exactly ten units.
       const inUsdc=body.feeCurrency==='usdc';
       if(inUsdc && (await factory.treasury()).toLowerCase()===this.address.toLowerCase())throw new Error('This wallet is also the launchpad fee recipient. The contract cannot verify a USDC fee paid to the same wallet. Choose native payment for this test, or launch from a different funded wallet to test USDC fee collection. No launch was submitted.');
       const fee = await factory.launchFee(), value = (inUsdc?0n:(fee*101n+99n)/100n) + (nativePair ? firstBuy : 0n), native = this.net.nativeCurrency.symbol;
-      const fundingError=nativeFundingError({balance:await this.provider.getBalance(this.address),value,native,network:this.net.name,feeInUsdc:inUsdc});
+      const fundingError=nativeFundingError({balance:await this.provider.getBalance(this.address),value:value+(payNative&&converted===null?nativeBuy:0n),native,network:this.net.name,feeInUsdc:inUsdc});
       if(fundingError)throw new Error(fundingError);
       const pairToken = paired ? new Contract(asset.address, this.config.contracts.quote.abi, this.signer) : null;
-      if (paired && await pairToken.balanceOf(this.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, asset.decimals)} ${asset.symbol} for the first buy.${asset.test ? ' Use its test faucet in Network and funds.' : ''}`);
+      if (paired && !payNative && await pairToken.balanceOf(this.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, asset.decimals)} ${asset.symbol} for the first buy.${asset.test ? ' Use its test faucet in Network and funds.' : ''}`);
       let published;
       // Token details always go into the launch transaction, never afterwards. Where they cannot, nothing launches.
       const detailsError=launchDetailsError({chain:this.net.key,networkName:this.net.name,metadataSupported:!this.needsMetadataUpgrade,publiclyIndexed:!!this.deployment?.shared&&this.model===DEX_MODEL});
@@ -1001,6 +1022,22 @@ export class TestnetWallet {
         if(!/^ipfs:\/\//.test(published.uri)||!['public-ipfs','elpida-hosted'].includes(published.storage))throw new Error('Token details were not staged safely. No launch was submitted.');
         metadataStorage=published.storage;
         await this.checkNetwork();
+      }
+      if (payNative) {
+        const amountText = amount => `${formatUnits(amount, asset.decimals)} ${asset.symbol}`;
+        if (converted === null) this.onProgress(`Convert ${body.nativeBuy} ${native} into ${asset.symbol} for your first purchase: confirm the conversion in your wallet…`);
+        const conversion = await convertForLaunch({ provider: this.provider, storage: localStorage, key: ckey, account: this.address, asset: asset.address,
+          quote: () => quoteNativePairConversion({ Contract, provider: this.provider, dex: this.dex, asset: asset.address, amountIn: nativeBuy }),
+          send: async route => {
+            await this.checkNetwork();
+            const deadline = BigInt((await this.provider.getBlock('latest')).timestamp + 300);
+            const data = swapCalldata(Interface, this.dex.routerVersion ?? 2, this.dex.router, { tokenIn: route.tokenIn, tokenOut: route.tokenOut, fee: route.fee, recipient: this.address, amountIn: nativeBuy, amountOutMinimum: route.minimum }, { deadline, refundETH: true });
+            return this.signer.sendTransaction({ to: this.dex.router, data, value: nativeBuy });
+          },
+          onSubmitted: () => this.onProgress('Conversion submitted. Waiting for the conversion to confirm…') });
+        if (await pairToken.balanceOf(this.address) < conversion.amount) { localStorage.removeItem(ckey); throw new Error(`The ${amountText(conversion.amount)} converted earlier is no longer in this wallet. Press again to convert anew. Nothing was launched.`); }
+        firstBuy = conversion.amount; cappedOut = minimumOut(firstBuy);
+        this.onProgress(conversion.reused ? `Using the ${amountText(firstBuy)} you converted earlier. No new conversion is needed…` : `Converted into ${amountText(firstBuy)}. It is your first purchase; continue with the launch…`);
       }
       const sharedUsdc = inUsdc && paired && asset.address.toLowerCase()===this.feeUsdc?.toLowerCase();
       const approvalCalls=[],batchKey='elpida:launch-batch:'+this.net.chainId+':'+this.address.toLowerCase();
@@ -1038,7 +1075,7 @@ export class TestnetWallet {
       const gasPrice=(await this.provider.getFeeData()).maxFeePerGas??(await this.provider.getFeeData()).gasPrice??0n;
       const launchGasError=nativeFundingError({balance:await this.provider.getBalance(this.address),value,gasCost:gas===null?0n:gas*gasPrice,native,network:this.net.name,feeInUsdc:inUsdc});
       if(launchGasError)throw new Error(launchGasError);
-      const confirmation='Confirm the '+(inUsdc?'10 USDC':'$10 equivalent native')+' launch fee, first purchase '+body.firstBuy+' '+this.qsym({pair:kind,quoteSymbol:asset?.symbol})+(gas===null?' and wallet-estimated gas.':' and estimated gas '+formatUnits(gas*gasPrice,18)+' '+native+'.')+' '+(inUsdc?'USDC covers the launch fee; native currency covers gas.':'Native fee cap includes 1%; unused fee is refunded.');
+      const confirmation='Confirm the '+(inUsdc?'10 USDC':'$10 equivalent native')+' launch fee, first purchase '+formatUnits(firstBuy,nativePair?18:asset.decimals)+' '+this.qsym({pair:kind,quoteSymbol:asset?.symbol})+(gas===null?' and wallet-estimated gas.':' and estimated gas '+formatUnits(gas*gasPrice,18)+' '+native+'.')+' '+(inUsdc?'USDC covers the launch fee; native currency covers gas.':'Native fee cap includes 1%; unused fee is refunded.');
       if(approvalCalls.length){
         const id=crypto.randomUUID(),calls=[...approvalCalls,{to:factory.target,data:factory.interface.encodeFunctionData('launchWithPayment',args),value:'0x'+value.toString(16)}];
         const record={id,chain:this.net.chainId,created:Date.now(),metadata:published?.metadata??details,uri:published?.uri,storage:metadataStorage};
@@ -1053,6 +1090,7 @@ export class TestnetWallet {
       }else result=await this.wait(factory.launchWithPayment(...args,{value}),confirmation);
       const event = result.receipt.logs.map(log => {try{return factory.interface.parseLog(log);}catch{return null;}}).find(log => log?.name === 'Launched');
       launchedToken=event?.args.token;
+      if (payNative && event) localStorage.removeItem(ckey);
       metadataSaved = !!event && await writeMetadataCache(metadataKey(this.net.chainId,this.deployment.factory,event.args.token),published?.metadata??details);
       if(published){metadataSaved=true;metadataPublished=true;}
     } else {

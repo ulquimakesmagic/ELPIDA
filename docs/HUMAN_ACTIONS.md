@@ -13,6 +13,22 @@ Nothing is signed with your keys, nothing is sent and no funds are used.
    (TSLAon, SPYon and NVDAon on Ethereum and BNB; Robinhood's own TSLA, SPY, NVDA and AAPL on Robinhood Chain).
 3. Send Claude `backups/mainnet-preview/summary.md` and the reports it lists. Model 11 joins the preview when its
    phase 4 lands.
+## Pay a stock-paired first purchase in ETH: seed the conversion pools, 3 November 2026
+
+A creator can now pay the first purchase of a stock- or token-paired launch in the native coin. The launch form
+converts it into the pair asset on the network's DEX first (one extra confirmation), then launches with what it
+received. It needs a funded native/stock pool on each testnet; none exists yet. Test assets only; no mainnet.
+
+1. In `elpida-fork`: `node scripts/seed-conversion-pools.mjs`. The first run creates `local-data\test-liquidity-evm.key`
+   and prints only its public address. It sends nothing.
+2. Send that address test coin on each testnet: about 0.15 ETH on Ethereum Sepolia, Base Sepolia and Robinhood,
+   and 0.15 tBNB on BNB Testnet (0.02 per pool for five stocks, plus gas).
+3. Preview with `node scripts/seed-conversion-pools.mjs --dry-run`, then run it without `--dry-run`. It mints each test
+   stock from its faucet and adds full-range liquidity to the 1% pool, priced at the stock's test feed against the
+   launchpad's native/USD feed. Pools that already hold liquidity are skipped, so rerunning is safe.
+   - One network only: `node scripts/seed-conversion-pools.mjs bnb-testnet`. Deeper pools: `--native 0.05`.
+   - To use a wallet that already has test coin instead: `--key local-data/flywheel-keeper-evm.key`.
+4. Send Claude the output. The launch form then offers **Pay first purchase with: ETH, converted to tNVDAon first**.
 
 ## Tokenized stocks: TSLAon and SPYon first, 2 November 2026
 
