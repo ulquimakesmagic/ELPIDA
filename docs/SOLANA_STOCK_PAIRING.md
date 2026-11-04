@@ -45,6 +45,41 @@ page (docs.orca.so), Meteora's DAMM v2 README (github.com/MeteoraAg/damm-v2).
 
 **Decided: Elpida's own locked pool now, and Meteora DAMM v2 for each stock once Meteora badges it.**
 
+### How the locked pool works (program change, 4 November 2026)
+
+- **Which pairs use it.** A quote mint is a *locked-pool venue* when it is a Token-2022 mint with ConfidentialTransferMint
+  (4), TransferHook (14), ScaledUiAmount (25) or Pausable (26) (`locked_pool_venue`). Ondo's stocks carry all four.
+  Every other pair graduates exactly as before (SOL to Raydium, other tokens to PumpSwap).
+- **Opening.** The buy that completes such a curve (a trade or the creator's launch buy) opens the pool in the same
+  instruction: status `STATUS_LOCKED` (3), the anti-snipe bonus joins the quote reserve, and the virtual reserves become
+  the real ones (`virtual_quote = 0`, `virtual_token = TOKEN_SUPPLY`). Event `LockedPoolOpened`. No migration step, no
+  third party, nothing left waiting.
+- **Trading.** `buy` and `sell` keep working: the same curve formulas now price x·y = k with x = the quote reserve and
+  y = the token vault. The fee is the flat base fee (no anti-snipe), split as on the curve (creator half, protocol half,
+  partner burns as fee-free buybacks). No completion point, so a buy is never partially filled.
+- **Locked.** No instruction withdraws the reserve: `withdraw_fees` pays only accrued fees, `reopen_curve` and both
+  migrations refuse a locked pool (`migrate_to_pumpswap` also refuses locked-venue mints outright).
+- **Issuer controls.** If Ondo pauses the stock or freezes an account, the affected trades fail and nothing changes;
+  trading resumes when the control is lifted. If Ondo switches on a transfer hook, trades fail until the program
+  passes the hook's extra accounts (Ondo question 4); the reserve stays in the vaults either way.
+- **Checked by:** host property tests (`contracts/solana/host-tests/tests/locked_pool.rs`: k never falls, every quote
+  unit accounted for, holders can always sell everything, the token vault is never emptied, the pool opens at the
+  curve's closing price) and a validator test with an Ondo-shaped stand-in mint (`tests/solana.test.mjs`, "Solana stock
+  pairs (Ondo stand-in)": pause and freeze during the curve and in the pool, the completing buy, trades matching the
+  client, refused migration and reopen, fee payout).
+
+### What is still to do
+
+1. **Devnet upgrade** (Malik, with the upgrade key): `solana-upgrade.cmd`, then `npm.cmd run solana:deploy -- --stock-pairs`
+   adds the tTSLAon stand-in pair (Token-2022, 9 decimals, all of Ondo's controls; no value).
+2. **Launch picker and token page** for Solana stock pairs (hidden until step 1: `SOLANA_LAUNCH_KINDS` stays SOL-only),
+   with the per-stock approval in the operator panel, as on EVM.
+3. **SOL-paid first purchase** through Jupiter (mainnet) and a devnet SOL/stand-in pool, resumable like the EVM version.
+4. **Meteora DAMM v2** per stock once Meteora badges it: a later migration out of the locked pool needs its own
+   program change and review; until then the locked pool is the venue.
+
+### The options that were considered
+
 
 1. **Meteora DAMM v2 with a token badge.** Ask Meteora to badge TSLAon, SPYon, NVDAon (and later ones), then build
    graduation into DAMM v2. Graduated pools are visible to Jupiter and aggregators. Depends on Meteora's answer.

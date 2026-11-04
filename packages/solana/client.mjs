@@ -24,6 +24,10 @@ export const MAX_PARTNER_WINDOW_SECS = 180 * 86_400;
 export const STATUS_TRADING = 0;
 export const STATUS_GRADUATED = 1; // curve complete, waiting for migration
 export const STATUS_MIGRATED = 2; // liquidity moved into a locked PumpSwap pool
+// Curve complete for an issuer-controlled quote (Ondo stocks): trading continues in the program's own locked
+// constant-product pool, priced by the same formulas with virtualQuote 0 and virtualToken = TOKEN_SUPPLY.
+export const STATUS_LOCKED = 3;
+const tradable = status => status === undefined || status === STATUS_TRADING || status === STATUS_LOCKED;
 export const MIGRATION_SIZE = 210;
 export const MIGRATION_EXT_LEN = 48;
 /** Test networks only: default tUSDC faucet mint (25,000 tUSDC, 6 decimals). */
@@ -141,6 +145,8 @@ export const EVENTS = {
   CurveBought: { discriminator: [129, 151, 113, 106, 27, 8, 15, 125], fields: [['pool', 'key'], ['buyer', 'key'], ['quoteIn', 'u64'], ['tokensOut', 'u64'], ['fee', 'u64'], ['antiSnipeFee', 'u64'], ['realQuote', 'u64'], ['virtualQuote', 'u64'], ['tokenReserve', 'u64'], ['sold', 'u64']] },
   CurveSold: { discriminator: [212, 236, 101, 124, 18, 87, 130, 47], fields: [['pool', 'key'], ['seller', 'key'], ['tokensIn', 'u64'], ['quoteOut', 'u64'], ['fee', 'u64'], ['antiSnipeFee', 'u64'], ['realQuote', 'u64'], ['virtualQuote', 'u64'], ['tokenReserve', 'u64'], ['sold', 'u64']] },
   CurveGraduated: { discriminator: [3, 228, 116, 195, 148, 182, 240, 104], fields: [['pool', 'key'], ['mint', 'key'], ['realQuote', 'u64'], ['liquidityBonus', 'u64'], ['lpTokens', 'u64']] },
+  // Issuer-controlled quotes (Ondo stocks): the completing buy opens the program's own locked pool.
+  LockedPoolOpened: { discriminator: [160, 91, 19, 196, 207, 185, 134, 108], fields: [['pool', 'key'], ['mint', 'key'], ['quoteReserve', 'u64'], ['tokenReserve', 'u64']] },
   FeesWithdrawn: { discriminator: [234, 15, 0, 119, 148, 241, 40, 21], fields: [['pool', 'key'], ['recipient', 'key'], ['amount', 'u64']] },
   CurveMigrated: { discriminator: [73, 99, 54, 46, 71, 35, 47, 242], fields: [['pool', 'key'], ['mint', 'key'], ['pumpPool', 'key'], ['lpMint', 'key'], ['baseAmount', 'u64'], ['quoteAmount', 'u64'], ['lpLocked', 'u64']] },
   // Native repricing by the upgrade authority (the trailing u16 max_creator_buy_bps is not decoded).
@@ -320,6 +326,11 @@ export function virtualQuoteForFdv(startFdvUsdE6, oracle, virtualToken) {
   return (fdv * BigInt(virtualToken) + TOKEN_SUPPLY - 1n) / TOKEN_SUPPLY;
 }
 
+/** Mirrors `trade_fee_bps`: the anti-snipe schedule on the curve, the flat base fee in a locked pool. */
+export function tradeFeeBps(config, pool, now) {
+  return pool.status === STATUS_LOCKED ? BigInt(config.baseFeeBps) : currentFeeBps(config, pool.createdAt, now);
+}
+
 /** Mirrors `current_fee_bps`: linear decay from the snipe fee at launch to the base fee. Times in seconds. */
 export function currentFeeBps(config, createdAt, now) {
   const base = BigInt(config.baseFeeBps);
@@ -344,10 +355,11 @@ function fees(gross, feeBps, baseFeeBps) {
 export function quoteBuy(pool, grossIn, feeBps, baseFeeBps = feeBps) {
   grossIn = BigInt(grossIn); feeBps = BigInt(feeBps); baseFeeBps = BigInt(baseFeeBps);
   if (grossIn <= 0n) throw new Error('A positive buy is required.');
-  if (pool.status !== undefined && pool.status !== STATUS_TRADING) throw new Error(PROGRAM_ERRORS[12]);
+  if (!tradable(pool.status)) throw new Error(PROGRAM_ERRORS[12]);
   const avail = pool.virtualToken - pool.sold;
   const quoteSide = pool.virtualQuote + pool.realQuote;
-  const remaining = pool.curveSupply - pool.sold;
+  const locked = pool.status === STATUS_LOCKED;
+  const remaining = locked ? avail + 1n : pool.curveSupply - pool.sold;
   let gross = grossIn;
   let f = fees(gross, feeBps, baseFeeBps);
   let net = gross - f.fee;
@@ -369,7 +381,7 @@ export function quoteBuy(pool, grossIn, feeBps, baseFeeBps = feeBps) {
 /** Mirrors `quote_sell`. */
 export function quoteSell(pool, tokensIn, feeBps, baseFeeBps = feeBps) {
   tokensIn = BigInt(tokensIn); feeBps = BigInt(feeBps); baseFeeBps = BigInt(baseFeeBps);
-  if (pool.status !== undefined && pool.status !== STATUS_TRADING) throw new Error(PROGRAM_ERRORS[12]);
+  if (!tradable(pool.status)) throw new Error(PROGRAM_ERRORS[12]);
   if (tokensIn <= 0n || tokensIn > pool.sold) throw new Error('Invalid sell amount.');
   const avail = pool.virtualToken - pool.sold;
   const quoteSide = pool.virtualQuote + pool.realQuote;
@@ -390,8 +402,9 @@ export function poolStats(pool, quoteDecimals = 6) {
   return {
     price,
     marketCap: price * Number(TOKEN_SUPPLY) / 10 ** TOKEN_DECIMALS,
-    progress: Number(pool.sold) / Number(pool.curveSupply),
+    progress: pool.status === STATUS_LOCKED ? 1 : Number(pool.sold) / Number(pool.curveSupply),
     graduated: pool.status === STATUS_GRADUATED,
+    locked: pool.status === STATUS_LOCKED,
     tokensLeftOnCurve: pool.curveSupply - pool.sold,
     lockedLiquidity: pool.realQuote + pool.liquidityBonus,
   };
@@ -896,6 +909,22 @@ export function loaderV3(web3) {
   };
 }
 
+/**
+ * Mirrors `locked_pool_extensions`: a Token-2022 quote mint with ConfidentialTransferMint (4), TransferHook (14),
+ * ScaledUiAmount (25) or Pausable (26) graduates into the program's own locked pool instead of PumpSwap.
+ * `data` is the raw mint account data and `owner` its program id (string or PublicKey).
+ */
+export function lockedPoolVenue(data, owner) {
+  if (String(owner) !== TOKEN_2022_PROGRAM || !data || data.length <= 165 || data[165] !== 1) return false;
+  for (let offset = 166; offset + 4 <= data.length;) {
+    const kind = data[offset] | (data[offset + 1] << 8), len = data[offset + 2] | (data[offset + 3] << 8);
+    if (kind === 0) return false;
+    if (kind === 4 || kind === 14 || kind === 25 || kind === 26) return true;
+    offset += 4 + len;
+  }
+  return false;
+}
+
 /** Test-only helpers: SPL and Token-2022 mints standing in for USDC, xStocks and other pair assets. */
 export function splTestMint(web3) {
   const { TransactionInstruction, SystemProgram } = web3;
@@ -931,6 +960,40 @@ export function splTestMint(web3) {
         new TransactionInstruction({ programId: token2022, data: data(concat([20, decimals], authority.toBytes(), [0])), keys: [{ pubkey: mint, isSigner: false, isWritable: true }] }),
       ];
     },
+    /**
+     * A devnet stand-in for an Ondo tokenized stock (TSLAon and others on Solana): Token-2022 with
+     * ConfidentialTransferMint, DefaultAccountState (initialized), TransferHook (authority, no program),
+     * MetadataPointer, ScaledUiAmount and Pausable, plus a freeze authority. `issuer` holds every issuer control.
+     */
+    STOCK_MINT_SIZE: 165 + 1 + (4 + 65) + (4 + 1) + (4 + 64) + (4 + 64) + (4 + 56) + (4 + 33),
+    createStockMint2022Ixs: async (connection, payer, mint, decimals, mintAuthority, issuer, multiplier = 1) => {
+      const size = 165 + 1 + (4 + 65) + (4 + 1) + (4 + 64) + (4 + 64) + (4 + 56) + (4 + 33);
+      const lamports = await connection.getMinimumBalanceForRentExemption(size);
+      const keys = [{ pubkey: mint, isSigner: false, isWritable: true }];
+      const ix = bytes => new TransactionInstruction({ programId: token2022, data: data(bytes), keys });
+      const f64 = value => { const b = new Uint8Array(8); new DataView(b.buffer).setFloat64(0, value, true); return b; };
+      const none = new Uint8Array(32);
+      return [
+        SystemProgram.createAccount({ fromPubkey: payer, newAccountPubkey: mint, lamports, space: size, programId: token2022 }),
+        // ConfidentialTransferExtension(27)/InitializeMint: authority, auto-approve, no auditor.
+        ix(concat([27, 0], issuer.toBytes(), [0], none)),
+        // DefaultAccountStateExtension(28)/Initialize: Initialized (1).
+        ix([28, 0, 1]),
+        // TransferHookExtension(36)/Initialize: authority, no hook program (as on Ondo's mints today).
+        ix(concat([36, 0], issuer.toBytes(), none)),
+        // MetadataPointerExtension(39)/Initialize: authority, metadata at the mint.
+        ix(concat([39, 0], issuer.toBytes(), mint.toBytes())),
+        // ScaledUiAmountExtension(43)/Initialize: authority, multiplier (f64).
+        ix(concat([43, 0], issuer.toBytes(), f64(multiplier))),
+        // PausableExtension(44)/Initialize: authority.
+        ix(concat([44, 0], issuer.toBytes())),
+        ix(concat([20, decimals], mintAuthority.toBytes(), [1], issuer.toBytes())),
+      ];
+    },
+    /** Pausable: stop or restart every transfer of `mint` (issuer signs). */
+    pauseIx: (mint, issuer, paused) => new TransactionInstruction({ programId: token2022, data: data([44, paused ? 1 : 2]), keys: [{ pubkey: mint, isSigner: false, isWritable: true }, { pubkey: issuer, isSigner: true, isWritable: false }] }),
+    /** Freeze (10) or thaw (11) one Token-2022 account (the freeze authority signs). */
+    freezeIx: (account, mint, issuer, frozen) => new TransactionInstruction({ programId: token2022, data: data([frozen ? 10 : 11]), keys: [{ pubkey: account, isSigner: false, isWritable: true }, { pubkey: mint, isSigner: false, isWritable: false }, { pubkey: issuer, isSigner: true, isWritable: false }] }),
     createMintIxs: async (connectionOrRent, payer, mint, decimals, authority) => {
       const lamports = typeof connectionOrRent === 'bigint' || typeof connectionOrRent === 'number' ? Number(connectionOrRent) : await connectionOrRent.getMinimumBalanceForRentExemption(82);
       return [

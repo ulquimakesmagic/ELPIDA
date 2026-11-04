@@ -58,6 +58,10 @@ pub const MAX_SYMBOL: usize = 10;
 pub const STATUS_TRADING: u8 = 0;
 pub const STATUS_GRADUATED: u8 = 1; // curve complete, waiting for migration
 pub const STATUS_MIGRATED: u8 = 2;
+/// Curve complete for an issuer-controlled quote (Ondo's tokenized stocks): no outside pool accepts the mint, so
+/// trading continues in a constant-product pool inside this program. Its reserves are the vaults themselves
+/// (`real_quote` and `TOKEN_SUPPLY - sold`); nothing can withdraw them, so the liquidity is locked forever.
+pub const STATUS_LOCKED: u8 = 3;
 
 pub const PUMP_AMM: Pubkey = pubkey!("pAMMBay6oceH9fJKBRHGP5D4bD4sWpmSwMn52FMfXEA");
 pub const PUMP_GLOBAL_CONFIG: Pubkey = pubkey!("ADyA8hdefvWN2dbGGWFotbzWxrAvLW83WG6QCVXvJKqw");
@@ -393,6 +397,7 @@ pub mod elpida_launchpad {
         let cfg: CurveConfig = **ctx.accounts.curve_config;
         // Early-partner tier of the launching wallet, fixed for this pool's whole life.
         let buyback_bps = partner_share(&a.partner.to_account_info(), &creator_key, now)?;
+        let locked_venue = locked_pool_venue(&ctx.accounts.quote_mint.to_account_info())?;
 
         let pool = &mut ctx.accounts.pool;
         pool.config = ctx.accounts.curve_config.key();
@@ -433,6 +438,8 @@ pub mod elpida_launchpad {
         }
         let burn_quote = apply_buy(pool, &trade, now, buyback_bps)?;
         let burned = partner_buyback(pool, burn_quote)?;
+        let opened = pool.status == STATUS_GRADUATED && locked_venue;
+        if opened { open_locked_pool(pool)?; }
         let bump = pool.bump;
         let pool_key = pool.key();
         let snapshot = Snapshot::of(pool);
@@ -454,6 +461,7 @@ pub mod elpida_launchpad {
             real_quote: snapshot.real_quote, virtual_quote: snapshot.virtual_quote_total, token_reserve: snapshot.token_reserve, sold: snapshot.sold,
         });
         if snapshot.graduated { emit!(CurveGraduated { pool: pool_key, mint: mint_key, real_quote: snapshot.real_quote, liquidity_bonus: snapshot.liquidity_bonus, lp_tokens: TOKEN_SUPPLY - snapshot.sold }); }
+        if opened { emit!(LockedPoolOpened { pool: pool_key, mint: mint_key, quote_reserve: snapshot.real_quote, token_reserve: snapshot.token_reserve }); }
         Ok(())
     }
 
@@ -461,13 +469,16 @@ pub mod elpida_launchpad {
         let now = Clock::get()?.unix_timestamp;
         let cfg: CurveConfig = **ctx.accounts.curve_config;
         let mut ext = PoolExt::read(&ctx.accounts.pool.to_account_info().try_borrow_data()?);
+        let locked_venue = locked_pool_venue(&ctx.accounts.quote_mint.to_account_info())?;
         let pool = &mut ctx.accounts.pool;
-        require!(pool.status == STATUS_TRADING, ElpidaError::CurveClosed);
-        let fee_bps = current_fee_bps(&cfg, pool.created_at, now);
+        require!(pool.status == STATUS_TRADING || pool.status == STATUS_LOCKED, ElpidaError::CurveClosed);
+        let fee_bps = trade_fee_bps(&cfg, pool, now);
         let trade = quote_buy(pool, gross_in, fee_bps, cfg.base_fee_bps as u64)?;
         require!(trade.tokens >= min_tokens_out, ElpidaError::Slippage);
         let burn_quote = apply_buy(pool, &trade, now, ext.buyback_bps)?;
         let burned = partner_buyback(pool, burn_quote)?;
+        let opened = pool.status == STATUS_GRADUATED && locked_venue;
+        if opened { open_locked_pool(pool)?; }
         let (mint_key, bump, pool_key) = (pool.mint, pool.bump, pool.key());
         let snapshot = Snapshot::of(pool);
         if ext.record(burned, burn_quote)? { ext.write(&mut ctx.accounts.pool.to_account_info().try_borrow_mut_data()?)?; }
@@ -485,6 +496,7 @@ pub mod elpida_launchpad {
             real_quote: snapshot.real_quote, virtual_quote: snapshot.virtual_quote_total, token_reserve: snapshot.token_reserve, sold: snapshot.sold,
         });
         if snapshot.graduated { emit!(CurveGraduated { pool: pool_key, mint: mint_key, real_quote: snapshot.real_quote, liquidity_bonus: snapshot.liquidity_bonus, lp_tokens: TOKEN_SUPPLY - snapshot.sold }); }
+        if opened { emit!(LockedPoolOpened { pool: pool_key, mint: mint_key, quote_reserve: snapshot.real_quote, token_reserve: snapshot.token_reserve }); }
         Ok(())
     }
 
@@ -493,8 +505,8 @@ pub mod elpida_launchpad {
         let cfg: CurveConfig = **ctx.accounts.curve_config;
         let mut ext = PoolExt::read(&ctx.accounts.pool.to_account_info().try_borrow_data()?);
         let pool = &mut ctx.accounts.pool;
-        require!(pool.status == STATUS_TRADING, ElpidaError::CurveClosed);
-        let fee_bps = current_fee_bps(&cfg, pool.created_at, now);
+        require!(pool.status == STATUS_TRADING || pool.status == STATUS_LOCKED, ElpidaError::CurveClosed);
+        let fee_bps = trade_fee_bps(&cfg, pool, now);
         let trade = quote_sell(pool, tokens_in, fee_bps, cfg.base_fee_bps as u64)?;
         require!(trade.net >= min_quote_out, ElpidaError::Slippage);
         pool.real_quote = pool.real_quote.checked_sub(trade.gross).ok_or(ElpidaError::MathOverflow)?;
@@ -560,6 +572,7 @@ pub mod elpida_launchpad {
     pub fn migrate_to_pumpswap(ctx: Context<MigrateToPumpswap>) -> Result<()> {
         require!(ctx.accounts.pool.status == STATUS_GRADUATED, ElpidaError::NotComplete);
         require_keys_neq!(ctx.accounts.quote_mint.key(), WSOL_MINT, ElpidaError::WrongVenue);
+        require!(!locked_pool_venue(&ctx.accounts.quote_mint.to_account_info())?, ElpidaError::WrongVenue);
         let pool = &ctx.accounts.pool;
         let base_amount = TOKEN_SUPPLY - pool.sold;
         let quote_amount = pool.real_quote.checked_add(pool.liquidity_bonus).ok_or(ElpidaError::MathOverflow)?;
@@ -1194,6 +1207,45 @@ fn check_quote_mint(mint: &AccountInfo) -> Result<()> {
     Ok(())
 }
 
+/// True when the quote mint must graduate into the program's own locked pool: a Token-2022 mint carrying an issuer
+/// control that PumpSwap, Raydium and Orca refuse or do not support (ConfidentialTransferMint 4, TransferHook 14,
+/// ScaledUiAmount 25, Pausable 26). Ondo's tokenized stocks carry all four.
+pub fn locked_pool_venue(mint: &AccountInfo) -> Result<bool> {
+    if *mint.owner != anchor_spl::token_2022::ID { return Ok(false); }
+    Ok(locked_pool_extensions(&mint.try_borrow_data()?))
+}
+
+/// The TLV scan behind `locked_pool_venue`, on raw mint data (split out for host tests).
+pub fn locked_pool_extensions(data: &[u8]) -> bool {
+    const BASE: usize = 165;
+    if data.len() <= BASE || data[BASE] != 1 { return false; }
+    let mut offset = BASE + 1;
+    while offset + 4 <= data.len() {
+        let kind = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        let len = u16::from_le_bytes([data[offset + 2], data[offset + 3]]) as usize;
+        match kind {
+            0 => return false,
+            4 | 14 | 25 | 26 => return true,
+            _ => {}
+        }
+        offset += 4 + len;
+    }
+    false
+}
+
+/// Turns a just-completed curve into its locked pool: the anti-snipe bonus joins the quote reserve and the virtual
+/// reserves become the real ones, so the curve formulas in `quote_buy`/`quote_sell` price the pool as x·y = k with
+/// x = `real_quote` (the quote vault less accrued fees) and y = `TOKEN_SUPPLY - sold` (the token vault).
+pub fn open_locked_pool(pool: &mut CurvePool) -> Result<()> {
+    require!(pool.status == STATUS_GRADUATED, ElpidaError::NotComplete);
+    pool.real_quote = pool.real_quote.checked_add(pool.liquidity_bonus).ok_or(ElpidaError::MathOverflow)?;
+    pool.liquidity_bonus = 0;
+    pool.virtual_quote = 0;
+    pool.virtual_token = TOKEN_SUPPLY;
+    pool.status = STATUS_LOCKED;
+    Ok(())
+}
+
 fn write_config(config: &mut CurveConfig, quote_mint: Pubkey, decimals: u8, treasury: Pubkey, params: &CurveParams, bump: u8) -> Result<()> {
     require!((6..=9).contains(&decimals), ElpidaError::QuoteDecimals);
     require!(params.virtual_quote > 0, ElpidaError::InvalidParams);
@@ -1275,6 +1327,11 @@ pub fn current_fee_bps(cfg: &CurveConfig, created_at: i64, now: i64) -> u64 {
 #[derive(Accounts)]
 pub struct OptionalBuyVersion {}
 
+/// The fee for a trade: the decaying anti-snipe schedule on the curve, the flat base fee in a locked pool.
+pub fn trade_fee_bps(cfg: &CurveConfig, pool: &CurvePool, now: i64) -> u64 {
+    if pool.status == STATUS_LOCKED { cfg.base_fee_bps as u64 } else { current_fee_bps(cfg, pool.created_at, now) }
+}
+
 pub struct TradeQuote { pub gross: u64, pub net: u64, pub tokens: u64, pub fee: u64, pub base_fee: u64, pub surplus: u64, pub graduates: bool }
 
 pub fn fees(gross: u64, fee_bps: u64, base_fee_bps: u64) -> (u64, u64, u64) {
@@ -1289,7 +1346,8 @@ pub fn quote_buy(pool: &CurvePool, gross_in: u64, fee_bps: u64, base_fee_bps: u6
     require!(gross_in > 0, ElpidaError::FirstBuyRequired);
     let avail = (pool.virtual_token - pool.sold) as u128;
     let quote_side = (pool.virtual_quote as u128) + (pool.real_quote as u128);
-    let remaining = (pool.curve_supply - pool.sold) as u128;
+    // A locked pool has no completion point: every buy is an ordinary constant-product swap.
+    let remaining = if pool.status == STATUS_LOCKED { u128::MAX } else { (pool.curve_supply - pool.sold) as u128 };
     let mut gross = gross_in;
     let (mut fee, mut base, mut surplus) = fees(gross, fee_bps, base_fee_bps);
     let mut net = gross - fee;
@@ -1355,6 +1413,12 @@ pub fn partner_buyback(pool: &mut CurvePool, quote_in: u64) -> Result<u64> {
     let avail = (pool.virtual_token - pool.sold) as u128;
     let quote_side = pool.virtual_quote as u128 + pool.real_quote as u128;
     let out = (avail * quote_in as u128 / (quote_side + quote_in as u128)) as u64;
+    if pool.status == STATUS_LOCKED {
+        // In the locked pool the buyback is a fee-free swap; the quote stays in the reserve even if it buys nothing.
+        pool.real_quote = pool.real_quote.checked_add(quote_in).ok_or(ElpidaError::MathOverflow)?;
+        pool.sold = pool.sold.checked_add(out).ok_or(ElpidaError::MathOverflow)?;
+        return Ok(out);
+    }
     if out == 0 || pool.status != STATUS_TRADING || pool.sold.checked_add(out).ok_or(ElpidaError::MathOverflow)? >= pool.curve_supply {
         pool.liquidity_bonus = pool.liquidity_bonus.checked_add(quote_in).ok_or(ElpidaError::MathOverflow)?;
         return Ok(0);
@@ -2164,6 +2228,8 @@ pub struct CurveLaunched { pub creator: Pubkey, pub mint: Pubkey, pub pool: Pubk
 pub struct CurveBought { pub pool: Pubkey, pub buyer: Pubkey, pub quote_in: u64, pub tokens_out: u64, pub fee: u64, pub anti_snipe_fee: u64, pub real_quote: u64, pub virtual_quote: u64, pub token_reserve: u64, pub sold: u64 }
 #[event]
 pub struct CurveSold { pub pool: Pubkey, pub seller: Pubkey, pub tokens_in: u64, pub quote_out: u64, pub fee: u64, pub anti_snipe_fee: u64, pub real_quote: u64, pub virtual_quote: u64, pub token_reserve: u64, pub sold: u64 }
+#[event]
+pub struct LockedPoolOpened { pub pool: Pubkey, pub mint: Pubkey, pub quote_reserve: u64, pub token_reserve: u64 }
 #[event]
 pub struct CurveGraduated { pub pool: Pubkey, pub mint: Pubkey, pub real_quote: u64, pub liquidity_bonus: u64, pub lp_tokens: u64 }
 #[event]

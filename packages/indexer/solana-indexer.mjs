@@ -12,7 +12,7 @@ import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { SOLANA_GENESIS } from '../solana/rpc-config.mjs';
-import { createElpidaSolana, decodeEvents, poolStats, quoteBuy, formatAmount, TOKEN_DECIMALS, TOKEN_SUPPLY, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, WSOL_MINT, TOKEN_PROGRAM, GRADUATION_GRACE_SECS, VENUE_RAYDIUM, RAYDIUM } from '../solana/client.mjs';
+import { createElpidaSolana, decodeEvents, poolStats, quoteBuy, formatAmount, TOKEN_DECIMALS, TOKEN_SUPPLY, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, WSOL_MINT, TOKEN_PROGRAM, GRADUATION_GRACE_SECS, VENUE_RAYDIUM, RAYDIUM } from '../solana/client.mjs';
 import { supplyPercent } from '../core/curve-model.mjs';
 
 const MAX_U64 = (1n << 64n) - 1n;
@@ -151,7 +151,9 @@ export class SolanaIndexer {
         const key = pool.config.toBase58(), cfg = configs.get(key);
         if (!cfg) continue;
         const quote = this.quoteOf(key, configs), d = quote.decimals, stats = poolStats(pool, d);
-        const complete = pool.status === STATUS_GRADUATED || pool.status === STATUS_MIGRATED;
+        // Locked: an issuer-controlled stock pair whose completing buy opened the program's own locked pool.
+        const locked = pool.status === STATUS_LOCKED;
+        const complete = pool.status === STATUS_GRADUATED || pool.status === STATUS_MIGRATED || locked;
         const mint = pool.mint.toBase58();
         const remaining = complete ? 0n : quoteBuy(pool, MAX_U64, cfg.baseFeeBps, cfg.baseFeeBps).gross;
         const x = extra.get(mint) ?? {}, migrated = pool.status === STATUS_MIGRATED;
@@ -160,15 +162,16 @@ export class SolanaIndexer {
         const price = pumpPrice ?? stats.price;
         upsert.run(mint, Number(pool.createdAt), json({
           address: mint, pool: pool.pubkey.toBase58(), config: key, name: pool.name, symbol: pool.symbol, creator: pool.creator.toBase58(), reward: pool.reward.toBase58(),
-          created: Number(pool.createdAt) * 1000, pair: quote.kind, quoteSymbol: quote.symbol, quoteDecimals: d, decimals: TOKEN_DECIMALS, dex: x.venue ?? (cfg.quoteMint.toBase58() === WSOL_MINT ? 'Raydium' : 'PumpSwap'),
+          created: Number(pool.createdAt) * 1000, pair: quote.kind, quoteSymbol: quote.symbol, quoteDecimals: d, decimals: TOKEN_DECIMALS, dex: locked ? 'Elpida locked pool' : x.venue ?? (cfg.quoteMint.toBase58() === WSOL_MINT ? 'Raydium' : 'PumpSwap'),
           reserve: formatAmount(pool.realQuote, d), liquidityBonus: formatAmount(pool.liquidityBonus, d), sold: formatAmount(pool.sold, TOKEN_DECIMALS),
           circulatingSupply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS), saleCap: formatAmount(pool.curveSupply, TOKEN_DECIMALS), supply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS),
           spotPrice: price, marketCap: pumpPrice !== null ? pumpPrice * Number(TOKEN_SUPPLY) / 10 ** TOKEN_DECIMALS : stats.marketCap, progress: stats.progress, remainingBuy: formatAmount(remaining, d),
-          complete, graduated: migrated, completedAt: Number(pool.graduatedAt), liquidityLocked: true,
+          complete, graduated: migrated || locked, lockedPool: locked, completedAt: Number(pool.graduatedAt), liquidityLocked: true,
           // D7: a completed curve that has not migrated can be reopened by anyone after the grace period.
           reopenableAt: pool.status === STATUS_GRADUATED && pool.graduatedAt > 0n ? Number(pool.graduatedAt) + GRADUATION_GRACE_SECS : null,
           ...(migrated ? { pumpPool: x.pumpPool, venue: x.venue, dexBase: x.dexBase, dexQuote: x.dexQuote, liquidity: x.pumpQuote !== undefined ? formatAmount(x.pumpQuote, d) : undefined,
             ...(x.lpBurned !== undefined ? { pendingBuyback: formatAmount(x.pendingBuyback, d) } : {}) } : {}),
+          ...(locked ? { venue: 'Elpida locked pool', liquidity: formatAmount(pool.realQuote, d) } : {}),
           // Early-partner tier fixed at launch; tokens burned by its buybacks (curve trades plus LP-fee burns after migration).
           buybackBps: pool.buybackBps, burned: formatAmount(pool.buybackBurned + (x.lpBurned ?? 0n), TOKEN_DECIMALS),
           protocolFees: formatAmount(pool.protocolFees, d), creatorFees: formatAmount(pool.creatorFees, d),
