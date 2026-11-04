@@ -41,7 +41,10 @@ Raydium's pool list has **no pool** for TSLAon, SPYon or NVDAon. So the SOL-paid
 Sources: Raydium's Token-2022 support matrix (docs.raydium.io/reference/token-2022-support), Orca's token extensions
 page (docs.orca.so), Meteora's DAMM v2 README (github.com/MeteoraAg/damm-v2).
 
-## The decision (Malik)
+## The decision (Malik, 4 November 2026): option 3
+
+**Decided: Elpida's own locked pool now, and Meteora DAMM v2 for each stock once Meteora badges it.**
+
 
 1. **Meteora DAMM v2 with a token badge.** Ask Meteora to badge TSLAon, SPYon, NVDAon (and later ones), then build
    graduation into DAMM v2. Graduated pools are visible to Jupiter and aggregators. Depends on Meteora's answer.
