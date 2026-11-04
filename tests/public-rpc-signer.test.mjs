@@ -168,3 +168,58 @@ test('setup recovers from a wallet that never broadcast, a replaced transaction 
   await assert.rejects(resumeSetupDeployment({ ...args, key: 'j' }), /may still be sending/);
   assert.equal(sent, before);
 });
+
+// Trust Wallet (2-3 November 2026) signed and broadcast but never returned the hash, so pages waited forever.
+function silentWallet({ minedAt = 102, historical = true, data = '0xabcd', answerAfterMs = null } = {}) {
+  let latestCalls = 0; const slow = [];
+  const provider = {
+    estimateGas: async () => 21000n,
+    getBlockNumber: async () => latestCalls > 1 ? 103 : 100,
+    getTransactionCount: async (_, tag) => {
+      if (tag === 'pending') return 5;
+      if (tag === 'latest') return ++latestCalls > 1 ? 6 : 5;
+      if (!historical) throw new Error('missing trie node');
+      return tag >= minedAt ? 6 : 5;
+    },
+    getBlock: async (n, full) => ({ number: n, prefetchedTransactions: full && n === minedAt ? [{ hash: '0xfound', from: ME, nonce: 5, to: '0x00000000000000000000000000000000000000BB', data, value: 0n }] : [] }),
+    getTransaction: async hash => ({ hash, from: 'public' }),
+  };
+  const walletSigner = { getAddress: async () => ME, provider: { getTransaction: async () => null },
+    sendUncheckedTransaction: () => answerAfterMs == null ? new Promise(() => {}) : new Promise(r => setTimeout(() => r('0xwallet'), answerAfterMs)) };
+  const signer = new PublicRpcSigner(walletSigner, provider, { onSlow: m => slow.push(m), slowMs: 10_000, pollMs: 1, sleep: () => new Promise(r => setTimeout(r, 2)) });
+  return { signer, slow };
+}
+
+test('a wallet that never reports back: the transaction is found on chain by nonce, recipient and data', async () => {
+  const { signer, slow } = silentWallet();
+  const tx = await signer.sendTransaction({ to: '0x00000000000000000000000000000000000000bb', data: '0xABCD' });
+  assert.equal(tx.hash, '0xfound');
+  assert.match(slow.at(-1), /on chain/);
+  const linear = silentWallet({ historical: false, minedAt: 101 });
+  assert.equal((await linear.signer.sendTransaction({ to: '0x00000000000000000000000000000000000000bb', data: '0xabcd' })).hash, '0xfound', 'without historical state the new blocks are scanned');
+});
+
+test('another transaction at that nonce is never adopted; the wallet answer still wins', async () => {
+  const { signer } = silentWallet({ data: '0xdead', answerAfterMs: 60 });
+  const tx = await signer.sendTransaction({ to: '0x00000000000000000000000000000000000000bb', data: '0xabcd' });
+  assert.equal(tx.hash, '0xwallet');
+});
+
+test('on a real chain: a wallet that broadcasts but never answers still completes the deployment', async t => {
+  const { network } = await import('hardhat');
+  const { BrowserProvider, ContractFactory } = await import('ethers');
+  const { compiled } = await import('./helpers/dex-fixture.mjs');
+  const connection = await network.create('localTest');
+  const wallet = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 }), pub = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 });
+  wallet.pollingInterval = pub.pollingInterval = 10;
+  t.after(async () => { wallet.destroy(); pub.destroy(); await connection.close(); });
+  const walletSigner = await wallet.getSigner(0), unchecked = walletSigner.sendUncheckedTransaction.bind(walletSigner);
+  walletSigner.sendUncheckedTransaction = async tx => { await unchecked(tx); return new Promise(() => {}); };
+  const signer = new PublicRpcSigner(walletSigner, pub, { pollMs: 5 });
+  const a = compiled['contracts/evm/testnet/ElpidaTestAsset.sol'].ElpidaTestAsset;
+  const asset = await new ContractFactory(a.abi, a.evm.bytecode.object, signer).deploy('Test Stock', 'TEST-STOCK', 'xstock', 18, 250);
+  await asset.waitForDeployment();
+  const receipt = await (await asset.faucet(10n ** 18n)).wait();
+  assert.equal(receipt.status, 1);
+  assert.equal(await asset.balanceOf(await signer.getAddress()), 10n ** 18n);
+});

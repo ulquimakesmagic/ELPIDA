@@ -42,9 +42,63 @@ export class PublicRpcSigner extends AbstractSigner {
     }
   }
 
+  /**
+   * Watches the public RPC for `prepared` sent by `from` at or after `nonce` (3 November 2026). Trust Wallet often
+   * signs and broadcasts but never returns the hash to the page, which left every step waiting forever. Once the
+   * account's mined nonce moves past `nonce`, the block holding each new nonce is found and its transaction from this
+   * account is compared with what was requested (recipient, data and value); a match is returned. Resolves to null
+   * when `stop.done` is set; RPC errors only delay it.
+   */
+  async watchChain({ from, nonce, startBlock, prepared, stop }) {
+    const p = this.provider, me = from.toLowerCase(), to = prepared.to == null ? null : String(prepared.to).toLowerCase();
+    const data = String(prepared.data ?? '0x').toLowerCase(), value = BigInt(prepared.value ?? 0);
+    const same = t => t && String(t.from).toLowerCase() === me && (t.to == null ? null : String(t.to).toLowerCase()) === to && String(t.data).toLowerCase() === data && BigInt(t.value ?? 0) === value;
+    // The first block whose state shows the account past `n` holds nonce n; linear scan if history is unavailable.
+    const blockOf = async (n, head) => {
+      try {
+        let lo = startBlock, hi = head;
+        while (lo < hi) { const mid = Math.floor((lo + hi) / 2); if (Number(await p.getTransactionCount(from, mid)) > n) hi = mid; else lo = mid + 1; }
+        return [lo];
+      } catch { const all = []; for (let b = Math.max(startBlock, head - 2000); b <= head; b++) all.push(b); return all; }
+    };
+    let next = nonce;
+    while (!stop.done) {
+      await this.sleep(this.pollMs * 2);
+      try {
+        const mined = Number(await p.getTransactionCount(from, 'latest'));
+        if (mined <= next) continue;
+        const head = Number(await p.getBlockNumber());
+        for (; next < mined && !stop.done; next++) {
+          for (const b of await blockOf(next, head)) {
+            const block = await p.getBlock(b, true);
+            const txs = block?.prefetchedTransactions ?? [];
+            const found = txs.find(t => String(t.from).toLowerCase() === me && Number(t.nonce) === next);
+            if (found) { if (same(found)) return found; break; }
+          }
+        }
+      } catch { /* a flaky public RPC only delays the watch */ }
+    }
+    return null;
+  }
+
   async sendTransaction(tx) {
     const prepared=await this.slow(this.withGasLimit(tx),'Checking transaction simulation and gas on this network. No wallet request has been sent yet.');
-    const hash = await this.slow(this.walletSigner.sendUncheckedTransaction(prepared));
+    // Snapshot the account before the wallet opens, so a send the wallet never reports can still be found on chain.
+    let watch = null; const stop = { done: false };
+    if (typeof this.provider.getTransactionCount === 'function' && typeof this.provider.getBlock === 'function') {
+      try {
+        const from = await this.getAddress();
+        const [nonce, startBlock] = await Promise.all([this.provider.getTransactionCount(from, 'pending'), this.provider.getBlockNumber()]);
+        watch = this.watchChain({ from, nonce: Number(nonce), startBlock: Number(startBlock), prepared, stop });
+      } catch { watch = null; }
+    }
+    const wallet = this.slow(this.walletSigner.sendUncheckedTransaction(prepared));
+    let hash;
+    try {
+      const first = await Promise.race([wallet.then(h => ({ hash: h })), ...(watch ? [watch.then(found => found ? { found } : new Promise(() => {}))] : [])]);
+      if (first.found) { wallet.catch(() => {}); this.onSlow('Your wallet did not report back, but the transaction is on chain. Continuing…'); return first.found; }
+      hash = first.hash;
+    } finally { stop.done = true; }
     // The wallet broadcast it; find it on the public RPC (propagation takes a few seconds).
     for (const started = Date.now(); ;) {
       const found = await this.provider.getTransaction(hash).catch(() => null);
