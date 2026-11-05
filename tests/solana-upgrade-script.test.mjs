@@ -32,6 +32,19 @@ test('a run without local deploy state reuses the published test mints instead o
   assert.ok(Object.keys(published).length > 0 && Object.values(published).every(m => typeof m === 'string'));
   assert.ok(!('sol' in published) && !('usdc' in published), 'only test assets, never SOL or USDC');
   assert.deepEqual(savedTestAssets({}, record, record.programId), published, 'fresh checkout: published mints');
-  assert.deepEqual(savedTestAssets({ testAssets: { 'test-meme': 'Local111' } }, record, record.programId), { 'test-meme': 'Local111' }, 'local state wins');
-  assert.deepEqual(savedTestAssets({}, record, 'AnotherProgram1111111111111111111111111111'), {}, 'never another program\'s mints');
+  // 5 November 2026: local state that lacked the tTSLAon key made a run create a second tTSLAon. Published mints now
+  // always win for their keys; local state only fills keys the record does not list.
+  assert.equal(published['test-ondo-tsla'], 'HE4LBuPDgFQCHT88Z4UMh62xKoJaTAQuzNHjAvCkHjYd');
+  assert.deepEqual(savedTestAssets({ testAssets: { 'test-meme': 'Local111' } }, record, record.programId), published, 'a published mint is never replaced');
+  assert.deepEqual(savedTestAssets({ testAssets: { 'test-meme': 'Local111' } }, record, record.programId)['test-ondo-tsla'], 'HE4LBuPDgFQCHT88Z4UMh62xKoJaTAQuzNHjAvCkHjYd', 'a key missing locally comes from the record');
+  assert.deepEqual(savedTestAssets({ testAssets: { 'local-only': 'Local222' } }, record, record.programId), { 'local-only': 'Local222', ...published }, 'local-only keys are kept');
+  assert.deepEqual(savedTestAssets({ testAssets: { 'test-meme': 'Local111' } }, record, 'AnotherProgram1111111111111111111111111111'), { 'test-meme': 'Local111' }, 'never another program\'s mints');
+});
+
+test('a run without the stock pair keeps the stock mint in the deploy state', async () => {
+  const { mergedTestAssets } = await import('../packages/solana/deploy-record.mjs');
+  const before = { 'test-meme': 'Meme111', 'test-ondo-tsla': 'Tsla111' };
+  assert.deepEqual(mergedTestAssets(before, [{ key: 'test-meme', mint: 'Meme111', test: true }, { key: 'sol', mint: 'So1', test: false }]), before, 'a run without --stock-pairs forgets nothing');
+  assert.deepEqual(mergedTestAssets(before, [{ key: 'test-ondo-tsla', mint: 'Tsla222', test: true }])['test-ondo-tsla'], 'Tsla222');
+  assert.deepEqual(mergedTestAssets(undefined, []), {});
 });

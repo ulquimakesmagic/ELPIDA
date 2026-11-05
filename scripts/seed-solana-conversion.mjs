@@ -5,6 +5,10 @@
 //   node scripts/seed-solana-conversion.mjs --stock-usd 440 --keypair <deploy key>             # 1 SOL per stock
 //   node scripts/seed-solana-conversion.mjs --stock-usd 440 --sol 2 --keypair <deploy key>
 //   node scripts/seed-solana-conversion.mjs --stock-usd 440 --dry-run                          # plan only
+//   node scripts/seed-solana-conversion.mjs --stock-usd 440 --mint <stock mint> --keypair ...   # one stock only
+//
+// The stocks come from the published record (deployments/solana-<cluster>.json: what the hosted site lists), then this
+// machine's own record. In PowerShell, type the price itself (440), not <TSLA price>: "<" is a reserved character.
 //
 // --stock-usd is the price the test stock should trade at, in US dollars (for tTSLAon, Tesla's current share price):
 // nothing is assumed. SOL/USD is read from the Pyth price account the program already uses. Only the program's upgrade
@@ -22,17 +26,18 @@ import { conversionSeedPlan } from './lib/solana-conversion-plan.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const { values: args } = parseArgs({ options: {
   cluster: { type: 'string', default: 'devnet' }, rpc: { type: 'string' }, keypair: { type: 'string' },
-  sol: { type: 'string', default: '1' }, 'stock-usd': { type: 'string' }, 'dry-run': { type: 'boolean', default: false },
+  sol: { type: 'string', default: '1' }, 'stock-usd': { type: 'string' }, mint: { type: 'string' }, 'dry-run': { type: 'boolean', default: false },
 } });
 if (!['devnet', 'localnet'].includes(args.cluster)) throw new Error('Test networks only: --cluster devnet or localnet. Mainnet pays in SOL through Jupiter.');
-if (!args['stock-usd']) throw new Error('Give --stock-usd: the US dollar price the test stock should trade at (for tTSLAon, Tesla\'s share price now).');
+if (!args['stock-usd'] || !/^\d+(\.\d+)?$/.test(args['stock-usd'])) throw new Error('Give --stock-usd: the US dollar price the test stock should trade at (for tTSLAon, Tesla\'s share price now).');
 const localnet = args.cluster === 'localnet';
 const rpcUrl = args.rpc ?? process.env.SOLANA_RPC_URL ?? (localnet ? 'http://127.0.0.1:8899' : solanaDevnet.rpcUrl);
-const record = [`${root}local-data/solana-${args.cluster}.json`, `${root}deployments/solana-${args.cluster}.json`].find(existsSync);
+const record = [`${root}deployments/solana-${args.cluster}.json`, `${root}local-data/solana-${args.cluster}.json`].find(existsSync);
 if (!record) throw new Error(`No Solana ${args.cluster} deployment found. Deploy first with scripts/solana-deploy.mjs.`);
 const deployment = JSON.parse(readFileSync(record, 'utf8'));
-const stocks = (deployment.pairs ?? []).filter(p => p.kind === 'xstock' && p.test && p.tokenProgram === TOKEN_2022_PROGRAM);
-if (!stocks.length) throw new Error('No test stock pair in the deployment. Add one with: node scripts/solana-deploy.mjs --upgrade --stock-pairs');
+const stocks = (deployment.pairs ?? []).filter(p => p.kind === 'xstock' && p.test && p.tokenProgram === TOKEN_2022_PROGRAM && (!args.mint || p.mint === args.mint));
+if (!stocks.length) throw new Error(args.mint ? `${args.mint} is not a test stock pair in ${record.replace(root, '')}.` : 'No test stock pair in the deployment. Add one with: node scripts/solana-deploy.mjs --upgrade --stock-pairs');
+console.log(`Stocks from ${record.replace(root, '')}: ${stocks.map(p => `${p.symbol} ${p.mint}`).join(', ')}`);
 
 const connection = new web3.Connection(rpcUrl, 'confirmed');
 const oracle = SOLANA_ORACLES[args.cluster];
