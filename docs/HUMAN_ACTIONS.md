@@ -1,5 +1,18 @@
 # Actions that need Malik
 
+## Mainnet preview on forks: Model 10 and the stock pairs on every chain, 3 November 2026
+
+One command previews Elpida on local copies of real mainnet state: Ethereum, BNB Chain, Robinhood Chain and Base.
+Nothing is signed with your keys, nothing is sent and no funds are used.
+
+1. In `elpida-fork`, add archive RPCs to `.env.ondo.local` (free tiers work: Alchemy, QuickNode or dRPC):
+   `ELPIDA_EQUITY_FORK_RPC_ETHEREUM=...`, `ELPIDA_EQUITY_FORK_RPC_BNB=...`, `ELPIDA_EQUITY_FORK_RPC_ROBINHOOD=...`.
+   Without one, that chain's stock steps are reported as SKIPPED.
+2. Run `node --env-file=.env.ondo.local scripts/mainnet-preview.mjs` (or name chains: `... mainnet-preview.mjs ethereum bnb`).
+   Per chain: Model 10 with the native coin on the real DEX and Chainlink feed, then each stock as the pair
+   (TSLAon, SPYon and NVDAon on Ethereum and BNB; Robinhood's own TSLA, SPY, NVDA and AAPL on Robinhood Chain).
+3. Send Claude `backups/mainnet-preview/summary.md` and the reports it lists. Model 11 joins the preview when its
+   phase 4 lands.
 ## Pay a stock-paired first purchase in ETH: seed the conversion pools, 3 November 2026
 
 A creator can now pay the first purchase of a stock- or token-paired launch in the native coin. The launch form
