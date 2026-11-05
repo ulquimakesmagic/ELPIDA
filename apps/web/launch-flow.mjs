@@ -5,6 +5,7 @@ import { assetIcon, chainIcon } from './chain-ui.mjs';
 // review. The draft survives step changes, failed requests and page reloads (session storage).
 import { h, icon, short, number, compact, avatar, metadataLinks, callout, field, setError, errorText, storage, safeImage, toast } from './ui.mjs';
 import { normalizeMetadata, MAX_IMAGE_BYTES, IMAGE_TYPES, IMAGE_FORMATS } from './metadata.mjs';
+import { fitTokenImage, TOKEN_IMAGE } from './image-fit.mjs';
 import { normalizeRewardPolicy } from './reward-policy.mjs';
 import { launchProfile } from './launch-capabilities.mjs';
 import { STRATEGIES } from './rewards-view.mjs';
@@ -201,7 +202,9 @@ export function renderLaunch(ctx) {
       try {
         if (!IMAGE_TYPES.includes(f.type)) throw new Error(`Use a ${IMAGE_FORMATS} image.`);
         if (f.size > MAX_IMAGE_BYTES) throw new Error(`This image is ${(f.size / 1024 / 1024).toFixed(2)} MB. Use one up to 5 MB.`);
-        const data = await new Promise((done, fail) => { const r = new FileReader(); r.onload = () => done(r.result); r.onerror = () => fail(new Error('The image could not be read.')); r.readAsDataURL(f); });
+        const raw = await new Promise((done, fail) => { const r = new FileReader(); r.onload = () => done(r.result); r.onerror = () => fail(new Error('The image could not be read.')); r.readAsDataURL(f); });
+        // Stored at 1500 × 500: the whole image fitted into the frame, never cropped (animated GIFs stay as they are).
+        const { url: data } = await fitTokenImage(raw, { maxBytes: MAX_IMAGE_BYTES });
         normalizeMetadata({ image: data });
         draft.image = data; draft.imageUrl = ''; url.value = ''; save(); logoPreview(); drawPreview();
       } catch (e) { file.value = ''; logoError.textContent = errorText(e); }
@@ -210,8 +213,8 @@ export function renderLaunch(ctx) {
     return { body: [
       h('div.row-2', field({ label: 'Token name', control: name, hint: `Up to ${profile().maxNameBytes} characters.` }), field({ label: 'Symbol', control: symbol, hint: '1–10 letters or numbers, shown in capitals.' })),
       h('div.field', h('label', { for: description.id = 'f-description' }, 'Description', counter), description, h('p.error-text#f-description-error', { role: 'alert' })),
-      h('div.field', h('span.field-label', 'Logo'), h('div.logo-drop', logoBox, h('div.stack', h('label.field-label', { for: 'logo-file' }, 'Upload an image'), file, h('p.hint#logo-hint', `Square ${IMAGE_FORMATS}, up to 5 MB on every network. Keep logos simple. Reselect large uploads if you reload the page.`), draft.image ? remove : null)), logoError),
-      field({ label: 'Or use a hosted logo URL', optional: true, control: url, hint: 'A public HTTPS image address. Uploading is more reliable.' }),
+      h('div.field', h('span.field-label', 'Logo'), h('div.logo-drop', logoBox, h('div.stack', h('label.field-label', { for: 'logo-file' }, 'Upload an image'), file, h('p.hint#logo-hint', `${IMAGE_FORMATS}, any shape, up to 5 MB. It is fitted whole into ${TOKEN_IMAGE.width} × ${TOKEN_IMAGE.height}, never cropped (animated GIFs are kept as they are). Reselect large uploads if you reload the page.`), draft.image ? remove : null)), logoError),
+      field({ label: 'Or use a hosted logo URL', optional: true, control: url, hint: `A public HTTPS image address, used as it is: make it ${TOKEN_IMAGE.width} × ${TOKEN_IMAGE.height} to match uploads. Uploading is more reliable.` }),
       h('fieldset', { class: 'stack' }, h('legend.field-label', 'Community links ', h('span.opt', 'Optional')),
         h('div.row-2', field({ label: 'Website', control: input('website', { type: 'url', placeholder: 'https://yourproject.com' }) }), field({ label: 'X', control: input('twitter', { type: 'url', placeholder: 'https://x.com/yourproject' }) })),
         h('div.row-2', field({ label: 'Telegram', control: input('telegram', { type: 'url', placeholder: 'https://t.me/yourproject' }) }), field({ label: 'Discord', control: input('discord', { type: 'url', placeholder: 'https://discord.gg/invite' }) }))),

@@ -31,8 +31,10 @@
 .lk .preview-card { border-radius: var(--r-card); padding: 16px; gap: 12px; }
 .lk-label { display: inline-flex; align-items: center; gap: 8px; font: 600 11px/1 var(--font-sans); letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
 .lk-label i { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
-.lk-well { aspect-ratio: 1; max-height: 220px; width: 100%; border-radius: 18px; display: grid; place-items: center; background: radial-gradient(circle at 50% 30%, var(--accent-glow), transparent 70%), var(--bg); border: .67px solid var(--line-soft); overflow: hidden; }
+.lk-well { aspect-ratio: 3 / 1; width: 100%; border-radius: 18px; display: grid; place-items: center; background: radial-gradient(circle at 50% 30%, var(--accent-glow), transparent 70%), var(--bg); border: .67px solid var(--line-soft); overflow: hidden; }
 .lk-well .avatar { width: 100%; height: 100%; border-radius: 0; }
+/* Token images are 1500 × 500; the preview shows them whole. */
+.lk-well .avatar img { object-fit: contain; }
 .lk-spark { width: 88px; height: 88px; border-radius: 22px; display: grid; place-items: center; border: 1px solid var(--accent-line); background: var(--accent-tint); color: var(--accent-text); }
 .lk-spark .icon { width: 36px; height: 36px; }
 .lk-name { display: grid; gap: 4px; min-width: 0; }
