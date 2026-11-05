@@ -2,6 +2,17 @@
 
 ## Solana stock pairing: devnet program upgrade, 4 November 2026
 
+**Done, 5 November 2026.** Malik ran the upgrade with `--stock-pairs`. Checked on chain:
+- The program data (`EoihUf…PpcV`, upgraded at slot 518968205) hashes to
+  `788f760314f4f3b1b55d69651e901d3bf42595d8b73aa17728f72d8a88821a05`, the reviewed test build.
+- The tTSLAon stand-in `HE4LBuPDgFQCHT88Z4UMh62xKoJaTAQuzNHjAvCkHjYd`: Token-2022, 9 decimals, ConfidentialTransferMint,
+  DefaultAccountState, TransferHook (no program), MetadataPointer, ScaledUiAmount and Pausable. The deploy key holds the
+  freeze and pause authority; the test faucet holds the mint authority.
+- Its pair config `4SwHxekNysG2gwy97tFz1rMuTSrY3aVqsdNe2bXpna33` exists, with USD pricing on. The pair was added to
+  `deployments/solana-devnet.json` in the launch-picker PR.
+
+The steps below are kept for reference:
+
 The program now lets a curve paired with an issuer-controlled stock (Ondo's TSLAon, SPYon, NVDAon on Solana) complete
 into Elpida's own locked pool, because no Solana DEX accepts those mints today (`docs/SOLANA_STOCK_PAIRING.md`).
 Devnet only; nothing changes for SOL pairs. Launches stay SOL-only on the site until this upgrade is in.

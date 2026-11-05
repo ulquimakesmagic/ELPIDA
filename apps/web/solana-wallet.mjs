@@ -1,5 +1,5 @@
 import { nowSeconds } from './clock.mjs';
-import { createElpidaSolana, quoteBuy, quoteSell, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, tradeFeeBps, lockedPoolVenue, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut, VENUE_RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, raydiumQuote, raydiumCreationCost, raydiumBuybackAmount } from '/elpida-solana.mjs';
+import { createElpidaSolana, quoteBuy, quoteSell, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, tradeFeeBps, lockedPoolVenue, mintControls, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut, VENUE_RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, raydiumQuote, raydiumCreationCost, raydiumBuybackAmount } from '/elpida-solana.mjs';
 import {normalizeMetadata,withSavedMetadata} from './metadata.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 import { PAIR_LIMITS, SOLANA_LAUNCH_KINDS, usdReferenceFor } from '/pairs.mjs';
@@ -122,7 +122,7 @@ export class SolanaWallet {
     if (!this.configs.size) throw new Error('The Solana SOL pair is not set up. Upgrade the program and run the deploy again (solana-upgrade.cmd, then npm.cmd run solana:deploy).');
     const mints = await this.connection.getMultipleAccountsInfo([...this.configs.values()].map(cfg => cfg.quoteMint));
     // Issuer-controlled quotes (Ondo stocks) complete into the program's own locked pool, in the completing buy.
-    [...this.configs.values()].forEach((cfg, i) => { cfg.quoteTokenProgram = mints[i]?.owner ?? c.tokenProgram; cfg.lockedPool = lockedPoolVenue(mints[i]?.data, mints[i]?.owner?.toBase58()); });
+    [...this.configs.values()].forEach((cfg, i) => { cfg.quoteTokenProgram = mints[i]?.owner ?? c.tokenProgram; cfg.lockedPool = lockedPoolVenue(mints[i]?.data, mints[i]?.owner?.toBase58()); cfg.controls = mintControls(mints[i]?.data, mints[i]?.owner?.toBase58(), b => new web3.PublicKey(b).toBase58()); });
     const all = [...this.configs.values()];
     const launch = all.find(cfg => cfg.kind === 'native') ?? all[0];
     this.programConfig = launch; this.decimals = launch.quoteDecimals;
@@ -175,14 +175,21 @@ export class SolanaWallet {
       // The creation fee is always lamports (SOL), whatever the pair.
       // Oracle-priced SOL pair: the $10 fee in SOL and the $-sized virtual reserve at the current Pyth price.
       const terms = this.launchTerms(cfg);
-      return { id, symbol: cfg.symbol, name: cfg.name, decimals: d, test: cfg.test, wsol: cfg.wsol, feeAmount: formatAmount(terms.fee, 9), feeSymbol: 'SOL', usdPriced: terms.priced,
+      return { id, symbol: cfg.symbol, name: cfg.name, decimals: d, test: cfg.test, wsol: cfg.wsol, ...(cfg.kind === 'xstock' ? { stock: { provider: cfg.test ? 'ondo-test' : 'ondo' }, lockedPool: true } : {}), feeAmount: formatAmount(terms.fee, 9), feeSymbol: 'SOL', usdPriced: terms.priced,
         curve: { vq: Number(terms.virtualQuote) / 10 ** d, vt: Number(cfg.virtualToken) / 10 ** TOKEN_DECIMALS, cap: Number(cfg.curveSupply) / 10 ** TOKEN_DECIMALS, feeBps: cfg.baseFeeBps },
         faucet: cfg.test && cfg.faucet ? { label: `Get ${Number(cfg.faucet).toLocaleString()} ${cfg.symbol}`, action: 'faucet', body: { asset: id } } : cfg.wsol && this.net.gasFaucet ? { label: 'Get devnet SOL', href: this.net.gasFaucet } : null };
     };
     const group = kind => {
       if (!SOLANA_LAUNCH_KINDS.includes(kind)) return { assets: [], unavailable: PAIR_LIMITS.solana[kind] };
-      const assets = all.filter(cfg => cfg.kind === kind).sort((a, b) => Number(b.test) - Number(a.test)).map(asset);
+      // Stock pairs: only issuer-controlled mints the program completes into its locked pool, and only while the
+      // issuer has not paused the stock or switched on a transfer hook (either would make every trade fail).
+      const usable = cfg => kind !== 'xstock' || (cfg.lockedPool && !cfg.controls?.paused && !cfg.controls?.hookProgram);
+      const listed = all.filter(cfg => cfg.kind === kind);
+      const assets = listed.filter(usable).sort((a, b) => Number(b.test) - Number(a.test)).map(asset);
       if (assets.length) return { assets };
+      if (kind === 'xstock') return { assets: [], unavailable: listed.some(cfg => cfg.controls?.paused) ? 'Its issuer has paused the approved stock on Solana. Stock launches return when it resumes.'
+        : listed.some(cfg => cfg.controls?.hookProgram) ? 'The stock\u2019s issuer switched on a transfer hook, which Elpida does not support yet. Stock launches are off until it does.'
+        : `No tokenized stock is approved on ${this.net.name} yet. Stocks are approved one at a time in the operator panel.` };
       return { assets: [], unavailable: PAIR_LIMITS.solana[kind] ?? (!this.deployment ? 'The Solana program is not deployed yet.' : this.net.mainnet ? `No ${kind === 'token' ? 'paired token' : 'asset of this kind'} is approved on mainnet yet.` : `Not set up on ${this.net.name} yet. Run solana-upgrade.cmd to add the SOL, USDC and test-token pairs.`) };
     };
     return { native: group('native'), usdc: group('usdc'), xstock: group('xstock'), token: group('token') };
@@ -557,7 +564,8 @@ export class SolanaWallet {
       const q = firstBuy===0n ? {tokens:0n,gross:0n,fee:0n} : quoteBuy(fresh, firstBuy, config.baseFeeBps, config.baseFeeBps);
       // The buy that completes a curve also opens its PumpSwap pool in the same transaction, so a curve is never left
       // closed. That does not fit inside a launch transaction, so a creator buy cannot take the whole curve.
-      if (q.graduates) throw new Error(`A creator buy can take at most part of the curve: the buy that completes it must also open the PumpSwap pool, which does not fit in the launch transaction. Lower the first buy below ${formatAmount(q.gross, d)} ${config.symbol}. Nothing was submitted.`);
+      // Stock pairs open their locked pool inside the launch itself, so a creator buy may complete their curve.
+      if (q.graduates && !config.lockedPool) throw new Error(`A creator buy can take at most part of the curve: the buy that completes it must also open the PumpSwap pool, which does not fit in the launch transaction. Lower the first buy below ${formatAmount(q.gross, d)} ${config.symbol}. Nothing was submitted.`);
       // The SOL creation fee is paid from plain SOL; for SOL pairs the first buy is wrapped from it too.
       const solNeeded = maxFee + (config.wsol ? q.gross : 0n) + SolanaWallet.SOL_HEADROOM;
       let usdc = null;

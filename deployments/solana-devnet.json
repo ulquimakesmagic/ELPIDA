@@ -62,6 +62,20 @@
       "wsol": false,
       "testSized": false,
       "faucet": "6000000"
+    },
+    {
+      "kind": "xstock",
+      "key": "test-ondo-tsla",
+      "symbol": "tTSLAon",
+      "name": "Elpida test Ondo-style TSLA stock (no value)",
+      "mint": "HE4LBuPDgFQCHT88Z4UMh62xKoJaTAQuzNHjAvCkHjYd",
+      "config": "4SwHxekNysG2gwy97tFz1rMuTSrY3aVqsdNe2bXpna33",
+      "decimals": 9,
+      "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+      "test": true,
+      "wsol": false,
+      "testSized": false,
+      "faucet": "25"
     }
   ],
   "usdPricing": {

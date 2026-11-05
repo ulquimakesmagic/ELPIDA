@@ -56,11 +56,11 @@ test('Solana stock pairs: LockedPoolOpened is decoded with the program\'s discri
   assert.deepEqual(EVENTS.LockedPoolOpened.fields.map(([name]) => name), ['pool', 'mint', 'quoteReserve', 'tokenReserve']);
 });
 
-test('Solana stock pairs: the devnet stand-in is opt-in and launches stay SOL-only until the program upgrade', () => {
+test('Solana stock pairs: the devnet stand-in is opt-in and never on mainnet', () => {
   const native = solanaPricing('devnet');
   assert.ok(!solanaPairTemplates(native, { test: true }).some(t => t.ondoStandIn), 'not added by default');
   const stock = solanaPairTemplates(native, { test: true, stocks: true }).find(t => t.ondoStandIn);
   assert.equal(stock.symbol, 'tTSLAon'); assert.equal(stock.decimals, 9); assert.match(stock.name, /no value/);
   assert.ok(!solanaPairTemplates(native, { test: false, stocks: true }).some(t => t.ondoStandIn), 'never on mainnet');
-  assert.deepEqual(SOLANA_LAUNCH_KINDS, ['native'], 'the launch picker stays SOL-only until devnet runs the locked-pool program');
+  assert.deepEqual(SOLANA_LAUNCH_KINDS, ['native', 'xstock'], 'the devnet program runs the locked pool (5 November): approved stocks are offered');
 });

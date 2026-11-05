@@ -37,6 +37,35 @@ export function testStockControls(wallet, run, fail) {
     }));
 }
 
+/**
+ * Solana stock pairs (5 November 2026). On Solana a pair is approved by creating its pair config, which only the
+ * program's upgrade authority can sign (the devnet deploy key; on mainnet the Squads vault, once the registry verifies
+ * the stock). This view shows each stock pair with the checks the launch picker applies: the mint must be one the
+ * program completes into its locked pool, not paused, and without an active transfer hook.
+ */
+export function solanaStockPairs(w) {
+  const configs = [...(w.configs?.values() ?? [])].filter(cfg => cfg.kind === 'xstock');
+  const link = (address, label = short(address)) => h('a.mono', { href: w.addressUrl(address), target: '_blank', rel: 'noopener noreferrer' }, label);
+  const state = cfg => !cfg.lockedPool ? ['blocked', 'The mint is not an issuer-controlled Token-2022 stock, so it has no venue on Solana.']
+    : cfg.controls?.paused ? ['paused', 'Its issuer paused every transfer. Launches and trades resume when it is lifted.']
+    : cfg.controls?.hookProgram ? ['blocked', `Its issuer switched on transfer hook ${short(cfg.controls.hookProgram)}, which Elpida does not support yet.`]
+    : ['offered', 'Offered in the launch picker. Completes into Elpida\u2019s locked pool.'];
+  const rows = configs.map(cfg => {
+    const [pill, why] = state(cfg);
+    return h('tr', h('td', h('span.op-net', assetIcon(cfg.symbol, true, { provider: cfg.test ? 'ondo-test' : 'ondo', name: cfg.name }), cfg.symbol, cfg.test ? h('span.chip.chip-xs.chip-test', 'Test') : null)),
+      h('td', link(cfg.quoteMint.toBase58())), h('td', link(cfg.address.toBase58())),
+      h('td', h(`span.op-pill.${pill === 'offered' ? 'op-ok' : 'op-warn'}`, pill)), h('td.small.muted', why));
+  });
+  const authority = w.deployment?.upgradeAuthority;
+  return h('section.tk-card.op-card', h('h2.tk-h', 'Tokenized stocks on Solana'),
+    h('p.small.muted', 'A stock is approved on Solana by creating its pair config, which only the program\u2019s upgrade authority can sign', authority ? [' (', link(authority), ')'] : null,
+      '. Its curve completes into Elpida\u2019s own locked pool, because no Solana DEX accepts Ondo\u2019s stock mints yet. The launch picker offers a stock only while the checks below pass.'),
+    rows.length ? h('div.table-scroll', h('table.market-table.tk-table.op-table', h('thead', h('tr', ...['Stock', 'Mint', 'Pair config', 'State', 'Why'].map(l => h('th', { scope: 'col' }, l)))), h('tbody', rows)))
+      : h('p.small.muted', `No stock pair is set up on ${w.net.name} yet.`),
+    w.net.mainnet ? h('p.small', h('span.op-pill.op-warn', 'mainnet'), ' Real Ondo stocks stay off until Ondo answers on transfer hooks and the registry verifies each stock. Approval then goes through the Squads vault.')
+      : h('p.small.muted', 'To add the devnet stand-in (tTSLAon, no value): ', h('code', 'node scripts/solana-deploy.mjs --upgrade --stock-pairs --keypair <deploy key>'), '.'));
+}
+
 export function renderPairs(ctx, { connect }) {
   const root = h('div.op-dash.pr');
   const error = h('p.error-text', { role: 'alert' });
@@ -55,7 +84,13 @@ export function renderPairs(ctx, { connect }) {
 
   function draw() {
     const w = ctx.wallet, net = w?.net;
-    if (ctx.mode !== 'testnet' || !net || net.kind === 'solana') { root.replaceChildren(card('Trading pairs', h('p.small.muted', 'Pair approvals are per EVM launchpad. Switch to Base, Ethereum, BNB Chain or Robinhood Chain in Network and funds, then come back here.'))); return; }
+    if (ctx.mode === 'testnet' && net?.kind === 'solana') {
+      if (!w.deployment) { root.replaceChildren(card('Trading pairs', h('p.small.muted', `The Solana program is not deployed on ${net.name} yet.`))); return; }
+      if (!w.configs) { root.replaceChildren(card('Trading pairs', h('p.small.muted', 'Loading the Solana pair configs…'))); w.loadConfig?.().then(draw, fail); return; }
+      root.replaceChildren(h('header.op-head', h('div', h('h1', h('span.op-net', chainIcon(net.key), `Trading pairs · ${net.name}`)), h('p.small.muted', `Program ${short(w.deployment.programId)}`))), error, h('div.op-grid', solanaStockPairs(w)));
+      return;
+    }
+    if (ctx.mode !== 'testnet' || !net) { root.replaceChildren(card('Trading pairs', h('p.small.muted', 'Pair approvals are per network. Connect a wallet on Base, Ethereum, BNB Chain, Robinhood Chain or Solana in Network and funds, then come back here.'))); return; }
     if (!w.address) { root.replaceChildren(card('Trading pairs', h('p.small.muted', `Connect the treasury wallet on ${net.name} to manage its trading pairs.`), h('button.btn.btn-secondary', { type: 'button', on: { click: connect } }, 'Connect wallet'))); return; }
     if (!w.deployment) { root.replaceChildren(card('Trading pairs', h('p.small.muted', `There is no launchpad on ${net.name} yet.`))); return; }
     let pairs = null; try { pairs = w.pairOptions?.(); } catch {}

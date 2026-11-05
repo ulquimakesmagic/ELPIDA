@@ -70,10 +70,11 @@ page (docs.orca.so), Meteora's DAMM v2 README (github.com/MeteoraAg/damm-v2).
 
 ### What is still to do
 
-1. **Devnet upgrade** (Malik, with the upgrade key): `solana-upgrade.cmd`, then `npm.cmd run solana:deploy -- --stock-pairs`
-   adds the tTSLAon stand-in pair (Token-2022, 9 decimals, all of Ondo's controls; no value).
-2. **Launch picker and token page** for Solana stock pairs (hidden until step 1: `SOLANA_LAUNCH_KINDS` stays SOL-only),
-   with the per-stock approval in the operator panel, as on EVM.
+1. ~~Devnet upgrade~~: done 5 November 2026 (`docs/HUMAN_ACTIONS.md`); tTSLAon stand-in `HE4L…HjYd`.
+2. ~~Launch picker~~: done 5 November. The picker offers a Solana stock only while its mint is a locked-pool venue,
+   not paused and without a transfer hook; the operator panel's Pairs tab shows each Solana stock pair with those
+   checks. Approval itself is creating the pair config, signed by the upgrade authority (deploy key on devnet; the
+   Squads vault on mainnet once the registry verifies a stock).
 3. **SOL-paid first purchase** through Jupiter (mainnet) and a devnet SOL/stand-in pool, resumable like the EVM version.
 4. **Meteora DAMM v2** per stock once Meteora badges it: a later migration out of the locked pool needs its own
    program change and review; until then the locked pool is the venue.
