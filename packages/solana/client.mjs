@@ -925,6 +925,23 @@ export function lockedPoolVenue(data, owner) {
   return false;
 }
 
+/**
+ * The issuer controls currently switched on for a Token-2022 quote mint: `paused` (Pausable, 26) and `hookProgram`
+ * (TransferHook, 14: base58 of the hook program, null while none is set). Either one stops trades in its pairs.
+ */
+export function mintControls(data, owner, toBase58 = bytes => bytes) {
+  const controls = { paused: false, hookProgram: null };
+  if (String(owner) !== TOKEN_2022_PROGRAM || !data || data.length <= 165 || data[165] !== 1) return controls;
+  for (let offset = 166; offset + 4 <= data.length;) {
+    const kind = data[offset] | (data[offset + 1] << 8), len = data[offset + 2] | (data[offset + 3] << 8), value = data.subarray(offset + 4, offset + 4 + len);
+    if (kind === 0) break;
+    if (kind === 26 && value.length >= 33) controls.paused = value[32] === 1;
+    if (kind === 14 && value.length >= 64 && value.subarray(32, 64).some(b => b !== 0)) controls.hookProgram = toBase58(value.subarray(32, 64));
+    offset += 4 + len;
+  }
+  return controls;
+}
+
 /** Test-only helpers: SPL and Token-2022 mints standing in for USDC, xStocks and other pair assets. */
 export function splTestMint(web3) {
   const { TransactionInstruction, SystemProgram } = web3;

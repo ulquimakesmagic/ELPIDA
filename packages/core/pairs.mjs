@@ -39,17 +39,17 @@ export const PAIR_INFO = {
 };
 
 /**
- * Why a kind is unavailable on a chain even though it is part of the structure. xStocks on Solana are
- * Token-2022 mints with an issuer permanent delegate; PumpSwap refuses such quote mints, so an
- * xStock-paired curve could never graduate. Meteora DAMM v2 accepts them (xStocks are badged there),
- * so a DAMM v2 graduation path is the way to add them.
+ * Why a kind is unavailable on a chain even though it is part of the structure. On Solana, xStocks carry an issuer
+ * permanent delegate the program refuses as a quote; Ondo's stocks (pause, freeze, transfer-hook authority) are
+ * accepted and complete into the program's own locked pool (docs/SOLANA_STOCK_PAIRING.md).
  */
-// New Solana launches pair with SOL only, so every curve graduates to Raydium (decided 1 November 2026). Tokens
-// already launched on USDC or token pairs keep trading on their PumpSwap pools, and stay indexed and claimable.
-const SOL_ONLY = 'New Solana launches pair with SOL and graduate to Raydium. Tokens already launched on other pairs keep trading on PumpSwap.';
-export const SOLANA_LAUNCH_KINDS = Object.freeze(['native']);
+// New Solana launches pair with SOL (graduating to Raydium, decided 1 November 2026) or with a tokenized stock the
+// operator panel approved (completing into Elpida's own locked pool, decided 4 November 2026; the devnet program runs it
+// since 5 November). Tokens already launched on USDC or token pairs keep trading on their PumpSwap pools.
+const SOL_ONLY = 'New Solana launches pair with SOL (graduating to Raydium) or an approved tokenized stock. Tokens already launched on other pairs keep trading on PumpSwap.';
+export const SOLANA_LAUNCH_KINDS = Object.freeze(['native', 'xstock']);
 export const PAIR_LIMITS = {
-  solana: { usdc: SOL_ONLY, token: SOL_ONLY, xstock: 'Not on Solana: new Solana launches pair with SOL only, and xStocks carry an issuer permanent delegate that blocks graduation (see docs/TOKENIZED_EQUITY.md).' },
+  solana: { usdc: SOL_ONLY, token: SOL_ONLY },
 };
 
 /**
@@ -58,7 +58,7 @@ export const PAIR_LIMITS = {
  * until verified. Display names only; nothing here implies a partnership.
  */
 export const EQUITY_PROVIDERS = {
-  ethereum: 'xStocks', 'ethereum-sepolia': 'xStocks', 'solana-mainnet': 'xStocks', 'solana-devnet': 'xStocks', 'solana-localnet': 'xStocks',
+  ethereum: 'xStocks', 'ethereum-sepolia': 'xStocks', 'solana-mainnet': 'Ondo Global Markets', 'solana-devnet': 'Ondo Global Markets', 'solana-localnet': 'Ondo Global Markets',
   'robinhood-testnet': 'Robinhood Stock Tokens', 'bnb-testnet': 'Binance bStocks', 'base-sepolia': 'Coinbase Tokenized Stocks',
 };
 
