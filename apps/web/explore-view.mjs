@@ -1,5 +1,5 @@
 // Home / Explore: the Trending strip and the Explore list with sort tabs, pair and chain
-// chips, the Live feed column, pagination and URL state. One persistent controller per visit: refreshes
+// chips, pagination and URL state (the Live feed column was removed on 5 November 2026: the top bar's Last sale strip covers it). One persistent controller per visit: refreshes
 // update cards in place (keyed by network and address), so rolling numbers and flashes show real changes.
 // Every figure comes from the indexers; a module with nothing to show is hidden, never filled in.
 import { h, icon, short, number, avatar, pricing, fmtMarketCap, fmtValue, progressOf, toast } from './ui.mjs';
@@ -9,12 +9,8 @@ import { nowSeconds } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
 import { PAIR_LIMITS } from '/pairs.mjs';
 import { partnerChip } from './partner-labels.mjs';
-import { exploreModel, pageOf, pageButtons, trendingTokens, feedRows, exploreStateFromHash, exploreHash, PER_PAGE, PER_PAGE_WIDE, isKothContender, kingOfTheHill, curveProgress, KOTH_PROGRESS } from './discovery.mjs';
+import { exploreModel, pageOf, pageButtons, trendingTokens, exploreStateFromHash, exploreHash, PER_PAGE_WIDE, isKothContender, kingOfTheHill, curveProgress, KOTH_PROGRESS } from './discovery.mjs';
 
-const store = {
-  get(key) { try { return localStorage.getItem(key); } catch { return null; } },
-  set(key, value) { try { localStorage.setItem(key, value); } catch {} },
-};
 const reducedMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
 const keyOf = t => `${t.network ?? 'local'}:${String(t.address).toLowerCase()}`;
 
@@ -115,7 +111,7 @@ function staticSignature(t) { return JSON.stringify([isKothContender(t), t._king
 function listCard(token, ctx) {
   const f = figures(token), href = ctx.tokenHref(token), name = token.metadata?.name ?? token.name, symbol = token.metadata?.symbol ?? token.symbol;
   const isNew = token.created && nowSeconds() - token.created / 1000 < 86400;
-  const cap = odometer(f.capText, 'lc-cap'), volume = odometer(f.volumeText, 'lc-volume');
+  const cap = odometer(f.capText, 'lc-cap'), volume = odometer(f.volumeText, 'lc-volume'), change = h('span.lc-change', changePill(token));
   const bought = h('span.lc-bought', icon('clock', 'icon-xs'), token.lastBuyAt ? timeNode('time', token.lastBuyAt, 'bought') : h('span', 'No buys yet'));
   const card = h('article.list-card', { 'data-key': keyOf(token) },
     h('div.lc-media', avatar(token, 'lc-avatar'), isNew ? h('span.new-chip', 'New') : null, kothBadge(token, ctx.king?.())),
@@ -123,7 +119,7 @@ function listCard(token, ctx) {
       h('div.lc-top', h('h3.lc-name', h('a.lc-link', { href }, name)), icon('arrow-up-right', 'icon-sm lc-go')),
       h('div.lc-meta', h('span.lc-ticker', `$${symbol}`), h('span.sep', { 'aria-hidden': 'true' }, '·'), pairStack(token, ctx.nativeSymbol(token), ctx.networkName(token)), token.created ? [h('span.sep', { 'aria-hidden': 'true' }, '·'), timeNode('time.lc-age', Math.floor(token.created / 1000), 'age')] : null, devBadge(token), burnBadge(token)),
       h('div.lc-figures',
-        h('div', h('span.lc-label', 'Market cap'), cap),
+        h('div', h('span.lc-label', 'Market cap'), h('span.lc-cap-row', cap, change)),
         h('div.lc-right', h('span.lc-label', '24h volume'), volume)),
       curveLine(token)),
     h('div.lc-foot', bought, h('button.lc-copy', { type: 'button', 'aria-label': `Copy token address ${token.address}`, on: { click: () => copy(token.address) } }, h('span.mono', short(token.address)), icon('copy', 'icon-xs'))));
@@ -134,6 +130,7 @@ function listCard(token, ctx) {
     setOdometer(cap, g.capText, unit ? changeDirection(card._raw.cap, g.cap) : 0);
     setOdometer(volume, g.volumeText, unit && g.volume !== null && card._raw.volume !== null ? changeDirection(card._raw.volume, g.volume) : 0);
     updateCurve(card, next);
+    change.replaceChildren(changePill(next) ?? '');
     const time = card.querySelector('.lc-bought time');
     if (next.lastBuyAt && Number(time?.dataset.at) !== next.lastBuyAt) bought.replaceChildren(icon('clock', 'icon-xs'), timeNode('time', next.lastBuyAt, 'bought'));
     card._raw = g;
@@ -200,7 +197,7 @@ async function copy(value) { try { await navigator.clipboard.writeText(value); t
  * }
  */
 export function createExplore(source) {
-  const state = { ...exploreStateFromHash(location.hash), feed: store.get('elpida:feed') !== 'off', trades: [] };
+  const state = { ...exploreStateFromHash(location.hash) };
   const listCache = new Map(), trendCache = new Map();
   let king = null;
   const ctx = { tokenHref: source.tokenHref, nativeSymbol: source.nativeSymbol, networkName: source.networkName, king: () => king };
@@ -245,7 +242,6 @@ export function createExplore(source) {
       h('button.sort-tab', { type: 'button', 'data-tab': key, 'aria-pressed': 'false', on: { click: () => set({ tab: key, page: 1 }) } }, icon(glyph, 'icon-sm'), label)));
   const filter = h('input', { type: 'search', placeholder: 'Filter by name, ticker or address', 'aria-label': 'Filter tokens by name, ticker or address', autocomplete: 'off', value: state.query, on: { input: e => { set({ query: e.target.value, page: 1 }, { fromFilter: true }); } } });
   filter.spellcheck = false;
-  const feedToggle = h('button.feed-toggle', { type: 'button', 'aria-pressed': String(state.feed), 'aria-controls': 'live-feed', on: { click: () => setFeed(!state.feed) } }, icon('radio', 'icon-sm'), 'Live feed');
   const pairChips = h('div.chip-scroll', { role: 'group', 'aria-label': 'Paired with' });
   const chainChips = h('div.chip-scroll', { role: 'group', 'aria-label': 'Chain' });
   const pairRow = h('div.chip-row', h('span.chip-row-label', icon('sliders-horizontal', 'icon-xs'), 'Paired with'), pairChips);
@@ -257,25 +253,12 @@ export function createExplore(source) {
   const pager = h('nav.pagination', { 'aria-label': 'Token pages' });
   const prices = h('div.price-note');
 
-  /* Live feed */
-  const feedList = h('ol.feed-list', { 'aria-label': 'Latest buys' });
-  // "Live" shows only while buys are actually coming in.
-  const livePill = h('span.live-pill', { hidden: true }, h('span.live-dot'), 'Live');
-  const feedEmpty = h('p.feed-empty', 'No buys yet. New buys show up here within a minute.');
-  const feed = h('aside.live-feed#live-feed', { 'aria-labelledby': 'live-feed-title', hidden: !state.feed },
-    h('div.feed-head', h('h2#live-feed-title', 'Live feed'), livePill, h('button.round-button.feed-close', { type: 'button', 'aria-label': 'Hide live feed', on: { click: () => setFeed(false) } }, icon('x', 'icon-sm'))),
-    h('p.feed-sub', icon('zap', 'icon-xs'), 'Latest buys'),
-    feedList, feedEmpty,
-    h('button.feed-more', { type: 'button', on: { click: () => { set({ tab: 'lastsale', page: 1 }); jumpToList(); } } }, 'Explore recent buys', icon('arrow-right', 'icon-sm accent-icon')));
-
   const listSection = h('section.home-section.explore-section#explore', { 'aria-labelledby': 'explore-title' },
     h('div.explore-head', h('h2#explore-title', 'Explore'), launched),
-    h('div.explore-controls', tabs, h('div.explore-tools', h('label.filter-field', icon('search', 'icon-sm'), filter), feedToggle)),
+    h('div.explore-controls', tabs, h('div.explore-tools', h('label.filter-field', icon('search', 'icon-sm'), filter))),
     pairRow, chainRow, errors,
-    // The body is a size container: the feed drops below the list when the column gets narrow.
-    h('div.explore-body', { 'data-feed': String(state.feed) }, h('div.explore-layout',
-      h('div.explore-list', meta, grid, empty, pager),
-      feed)),
+    h('div.explore-body', { 'data-feed': 'false' }, h('div.explore-layout',
+      h('div.explore-list', meta, grid, empty, pager))),
     prices);
   const root = h('div.explore', h('h1.visually-hidden', 'Explore tokens'), kothSection, trending, listSection);
 
@@ -287,14 +270,7 @@ export function createExplore(source) {
     if ('query' in patch) source.onQuery?.(state.query);
     writeUrl(); draw();
   }
-  function setFeed(open) {
-    state.feed = open; store.set('elpida:feed', open ? 'on' : 'off');
-    feed.hidden = !open; feedToggle.setAttribute('aria-pressed', String(open));
-    listSection.querySelector('.explore-body').dataset.feed = String(open);
-    if (!open && feed.contains(document.activeElement)) feedToggle.focus();
-    draw(); // the page size follows the layout: 8 beside the feed, 12 across the full width
-  }
-  function perPage() { return state.feed ? PER_PAGE : PER_PAGE_WIDE; }
+  function perPage() { return PER_PAGE_WIDE; }
 
   function drawTrending(tokens) {
     const list = trendingTokens(tokens, 10);
@@ -333,22 +309,6 @@ export function createExplore(source) {
         pageButtons(view.page, view.pages).map(p => p === '…' ? h('span.page-gap', { 'aria-hidden': 'true' }, '…') : h('button.page-button', { type: 'button', 'aria-label': `Page ${p}`, 'aria-current': p === view.page ? 'page' : undefined, on: { click: go(p) } }, String(p))),
         h('button.page-button', { type: 'button', 'aria-label': 'Next page', disabled: view.page >= view.pages, on: { click: go(view.page + 1) } }, icon('chevron-right', 'icon-sm'))));
   }
-  function drawFeed(tokens) {
-    const rows = feedRows(state.trades, tokens, 20);
-    feedEmpty.hidden = rows.length > 0; livePill.hidden = !rows.length;
-    const before = new Set([...feedList.children].map(li => li.dataset.key));
-    const firstDraw = !feedList.dataset.drawn;
-    feedList.replaceChildren(...rows.map(({ trade, token }) => {
-      const key = `${keyOf(token)}:${trade.timestamp}`, f = figures(token);
-      const li = h('li.feed-row', { 'data-key': key, class: !firstDraw && !before.has(key) ? 'arrive' : undefined },
-        h('a.feed-link', { href: source.tokenHref(token) },
-          avatar(token, 'feed-avatar'),
-          h('span.feed-main', h('strong', token.metadata?.name ?? token.name), h('small', `$${token.metadata?.symbol ?? token.symbol} · ${token.quoteSymbol ?? source.nativeSymbol(token)}`)),
-          h('span.feed-side', timeNode('time.feed-when', trade.timestamp, 'bought'), f.cap > 0 ? h('small', `${f.capText} MC`) : null)));
-      return li;
-    }));
-    feedList.dataset.drawn = '1';
-  }
   function drawPrices() {
     const list = source.prices();
     if (!list.length) { prices.replaceChildren(); return; }
@@ -385,7 +345,6 @@ export function createExplore(source) {
         h('a.btn-accent', { href: '#/launch' }, icon('plus', 'icon-sm'), 'Create a token')));
     empty.hidden = !!view.total;
     drawPager(view);
-    drawFeed(tokens);
     drawPrices();
   }
 
@@ -397,8 +356,8 @@ export function createExplore(source) {
     root,
     /** New data from a refresh: cards update in place. */
     update() { draw(); },
-    /** Recent buys for the Live feed (newest first, the /recent-trades shape). */
-    setTrades(trades) { state.trades = Array.isArray(trades) ? trades : []; drawFeed(source.tokens() ?? []); },
+    /** Kept for the app's refresh loop; Explore no longer shows a Live feed. */
+    setTrades() {},
     /** A query typed in the top bar search. */
     setQuery(query,{reveal=false}={}) { if(query!==state.query||reveal){Object.assign(state,{query,page:1,...(reveal?{chain:'all',pair:'all',tab:'trending'}:{})});if(filter.value!==query)filter.value=query;writeUrl();draw();}if(reveal)jumpToList(); },
     revealSearch(){jumpToList();},

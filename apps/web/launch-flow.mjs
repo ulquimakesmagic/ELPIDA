@@ -202,7 +202,6 @@ export function renderLaunch(ctx) {
       try {
         if (!IMAGE_TYPES.includes(f.type)) throw new Error(`Use a ${IMAGE_FORMATS} image.`);
         if (f.size > MAX_IMAGE_BYTES) throw new Error(`This image is ${(f.size / 1024 / 1024).toFixed(2)} MB. Use one up to 5 MB.`);
-        // Stored exactly as uploaded; every box that shows it fits the whole image (nothing is cut off).
         const data = await new Promise((done, fail) => { const r = new FileReader(); r.onload = () => done(r.result); r.onerror = () => fail(new Error('The image could not be read.')); r.readAsDataURL(f); });
         normalizeMetadata({ image: data });
         draft.image = data; draft.imageUrl = ''; url.value = ''; save(); logoPreview(); drawPreview();
@@ -212,7 +211,7 @@ export function renderLaunch(ctx) {
     return { body: [
       h('div.row-2', field({ label: 'Token name', control: name, hint: `Up to ${profile().maxNameBytes} characters.` }), field({ label: 'Symbol', control: symbol, hint: '1–10 letters or numbers, shown in capitals.' })),
       h('div.field', h('label', { for: description.id = 'f-description' }, 'Description', counter), description, h('p.error-text#f-description-error', { role: 'alert' })),
-      h('div.field', h('span.field-label', 'Logo'), h('div.logo-drop', logoBox, h('div.stack', h('label.field-label', { for: 'logo-file' }, 'Upload an image'), file, h('p.hint#logo-hint', `${IMAGE_FORMATS}, any shape, up to 5 MB. It is shown whole everywhere, never cropped. Reselect large uploads if you reload the page.`), draft.image ? remove : null)), logoError),
+      h('div.field', h('span.field-label', 'Logo'), h('div.logo-drop', logoBox, h('div.stack', h('label.field-label', { for: 'logo-file' }, 'Upload an image'), file, h('p.hint#logo-hint', `Square ${IMAGE_FORMATS}, up to 5 MB on every network. Keep logos simple. Reselect large uploads if you reload the page.`), draft.image ? remove : null)), logoError),
       field({ label: 'Or use a hosted logo URL', optional: true, control: url, hint: 'A public HTTPS image address. Uploading is more reliable.' }),
       h('fieldset', { class: 'stack' }, h('legend.field-label', 'Community links ', h('span.opt', 'Optional')),
         h('div.row-2', field({ label: 'Website', control: input('website', { type: 'url', placeholder: 'https://yourproject.com' }) }), field({ label: 'X', control: input('twitter', { type: 'url', placeholder: 'https://x.com/yourproject' }) })),

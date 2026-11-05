@@ -1,5 +1,8 @@
 import { nowSeconds } from './clock.mjs';
-export function freshUsd(token,now=nowSeconds()){const p=token.usdReference;return p?.status==='fresh'&&Number.isFinite(p.usd)&&p.usd>0&&now-p.updatedAt<=(p.maxAge??180)?p.usd:null;}
+/** How old a reference price may be and still value tokens on screen (display only; launches verify their own). */
+export const DISPLAY_MAX_AGE = 3600;
+/** The dollar rate to display: a fresh or briefly stale reference (a missed refresh never blanks every value). */
+export function freshUsd(token,now=nowSeconds()){const p=token.usdReference;return ['fresh','stale'].includes(p?.status)&&Number.isFinite(p.usd)&&p.usd>0&&now-p.updatedAt<=Math.max(p.maxAge??180,DISPLAY_MAX_AGE)?p.usd:null;}
 export function discoveryTokens(tokens,{query='',category='all'}={},now=nowSeconds()){
   const items=tokens.filter(t=>`${t.name} ${t.symbol}`.toLowerCase().includes(query.trim().toLowerCase())).filter(t=>category==='migrating'?t.complete&&!t.graduated:category==='graduated'?t.graduated:true);
   const identity=t=>`${t.network??'local'}:${t.address}`;
@@ -11,15 +14,23 @@ export function discoveryTokens(tokens,{query='',category='all'}={},now=nowSecon
     return cap(b)*(rateB??0)-cap(a)*(rateA??0)||identity(a).localeCompare(identity(b));
   });
 }
+/**
+ * Price change for the cards, from confirmed executions in the pair asset (never current USD FX or an invented launch
+ * price): the latest trade against the last trade at least 24 hours old. A token younger than that, or whose trades
+ * are all within the last day, is compared with its first trade ("since launch"). The latest trade is the current
+ * price however long ago it happened, so every traded token has a change.
+ */
 export function indexedChange(db,token,now=Math.floor(Date.now()/1000)){
-  // Compare executions in the quote asset, not current USD FX or an invented launch price.
   const column=db.prepare('PRAGMA table_info(trades)').all().some(c=>c.name==='mint')?'mint':'address';
-  const row=db.prepare(`SELECT data FROM trades WHERE ${column}=? AND timestamp<=? ORDER BY timestamp DESC LIMIT 1`).get(token.address,now-86400);
-  const latest=db.prepare(`SELECT data FROM trades WHERE ${column}=? AND timestamp<=? ORDER BY timestamp DESC LIMIT 1`).get(token.address,now);
-  if(!row||!latest)return null;
-  const old=JSON.parse(row.data),next=JSON.parse(latest.data);
-  if(old.timestamp<now-90000||next.timestamp<now-3600||!(old.priceQuote>0)||!(next.priceQuote>0))return null;
-  return {percent:(next.priceQuote/old.priceQuote-1)*100,interval:'24h',basis:'Confirmed execution prices in the trading pair; includes trader fees',from:old.timestamp,to:next.timestamp};
+  // A chain clock a little ahead of this server's (a local simulation) still counts its latest trade.
+  const latest=db.prepare(`SELECT data FROM trades WHERE ${column}=? AND timestamp<=? ORDER BY timestamp DESC LIMIT 1`).get(token.address,now)
+    ??db.prepare(`SELECT data FROM trades WHERE ${column}=? ORDER BY timestamp DESC LIMIT 1`).get(token.address);
+  if(!latest)return null;
+  const dayOld=db.prepare(`SELECT data FROM trades WHERE ${column}=? AND timestamp<=? ORDER BY timestamp DESC LIMIT 1`).get(token.address,now-86400);
+  const base=dayOld??db.prepare(`SELECT data FROM trades WHERE ${column}=? ORDER BY timestamp ASC LIMIT 1`).get(token.address);
+  const old=JSON.parse(base.data),next=JSON.parse(latest.data);
+  if(!(old.priceQuote>0)||!(next.priceQuote>0))return null;
+  return {percent:(next.priceQuote/old.priceQuote-1)*100,interval:dayOld?'24h':'since launch',basis:dayOld?'24h change: confirmed execution prices in the trading pair, including trader fees':'Change since the first trade: confirmed execution prices in the trading pair, including trader fees',from:old.timestamp,to:next.timestamp};
 }
 
 const EMPTY_ACTIVITY = Object.freeze({ volume24h: 0, trades24h: 0, buys24h: 0, sells24h: 0, lastTradeAt: null, lastBuyAt: null });

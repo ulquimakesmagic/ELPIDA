@@ -202,8 +202,7 @@ details.tech .kv dd { font-weight: 500; word-break: break-all; }
 .figure span { display: block; font-size: var(--text-xs); color: var(--ink-3); }
 .figure strong { font-size: var(--text-md); font-weight: 600; }
 .avatar { width: 44px; height: 44px; border-radius: var(--radius-md); background: var(--surface-2); display: grid; place-items: center; overflow: hidden; flex: none; color: var(--ink-3); border: 1px solid var(--line); }
-/* Token images are shown whole in every box, whatever their shape (5 November 2026): never cropped. */
-.avatar img { width: 100%; height: 100%; object-fit: contain; }
+.avatar img { width: 100%; height: 100%; object-fit: cover; }
 .avatar-lg { width: 72px; height: 72px; border-radius: 14px; }
 .avatar .initials { font-family: var(--font-display); font-weight: 650; font-size: var(--text-md); color: var(--ink-2); }
 .avatar-lg .initials { font-size: var(--text-2xl); }
@@ -762,7 +761,7 @@ dialog{max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contai
 .analytics-summary .analytics-metric { padding:16px; }
 .analytics-summary .analytics-metric strong { font-size:24px; }
 .analytics-token { display:flex; align-items:center; gap:10px; min-width:160px; }
-.analytics-avatar { width:32px; height:32px; flex:0 0 32px; border-radius:50%; object-fit:contain; background:var(--panel-2); }
+.analytics-avatar { width:32px; height:32px; flex:0 0 32px; border-radius:50%; object-fit:cover; }
 .analytics-policy { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; margin:24px 0; }
 .analytics-policy>div { display:flex; flex-direction:column; gap:6px; }
 .analytics-policy strong { color:var(--primary); font-size:24px; }

@@ -23,10 +23,13 @@ export function usdReferenceFor(token, nativeReference, now = Math.floor(Date.no
   // Never promote test issuer data into a live stock valuation.
   const stock=token?.stock;
   if(token?.pair==='xstock'&&['ethereum-sepolia','base-sepolia','bnb-testnet','robinhood-testnet'].includes(token.network)&&stock?.provider==='ondo-test'){
+    // A simulated price is a test parameter, not market data, so its age does not blank the dollar values on screen
+    // (5 November 2026: STKTEST showed "USD unavailable" once the test feed had not been set for five days). The source
+    // says when it was last set. The graduation gate still checks the on-chain feed's freshness itself.
     const usd=Number(stock.price),updatedAt=Number(stock.updatedAt),age=now-updatedAt;
-    if(!stock.paused&&['open','closed'].includes(stock.marketStatus)&&Number.isFinite(usd)&&usd>0&&Number.isFinite(updatedAt)&&age>=-300&&age<=172800)
-      return {status:'fresh',usd,updatedAt:Math.min(now,updatedAt),maxAge:172800,source:'Simulated test-stock USD feed (no monetary value)',feed:stock.feed};
-    return null;
+    if(stock.paused||!['open','closed'].includes(stock.marketStatus)||!Number.isFinite(usd)||usd<=0||!Number.isFinite(updatedAt)||age<-300)return null;
+    if(age<=172800)return {status:'fresh',usd,updatedAt:Math.min(now,updatedAt),maxAge:172800,source:'Simulated test-stock USD feed (no monetary value)',feed:stock.feed};
+    return {status:'fresh',usd,updatedAt:now,maxAge:172800,source:`Simulated test-stock USD feed, last set ${new Date(updatedAt*1000).toISOString().slice(0,16).replace('T',' ')} UTC (no monetary value)`,feed:stock.feed};
   }
   return token?.usdReference ?? null;
 }

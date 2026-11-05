@@ -1,4 +1,5 @@
 import { nowSeconds } from './clock.mjs';
+import { freshUsd } from './discovery.mjs';
 // Small DOM and formatting helpers shared by every Elpida view. All dynamic text goes through
 // textContent; no untrusted value is ever inserted as HTML.
 import { normalizeMetadata } from './metadata.mjs';
@@ -61,10 +62,8 @@ export function pricing(token) {
   // and market cap equals FDV: price × 1B. Tokens still in the curve or pool are part of that supply.
   return { price, fdv: price * supply, marketCap: price * supply, circulating: supply, supply };
 }
-export function usdRate(token) {
-  const p=token.usdReference;
-  return p?.status==='fresh'&&Number.isFinite(p.usd)&&p.usd>0&&nowSeconds()-p.updatedAt<=(p.maxAge??180)?p.usd:null;
-}
+/** The dollar rate to display (see `freshUsd`: a missed price refresh does not blank every dollar value). */
+export function usdRate(token) { return freshUsd(token, nowSeconds()); }
 export const fmtPrice = token => usdRate(token)!==null ? formatPrice(pricing(token).price*usdRate(token)) : `${formatPrice(pricing(token).price, '')} ${token.quoteSymbol ?? ''}`.trim();
 export const fmtValue = (value, token) => usdRate(token)!==null ? '$'+compact(value*usdRate(token)) : `${compact(value)} ${token.quoteSymbol ?? ''}`.trim();
 export function progressOf(token) {
@@ -160,5 +159,6 @@ export const storage = {
   remove(key) { try { sessionStorage.removeItem(key); } catch {} },
 };
 
-// Market capitalization is always dollar-denominated; an absent FX reference is not a pair-value cap.
-export const fmtMarketCap = (token, value = pricing(token).marketCap) => usdRate(token) === null ? 'USD unavailable' : '$' + compact(Number(value) * usdRate(token));
+// Market cap in dollars; a pair whose asset has no dollar price at all (a test paired token) shows it in that asset,
+// like the price and volume, instead of "USD unavailable".
+export const fmtMarketCap = (token, value = pricing(token).marketCap) => usdRate(token) === null ? `${compact(Number(value))} ${token.quoteSymbol ?? ''}`.trim() : '$' + compact(Number(value) * usdRate(token));
