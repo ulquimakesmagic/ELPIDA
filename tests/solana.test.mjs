@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import * as web3 from '@solana/web3.js';
 import {
   createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, curveParams, poolStats, encodeCurveParams,
-  DISCRIMINATORS, EVENTS, LEGACY_EVENTS, TOKEN_SUPPLY, STATUS_GRADUATED, STATUS_MIGRATED, BPS, explainError, decodeEvents,
+  DISCRIMINATORS, EVENTS, LEGACY_EVENTS, TOKEN_SUPPLY, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, lockedPoolVenue, tradeFeeBps, BPS, explainError, decodeEvents,
   harvestableLp, harvestNow, MPL_TOKEN_METADATA, MAX_LAUNCH_URI, GRADUATION_GRACE_SECS, validMetadataUri, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint, PYTH_RECEIVER, SOL_USD_FEED_ID, SOL_USD_PRICE_ACCOUNT, parsePriceUpdate, usdToQuote, virtualQuoteForFdv,
   RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, VENUE_RAYDIUM, raydiumCreationCost, raydiumQuote, raydiumBuybackAmount,
 } from '../packages/solana/client.mjs';
@@ -1047,6 +1047,101 @@ test('Solana pairs reject quote tokens that would break the curve or never gradu
   assert.match(explainError(new Error('custom program error: 0x1785')), /permanent delegate/);
 });
 
+test('Solana stock pairs (Ondo stand-in): pause and freeze never strand the curve; the completing buy opens a locked pool that keeps trading', { skip }, async () => {
+  // Shaped like TSLAon on Solana: Token-2022, 9 decimals, ConfidentialTransferMint, DefaultAccountState (initialized),
+  // TransferHook with no program, MetadataPointer, ScaledUiAmount, Pausable and a freeze authority (the issuer).
+  const spl = f.spl, t22 = new PublicKey(TOKEN_2022_PROGRAM), stock = Keypair.generate(), issuer = f.authority;
+  await send(f.connection, f.authority, await spl.createStockMint2022Ixs(f.connection, f.authority.publicKey, stock.publicKey, 9, f.client.faucetAuthority, issuer.publicKey, 1.00172), [stock]);
+  const mintInfo = await f.connection.getAccountInfo(stock.publicKey);
+  assert.equal(mintInfo.data.length, spl.STOCK_MINT_SIZE);
+  assert.equal(lockedPoolVenue(mintInfo.data, mintInfo.owner.toBase58()), true, 'Ondo-shaped mints graduate into the locked pool');
+  assert.equal(lockedPoolVenue((await f.connection.getAccountInfo(f.quoteMint)).data, TOKEN_PROGRAM), false);
+  const UNIT = 1_000_000_000n;
+  const params = curveParams({ startFdv: 50, endFdv: 500, quoteDecimals: 9, launchFee: '0.01', snipeWindowSecs: 4 });
+  await send(f.connection, f.authority, [f.client.addCurveConfig({ authority: f.authority.publicKey, quoteMint: stock.publicKey, treasury: f.treasury, quoteTokenProgram: t22, params })], [], 1);
+  const cfg = { address: f.client.configFor(stock.publicKey), quoteMint: stock.publicKey, treasury: f.treasury, quoteTokenProgram: t22 };
+  const [creator, trader] = [Keypair.generate(), Keypair.generate()];
+  for (const kp of [creator, trader]) {
+    await airdrop(f.connection, kp.publicKey, 5 * web3.LAMPORTS_PER_SOL);
+    await send(f.connection, kp, [f.client.testUsdcFaucet({ user: kp.publicKey, mint: stock.publicKey, tokenProgram: t22, amount: 1_000n * UNIT })]);
+  }
+  const stockOf = owner => balance(f.client.quoteAta(owner, cfg));
+  const buyStock = (who, mint, grossIn, minTokensOut = 1n) => send(f.connection, who, [f.client.buy({ buyer: who.publicKey, config: cfg, mint, grossIn, minTokensOut })], [], 1);
+  const sellStock = (who, mint, tokensIn, minQuoteOut = 1n) => send(f.connection, who, [f.client.sell({ seller: who.publicKey, config: cfg, mint, tokensIn, minQuoteOut })], [], 1);
+  const vaults = async mint => {
+    const p = await pool(mint), key = f.client.poolPda(mint);
+    assert.equal(await balance(f.client.quoteAta(key, cfg)), p.realQuote + p.liquidityBonus + p.protocolFees + p.creatorFees, 'stock vault = reserve + bonus + owed fees');
+    assert.equal(await balance(f.client.ata(key, mint)), TOKEN_SUPPLY - p.sold, 'token vault = supply - sold');
+    return p;
+  };
+  const mint = Keypair.generate();
+  await send(f.connection, creator, [f.client.computeBudget(), f.client.launch({ uri: TEST_URI, creator: creator.publicKey, config: cfg, mint: mint.publicKey, name: 'Stock Garden', symbol: 'STKG', firstBuy: 1n * UNIT, minTokensOut: 1n, reward: f.rewardWallet.publicKey })], [mint], 1);
+  await afterSnipeWindow(mint.publicKey);
+  await buyStock(trader, mint.publicKey, 5n * UNIT);
+  await vaults(mint.publicKey);
+  // Pause: every transfer of the stock stops, so trades fail and nothing changes; after resume the curve trades on.
+  await send(f.connection, issuer, [spl.pauseIx(stock.publicKey, issuer.publicKey, true)]);
+  const paused = await pool(mint.publicKey);
+  await failsWith(buyStock(trader, mint.publicKey, 1n * UNIT), /custom program error/);
+  assert.deepEqual(await pool(mint.publicKey), paused, 'a paused stock leaves the curve untouched');
+  await send(f.connection, issuer, [spl.pauseIx(stock.publicKey, issuer.publicKey, false)]);
+  const held = await balance(f.client.ata(trader.publicKey, mint.publicKey));
+  await sellStock(trader, mint.publicKey, held / 3n);
+  // Freeze one holder's stock account: that holder cannot sell into it; everyone else trades on.
+  const traderStock = f.client.quoteAta(trader.publicKey, cfg);
+  await send(f.connection, issuer, [spl.freezeIx(traderStock, stock.publicKey, issuer.publicKey, true)]);
+  await failsWith(sellStock(trader, mint.publicKey, held / 3n), /custom program error/);
+  await buyStock(creator, mint.publicKey, 1n * UNIT);
+  await send(f.connection, issuer, [spl.freezeIx(traderStock, stock.publicKey, issuer.publicKey, false)]);
+  // The completing buy opens the locked pool in the same transaction: no migration step, no third-party venue.
+  const before = await pool(mint.publicKey);
+  const q = quoteBuy(before, 900n * UNIT, BigInt(params.baseFeeBps));
+  assert.equal(q.graduates, true);
+  const events = await eventsOf(await buyStock(trader, mint.publicKey, 900n * UNIT, q.tokens));
+  const locked = await vaults(mint.publicKey);
+  assert.equal(locked.status, STATUS_LOCKED);
+  assert.equal(locked.liquidityBonus, 0n); assert.equal(locked.virtualQuote, 0n); assert.equal(locked.virtualToken, TOKEN_SUPPLY);
+  assert.equal(locked.sold, locked.curveSupply);
+  const opened = events.find(e => e.name === 'LockedPoolOpened');
+  assert.ok(opened, 'LockedPoolOpened emitted'); assert.ok(!events.some(e => e.name === 'CurveGraduated'), 'no migration is pending');
+  assert.equal(opened.quoteReserve, locked.realQuote); assert.equal(opened.tokenReserve, TOKEN_SUPPLY - locked.sold);
+  const curveClose = Number(before.virtualQuote + before.realQuote + q.net) / Number(before.virtualToken - before.sold - q.tokens);
+  assert.ok(Math.abs(Number(locked.realQuote) / Number(TOKEN_SUPPLY - locked.sold) / curveClose - 1) < 0.02, 'the pool opens at the curve close');
+  assert.equal(poolStats(locked, 9).locked, true);
+  // Trading continues at the flat base fee and matches the client math; k never falls.
+  const k = p => p.realQuote * (TOKEN_SUPPLY - p.sold);
+  const config = f.client.decodeConfig((await f.connection.getAccountInfo(cfg.address)).data);
+  const fee = tradeFeeBps(config, locked, 0);
+  assert.equal(fee, BigInt(params.baseFeeBps));
+  const qb = quoteBuy(locked, 10n * UNIT, fee);
+  assert.equal(qb.graduates, false); assert.equal(qb.gross, 10n * UNIT);
+  const boughtBefore = await balance(f.client.ata(creator.publicKey, mint.publicKey));
+  await failsWith(buyStock(creator, mint.publicKey, 10n * UNIT, qb.tokens + 1n), /0x1777/);
+  await buyStock(creator, mint.publicKey, 10n * UNIT, qb.tokens);
+  assert.equal(await balance(f.client.ata(creator.publicKey, mint.publicKey)) - boughtBefore, qb.tokens);
+  const afterBuy = await vaults(mint.publicKey);
+  assert.ok(k(afterBuy) >= k(locked));
+  const sellAll = await balance(f.client.ata(creator.publicKey, mint.publicKey));
+  const qs = quoteSell(afterBuy, sellAll, fee);
+  const stockBefore = await stockOf(creator.publicKey);
+  await sellStock(creator, mint.publicKey, sellAll, qs.net);
+  assert.equal(await stockOf(creator.publicKey) - stockBefore, qs.net);
+  const afterSell = await vaults(mint.publicKey);
+  assert.ok(k(afterSell) >= k(afterBuy)); assert.equal(afterSell.status, STATUS_LOCKED);
+  // Paused while locked: trades fail and resume afterwards. The liquidity can never leave: no migration, no reopen.
+  await send(f.connection, issuer, [spl.pauseIx(stock.publicKey, issuer.publicKey, true)]);
+  await failsWith(sellStock(trader, mint.publicKey, 1_000_000n), /custom program error/);
+  await send(f.connection, issuer, [spl.pauseIx(stock.publicKey, issuer.publicKey, false)]);
+  await sellStock(trader, mint.publicKey, 1_000_000n);
+  await failsWith(send(f.connection, f.outsider, [f.client.computeBudget(MIGRATE_COMPUTE_UNITS), f.client.migrateToPumpswap({ payer: f.outsider.publicKey, config: cfg, mint: mint.publicKey })], [], 1), /0x1780|0x1791/);
+  await failsWith(send(f.connection, f.outsider, [f.client.reopenCurve({ mint: mint.publicKey })]), /0x1780/);
+  // Fees stay claimable; the reserve does not move.
+  const preFees = await vaults(mint.publicKey);
+  await send(f.connection, f.outsider, [f.client.withdrawFees({ payer: f.outsider.publicKey, config: cfg, mint: mint.publicKey, reward: f.rewardWallet.publicKey })]);
+  const postFees = await vaults(mint.publicKey);
+  assert.equal(postFees.realQuote, preFees.realQuote); assert.equal(postFees.protocolFees + postFees.creatorFees, 0n);
+});
+
 test('Solana beta gate: invite-only launches, allowlist managed by the beta admin, then open again', { skip }, async () => {
   const programId = f.programId;
   const admin = Keypair.generate(), outsider = Keypair.generate();
@@ -1192,8 +1287,13 @@ test('Solana public indexer: pools, launch/buy/sell trades, candles and holders 
     // A graduated, unmigrated curve advertises when it can be reopened (D7).
     const waiting = listings.find(t => t.complete && !t.graduated);
     if (waiting) assert.equal(waiting.reopenableAt, waiting.completedAt + GRADUATION_GRACE_SECS);
+    // Stock pairs that completed into the program's locked pool are priced from that pool (the curve state itself).
+    assert.ok(listings.some(t => t.symbol === 'STKG' && t.lockedPool), 'the stock-pair test token is listed as trading in its locked pool');
+    for (const locked of listings.filter(t => t.lockedPool)) {
+      assert.ok(locked.graduated && locked.complete && locked.dex === 'Elpida locked pool' && Number(locked.liquidity) > 0 && locked.spotPrice > 0, `${locked.symbol} priced from its locked pool`);
+    }
     // Migrated tokens are priced from the PumpSwap pool, not the emptied curve.
-    for (const migrated of listings.filter(t => t.graduated)) {
+    for (const migrated of listings.filter(t => t.graduated && !t.lockedPool)) {
       assert.ok(migrated.pumpPool && Number(migrated.liquidity) > 0 && migrated.spotPrice > 0, `${migrated.symbol} priced from PumpSwap`);
     }
     assert.ok(retained.includes(TEST_URI), 'published metadata retained once seen on chain');

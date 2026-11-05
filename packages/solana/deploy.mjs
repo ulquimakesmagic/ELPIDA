@@ -282,7 +282,9 @@ export async function ensurePairConfigs({ connection, payer, programId, treasury
     if (!mint) {
       const kp = Keypair.generate();
       onProgress(`Creating ${t.symbol} test mint ${kp.publicKey.toBase58()}…`);
-      const ixs = t.token2022
+      const ixs = t.ondoStandIn
+        ? await spl.createStockMint2022Ixs(connection, payer.publicKey, kp.publicKey, t.decimals, client.faucetAuthority, payer.publicKey)
+        : t.token2022
         ? await spl.createMint2022Ixs(connection, payer.publicKey, kp.publicKey, t.decimals, client.faucetAuthority, t.permanentDelegate === false ? null : payer.publicKey)
         : await spl.createMintIxs(connection, payer.publicKey, kp.publicKey, t.decimals, client.faucetAuthority);
       await send(connection, payer, ixs, [kp]);

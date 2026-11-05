@@ -1,5 +1,24 @@
 # Actions that need Malik
 
+## Solana stock pairing: devnet program upgrade, 4 November 2026
+
+The program now lets a curve paired with an issuer-controlled stock (Ondo's TSLAon, SPYon, NVDAon on Solana) complete
+into Elpida's own locked pool, because no Solana DEX accepts those mints today (`docs/SOLANA_STOCK_PAIRING.md`).
+Devnet only; nothing changes for SOL pairs. Launches stay SOL-only on the site until this upgrade is in.
+
+New SHA256 (Solana CLI 2.3.13): test build `788f760314f4f3b1b55d69651e901d3bf42595d8b73aa17728f72d8a88821a05`,
+mainnet build `36f672d31b5677b992ab4d12566fc3832752e2bbbedab0b9a66af807fd9bbaaf`.
+
+1. After the PR is merged, in `elpida-fork`: `git pull`, then check the build:
+   `certutil -hashfile contracts\solana\build\elpida_launchpad.so SHA256` must print
+   `788f760314f4f3b1b55d69651e901d3bf42595d8b73aa17728f72d8a88821a05`.
+2. Make sure the deployer `FeUWF…KaH8` holds about **6.5 devnet SOL** (most of it is an upload buffer, refunded).
+3. Run `node scripts/solana-deploy.mjs --upgrade --stock-pairs --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`.
+   `--stock-pairs` creates the **tTSLAon** stand-in (Token-2022, 9 decimals, pause, freeze, transfer-hook authority,
+   confidential transfers, scaled UI amount, exactly like Ondo's mint; no value) and its pair config.
+4. Send Claude the output. If the script rewrites `deployments/solana-devnet.json`, do not commit it; Claude adds the
+   stand-in pair to the launch picker and the operator panel in the next PR.
+
 ## Mainnet preview on forks: Model 10 and the stock pairs on every chain, 3 November 2026
 
 One command previews Elpida on local copies of real mainnet state: Ethereum, BNB Chain, Robinhood Chain and Base.

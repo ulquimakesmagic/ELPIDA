@@ -1,5 +1,5 @@
 import { nowSeconds } from './clock.mjs';
-import { createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut, VENUE_RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, raydiumQuote, raydiumCreationCost, raydiumBuybackAmount } from '/elpida-solana.mjs';
+import { createElpidaSolana, quoteBuy, quoteSell, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, tradeFeeBps, lockedPoolVenue, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut, VENUE_RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, raydiumQuote, raydiumCreationCost, raydiumBuybackAmount } from '/elpida-solana.mjs';
 import {normalizeMetadata,withSavedMetadata} from './metadata.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 import { PAIR_LIMITS, SOLANA_LAUNCH_KINDS, usdReferenceFor } from '/pairs.mjs';
@@ -7,6 +7,8 @@ import { withWalletTimeout, walletErrorText } from './wallet.mjs';
 
 import { injectedSolanaWallets, standardSolanaWallets, standardSolanaProvider } from './wallet-discovery.mjs';
 const SOL_CHOICE = 'elpida:solana-wallet';
+/** Where an issuer-controlled stock pair trades after its curve completes. */
+const LOCKED_POOL_VENUE = 'Elpida locked pool';
 /** Installed Solana signing wallets; standard adapters take precedence. */
 export function solanaWallets(chain='solana:devnet') {
  const list=injectedSolanaWallets(typeof window==='undefined'?{}:window);
@@ -119,7 +121,8 @@ export class SolanaWallet {
     });
     if (!this.configs.size) throw new Error('The Solana SOL pair is not set up. Upgrade the program and run the deploy again (solana-upgrade.cmd, then npm.cmd run solana:deploy).');
     const mints = await this.connection.getMultipleAccountsInfo([...this.configs.values()].map(cfg => cfg.quoteMint));
-    [...this.configs.values()].forEach((cfg, i) => { cfg.quoteTokenProgram = mints[i]?.owner ?? c.tokenProgram; });
+    // Issuer-controlled quotes (Ondo stocks) complete into the program's own locked pool, in the completing buy.
+    [...this.configs.values()].forEach((cfg, i) => { cfg.quoteTokenProgram = mints[i]?.owner ?? c.tokenProgram; cfg.lockedPool = lockedPoolVenue(mints[i]?.data, mints[i]?.owner?.toBase58()); });
     const all = [...this.configs.values()];
     const launch = all.find(cfg => cfg.kind === 'native') ?? all[0];
     this.programConfig = launch; this.decimals = launch.quoteDecimals;
@@ -223,7 +226,7 @@ export class SolanaWallet {
     return { hash: signature, message: `The curve is complete and ${symbol ?? 'the token'} now trades on ${dex}. The liquidity is locked for good.` };
   }
   /** Where a pair graduates: Raydium CPMM for SOL, PumpSwap for every other pair. */
-  venueOf(config) { return config?.wsol ? 'Raydium' : 'PumpSwap'; }
+  venueOf(config) { return config?.lockedPool ? LOCKED_POOL_VENUE : config?.wsol ? 'Raydium' : 'PumpSwap'; }
   /** SOL the migrating wallet lends for the instruction: Raydium's fee and rent (all repaid), or PumpSwap rent (mostly refunded). */
   migrationAdvance(config) { return config.wsol ? raydiumCreationCost() + 10_000_000n : SolanaWallet.MIGRATION_RENT; }
   migrateIx(config, refs, mint) { return config.wsol ? this.client.migrateToRaydium({ payer: this.publicKey, config: refs, mint }) : this.client.migrateToPumpswap({ payer: this.publicKey, config: refs, mint }); }
@@ -253,8 +256,8 @@ export class SolanaWallet {
       this.launches.set(address, pool);
       const config = this.configOf(pool), d = config.quoteDecimals;
       const stats = poolStats(pool, d);
-      const complete = pool.status === STATUS_GRADUATED || pool.status === STATUS_MIGRATED;
-      const feeBps = currentFeeBps(config, pool.createdAt, now);
+      const complete = pool.status === STATUS_GRADUATED || pool.status === STATUS_MIGRATED || pool.status === STATUS_LOCKED;
+      const feeBps = tradeFeeBps(config, pool, now);
       // Cost to finish the curve at the base fee (what it costs once the anti-snipe minute is over).
       const remainingBuy = complete ? 0n : quoteBuy(pool, MAX_U64, config.baseFeeBps, config.baseFeeBps).gross;
       const token = {
@@ -268,7 +271,7 @@ export class SolanaWallet {
         // Live anti-snipe schedule for the trade panel's fee window countdown.
         launchedAt: Number(pool.createdAt), feeSchedule: { base: Number(config.baseFeeBps), start: Number(config.snipeStartBps), window: Number(config.snipeWindowSecs) },
         // `complete`: the curve sold out; `graduated`: its liquidity is now in the locked PumpSwap pool.
-        complete, graduated: pool.status === STATUS_MIGRATED, completedAt: Number(pool.graduatedAt),
+        complete, graduated: pool.status === STATUS_MIGRATED || pool.status === STATUS_LOCKED, lockedPool: pool.status === STATUS_LOCKED, completedAt: Number(pool.graduatedAt),
         protocolFees: formatAmount(pool.protocolFees, d), creatorFees: formatAmount(pool.creatorFees, d), liquidityLocked: true,
         // Early-partner tier fixed at launch, and tokens its buybacks burned on the curve (LP-fee burns added below).
         buybackBps: pool.buybackBps, burned: formatAmount(pool.buybackBurned, TOKEN_DECIMALS),
@@ -424,7 +427,7 @@ export class SolanaWallet {
         ? { out: formatAmount(q.out, TOKEN_DECIMALS), fee: formatAmount(q.fee, d), spend: formatAmount(raw, d), maxSpend: formatAmount(q.limit, d), venue: 'PumpSwap' }
         : { out: formatAmount(q.out, d), fee: formatAmount(q.fee, d), venue: 'PumpSwap' };
     }
-    const feeBps = currentFeeBps(config, pool.createdAt, chainNow());
+    const feeBps = tradeFeeBps(config, pool, chainNow());
     const extra = { feeBps: Number(feeBps), antiSnipeActive: feeBps > BigInt(config.baseFeeBps) };
     if (side === 'buy') {
       const q = quoteBuy(pool, parseAmount(amount, d), feeBps, config.baseFeeBps);
@@ -610,6 +613,7 @@ export class SolanaWallet {
     }
     if (action === 'graduate') {
       const dex = this.venueOf(config);
+      if (pool.status === STATUS_LOCKED || config.lockedPool) throw new Error(`This token trades in its ${LOCKED_POOL_VENUE}, opened when the curve completed. Nothing to migrate.`);
       if (pool.status === STATUS_MIGRATED) throw new Error(`This token already trades on ${(await this.dexStateOf(pool).catch(() => null))?.venue ?? dex}.`);
       if (pool.status !== STATUS_GRADUATED) throw new Error('The curve is not complete yet.');
       const lent = this.migrationAdvance(config);
@@ -653,7 +657,7 @@ export class SolanaWallet {
     const bps = BigInt(Math.round(percent * 100));
     let instruction;
     if (pool.status === STATUS_GRADUATED) throw new Error(`This curve is complete. Migrate it to ${this.venueOf(config)} to continue trading.`);
-    const feeBps = currentFeeBps(config, pool.createdAt, chainNow());
+    const feeBps = tradeFeeBps(config, pool, chainNow());
     if (action === 'buy') {
       const grossIn = parseAmount(body.amount, d);
       const q = quoteBuy(pool, grossIn, feeBps, config.baseFeeBps);
@@ -661,7 +665,8 @@ export class SolanaWallet {
       if (held < q.gross + (config.wsol ? 5_000_000n : 0n)) throw new Error(`Not enough ${config.symbol} on ${this.net.name}.${config.test ? ' Use its test faucet in Network and funds.' : config.wsol ? ' Get devnet SOL at faucet.solana.com.' : ''}`);
       // Only what the trade actually charges is wrapped; a partial final fill leaves the rest unspent.
       const wrap = await this.wrapFor(config, q.gross), buyIx = this.client.buy({ buyer: this.publicKey, config: refs, mint, grossIn: q.gross, minTokensOut: q.tokens * (10000n - bps) / 10000n });
-      if (q.graduates) return this.completeAndMigrate({ config, refs, mint, wrap, buyIx, spend: q.gross, symbol: pool.symbol });
+      // A locked-pool pair opens its pool inside the completing buy itself: nothing to migrate.
+      if (q.graduates && !config.lockedPool) return this.completeAndMigrate({ config, refs, mint, wrap, buyIx, spend: q.gross, symbol: pool.symbol });
       instruction = [...wrap, buyIx];
     } else if (action === 'sell') {
       const tokensIn = parseAmount(body.amount, TOKEN_DECIMALS);

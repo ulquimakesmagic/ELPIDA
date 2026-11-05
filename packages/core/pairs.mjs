@@ -83,11 +83,15 @@ export function issuerNotice(provider) {
  * (launchFee in SOL, startFdv / endFdv in SOL). Test networks add a labelled test paired token, minted
  * only by the program's faucet PDA; its curve is sized in that token, its creation fee is still SOL.
  */
-export function solanaPairTemplates(native, { test = false, usdcMint = null, usdcStartFdv = '5000' } = {}) {
+export function solanaPairTemplates(native, { test = false, usdcMint = null, usdcStartFdv = '5000', stocks = false } = {}) {
   const sol = { kind: 'native', key: 'sol', symbol: 'SOL', name: 'SOL (wrapped automatically)', decimals: 9, wsol: true, startFdv: native.startFdv, endFdv: native.endFdv, launchFee: native.launchFee, testSized: !!native.testSized };
   const pairs = [sol];
   if (usdcMint) pairs.push({ kind: 'usdc', key: 'usdc', symbol: 'USDC', name: test ? 'Circle test USDC (no value)' : 'USDC', mint: usdcMint, decimals: 6, startFdv: usdcStartFdv, endFdv: String(Number(usdcStartFdv)*10), launchFee: native.launchFee, testSized: !!test });
   if (test) pairs.push({ kind: 'token', key: 'test-meme', symbol: 'TEST-MEME', name: 'Elpida test paired token (no value)', decimals: 6, startFdv: '500000', endFdv: '5000000', launchFee: native.launchFee, faucet: '6000000' });
+  // Solana stock pairing (decided 4 November 2026): a devnet stand-in shaped exactly like Ondo's TSLAon (Token-2022,
+  // 9 decimals, pause, freeze, transfer-hook authority, confidential transfers, scaled UI amount). Its curve completes
+  // into the program's own locked pool. Only with the upgraded program (`npm run solana:deploy -- --stock-pairs`).
+  if (test && stocks) pairs.push({ kind: 'xstock', key: 'test-ondo-tsla', symbol: 'tTSLAon', name: 'Elpida test Ondo-style TSLA stock (no value)', decimals: 9, ondoStandIn: true, startFdv: '50', endFdv: '500', launchFee: native.launchFee, faucet: '25' });
   return pairs;
 }
 

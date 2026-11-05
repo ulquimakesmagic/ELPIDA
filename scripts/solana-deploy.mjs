@@ -37,6 +37,7 @@ const { values: args } = parseArgs({ options: {
   rate: { type: 'string' }, // program-chunk uploads per second (public devnet allows only a few)
   upgrade: { type: 'boolean', default: false }, // upgrade an already deployed program to contracts/solana/build
   'no-test-pairs': { type: 'boolean', default: false }, // test networks: skip the test paired-token config
+  'stock-pairs': { type: 'boolean', default: false }, // test networks: add the tTSLAon stand-in (needs the locked-pool program)
   'beta-admin': { type: 'string' }, // wallet that manages the beta allowlist (default: the deployer)
   allow: { type: 'string', multiple: true, default: [] }, // creators allowed to launch during the beta
   'invite-only': { type: 'boolean', default: false }, // turn on the beta gate: only allowlisted creators can launch
@@ -160,7 +161,7 @@ if (!isAuthority) console.log('The upgrade authority is not this deployer (multi
 const publishedPath = `${root}deployments/solana-${args.cluster}.json`;
 const published = !localnet && existsSync(publishedPath) ? JSON.parse(readFileSync(publishedPath, 'utf8')) : null;
 const pairs = await ensurePairConfigs({ connection, payer, programId: programId, treasury: args.treasury ?? payer.publicKey.toBase58(),
-  templates: solanaPairTemplates(pricing, { test: !mainnet && !args['no-test-pairs'], usdcMint: SOLANA_ORACLES[args.cluster]?.usdcMint, usdcStartFdv: mainnet?'5000':'50' }), saved: savedTestAssets(state, published, programId.toBase58()), reprice: isAuthority, onProgress: message => console.log(message) });
+  templates: solanaPairTemplates(pricing, { test: !mainnet && !args['no-test-pairs'], usdcMint: SOLANA_ORACLES[args.cluster]?.usdcMint, usdcStartFdv: mainnet?'5000':'50', stocks: !mainnet && !!args['stock-pairs'] }), saved: savedTestAssets(state, published, programId.toBase58()), reprice: isAuthority, onProgress: message => console.log(message) });
 state.testAssets = Object.fromEntries(pairs.filter(p => p.test).map(p => [p.key, p.mint]));
 writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
 for (const p of pairs) console.log(`${p.symbol} pair config ${p.created ? 'created' : p.repriced ? 'repriced for future launches' : 'up to date'} (${p.kind}, mint ${p.mint}).`);
