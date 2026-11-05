@@ -116,7 +116,7 @@ export function createTokenizedEquity(config, { env = {}, fixtures = false } = {
       network: net, provider: pid, availableProviders: providersForNetwork(key), providerName: p.name, issuer: p.issuer, eligibility: p.eligibility.summary, nigeria: p.eligibility.nigeria,
       excluded: p.excluded ? { since: p.excluded.since, reason: p.excluded.reason } : null,
       marketHours: p.marketHours, balanceSemantics: p.balanceSemantics[net], unresolved: p.unresolved, sources: p.sources,
-      assets: [...assets.values()].filter(a => a.network === net && a.provider === pid).map(a => ({ symbol: a.symbol, underlying: a.underlying, address: a.address, capabilities: capabilities(a) })),
+      assets: [...assets.values()].filter(a => a.network === net && a.provider === pid).map(a => ({ symbol: a.symbol, underlying: a.underlying, address: a.address, decimals: a.decimals ?? null, feed: a.feed ?? null, capabilities: capabilities(a) })),
     };
   }
   return { providerForNetwork, providersForNetwork, mainnetFor, getAsset, capabilityState, capabilities, evaluateEligibility, describeNetwork, assets: () => [...assets.values()] };
