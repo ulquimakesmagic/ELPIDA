@@ -1,3 +1,4 @@
+import { isKothContender, kingOfTheHill, curveProgress } from './discovery.mjs';
 import { nowSeconds } from './clock.mjs';
 import { snipeLabel } from '/curve-model.mjs';
 import { assetIcon, chainIcon } from './chain-ui.mjs';
@@ -124,6 +125,7 @@ export function renderToken(ctx, address) {
           h('span.tk-tag', { title: 'Copy a link that shows a preview card on X, Telegram and Discord' }, 'Share', copyButton(`${location.origin}/token/${encodeURIComponent(token.network ?? ctx.wallet.net.key)}/${token.address}`, '')),
           token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null,
           (stock => stock ? h('span.tk-tag.tk-tag-stock', { 'data-ok': String(stock.usable), title: stock.reason ?? 'Stock price is fresh; the curve can graduate.' }, icon('chart-candlestick', 'icon-xs'), `${q} · ${STOCK_LABELS[stock.status] ?? stock.status}`) : null)(testStockStatus(token.stock)),
+          kothTag(ctx, token),
           (chip => chip ? h('span.tk-tag.tk-tag-burn', { 'data-tier': chip.tier.toLowerCase(), title: chip.title }, icon('flame', 'icon-xs'), `${chip.tier} · ${chip.text}`) : null)(partnerChip(token)))),
         h('div.tk-sub', h('div.tk-about', descText, descMore),
           h('div.tk-links', ...linkPills, explorerHref ? h('a.tk-pill.tk-pill-end', { href: explorerHref, target: '_blank', rel: 'noopener noreferrer', title: 'Open in explorer' }, 'Explorer', icon('arrow-up-right', 'icon-sm')) : null, txUrl(launchHash) ? h('a.tk-pill', { href: txUrl(launchHash), target: '_blank', rel: 'noopener noreferrer', title: 'The transaction that created this token' }, 'Launch transaction', icon('arrow-up-right', 'icon-sm')) : null)))));
@@ -284,6 +286,13 @@ function marketActivity(ctx,token,q,{addressUrl,isCreator,me,info,onCounts,onHol
   load();return panel;
 }
 
+/** King of the Hill: the crowned token closest to graduating, or a contender with 80%+ of its curve sold. */
+function kothTag(ctx, token) {
+  if (!isKothContender(token)) return null;
+  const king = kingOfTheHill(ctx.allTokens?.() ?? []), crowned = king && king.address?.toLowerCase() === token.address?.toLowerCase() && (king.network ?? '') === (token.network ?? king.network ?? '');
+  const pct = Math.round(curveProgress(token) * 100);
+  return h('span.tk-tag.tk-tag-koth', { 'data-king': crowned ? 'true' : undefined, title: crowned ? 'King of the Hill: the token closest to graduating right now' : `King of the Hill contender: ${pct}% of the curve sold` }, icon('crown', 'icon-xs'), crowned ? `King of the Hill · ${pct}%` : `KOTH · ${pct}%`);
+}
 export function tradePanel(ctx, token, { dex, solana }) {
   const q = token.quoteSymbol ?? ctx.state?.nativeSymbol ?? 'ETH';
 

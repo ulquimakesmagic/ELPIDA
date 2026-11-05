@@ -353,3 +353,34 @@
   .curve-track > span { transition: none; }
   .live-dot { animation: none; }
 }
+
+/* King of the Hill (5 November 2026): a gold crown on tokens with 80%+ of their curve sold; the king gets a spotlight. */
+.koth { --koth: #f5c542; --koth-bg: rgba(245, 197, 66, .12); --koth-line: rgba(245, 197, 66, .38); }
+.koth-badge { --koth: #f5c542; position: absolute; z-index: 2; pointer-events: none; display: inline-flex; align-items: center; gap: 4px; padding: 3px 8px;
+  border-radius: var(--r-pill); border: .67px solid rgba(245, 197, 66, .45); background: rgba(38, 30, 8, .82); color: var(--koth);
+  font: 700 10px/1.2 var(--font-sans); letter-spacing: .02em; -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
+.koth-badge[data-king="true"] { background: linear-gradient(#ffe08a, #f5c542 70%); color: #2a1d00; border-color: transparent; }
+.tc-media .koth-badge { top: 40px; left: 10px; }
+.lc-media .koth-badge { bottom: -8px; left: 50%; transform: translateX(-50%); padding: 2px 6px; font-size: 9px; white-space: nowrap; }
+.koth .section-title h2 { display: inline-flex; align-items: center; gap: 8px; }
+.koth-crown { color: #f5c542; width: 20px; height: 20px; }
+.koth-card { position: relative; display: grid; grid-template-columns: auto 1fr auto; align-items: center; gap: 16px; padding: 14px 16px;
+  border-radius: 20px; border: .67px solid var(--koth-line); background: linear-gradient(120deg, var(--koth-bg), transparent 60%), var(--panel); box-shadow: var(--shadow-card); }
+.avatar.koth-avatar { width: 64px; height: 64px; border-radius: 16px; border: 1.5px solid var(--koth); }
+.koth-main { display: grid; gap: 6px; min-width: 0; }
+.koth-name { display: flex; align-items: baseline; gap: 8px; font-size: 18px; font-weight: 600; letter-spacing: -.3px; min-width: 0; }
+.koth-name a { position: relative; z-index: 2; color: inherit; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.koth-name a:hover { text-decoration: underline; text-underline-offset: 3px; }
+.koth-ticker { font-size: 12px; color: var(--muted); font-weight: 500; }
+.koth-meta { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; font-size: 12px; color: var(--muted); }
+.koth-curve .curve-track { height: 5px; }
+.koth-curve .curve-track > span { background: linear-gradient(90deg, #c9961a, var(--koth)); }
+.koth-curve .curve-pct { color: var(--koth); font-weight: 650; }
+.koth-all { position: relative; z-index: 2; }
+@media (max-width: 640px) {
+  .koth-card { grid-template-columns: auto 1fr; }
+  .koth-all { grid-column: 1 / -1; justify-self: start; }
+}
+[data-theme="light"] .koth { --koth: #a87708; --koth-bg: rgba(245, 197, 66, .16); }
+[data-theme="light"] .koth-badge { background: rgba(255, 248, 225, .92); color: #8a6100; border-color: rgba(168, 119, 8, .4); }
+[data-theme="light"] .koth-crown { color: #a87708; }

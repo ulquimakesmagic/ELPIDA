@@ -59,3 +59,26 @@ test('mintControls reads the issuer\'s pause flag and transfer-hook program from
   assert.deepEqual(mintControls(mint(true), TOKEN_PROGRAM), { paused: false, hookProgram: null }, 'classic SPL mints have no such controls');
   assert.deepEqual(mintControls(null, TOKEN_2022_PROGRAM), { paused: false, hookProgram: null });
 });
+
+test('a Solana stock pair is valued in dollars from the devnet conversion pool × Pyth SOL/USD, labelled as a test price', async () => {
+  const { DISCRIMINATORS } = await import('../packages/solana/client.mjs');
+  const pool = (sol, stock) => { const d = new Uint8Array(57); d.set(DISCRIMINATORS.TestConversion, 0); const v = new DataView(d.buffer); v.setBigUint64(40, sol, true); v.setBigUint64(48, stock, true); return d; };
+  const make = (accounts, { mainnet = false } = {}) => {
+    const cfg = stock({ quoteMint: key() }), w = wallet([cfg]);
+    Object.assign(w, { price: { symbol: 'SOL', usd: 100, status: 'fresh', updatedAt: 1, maxAge: 120, source: 'Pyth SOL/USD (verified on-chain)' },
+      net: { name: 'Solana Devnet', mainnet, deployment: { programId: 'x' } },
+      _client: { testConversionPda: mint => mint },
+      connection: { getMultipleAccountsInfo: async keys => keys.map(() => accounts) } });
+    return { w, cfg };
+  };
+  // 1 SOL buys 0.2 tTSLAon (9 decimals): 5 SOL per stock × $100 = $500.
+  const seeded = make({ data: pool(1_000_000_000n, 200_000_000n) });
+  await seeded.w.loadConversionPrices();
+  assert.ok(Math.abs(seeded.cfg.usdReference.usd - 500) < 1e-9);
+  assert.equal(seeded.cfg.usdReference.status, 'fresh', 'as fresh as the SOL/USD price it uses');
+  assert.match(seeded.cfg.usdReference.source, /Devnet test price.*no monetary value/);
+  const none = make(null); await none.w.loadConversionPrices();
+  assert.equal(none.cfg.usdReference, null, 'no pool: values stay in the stock');
+  const main = make({ data: pool(1_000_000_000n, 200_000_000n) }, { mainnet: true }); await main.w.loadConversionPrices();
+  assert.equal(main.cfg.usdReference, null, 'never a test price on mainnet');
+});

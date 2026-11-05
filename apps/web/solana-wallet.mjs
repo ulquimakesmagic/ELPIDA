@@ -134,7 +134,9 @@ export class SolanaWallet {
     const response = await fetch('/api/public/tokens?network=' + encodeURIComponent(this.net.key));
     if (!response.ok) throw new Error('Public Solana token discovery is unavailable.');
     const entries = await response.json();
-    return Promise.all(entries.map(async item => ({ ...item, metadata: withSavedMetadata(item.metadata, this.deployment ? await readSaved(metadataKey(this.deployment.programId, item.address)) : null) })));
+    // Stock pairs carry their test USD reference (conversion pool × Pyth SOL/USD) when the configs and price are loaded.
+    const stockRef = item => item.pair === 'xstock' ? [...(this.configs?.values() ?? [])].find(cfg => cfg.kind === 'xstock' && cfg.symbol === item.quoteSymbol)?.usdReference ?? null : undefined;
+    return Promise.all(entries.map(async item => ({ ...item, ...(item.pair === 'xstock' ? { usdReference: stockRef(item) } : {}), metadata: withSavedMetadata(item.metadata, this.deployment ? await readSaved(metadataKey(this.deployment.programId, item.address)) : null) })));
   }
   /** USDC mint accepted for the $10 fee, when the deployment's USD pricing offers it. */
   get feeUsdc() { return this.deployment?.usdPricing?.usdcMint ?? null; }
@@ -156,7 +158,25 @@ export class SolanaWallet {
     const usd = Number(oracle.price) * 10 ** oracle.exponent, age = nowSeconds() - oracle.publishTime;
     this.price = { symbol: 'SOL', usd, updatedAt: oracle.publishTime, source: 'Pyth SOL/USD (verified on-chain)', maxAge: bound.maxAgeSecs, status: age <= bound.maxAgeSecs && Number(oracle.conf) * 10000 <= Number(oracle.price) * bound.maxConfBps ? 'fresh' : 'stale' };
     this.usdPricing = { oracle, priceFeed: bound.priceFeed };
+    await this.loadConversionPrices().catch(() => {});
     return this.usdPricing;
+  }
+  /**
+   * Test networks: a stock pair's USD reference is the program's SOL/stock conversion pool price times Pyth SOL/USD,
+   * labelled as a test price. None without a seeded pool (and never on mainnet, where Ondo's prices will come
+   * from a real source), so values stay in the stock rather than show an invented dollar figure.
+   */
+  async loadConversionPrices() {
+    const stocks = [...(this.configs?.values() ?? [])].filter(cfg => cfg.kind === 'xstock');
+    for (const cfg of stocks) cfg.usdReference = null;
+    if (this.net.mainnet || !stocks.length || !(this.price?.usd > 0)) return;
+    const infos = await this.connection.getMultipleAccountsInfo(stocks.map(cfg => this.client.testConversionPda(cfg.quoteMint)));
+    stocks.forEach((cfg, i) => {
+      const conv = decodeTestConversion(infos[i]?.data);
+      if (!conv || conv.solReserve <= 0n || conv.quoteReserve <= 0n) return;
+      const solPerStock = Number(conv.solReserve) / 1e9 / (Number(conv.quoteReserve) / 10 ** cfg.quoteDecimals);
+      cfg.usdReference = { ...this.price, symbol: cfg.symbol, usd: solPerStock * this.price.usd, source: `Devnet test price: ${cfg.symbol}/SOL conversion pool × Pyth SOL/USD (no monetary value)` };
+    });
   }
   /** The SOL fee and virtual reserve a launch on `cfg` will use at the current on-chain price. */
   launchTerms(cfg) {
@@ -270,7 +290,7 @@ export class SolanaWallet {
       const remainingBuy = complete ? 0n : quoteBuy(pool, MAX_U64, config.baseFeeBps, config.baseFeeBps).gross;
       const token = {
         address, pool: pool.pubkey.toBase58(), name: pool.name, symbol: pool.symbol, creator: pool.creator.toBase58(), reward: pool.reward.toBase58(),
-        created: Number(pool.createdAt)*1000, metadata:await readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair: config.kind ?? 'native', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: this.venueOf(config), usdReference: config.wsol ? this.price : usdReferenceFor({ pair: config.kind ?? 'native' }, null),
+        created: Number(pool.createdAt)*1000, metadata:await readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair: config.kind ?? 'native', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: this.venueOf(config), usdReference: config.wsol ? this.price : config.usdReference ?? usdReferenceFor({ pair: config.kind ?? 'native' }, null),
         reserve: formatAmount(pool.realQuote, d), liquidityBonus: formatAmount(pool.liquidityBonus, d), lockedLiquidity: formatAmount(stats.lockedLiquidity, d),
         sold: formatAmount(pool.sold, TOKEN_DECIMALS), circulatingSupply: formatAmount(pool.sold, TOKEN_DECIMALS), saleCap: formatAmount(pool.curveSupply, TOKEN_DECIMALS),
         supply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS), balance: formatAmount(this.client.tokenAmount(holdings[index]?.data), TOKEN_DECIMALS),
