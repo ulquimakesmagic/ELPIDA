@@ -115,7 +115,7 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
     // Solana's index is read with the other networks on every refresh, whichever wallet is active, so its tokens keep
     // their 24h activity and images; live wallet reads are laid over the index without erasing either.
     let solana=[];
-    if(solWallet.deployment){try{solana=(await solWallet.indexedTokens()).map(t=>({...t,network:solWallet.net.key,usdReference:usdReferenceFor({...t,usdReference:null},config.prices?.[solWallet.net.key]??solWallet.price,nowSeconds())}));}catch{discoveryErrors.push(solWallet.net.name);}}
+    if(solWallet.deployment){try{solana=(await solWallet.indexedTokens()).map(t=>({...t,network:solWallet.net.key,usdReference:usdReferenceFor({...t,usdReference:t.pair==='xstock'?t.usdReference??null:null},config.prices?.[solWallet.net.key]??solWallet.price,nowSeconds())}));}catch{discoveryErrors.push(solWallet.net.name);}}
     if(revision!==refreshRevision)return state;
     const indexed=[...results.flatMap(r=>r.status==='fulfilled'?r.value:[]),...solana];
     const merged=new Map(indexed.map(t=>[tokenKey(t.network,t.address),t]));

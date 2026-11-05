@@ -9,7 +9,7 @@ import { nowSeconds } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
 import { PAIR_LIMITS } from '/pairs.mjs';
 import { partnerChip } from './partner-labels.mjs';
-import { exploreModel, pageOf, pageButtons, trendingTokens, feedRows, exploreStateFromHash, exploreHash, PER_PAGE, PER_PAGE_WIDE } from './discovery.mjs';
+import { exploreModel, pageOf, pageButtons, trendingTokens, feedRows, exploreStateFromHash, exploreHash, PER_PAGE, PER_PAGE_WIDE, isKothContender, kingOfTheHill, curveProgress, KOTH_PROGRESS } from './discovery.mjs';
 
 const store = {
   get(key) { try { return localStorage.getItem(key); } catch { return null; } },
@@ -82,6 +82,12 @@ function devBadge(token) {
   const pct = Number(token.devHoldingPct ?? token.devBoughtPct);
   return h('span.dev-badge', { 'data-level': pct > 10 ? 'high' : 'ok', title: devLabel(token.devBoughtPct, token.devHoldingPct) }, `Dev ${number(pct, 1)}%`);
 }
+/** King of the Hill: a crown on every token with 80% or more of its curve sold (and on the king itself). */
+function kothBadge(token, king) {
+  if (!isKothContender(token)) return null;
+  const crowned = king && keyOf(king) === keyOf(token);
+  return h('span.koth-badge', { 'data-king': crowned ? 'true' : undefined, title: crowned ? 'King of the Hill: the token closest to graduating' : `King of the Hill contender: ${Math.round(KOTH_PROGRESS * 100)}% or more of its curve sold` }, icon('crown', 'icon-xs'), crowned ? 'King' : 'KOTH');
+}
 /** Partner tokens: the share of trading fees that buys back and burns the token, fixed at launch. */
 function burnBadge(token) {
   const chip = partnerChip(token);
@@ -104,7 +110,7 @@ function scroller(track, prev, next) {
 /* ---------- Cards ---------- */
 // Values roll only between two figures in the same unit (dollars, or the same pair asset).
 const sameUnit = (a, b) => a.startsWith('$') === b.startsWith('$');
-function staticSignature(t) { return JSON.stringify([t.name, t.symbol, t.metadata?.image ?? t.image ?? '', t.network, t.pair, t.quoteSymbol, !!t.graduated, !!t.complete, t.devBoughtPct, t.devHoldingPct, t.created, t.creator, t.buybackBps, t.burned]); }
+function staticSignature(t) { return JSON.stringify([isKothContender(t), t._king === true, t.name, t.symbol, t.metadata?.image ?? t.image ?? '', t.network, t.pair, t.quoteSymbol, !!t.graduated, !!t.complete, t.devBoughtPct, t.devHoldingPct, t.created, t.creator, t.buybackBps, t.burned]); }
 
 function listCard(token, ctx) {
   const f = figures(token), href = ctx.tokenHref(token), name = token.metadata?.name ?? token.name, symbol = token.metadata?.symbol ?? token.symbol;
@@ -112,7 +118,7 @@ function listCard(token, ctx) {
   const cap = odometer(f.capText, 'lc-cap'), volume = odometer(f.volumeText, 'lc-volume');
   const bought = h('span.lc-bought', icon('clock', 'icon-xs'), token.lastBuyAt ? timeNode('time', token.lastBuyAt, 'bought') : h('span', 'No buys yet'));
   const card = h('article.list-card', { 'data-key': keyOf(token) },
-    h('div.lc-media', avatar(token, 'lc-avatar'), isNew ? h('span.new-chip', 'New') : null),
+    h('div.lc-media', avatar(token, 'lc-avatar'), isNew ? h('span.new-chip', 'New') : null, kothBadge(token, ctx.king?.())),
     h('div.lc-body',
       h('div.lc-top', h('h3.lc-name', h('a.lc-link', { href }, name)), icon('arrow-up-right', 'icon-sm lc-go')),
       h('div.lc-meta', h('span.lc-ticker', `$${symbol}`), h('span.sep', { 'aria-hidden': 'true' }, '·'), pairStack(token, ctx.nativeSymbol(token), ctx.networkName(token)), token.created ? [h('span.sep', { 'aria-hidden': 'true' }, '·'), timeNode('time.lc-age', Math.floor(token.created / 1000), 'age')] : null, devBadge(token), burnBadge(token)),
@@ -142,7 +148,7 @@ function trendCard(token, rank, ctx) {
   const card = h('li.trend-item', { 'data-key': keyOf(token) }, h('article.trend-card',
     // The whole card opens the token; the name link is the one keyboard and screen reader users get.
     h('a.card-cover', { href, tabIndex: -1, 'aria-hidden': 'true' }),
-    h('div.tc-media', avatar(token, 'tc-image'), rankChip, pill,
+    h('div.tc-media', avatar(token, 'tc-image'), rankChip, pill, kothBadge(token, ctx.king?.()),
       h('div.tc-band', h('h3.tc-name', h('a.tc-link', { href }, name)), h('span.tc-ticker', `$${symbol}`, pairStack(token, ctx.nativeSymbol(token), ctx.networkName(token))), curveLine(token))),
     h('div.tc-stats', h('div', h('span.label-xs', 'Market cap'), cap), h('div', h('span.label-xs', '24h volume'), volume)),
     h('div.tc-foot', h('span.mono.tc-address', short(token.address)), token.created ? timeNode('time.mono.tc-age', Math.floor(token.created / 1000), 'age-long') : null)));
@@ -196,7 +202,31 @@ async function copy(value) { try { await navigator.clipboard.writeText(value); t
 export function createExplore(source) {
   const state = { ...exploreStateFromHash(location.hash), feed: store.get('elpida:feed') !== 'off', trades: [] };
   const listCache = new Map(), trendCache = new Map();
-  const ctx = { tokenHref: source.tokenHref, nativeSymbol: source.nativeSymbol, networkName: source.networkName };
+  let king = null;
+  const ctx = { tokenHref: source.tokenHref, nativeSymbol: source.nativeSymbol, networkName: source.networkName, king: () => king };
+  /* King of the Hill spotlight: the token closest to graduating, with every contender one click away. */
+  const kothBody = h('div.koth-body');
+  const kothSection = h('section.home-section.koth', { 'aria-labelledby': 'koth-title', hidden: true },
+    h('div.section-head', h('div.section-title', h('h2#koth-title', icon('crown', 'icon-sm koth-crown'), 'King of the Hill'), h('span.section-sub', `Closest to graduating · ${Math.round(KOTH_PROGRESS * 100)}%+ of the curve sold`))),
+    kothBody);
+  function drawKoth(tokens) {
+    king = kingOfTheHill(tokens);
+    const contenders = tokens.filter(isKothContender).length;
+    kothSection.hidden = !king;
+    if (!king) { kothBody.replaceChildren(); return; }
+    const pct = curveProgress(king) * 100, f = figures(king), name = king.metadata?.name ?? king.name, symbol = king.metadata?.symbol ?? king.symbol;
+    kothBody.replaceChildren(h('article.koth-card',
+      h('a.card-cover', { href: source.tokenHref(king), tabIndex: -1, 'aria-hidden': 'true' }),
+      avatar(king, 'koth-avatar'),
+      h('div.koth-main',
+        h('h3.koth-name', h('a', { href: source.tokenHref(king) }, name), h('span.koth-ticker', `$${symbol}`)),
+        h('span.koth-meta', pairStack(king, source.nativeSymbol(king), source.networkName(king)), h('span', `Market cap ${f.capText}`)),
+        h('span.curve-line.koth-curve', { 'data-state': 'open' },
+          h('span.curve-track', { role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': '100', 'aria-valuenow': String(Math.round(pct)), 'aria-label': 'Bonding curve progress' }, h('span', { style: `width:${pct}%` })),
+          h('span.curve-pct', `${number(pct, 1)}%`))),
+      h('button.btn.btn-secondary.btn-sm.koth-all', { type: 'button', on: { click: () => { set({ tab: 'koth', page: 1 }); jumpToList(); } } },
+        contenders > 1 ? `All ${number(contenders, 0)} contenders` : 'View contenders', icon('arrow-right', 'icon-sm accent-icon'))));
+  }
 
   /* Trending */
   const trendTrack = h('ol.trend-track', { 'aria-label': 'Trending tokens' });
@@ -211,7 +241,7 @@ export function createExplore(source) {
   /* Explore list */
   const launched = h('span.launched');
   const tabs = h('div.sort-tabs', { role: 'group', 'aria-label': 'Sort tokens' },
-    [['trending', 'flame', 'Trending'], ['marketcap', 'chart-column', 'Market cap'], ['new', 'sprout', 'New pairs'], ['lastsale', 'clock', 'Last sale'], ['graduating', 'mountain', 'Graduating']].map(([key, glyph, label]) =>
+    [['trending', 'flame', 'Trending'], ['marketcap', 'chart-column', 'Market cap'], ['new', 'sprout', 'New pairs'], ['lastsale', 'clock', 'Last sale'], ['koth', 'crown', 'King of the Hill']].map(([key, glyph, label]) =>
       h('button.sort-tab', { type: 'button', 'data-tab': key, 'aria-pressed': 'false', on: { click: () => set({ tab: key, page: 1 }) } }, icon(glyph, 'icon-sm'), label)));
   const filter = h('input', { type: 'search', placeholder: 'Filter by name, ticker or address', 'aria-label': 'Filter tokens by name, ticker or address', autocomplete: 'off', value: state.query, on: { input: e => { set({ query: e.target.value, page: 1 }, { fromFilter: true }); } } });
   filter.spellcheck = false;
@@ -247,7 +277,7 @@ export function createExplore(source) {
       h('div.explore-list', meta, grid, empty, pager),
       feed)),
     prices);
-  const root = h('div.explore', h('h1.visually-hidden', 'Explore tokens'), trending, listSection);
+  const root = h('div.explore', h('h1.visually-hidden', 'Explore tokens'), kothSection, trending, listSection);
 
   function jumpToList() { listSection.scrollIntoView({ behavior: reducedMotion() ? 'auto' : 'smooth', block: 'start' }); }
   function writeUrl() { const next = exploreHash(state); if (location.hash !== next && (location.hash || '#/') !== next) history.replaceState(history.state, '', next); }
@@ -337,6 +367,8 @@ export function createExplore(source) {
     const model = exploreModel(tokens, state);
     const view = { ...pageOf(model.items, state.page, perPage()), total: model.items.length };
     if (view.page !== state.page) { state.page = view.page; writeUrl(); }
+    drawKoth(tokens);
+    for (const t of tokens) t._king = !!king && keyOf(t) === keyOf(king);
     drawTrending(tokens);
     drawChips(model.counts);
     const failed = source.errors();
@@ -345,10 +377,10 @@ export function createExplore(source) {
     meta.hidden = !view.total;
     meta.replaceChildren(h('span', `Showing ${number(view.from, 0)}–${number(view.to, 0)} of ${number(view.total, 0)}`), ...(view.pages > 1 ? [h('span', `Page ${view.page} of ${view.pages}`)] : []));
     reconcile(grid, view.items, listCache, t => listCard(t, ctx), (node, t) => node._update(t));
-    const filtered = state.query.trim() || state.pair !== 'all' || state.chain !== 'all' || state.tab === 'graduating';
+    const filtered = state.query.trim() || state.pair !== 'all' || state.chain !== 'all' || state.tab === 'koth';
     empty.replaceChildren(view.total ? '' : tokens.length && filtered
-      ? h('div.empty.empty-compact', h('h3', 'No tokens match'), h('p', state.tab === 'graduating' && !state.query.trim() && state.pair === 'all' && state.chain === 'all' ? 'Every listed token has graduated.' : 'Try another name, ticker or address, or clear the filters.'),
-        h('button.btn.btn-secondary', { type: 'button', on: { click: () => set({ query: '', pair: 'all', chain: 'all', tab: state.tab === 'graduating' ? 'trending' : state.tab, page: 1 }) } }, 'Clear filters'))
+      ? h('div.empty.empty-compact', h('h3', 'No tokens match'), h('p', state.tab === 'koth' && !state.query.trim() && state.pair === 'all' && state.chain === 'all' ? `No token has ${Math.round(KOTH_PROGRESS * 100)}% of its curve sold right now. The hill is open.` : 'Try another name, ticker or address, or clear the filters.'),
+        h('button.btn.btn-secondary', { type: 'button', on: { click: () => set({ query: '', pair: 'all', chain: 'all', tab: state.tab === 'koth' ? 'trending' : state.tab, page: 1 }) } }, 'Clear filters'))
       : h('div.empty', h('img.brand-dark', { src: '/assets/brand/elpida-mark-dark.svg?v=mark-20261019', alt: '' }), h('img.brand-light', { src: '/assets/brand/elpida-mark.svg?v=mark-20261019', alt: '' }), h('h3', 'No launches yet'), h('p', source.mode() === 'local' ? 'Tokens you launch in the simulation appear here.' : 'Tokens launched on Elpida networks appear here as soon as they are indexed.'),
         h('a.btn-accent', { href: '#/launch' }, icon('plus', 'icon-sm'), 'Create a token')));
     empty.hidden = !!view.total;

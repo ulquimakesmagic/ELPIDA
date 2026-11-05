@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { DatabaseSync } from 'node:sqlite';
-import { indexedActivity, activityOf, exploreModel, pageOf, pageButtons, trendingTokens, topCreators, feedRows, exploreStateFromHash, exploreHash, matchesQuery, overlayToken, tokenKey } from '../apps/web/discovery.mjs';
+import { isKothContender, kingOfTheHill, curveProgress, KOTH_PROGRESS, indexedActivity, activityOf, exploreModel, pageOf, pageButtons, trendingTokens, topCreators, feedRows, exploreStateFromHash, exploreHash, matchesQuery, overlayToken, tokenKey } from '../apps/web/discovery.mjs';
 
 const now = 2000000000, ref = { status: 'fresh', usd: 2000, updatedAt: now };
 const usdc = { status: 'fresh', usd: 1, updatedAt: now, maxAge: Number.MAX_SAFE_INTEGER };
@@ -46,8 +46,8 @@ test('Explore tabs, pair and chain filters, search and chip counts', () => {
   assert.deepEqual(ids(exploreModel(tokens, { tab: 'lastsale' }, now)), ['b', 'a', 'd', 'c']);
   // Market cap in dollars ($10M USDC pair first); equal caps fall back to a stable network:address order.
   assert.deepEqual(ids(exploreModel(tokens, { tab: 'marketcap' }, now)), ['b', 'a', 'd', 'c']);
-  // Graduating: closest to completion, graduated tokens left out, waiting migrations first.
-  assert.deepEqual(ids(exploreModel(tokens, { tab: 'graduating' }, now)), ['c', 'b', 'a']);
+  // King of the Hill: only 80%+ of the curve sold and not graduated; curves still trading first, then waiting migrations.
+  assert.deepEqual(ids(exploreModel(tokens, { tab: 'koth' }, now)), ['b', 'c']);
   const usdcOnly = exploreModel(tokens, { pair: 'usdc' }, now);
   assert.deepEqual(ids(usdcOnly), ['b']);
   assert.deepEqual(usdcOnly.counts.pair, { all: 4, native: 3, usdc: 1, xstock: 0, token: 0 });
@@ -105,10 +105,11 @@ test('the live feed shows buys of listed tokens only', () => {
 });
 
 test('Explore view state round-trips through the URL and ignores unknown values', () => {
-  const state = { tab: 'graduating', pair: 'usdc', chain: 'solana-devnet', query: 'hope coin', page: 2 };
+  const state = { tab: 'koth', pair: 'usdc', chain: 'solana-devnet', query: 'hope coin', page: 2 };
   const hash = exploreHash(state);
-  assert.equal(hash, '#/?tab=graduating&pair=usdc&chain=solana-devnet&q=hope+coin&page=2');
+  assert.equal(hash, '#/?tab=koth&pair=usdc&chain=solana-devnet&q=hope+coin&page=2');
   assert.deepEqual(exploreStateFromHash(hash), state);
+  assert.equal(exploreStateFromHash('#/?tab=graduating').tab, 'koth', 'links to the old Graduating tab open King of the Hill');
   assert.equal(exploreHash({}), '#/');
   assert.deepEqual(exploreStateFromHash('#/?tab=nope&pair=gold&page=-3'), { tab: 'trending', pair: 'all', chain: 'all', query: '', page: 1 });
 });
@@ -131,4 +132,29 @@ test('a live wallet read laid over the index keeps 24h activity, the price chang
   assert.deepEqual(trendingTokens([merged, { ...indexed, address: 'other', volume24h: 0 }], 10, now).map(t => t.symbol), ['MASHLE']);
   assert.equal(overlayToken(undefined, live), live); assert.equal(overlayToken(indexed, null), indexed);
   assert.equal(tokenKey('ethereum-sepolia', '0xABC'), tokenKey('ethereum-sepolia', '0xabc'), 'one key whatever the address casing');
+});
+
+test('King of the Hill: 80%+ of the curve sold and not graduated; the king is the closest curve still trading', () => {
+  assert.equal(KOTH_PROGRESS, 0.8);
+  const tokens = [
+    t('low', { sold: 6.39e8 }),                          // 79.9%
+    t('edge', { sold: 6.4e8 }),                          // exactly 80%
+    t('high', { sold: 7.6e8, spotPrice: 0.000001 }),     // 95%
+    t('tie', { sold: 7.6e8, spotPrice: 0.000002 }),      // 95%, bigger market cap
+    t('done', { sold: 8e8, complete: true }),            // waiting to migrate: on the hill, never the king
+    t('grad', { sold: 8e8, complete: true, graduated: true }),
+  ];
+  const by = id => tokens.find(x => x.address === id);
+  assert.equal(isKothContender(by('low')), false);
+  assert.equal(isKothContender(by('edge')), true);
+  assert.equal(isKothContender(by('done')), true);
+  assert.equal(isKothContender(by('grad')), false, 'graduated tokens leave the hill');
+  assert.equal(curveProgress(by('done')), 1);
+  assert.equal(kingOfTheHill(tokens, now).address, 'tie', 'equal progress: the higher market cap wins');
+  assert.equal(kingOfTheHill(tokens.filter(x => x.address !== 'tie' && x.address !== 'high'), now).address, 'edge');
+  assert.equal(kingOfTheHill([by('low'), by('done'), by('grad')], now), null, 'no curve still trading above 80%: no king');
+  const model = exploreModel(tokens, { tab: 'koth' }, now);
+  assert.deepEqual(new Set(model.items.map(x => x.address)), new Set(['edge', 'high', 'tie', 'done']));
+  assert.equal(model.items.at(-1).address, 'done', 'waiting migrations come last');
+  assert.equal(model.items.at(-2).address, 'edge');
 });

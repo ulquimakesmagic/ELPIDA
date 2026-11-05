@@ -45,7 +45,9 @@ export function indexedActivity(db, now = Math.floor(Date.now() / 1000)) {
 export function activityOf(map, address) { return { ...(map.get(address) ?? map.get(String(address).toLowerCase()) ?? EMPTY_ACTIVITY) }; }
 
 /* ---------- Explore model (pure; shared by the web app and tests) ---------- */
-export const EXPLORE_TABS = ['trending', 'marketcap', 'new', 'lastsale', 'graduating'];
+export const EXPLORE_TABS = ['trending', 'marketcap', 'new', 'lastsale', 'koth'];
+/** King of the Hill (5 November 2026): tokens whose curve is at least 80% sold and that have not graduated yet. */
+export const KOTH_PROGRESS = 0.8;
 export const PAIR_FILTERS = ['all', 'native', 'usdc', 'xstock', 'token'];
 export const PER_PAGE = 8;
 /** With the Live feed hidden the list shows up to four compact cards per row: three full rows. */
@@ -53,6 +55,18 @@ export const PER_PAGE_WIDE = 12;
 const identityOf = t => `${t.network ?? 'local'}:${t.address}`;
 const capQuote = t => Number(t.spotPrice ?? 0) * Number(t.supply ?? 0);
 const progress = t => { const cap = Number(t.saleCap ?? t.supply); return cap > 0 ? Math.min(1, Number(t.sold ?? 0) / cap) : 0; };
+/** How much of the curve has sold, 0 to 1 (a completed curve counts as 1). */
+export const curveProgress = t => t?.complete ? 1 : progress(t);
+/** A King of the Hill contender: 80% or more of its curve sold and not graduated. */
+export const isKothContender = t => !t?.graduated && curveProgress(t) >= KOTH_PROGRESS;
+/**
+ * The King of the Hill: the contender still trading on its curve that is closest to graduating (most of its curve
+ * sold, then the higher market cap). Curves already complete are about to graduate and leave the hill.
+ */
+export function kingOfTheHill(tokens, now = nowSeconds()) {
+  return (tokens ?? []).filter(t => isKothContender(t) && !t.complete)
+    .sort((a, b) => progress(b) - progress(a) || desc(marketCapUsd(a, now), marketCapUsd(b, now)) || capQuote(b) - capQuote(a) || identityOf(a).localeCompare(identityOf(b)))[0] ?? null;
+}
 /** 24h volume in dollars, or null when the pair asset has no fresh dollar reference. */
 export function volumeUsd(token, now = nowSeconds()) { const rate = freshUsd(token, now); return rate === null ? null : Number(token.volume24h ?? 0) * rate; }
 /** Market cap (price × the full supply) in dollars, or null without a fresh dollar reference. */
@@ -84,8 +98,8 @@ const ORDERS = {
   marketcap: now => (a, b) => desc(marketCapUsd(a, now), marketCapUsd(b, now)) || capQuote(b) - capQuote(a),
   new: () => (a, b) => (b.created ?? 0) - (a.created ?? 0),
   lastsale: () => (a, b) => desc(a.lastBuyAt, b.lastBuyAt) || (b.created ?? 0) - (a.created ?? 0),
-  // Closest to graduation: curves waiting to migrate first, then by how much of the curve has sold.
-  graduating: () => (a, b) => Number(!!b.complete) - Number(!!a.complete) || progress(b) - progress(a),
+  // King of the Hill: the closest to graduating first (curves still trading), then curves waiting to migrate.
+  koth: () => (a, b) => Number(!!a.complete) - Number(!!b.complete) || progress(b) - progress(a),
 };
 /**
  * Filters and orders Explore. Returns the ordered list plus chip counts: pair counts honour the chain
@@ -101,7 +115,7 @@ export function exploreModel(tokens, { tab = 'trending', pair = 'all', chain = '
     if (inPair(t)) { chains.all++; const key = t.network ?? 'local'; chains[key] = (chains[key] ?? 0) + 1; }
   }
   const order = (ORDERS[tab] ?? ORDERS.trending)(now);
-  const items = searched.filter(t => inChain(t) && inPair(t) && (tab !== 'graduating' || !t.graduated))
+  const items = searched.filter(t => inChain(t) && inPair(t) && (tab !== 'koth' || isKothContender(t)))
     .sort((a, b) => order(a, b) || identityOf(a).localeCompare(identityOf(b)));
   return { items, counts: { pair: pairs, chain: chains } };
 }
@@ -150,7 +164,8 @@ export function feedRows(trades, tokens, limit = 20) {
 export function exploreStateFromHash(hash) {
   const params = new URLSearchParams(String(hash ?? '').split('?')[1] ?? '');
   const tab = params.get('tab'), pair = params.get('pair');
-  return { tab: EXPLORE_TABS.includes(tab) ? tab : 'trending', pair: PAIR_FILTERS.includes(pair) ? pair : 'all', chain: params.get('chain') || 'all', query: (params.get('q') ?? '').slice(0, 100), page: Math.max(1, Math.floor(Number(params.get('page')) || 1)) };
+  // 'graduating' was the tab's name before King of the Hill (5 November 2026); old links still open it.
+  return { tab: tab === 'graduating' ? 'koth' : EXPLORE_TABS.includes(tab) ? tab : 'trending', pair: PAIR_FILTERS.includes(pair) ? pair : 'all', chain: params.get('chain') || 'all', query: (params.get('q') ?? '').slice(0, 100), page: Math.max(1, Math.floor(Number(params.get('page')) || 1)) };
 }
 export function exploreHash({ tab = 'trending', pair = 'all', chain = 'all', query = '', page = 1 } = {}) {
   const params = new URLSearchParams();
