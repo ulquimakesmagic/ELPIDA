@@ -75,7 +75,16 @@ page (docs.orca.so), Meteora's DAMM v2 README (github.com/MeteoraAg/damm-v2).
    not paused and without a transfer hook; the operator panel's Pairs tab shows each Solana stock pair with those
    checks. Approval itself is creating the pair config, signed by the upgrade authority (deploy key on devnet; the
    Squads vault on mainnet once the registry verifies a stock).
-3. **SOL-paid first purchase** through Jupiter (mainnet) and a devnet SOL/stand-in pool, resumable like the EVM version.
+3. **Paying in SOL.** Devnet: done 5 November with the program's own SOL/stock conversion pool (test build only;
+   `seed_test_conversion`, `test_conversion_swap`, x·y = k with a 0.3% fee kept in the pool, seeded only by the
+   upgrade authority at a dollar price given on the command line). Manifest, the order book Jupiter uses for Ondo's
+   stocks on mainnet, was considered: its devnet deployment (January 2025) predates Token-2022's Pausable and
+   ScaledUiAmount and refuses the stand-in, and a copy would have to be rebuilt with our own program address.
+   - Token page: a buy with SOL is one transaction (convert, then buy exactly the converted minimum); a sell is one
+     transaction (sell, then convert the sale's minimum). The 1% margin left over stays in the wallet as stock.
+   - Launch: SOL is converted in its own transaction, then the launch spends exactly what arrived; a conversion whose
+     launch fails is remembered in the browser and reused.
+   - Mainnet: Jupiter (SOL → USDC → … → the Ondo stock), still to build; until then the SOL option says so.
 4. **Meteora DAMM v2** per stock once Meteora badges it: a later migration out of the locked pool needs its own
    program change and review; until then the locked pool is the venue.
 

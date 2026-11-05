@@ -16,7 +16,7 @@ import { fileURLToPath } from 'node:url';
 import * as web3 from '@solana/web3.js';
 import {
   createElpidaSolana, quoteBuy, quoteSell, currentFeeBps, curveParams, poolStats, encodeCurveParams,
-  DISCRIMINATORS, EVENTS, LEGACY_EVENTS, TOKEN_SUPPLY, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, lockedPoolVenue, tradeFeeBps, BPS, explainError, decodeEvents,
+  DISCRIMINATORS, EVENTS, LEGACY_EVENTS, TOKEN_SUPPLY, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, lockedPoolVenue, tradeFeeBps, testConversionOut, decodeTestConversion, BPS, explainError, decodeEvents,
   harvestableLp, harvestNow, MPL_TOKEN_METADATA, MAX_LAUNCH_URI, GRADUATION_GRACE_SECS, validMetadataUri, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint, PYTH_RECEIVER, SOL_USD_FEED_ID, SOL_USD_PRICE_ACCOUNT, parsePriceUpdate, usdToQuote, virtualQuoteForFdv,
   RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, VENUE_RAYDIUM, raydiumCreationCost, raydiumQuote, raydiumBuybackAmount,
 } from '../packages/solana/client.mjs';
@@ -1142,6 +1142,74 @@ test('Solana stock pairs (Ondo stand-in): pause and freeze never strand the curv
   assert.equal(postFees.realQuote, preFees.realQuote); assert.equal(postFees.protocolFees + postFees.creatorFees, 0n);
 });
 
+// Set by the conversion test below; the mainnet-build test checks that this pool refuses swaps there.
+let conversionStock = null;
+test('Solana devnet SOL conversion: a seeded SOL/stock pool lets SOL pay for stock-pair trades in one transaction', { skip }, async () => {
+  const spl = f.spl, t22 = new PublicKey(TOKEN_2022_PROGRAM), stock = Keypair.generate(), issuer = f.authority, UNIT = 1_000_000_000n, SOL = BigInt(web3.LAMPORTS_PER_SOL);
+  await send(f.connection, f.authority, await spl.createStockMint2022Ixs(f.connection, f.authority.publicKey, stock.publicKey, 9, f.client.faucetAuthority, issuer.publicKey), [stock]);
+  const params = curveParams({ startFdv: 50, endFdv: 500, quoteDecimals: 9, launchFee: '0.01', snipeWindowSecs: 4 });
+  await send(f.connection, f.authority, [f.client.addCurveConfig({ authority: f.authority.publicKey, quoteMint: stock.publicKey, treasury: f.treasury, quoteTokenProgram: t22, params })], [], 1);
+  const cfg = { address: f.client.configFor(stock.publicKey), quoteMint: stock.publicKey, treasury: f.treasury, quoteTokenProgram: t22 };
+  const ref = { quoteMint: stock.publicKey, quoteTokenProgram: t22 };
+  const stockOf = owner => balance(f.client.quoteAta(owner, cfg));
+  const state = async () => decodeTestConversion((await f.connection.getAccountInfo(f.client.testConversionPda(stock.publicKey)))?.data);
+  // Only the upgrade authority seeds (it sets the test price): 2 SOL against 10 stock. Topped up first so the
+  // program upgrades in later tests still have their rent.
+  await airdrop(f.connection, f.authority.publicKey, 5 * web3.LAMPORTS_PER_SOL);
+  await send(f.connection, f.authority, [f.client.testUsdcFaucet({ user: f.authority.publicKey, mint: stock.publicKey, tokenProgram: t22, amount: 25n * UNIT })]);
+  const outsider = Keypair.generate(); await airdrop(f.connection, outsider.publicKey, 5 * web3.LAMPORTS_PER_SOL);
+  await send(f.connection, outsider, [f.client.testUsdcFaucet({ user: outsider.publicKey, mint: stock.publicKey, tokenProgram: t22, amount: 1n * UNIT })]);
+  await failsWith(send(f.connection, outsider, [f.client.seedTestConversion({ authority: outsider.publicKey, ...ref, solAmount: SOL, quoteAmount: UNIT })], [], 1), /0x1770/);
+  await send(f.connection, f.authority, [f.client.seedTestConversion({ authority: f.authority.publicKey, ...ref, solAmount: 2n * SOL, quoteAmount: 10n * UNIT })], [], 1);
+  let conv = await state();
+  assert.equal(conv.solReserve, 2n * SOL); assert.equal(conv.quoteReserve, 10n * UNIT);
+  assert.equal(await stockOf(f.client.testConversionPda(stock.publicKey)), 10n * UNIT);
+  // SOL → stock for a user with no stock account yet; output matches the client mirror; slippage is enforced.
+  const user = Keypair.generate(); await airdrop(f.connection, user.publicKey, 5 * web3.LAMPORTS_PER_SOL);
+  const out = testConversionOut(conv.solReserve, conv.quoteReserve, SOL / 10n);
+  await failsWith(send(f.connection, user, [f.client.testConversionSwap({ user: user.publicKey, ...ref, amountIn: SOL / 10n, minOut: out + 1n, solIn: true })], [], 1), /0x1777/);
+  await send(f.connection, user, [f.client.testConversionSwap({ user: user.publicKey, ...ref, amountIn: SOL / 10n, minOut: out, solIn: true })], [], 1);
+  assert.equal(await stockOf(user.publicKey), out);
+  conv = await state();
+  assert.equal(conv.solReserve, 2n * SOL + SOL / 10n); assert.equal(conv.quoteReserve, 10n * UNIT - out);
+  // Stock → SOL pays lamports out of the pool; the pool keeps its rent and its books match its balances.
+  const back = testConversionOut(conv.quoteReserve, conv.solReserve, out / 2n), before = BigInt(await f.connection.getBalance(user.publicKey));
+  const sig = await send(f.connection, user, [f.client.testConversionSwap({ user: user.publicKey, ...ref, amountIn: out / 2n, minOut: back, solIn: false })], [], 1);
+  const fee = BigInt((await f.connection.getTransaction(sig, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 })).meta.fee);
+  assert.equal(BigInt(await f.connection.getBalance(user.publicKey)) - before, back - fee);
+  conv = await state();
+  const poolKey = f.client.testConversionPda(stock.publicKey), rent = BigInt(await f.connection.getMinimumBalanceForRentExemption(8 + 32 + 8 + 8 + 1));
+  assert.equal(BigInt(await f.connection.getBalance(poolKey)), rent + conv.solReserve, 'pool lamports = rent + SOL reserve');
+  assert.equal(await stockOf(poolKey), conv.quoteReserve, 'pool stock account = stock reserve');
+  // A stock-pair token bought with SOL in one transaction: convert, then buy with exactly the converted minimum.
+  const creator = Keypair.generate(); await airdrop(f.connection, creator.publicKey, 5 * web3.LAMPORTS_PER_SOL);
+  await send(f.connection, creator, [f.client.testUsdcFaucet({ user: creator.publicKey, mint: stock.publicKey, tokenProgram: t22, amount: 1n * UNIT })]);
+  const mint = Keypair.generate();
+  await send(f.connection, creator, [f.client.computeBudget(), f.client.launch({ uri: TEST_URI, creator: creator.publicKey, config: cfg, mint: mint.publicKey, name: 'Sol Paid Stock', symbol: 'SOLPS', firstBuy: UNIT / 10n, minTokensOut: 1n, reward: f.rewardWallet.publicKey })], [mint], 1);
+  await afterSnipeWindow(mint.publicKey);
+  const buyer = Keypair.generate(); await airdrop(f.connection, buyer.publicKey, 5 * web3.LAMPORTS_PER_SOL);
+  conv = await state();
+  const converted = testConversionOut(conv.solReserve, conv.quoteReserve, SOL / 2n), minStock = converted * 99n / 100n;
+  const curve = await pool(mint.publicKey), q = quoteBuy(curve, minStock, BigInt(params.baseFeeBps));
+  const buyTx = [f.client.computeBudget(), f.client.testConversionSwap({ user: buyer.publicKey, ...ref, amountIn: SOL / 2n, minOut: minStock, solIn: true }), f.client.buy({ buyer: buyer.publicKey, config: cfg, mint: mint.publicKey, grossIn: minStock, minTokensOut: q.tokens })];
+  await send(f.connection, buyer, buyTx, [], 1);
+  assert.equal(await balance(f.client.ata(buyer.publicKey, mint.publicKey)), q.tokens);
+  assert.equal(await stockOf(buyer.publicKey), converted - minStock, 'the slippage margin stays in the wallet as stock');
+  // And sold back to SOL in one transaction: sell, then convert exactly the sale's minimum.
+  const s = quoteSell(await pool(mint.publicKey), q.tokens, BigInt(params.baseFeeBps)), afterSell = await state();
+  const solBack = testConversionOut(afterSell.quoteReserve, afterSell.solReserve, s.net);
+  const solBefore = BigInt(await f.connection.getBalance(buyer.publicKey));
+  const sellSig = await send(f.connection, buyer, [f.client.computeBudget(), f.client.sell({ seller: buyer.publicKey, config: cfg, mint: mint.publicKey, tokensIn: q.tokens, minQuoteOut: s.net }), f.client.testConversionSwap({ user: buyer.publicKey, ...ref, amountIn: s.net, minOut: solBack, solIn: false })], [], 1);
+  const sellFee = BigInt((await f.connection.getTransaction(sellSig, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 })).meta.fee);
+  assert.equal(BigInt(await f.connection.getBalance(buyer.publicKey)) - solBefore, solBack - sellFee);
+  // A paused stock stops the conversion too; resuming restores it.
+  await send(f.connection, issuer, [spl.pauseIx(stock.publicKey, issuer.publicKey, true)]);
+  await failsWith(send(f.connection, user, [f.client.testConversionSwap({ user: user.publicKey, ...ref, amountIn: SOL / 100n, minOut: 1n, solIn: true })], [], 1), /custom program error/);
+  await send(f.connection, issuer, [spl.pauseIx(stock.publicKey, issuer.publicKey, false)]);
+  await send(f.connection, user, [f.client.testConversionSwap({ user: user.publicKey, ...ref, amountIn: SOL / 100n, minOut: 1n, solIn: true })], [], 1);
+  conversionStock = { ...ref, user };
+});
+
 test('Solana beta gate: invite-only launches, allowlist managed by the beta admin, then open again', { skip }, async () => {
   const programId = f.programId;
   const admin = Keypair.generate(), outsider = Keypair.generate();
@@ -1177,6 +1245,7 @@ test('Solana mainnet build rejects test instructions; the upgrade authority can 
   assert.equal(await rejectsTestInstructions({ connection: f.connection, payer: f.authority, programId }), true, 'the mainnet build rejects them');
   const user = Keypair.generate(); await airdrop(f.connection, user.publicKey, web3.LAMPORTS_PER_SOL);
   await failsWith(send(f.connection, user, [f.client.testUsdcFaucet({ user: user.publicKey, mint: f.faucetMint })], [], 1), /0x1786/);
+  if (conversionStock) await failsWith(send(f.connection, conversionStock.user, [f.client.testConversionSwap({ user: conversionStock.user.publicKey, quoteMint: conversionStock.quoteMint, quoteTokenProgram: conversionStock.quoteTokenProgram, amountIn: 1_000_000n, minOut: 1n, solIn: true })], [], 1), /0x1786/);
   // Normal trading still works on the mainnet build.
   const { mint } = await launch({ symbol: 'MAINB' });
   await afterSnipeWindow(mint);

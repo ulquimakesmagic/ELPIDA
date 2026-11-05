@@ -97,7 +97,8 @@ export function renderLaunch(ctx) {
   const assetDecimals = () => selectedAsset()?.decimals ?? 18;
   // Creator purchase paid in the native coin on a non-native pair: swapped into the pair asset before the launch
   // (apps/web/launch-conversion.mjs). Public EVM testnets with a DEX only; the quote shows what the swap delivers.
-  const canPayNative = () => !solana() && isPublic() && draft.pair !== 'native' && connected() && !net()?.mainnet && typeof ctx.wallet.firstBuyConversionQuote === 'function' && !!selectedAsset();
+  // Solana: stock pairs only, converted in the program's devnet SOL/stock pool (Jupiter on mainnet later).
+  const canPayNative = () => (!solana() || !!selectedAsset()?.lockedPool) && isPublic() && draft.pair !== 'native' && connected() && !net()?.mainnet && typeof ctx.wallet.firstBuyConversionQuote === 'function' && !!selectedAsset();
   const payNative = () => draft.buyWith === 'native' && canPayNative();
   let conversion = { key: '', state: 'idle' };
   const conversionFor = () => `${draft.chain}:${selectedAsset()?.id}:${draft.nativeBuy}`;
