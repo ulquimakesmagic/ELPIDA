@@ -275,6 +275,48 @@ pub mod elpida_launchpad {
         test_networks_only()
     }
 
+    /// TEST NETWORKS ONLY: adds SOL and a test asset to the SOL/asset conversion pool at PDA
+    /// ["test-conversion", asset mint]. On mainnet, paying in SOL for a stock pair routes through Jupiter; devnet has
+    /// no Jupiter and no DEX that accepts Ondo-shaped mints, so this constant-product pool stands in for it. Only the
+    /// upgrade authority seeds it (it sets the test price); nobody can withdraw from it.
+    pub fn seed_test_conversion(ctx: Context<SeedTestConversion>, sol_amount: u64, quote_amount: u64) -> Result<()> {
+        test_networks_only()?;
+        require!(sol_amount > 0 && quote_amount > 0, ElpidaError::InvalidParams);
+        let a = &ctx.accounts;
+        system_program::transfer(CpiContext::new(a.system_program.to_account_info(), system_program::Transfer { from: a.authority.to_account_info(), to: a.pool.to_account_info() }), sol_amount)?;
+        quote_transfer(&a.quote_token_program, &a.quote_mint, a.authority_quote.to_account_info(), a.pool_quote.to_account_info(), a.authority.to_account_info(), quote_amount, a.quote_mint.decimals, &[])?;
+        let pool = &mut ctx.accounts.pool;
+        pool.quote_mint = ctx.accounts.quote_mint.key();
+        pool.bump = ctx.bumps.pool;
+        pool.sol_reserve = pool.sol_reserve.checked_add(sol_amount).ok_or(ElpidaError::MathOverflow)?;
+        pool.quote_reserve = pool.quote_reserve.checked_add(quote_amount).ok_or(ElpidaError::MathOverflow)?;
+        emit!(TestConversionSeeded { quote_mint: pool.quote_mint, sol_reserve: pool.sol_reserve, quote_reserve: pool.quote_reserve });
+        Ok(())
+    }
+
+    /// TEST NETWORKS ONLY: swaps SOL for the test asset (`sol_in`) or back, x·y = k with a 0.3% fee that stays in
+    /// the pool. The caller's asset account is created if needed, so SOL can buy a stock in one step.
+    pub fn test_conversion_swap(ctx: Context<TestConversionSwap>, amount_in: u64, min_out: u64, sol_in: bool) -> Result<()> {
+        test_networks_only()?;
+        let (reserve_in, reserve_out) = if sol_in { (ctx.accounts.pool.sol_reserve, ctx.accounts.pool.quote_reserve) } else { (ctx.accounts.pool.quote_reserve, ctx.accounts.pool.sol_reserve) };
+        let out = test_conversion_out(reserve_in, reserve_out, amount_in)?;
+        require!(out >= min_out, ElpidaError::Slippage);
+        let a = &ctx.accounts;
+        let seeds: &[&[u8]] = &[b"test-conversion", a.pool.quote_mint.as_ref(), &[a.pool.bump]];
+        if sol_in {
+            system_program::transfer(CpiContext::new(a.system_program.to_account_info(), system_program::Transfer { from: a.user.to_account_info(), to: a.pool.to_account_info() }), amount_in)?;
+            quote_transfer(&a.quote_token_program, &a.quote_mint, a.pool_quote.to_account_info(), a.user_quote.to_account_info(), a.pool.to_account_info(), out, a.quote_mint.decimals, &[seeds])?;
+        } else {
+            quote_transfer(&a.quote_token_program, &a.quote_mint, a.user_quote.to_account_info(), a.pool_quote.to_account_info(), a.user.to_account_info(), amount_in, a.quote_mint.decimals, &[])?;
+            a.pool.to_account_info().sub_lamports(out)?;
+            a.user.to_account_info().add_lamports(out)?;
+        }
+        let pool = &mut ctx.accounts.pool;
+        if sol_in { pool.sol_reserve += amount_in; pool.quote_reserve -= out; } else { pool.quote_reserve += amount_in; pool.sol_reserve -= out; }
+        emit!(TestConversionSwapped { quote_mint: pool.quote_mint, sol_in, amount_in, amount_out: out, sol_reserve: pool.sol_reserve, quote_reserve: pool.quote_reserve });
+        Ok(())
+    }
+
     /// Upgrade authority: creates or updates the beta launch gate. While `enabled`, only creators on the
     /// allowlist can launch; `authority` (for example a beta admin key) manages that allowlist.
     pub fn set_beta_gate(ctx: Context<SetBetaGate>, authority: Pubkey, enabled: bool) -> Result<()> {
@@ -1114,6 +1156,19 @@ pub fn harvestable_lp(lp: u64, principal: u128, state: &PumpState) -> Result<u64
     Ok((lp as u128).saturating_sub(keep).min(u64::MAX as u128) as u64)
 }
 
+/// Fee of the devnet SOL/asset conversion pool, in basis points of the input (kept in the pool).
+pub const TEST_CONVERSION_FEE_BPS: u64 = 30;
+
+/// Output of the test conversion pool for `amount_in`: x·y = k after the 0.3% fee, rounded down, never the whole
+/// reserve.
+pub fn test_conversion_out(reserve_in: u64, reserve_out: u64, amount_in: u64) -> Result<u64> {
+    require!(amount_in > 0 && reserve_in > 0 && reserve_out > 0, ElpidaError::InvalidParams);
+    let net = amount_in as u128 * (BPS as u128 - TEST_CONVERSION_FEE_BPS as u128) / BPS as u128;
+    let out = reserve_out as u128 * net / (reserve_in as u128 + net);
+    require!(out > 0 && out < reserve_out as u128, ElpidaError::SellTooSmall);
+    Ok(out as u64)
+}
+
 /// Test-only instructions exist in every build but succeed only when compiled with `--features testnet`.
 /// The mainnet build (`build/elpida_launchpad-mainnet.so`) rejects them, so it can never mint test assets.
 fn test_networks_only() -> Result<()> {
@@ -1748,6 +1803,55 @@ pub struct PricingConfig {
 #[derive(Accounts)]
 pub struct TestBuildCheck {}
 
+/// The devnet SOL/asset conversion pool (test builds only). Its SOL is the account's lamports above rent
+/// (`sol_reserve`); its asset sits in the PDA's associated token account (`quote_reserve`).
+#[account]
+#[derive(InitSpace)]
+pub struct TestConversion {
+    pub quote_mint: Pubkey,
+    pub sol_reserve: u64,
+    pub quote_reserve: u64,
+    pub bump: u8,
+}
+
+#[derive(Accounts)]
+pub struct SeedTestConversion<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(init_if_needed, payer = authority, space = 8 + TestConversion::INIT_SPACE, seeds = [b"test-conversion", quote_mint.key().as_ref()], bump)]
+    pub pool: Box<Account<'info, TestConversion>>,
+    #[account(mint::token_program = quote_token_program)]
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(mut, token::mint = quote_mint, token::authority = authority, token::token_program = quote_token_program)]
+    pub authority_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(init_if_needed, payer = authority, associated_token::mint = quote_mint, associated_token::authority = pool, associated_token::token_program = quote_token_program)]
+    pub pool_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ ElpidaError::Unauthorized)]
+    pub program: Program<'info, crate::program::ElpidaLaunchpad>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ ElpidaError::Unauthorized)]
+    pub program_data: Box<Account<'info, ProgramData>>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct TestConversionSwap<'info> {
+    #[account(mut)]
+    pub user: Signer<'info>,
+    #[account(mut, seeds = [b"test-conversion", quote_mint.key().as_ref()], bump = pool.bump)]
+    pub pool: Box<Account<'info, TestConversion>>,
+    #[account(mint::token_program = quote_token_program)]
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(init_if_needed, payer = user, associated_token::mint = quote_mint, associated_token::authority = user, associated_token::token_program = quote_token_program)]
+    pub user_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = pool, associated_token::token_program = quote_token_program)]
+    pub pool_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
 /// Mainnet beta: when enabled, only allowlisted creators can launch.
 #[account]
 #[derive(InitSpace)]
@@ -2228,6 +2332,10 @@ pub struct CurveLaunched { pub creator: Pubkey, pub mint: Pubkey, pub pool: Pubk
 pub struct CurveBought { pub pool: Pubkey, pub buyer: Pubkey, pub quote_in: u64, pub tokens_out: u64, pub fee: u64, pub anti_snipe_fee: u64, pub real_quote: u64, pub virtual_quote: u64, pub token_reserve: u64, pub sold: u64 }
 #[event]
 pub struct CurveSold { pub pool: Pubkey, pub seller: Pubkey, pub tokens_in: u64, pub quote_out: u64, pub fee: u64, pub anti_snipe_fee: u64, pub real_quote: u64, pub virtual_quote: u64, pub token_reserve: u64, pub sold: u64 }
+#[event]
+pub struct TestConversionSeeded { pub quote_mint: Pubkey, pub sol_reserve: u64, pub quote_reserve: u64 }
+#[event]
+pub struct TestConversionSwapped { pub quote_mint: Pubkey, pub sol_in: bool, pub amount_in: u64, pub amount_out: u64, pub sol_reserve: u64, pub quote_reserve: u64 }
 #[event]
 pub struct LockedPoolOpened { pub pool: Pubkey, pub mint: Pubkey, pub quote_reserve: u64, pub token_reserve: u64 }
 #[event]

@@ -117,6 +117,9 @@ export const DISCRIMINATORS = {
   harvestLpFees: [153, 236, 19, 193, 135, 211, 138, 173],
   PumpMigration: [234, 227, 47, 135, 5, 201, 199, 146],
   testBuildCheck: [135,  170,  99,  137,  166,  97,  12,  254],
+  seedTestConversion: [100, 63, 69, 27, 130, 197, 194, 2],
+  testConversionSwap: [3, 153, 7, 95, 104, 205, 161, 234],
+  TestConversion: [42, 1, 194, 144, 131, 234, 29, 29],
   setBetaGate: [173, 164, 104, 88, 207, 75, 214, 143],
   allowBetaCreator: [85, 38, 209, 94, 146, 252, 6, 98],
   revokeBetaCreator: [225, 1, 249, 74, 23, 63, 36, 199],
@@ -352,6 +355,23 @@ function fees(gross, feeBps, baseFeeBps) {
  * Mirrors `quote_buy`. `pool` is a decoded CurvePool. The final buy is partially filled: `gross` may
  * be less than `grossIn`, and `graduates` is true when it takes the rest of the curve supply.
  */
+/** Fee of the devnet SOL/asset conversion pool (`TEST_CONVERSION_FEE_BPS`), kept in the pool. */
+export const TEST_CONVERSION_FEE_BPS = 30n;
+/** Mirrors `test_conversion_out`: x·y = k after the fee, rounded down; null when the program would refuse it. */
+export function testConversionOut(reserveIn, reserveOut, amountIn) {
+  reserveIn = BigInt(reserveIn); reserveOut = BigInt(reserveOut); amountIn = BigInt(amountIn);
+  if (amountIn <= 0n || reserveIn <= 0n || reserveOut <= 0n) return null;
+  const net = amountIn * (BPS - TEST_CONVERSION_FEE_BPS) / BPS;
+  const out = reserveOut * net / (reserveIn + net);
+  return out > 0n && out < reserveOut ? out : null;
+}
+/** The test conversion pool's state: { quoteMint, solReserve, quoteReserve } or null. */
+export function decodeTestConversion(data) {
+  if (!data || data.length < 8 + 32 + 8 + 8 + 1 || !DISCRIMINATORS.TestConversion.every((b, i) => data[i] === b)) return null;
+  const view = new DataView(data.buffer, data.byteOffset, data.byteLength);
+  return { quoteMint: data.slice(8, 40), solReserve: view.getBigUint64(40, true), quoteReserve: view.getBigUint64(48, true) };
+}
+
 export function quoteBuy(pool, grossIn, feeBps, baseFeeBps = feeBps) {
   grossIn = BigInt(grossIn); feeBps = BigInt(feeBps); baseFeeBps = BigInt(baseFeeBps);
   if (grossIn <= 0n) throw new Error('A positive buy is required.');
@@ -660,6 +680,20 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
     },
     /** Succeeds only on the test build; the mainnet build fails with TestNetworksOnly (6022). */
     testBuildCheck: () => ix([], DISCRIMINATORS.testBuildCheck),
+    /** Devnet SOL/asset conversion pool (test builds only): PDA ["test-conversion", asset mint]. */
+    testConversionPda: quoteMint => PublicKey.findProgramAddressSync([new TextEncoder().encode('test-conversion'), quoteMint.toBytes()], programId)[0],
+    /** Upgrade authority: adds `solAmount` lamports and `quoteAmount` of the asset (from its own account) to the pool. */
+    seedTestConversion({ authority, quoteMint, quoteTokenProgram, solAmount, quoteAmount }) {
+      const pool = PublicKey.findProgramAddressSync([new TextEncoder().encode('test-conversion'), quoteMint.toBytes()], programId)[0];
+      return ix([meta(authority, true, true), meta(pool, true), meta(quoteMint), meta(ata(authority, quoteMint, quoteTokenProgram), true), meta(ata(pool, quoteMint, quoteTokenProgram), true), meta(programId), meta(programDataAddress), meta(quoteTokenProgram), meta(ataProgram), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.seedTestConversion, u64(solAmount), u64(quoteAmount)));
+    },
+    /** Swaps SOL for the asset (`solIn`) or back in the devnet conversion pool; creates the user's asset account if needed. */
+    testConversionSwap({ user, quoteMint, quoteTokenProgram, amountIn, minOut, solIn }) {
+      const pool = PublicKey.findProgramAddressSync([new TextEncoder().encode('test-conversion'), quoteMint.toBytes()], programId)[0];
+      return ix([meta(user, true, true), meta(pool, true), meta(quoteMint), meta(ata(user, quoteMint, quoteTokenProgram), true), meta(ata(pool, quoteMint, quoteTokenProgram), true), meta(quoteTokenProgram), meta(ataProgram), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.testConversionSwap, u64(amountIn), u64(minOut), [solIn ? 1 : 0]));
+    },
     /** Upgrade authority: creates or updates the beta gate; `gateAuthority` then manages the allowlist. */
     setBetaGate({ authority, gateAuthority, enabled }) {
       return ix([meta(authority, true, true), meta(betaGatePda, true), meta(programId), meta(programDataAddress), meta(SystemProgram.programId)],

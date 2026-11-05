@@ -1,7 +1,7 @@
 // Node-only helpers that deploy and initialize the Elpida Solana program over RPC.
 // Used by scripts/solana-deploy.mjs and tests/solana.test.mjs.
 import * as web3 from '@solana/web3.js';
-import { createElpidaSolana, loaderV3, splTestMint, curveParams, LOADER_V3, WSOL_MINT, TOKEN_PROGRAM, TOKEN_2022_PROGRAM, PYTH_RECEIVER, parsePriceUpdate } from './client.mjs';
+import { createElpidaSolana, loaderV3, splTestMint, curveParams, LOADER_V3, WSOL_MINT, TOKEN_PROGRAM, TOKEN_2022_PROGRAM, PYTH_RECEIVER, parsePriceUpdate, decodeTestConversion } from './client.mjs';
 
 const { Keypair, PublicKey, Transaction, SystemProgram } = web3;
 const CHUNK = 950;
@@ -421,4 +421,25 @@ export async function prepareUpgradeBuffer({ connection, payer, elf, multisig, .
 export async function airdrop(connection, address, lamports) {
   const { lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
   return confirmByPolling(connection, await connection.requestAirdrop(new PublicKey(address), Number(lamports)), lastValidBlockHeight + 150);
+}
+
+/**
+ * Test networks: funds the program's SOL/stock conversion pool for a test stock (the devnet stand-in for Jupiter,
+ * docs/SOLANA_STOCK_PAIRING.md). `stockAmount` of the stock is minted from the test faucet (at most 25 whole units a
+ * call) and added with `solAmount` lamports. Only the upgrade authority can seed; returns the pool's state afterwards.
+ */
+export async function ensureTestConversion({ connection, payer, programId, quoteMint, quoteTokenProgram, decimals, solAmount, stockAmount, onProgress = () => {} }) {
+  const client = createElpidaSolana(web3, programId);
+  const mint = new PublicKey(quoteMint), program = new PublicKey(quoteTokenProgram);
+  if (solAmount <= 0n || stockAmount <= 0n) throw new Error('Seed a positive SOL and stock amount.');
+  const held = async () => client.tokenAmount((await connection.getAccountInfo(client.ata(payer.publicKey, mint, program)))?.data);
+  const perCall = 25n * 10n ** BigInt(decimals);
+  for (let have = await held(); have < stockAmount; have = await held()) {
+    const amount = stockAmount - have < perCall ? stockAmount - have : perCall;
+    onProgress(`Minting ${Number(amount) / 10 ** decimals} test stock from the faucet…`);
+    await send(connection, payer, [client.testUsdcFaucet({ user: payer.publicKey, mint, tokenProgram: program, amount })]);
+  }
+  onProgress(`Seeding the SOL/stock conversion pool: ${Number(solAmount) / web3.LAMPORTS_PER_SOL} SOL and ${Number(stockAmount) / 10 ** decimals} stock…`);
+  await send(connection, payer, [client.seedTestConversion({ authority: payer.publicKey, quoteMint: mint, quoteTokenProgram: program, solAmount, quoteAmount: stockAmount })]);
+  return decodeTestConversion((await connection.getAccountInfo(client.testConversionPda(mint)))?.data);
 }

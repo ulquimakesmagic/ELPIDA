@@ -1,5 +1,22 @@
 # Actions that need Malik
 
+## Pay in SOL for Solana stock pairs on devnet, 5 November 2026
+
+No devnet DEX accepts Ondo-shaped mints, and Jupiter does not run on devnet, so the program's test build now has its
+own small SOL/stock conversion pool. The mainnet build refuses it; on mainnet the same payments will go through
+Jupiter. Two steps, both with the deploy key, after this PR is merged:
+
+1. `git pull`, then check the build: `certutil -hashfile contracts\solana\build\elpida_launchpad.so SHA256` must print
+   `469fe201f86f9297f9431cd7d912d018d034f909395645536742b348d6100f78`. (Mainnet build, not deployed:
+   `cc522b88b97554235b3412d5bca8f40ee6513b735a12414d2c850b688739b0de`.)
+2. Upgrade the devnet program (about 6.5 devnet SOL, mostly refunded):
+   `node scripts/solana-deploy.mjs --upgrade --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`
+3. Seed the pool at Tesla's current share price (look it up; nothing is assumed), with 1 SOL by default:
+   `node scripts/seed-solana-conversion.mjs --stock-usd <TSLA price> --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`
+   Add `--dry-run` first to see the amounts. The script mints the tTSLAon it needs from the faucet.
+4. Send Claude the output. Then on a tTSLAon-paired token page, choose SOL in the swap card's currency menu; on the
+   launch form, choose "SOL, converted to tTSLAon first" for the first purchase.
+
 ## Solana stock pairing: devnet program upgrade, 4 November 2026
 
 **Done, 5 November 2026.** Malik ran the upgrade with `--stock-pairs`. Checked on chain:
