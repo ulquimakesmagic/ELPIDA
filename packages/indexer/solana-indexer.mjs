@@ -105,6 +105,20 @@ function dexSwapTrade(tx, { pool, poolBase, poolQuote, programs, kinds }) {
   return { side: buy ? 'buy' : 'sell', tokenRaw, quoteRaw, account: swaps[0].trader ?? all[0] };
 }
 
+/**
+ * A short, safe code for an RPC failure (3 November 2026: the devnet index stalled for eight days showing only
+ * "Error"). Never includes the URL or its key.
+ */
+export function rpcErrorCode(error) {
+  if (error?.code && /^[A-Z][A-Z0-9_]+$/.test(String(error.code))) return String(error.code).slice(0, 64);
+  const text = `${error?.message ?? ''} ${error?.cause?.code ?? ''} ${error?.cause?.message ?? ''}`;
+  if (/\b429\b|too many requests|rate.?limit/i.test(text)) return 'RPC_RATE_LIMITED';
+  if (/\b40[13]\b|unauthori[sz]ed|forbidden|api.?key|credits?/i.test(text)) return 'RPC_UNAUTHORIZED';
+  if (/fetch failed|ENOTFOUND|ECONNREFUSED|ECONNRESET|ETIMEDOUT|EAI_AGAIN|timed? ?out|socket hang up|network/i.test(text)) return 'RPC_UNREACHABLE';
+  if (/\b5\d\d\b|bad gateway|service unavailable|internal error/i.test(text)) return 'RPC_SERVER_ERROR';
+  return String(error?.code ?? error?.name ?? 'INDEX_ERROR').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 64);
+}
+
 export class SolanaIndexer {
   /**
    * `web3`: @solana/web3.js; `connection`: a Connection; `deployment`: { programId, pairs }; `network`: net registry entry.
@@ -387,7 +401,7 @@ export class SolanaIndexer {
         if (added) await this.syncPools();
         this.lastError = null; this.lastErrorPhase = null; this.lastSuccess = new Date().toISOString();
       }
-      catch (error) { this.lastErrorPhase = phase; this.lastError = String(error.code ?? error.name ?? 'INDEX_ERROR').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 64); throw error; }
+      catch (error) { this.lastErrorPhase = phase; this.lastError = rpcErrorCode(error); throw error; }
       finally { this.running = null; }
     })();
     return this.running;
@@ -424,7 +438,7 @@ export class SolanaIndexer {
         }
         this.lastError = null; this.lastErrorPhase = null; this.lastSuccess = new Date().toISOString();
       }
-      catch (error) { this.lastErrorPhase = phase; this.lastError = String(error.code ?? error.name ?? 'INDEX_ERROR').replace(/[^a-zA-Z0-9_]/g, '').slice(0, 64); throw error; }
+      catch (error) { this.lastErrorPhase = phase; this.lastError = rpcErrorCode(error); throw error; }
       finally { this.running = null; }
     })();
     return this.running;
@@ -509,9 +523,11 @@ export class SolanaIndexer {
     this.holderCache.set(mint, { at: Date.now(), rows });
     return rows;
   }
+  /** Moves to another RPC (after repeated failures): the new one is checked against the cluster before use. */
+  useConnection(connection, host = null) { this.connection = connection; this.networkValidated = false; this.rpcHost = host; }
   status() {
     const cursor = this.db.prepare('SELECT signature, slot FROM cursor WHERE id=1').get();
-    return { network: this.network.key, programId: this.deployment.programId, tokens: this.db.prepare('SELECT COUNT(*) n FROM tokens').get().n, trades: this.db.prepare('SELECT COUNT(*) n FROM trades').get().n, cursorSlot: cursor?.slot ?? null, lastSuccess: this.lastSuccess, error: this.lastError, errorPhase: this.lastErrorPhase ?? null, phaseErrors: this.phaseErrors ?? {}, backend: 'SQLite WAL' };
+    return { network: this.network.key, programId: this.deployment.programId, tokens: this.db.prepare('SELECT COUNT(*) n FROM tokens').get().n, trades: this.db.prepare('SELECT COUNT(*) n FROM trades').get().n, cursorSlot: cursor?.slot ?? null, lastSuccess: this.lastSuccess, error: this.lastError, errorPhase: this.lastErrorPhase ?? null, rpc: this.rpcHost ?? null, phaseErrors: this.phaseErrors ?? {}, backend: 'SQLite WAL' };
   }
   close() { this.db.close(); }
 }
