@@ -7,7 +7,8 @@ own small SOL/stock conversion pool. The mainnet build refuses it; on mainnet th
 Jupiter. Two steps, both with the deploy key, after this PR is merged:
 
 1. `git pull`, then check the build: `certutil -hashfile contracts\solana\build\elpida_launchpad.so SHA256` must print
-   `469fe201f86f9297f9431cd7d912d018d034f909395645536742b348d6100f78`.
+   `469fe201f86f9297f9431cd7d912d018d034f909395645536742b348d6100f78`. (Mainnet build, not deployed:
+   `cc522b88b97554235b3412d5bca8f40ee6513b735a12414d2c850b688739b0de`.)
 2. Upgrade the devnet program (about 6.5 devnet SOL, mostly refunded):
    `node scripts/solana-deploy.mjs --upgrade --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`
 3. Seed the pool at Tesla's current share price (look it up; nothing is assumed), with 1 SOL by default:
