@@ -5,8 +5,17 @@ export function publishedTestAssets(record) {
   return Object.fromEntries((record?.pairs ?? []).filter(p => p.test && p.key && p.mint).map(p => [p.key, p.mint]));
 }
 
-/** Test mints to reuse: the local deploy state first, then the published record for the same program. */
+/**
+ * Test mints to reuse, per pair key: the published record's (what the hosted site lists) for the same program, then
+ * this machine's deploy state for keys the record does not have. A run never replaces a published test mint: on
+ * 5 November 2026 a run whose local state lacked the tTSLAon key created a second tTSLAon instead of reusing it.
+ */
 export function savedTestAssets(state, record, programId) {
-  if (state?.testAssets && Object.keys(state.testAssets).length) return state.testAssets;
-  return record?.programId === programId ? publishedTestAssets(record) : {};
+  const published = record?.programId === programId ? publishedTestAssets(record) : {};
+  return { ...(state?.testAssets ?? {}), ...published };
+}
+
+/** The deploy state's test mints after a run: this run's pairs, keeping keys a run without that pair did not touch. */
+export function mergedTestAssets(previous, pairs) {
+  return { ...(previous ?? {}), ...Object.fromEntries(pairs.filter(p => p.test && p.key && p.mint).map(p => [p.key, p.mint])) };
 }

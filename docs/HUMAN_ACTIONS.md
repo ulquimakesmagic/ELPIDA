@@ -2,6 +2,14 @@
 
 ## Pay in SOL for Solana stock pairs on devnet, 5 November 2026
 
+**Status, 5 November 22:40:** the devnet program is upgraded (step 2 done). That run created a second tTSLAon
+(`EmRwecYo…AxwpS`) because the local deploy state had lost the first one; the scripts now always reuse the published
+mint. The tTSLAon to use stays `HE4LBuPDgFQCHT88Z4UMh62xKoJaTAQuzNHjAvCkHjYd` (ISSHIKI is paired with it); the second
+one is an unused test token. For step 3, in PowerShell type the price itself, without `<` `>`:
+`git checkout -- deployments/solana-devnet.json`, `git pull`, then
+`node scripts/seed-solana-conversion.mjs --stock-usd 440 --mint HE4LBuPDgFQCHT88Z4UMh62xKoJaTAQuzNHjAvCkHjYd --dry-run --keypair <deploy key path>`
+(440 is only an example: use Tesla's share price now), and the same without `--dry-run`.
+
 No devnet DEX accepts Ondo-shaped mints, and Jupiter does not run on devnet, so the program's test build now has its
 own small SOL/stock conversion pool. The mainnet build refuses it; on mainnet the same payments will go through
 Jupiter. Two steps, both with the deploy key, after this PR is merged:
