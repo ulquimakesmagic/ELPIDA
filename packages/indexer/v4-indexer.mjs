@@ -107,6 +107,8 @@ export class V4Indexer extends EvmIndexer {
         const q = new Contract(quote, V4_ABIS.token, this.provider);
         [quoteSymbol, quoteDecimals] = await Promise.all([q.symbol(call), q.decimals(call).then(Number)]);
         try { if ((await new Contract(this.factory, V4_ABIS.factory, this.provider).feeUsdc(call)).toLowerCase() === quote.toLowerCase()) pair = 'usdc'; } catch { /* pricing not configured */ }
+        // Test stocks (and later approved real ones) describe themselves: pairKind() === 'xstock'.
+        if (pair === 'token') try { if (await new Contract(quote, ['function pairKind() view returns(string)'], this.provider).pairKind(call) === 'xstock') pair = 'xstock'; } catch { /* a plain token */ }
       }
       const launch = await this.hookContract.launches(address, call);
       const positions = { upperTick: Number(placed.e.args.upperTick), lowerTick: Number(placed.e.args.lowerTick), saleLiquidity: placed.e.args.saleLiquidity.toString(), upperLiquidity: placed.e.args.upperLiquidity.toString() };

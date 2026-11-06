@@ -9,8 +9,8 @@ const flow = readFileSync(new URL('../apps/web/launch-flow.mjs', import.meta.url
 
 test('the launch model comes before the trading pair, and Model 11 limits the pairs it offers', () => {
   assert.ok(flow.indexOf("h('h3', 'Launch model')") < flow.indexOf("h('h3', 'Trading pair')"), 'model first, then pair');
-  assert.match(flow, /v4Chosen\(\) && !V4_PAIRS\.includes\(kind\) \? 'Model 11 test launches pair with the native coin or USDC/);
-  assert.match(flow, /const V4_PAIRS = \['native', 'usdc'\]/);
+  assert.match(flow, /v4Chosen\(\) && !V4_PAIRS\.includes\(kind\) \? 'Model 11 test launches pair with the native coin, USDC or a test stock/);
+  assert.match(flow, /const V4_PAIRS = \['native', 'usdc', 'xstock'\]/);
   assert.match(flow, /function networkStep\(\) \{\n    fitPairToModel\(\);/, 'a saved pair is fitted before the step draws');
   assert.match(flow, /draft\.launchModel = key; fitPairToModel\(\);/, 'and again when the model changes');
 });

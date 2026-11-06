@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { Contract, keccak256, toUtf8Bytes, formatUnits, parseUnits } from 'ethers';
 import './helpers/browser-modules.mjs';
-import { v4Fixture, v4Art, mined, mineHookSalt as fixtureMine, HOOK_FLAGS, TEST_URI } from './helpers/v4-fixture.mjs';
+import { v4Fixture, v4Art, mined, parse, mineHookSalt as fixtureMine, HOOK_FLAGS, TEST_URI } from './helpers/v4-fixture.mjs';
 import { v4Artifacts } from '../apps/api/v4-artifacts.mjs';
 import { V4Indexer } from '../packages/indexer/v4-indexer.mjs';
 import { V4_MODEL } from '../packages/core/v4-model.mjs';
@@ -114,7 +114,8 @@ test('a USDC-paired Model 11 launch pays its first buy in USDC after one exact a
   assert.ok(cw.progress.some(m => /Approve exactly the first buy in USDC/.test(m)));
   const token = new Contract(launched.token, v4Art('ElpidaToken').abi, f.provider);
   assert.ok(await token.balanceOf(cw.address) > 0n);
-  await assert.rejects(launchV4(cw, { name: 'X', symbol: 'X', pair: 'xstock' }), /native coin or USDC/);
+  await assert.rejects(launchV4(cw, { name: 'X', symbol: 'X', pair: 'token' }), /native coin, USDC or a test stock/);
+  await assert.rejects(launchV4(cw, { name: 'X', symbol: 'X', pair: 'xstock' }), /Choose a test stock/, 'a stock pair needs an approved test stock');
 });
 
 test('the deploy waits out an RPC node that lags behind, and a retry reuses a hook an earlier attempt deployed', async t => {
@@ -175,5 +176,64 @@ test('BNB Chain testnet: the operator deploys a test copy of Uniswap\'s PoolMana
   await v4Trade(bw, item, 'buy', { amount: '0.02', slippage: '1' });
   await index.sync();
   assert.equal(index.trades(launched.token).length, 2);
+  await index.close();
+});
+
+test('Model 11 stock pairs (BNB testnet first): approved at the Model 10 price, launched and traded in the stock; a paused stock holds trades and fees, then resumes', async t => {
+  browser(t);
+  const { compileContracts } = await import('../scripts/compile.mjs');
+  const { stockVirtualQuote } = await import('../apps/web/stock-approval.mjs');
+  const { approveV4Stock, v4StockPairs } = await import('../apps/web/v4-launchpad.mjs');
+  const compiled = compileContracts(), testArt = name => compiled[`contracts/evm/testnet/${name}.sol`][name];
+  const f = await v4Fixture(t), owner = f.signers[2];
+  const net = { key: 'bnb-testnet', name: 'Local BNB', chainId: 31337, nativeCurrency: { symbol: 'tBNB' }, v4: { poolManager: f.manager.target, testPoolManager: true, shared: null } };
+  const feed = await f.deploy(testArt('ElpidaTestStockFeed'), 'Simulated NVDA', 180n * 10n ** 8n);
+  const stock = await f.deploy(testArt('ElpidaTestOndoStock'), 'Elpida test Ondo-style NVDA stock (no value)', 'tNVDAon', 25n, feed.target);
+  const record = { id: stock.target, address: stock.target, kind: 'xstock', symbol: 'tNVDAon', decimals: 18, test: true, virtualQuote: stockVirtualQuote({ startFdvUsd: 50n, decimals: 18, priceUsd8: 180n * 10n ** 8n }) };
+  // The page's own stock check (Model 10's rule): a paused stock or a blocked wallet stops before signing.
+  const withStocks = async signer => Object.assign(await walletFor(f, signer, net), { approvedQuotes: [record],
+    async stockPreflight(item) { const s = new Contract(item.quoteAddress, testArt('ElpidaTestOndoStock').abi, f.provider); if (await s.paused()) throw new Error('The issuer has paused this test stock. Nothing was sent.'); } });
+  const ow = await withStocks(owner);
+  const { record: launchpad } = await deployV4(ow);
+  assert.deepEqual((await v4StockPairs(ow)).map(s => [s.symbol, s.approved]), [['tNVDAon', false]]);
+  await assert.rejects(approveV4Stock(await withStocks(f.signers[1]), { asset: stock.target }), /Only the Model 11 launchpad's treasury/);
+  await approveV4Stock(ow, { asset: stock.target });
+  assert.deepEqual((await v4StockPairs(ow)).map(s => s.approved), [true]);
+  assert.match((await approveV4Stock(ow, { asset: stock.target })).message, /already a Model 11 pair/);
+
+  // A creator launches paired with the stock and pays the first buy in it.
+  const creator = f.signers[0], cw = await withStocks(creator);
+  await mined(stock.connect(creator).faucet(parseUnits('1', 18)));
+  const launched = await launchV4(cw, { name: 'Shares', symbol: 'SHR', pair: 'xstock', quoteAsset: stock.target, firstBuy: '0.01', description: '', image: '' });
+  assert.ok(cw.progress.some(m => /Approve exactly the first buy in tNVDAon/.test(m)));
+  const index = new V4Indexer({ provider: f.provider, factory: launchpad.factory, hook: launchpad.hook, poolManager: f.manager.target, router: launchpad.router, fromBlock: launchpad.block, nativeSymbol: 'tBNB' });
+  await index.sync();
+  const item = { ...index.listings()[0], deploymentModel: V4_MODEL, factory: launchpad.factory };
+  assert.equal(item.pair, 'xstock'); assert.equal(item.quoteSymbol, 'tNVDAon'); assert.equal(item.address, launched.token.toLowerCase());
+
+  const buyer = f.signers[1], bw = await withStocks(buyer);
+  await mined(stock.connect(buyer).faucet(parseUnits('1', 18)));
+  await f.advance(120);
+  await v4Trade(bw, item, 'buy', { amount: '0.05', slippage: '1' });
+  const token = new Contract(launched.token, v4Art('ElpidaToken').abi, f.provider);
+  assert.ok(await token.balanceOf(bw.address) > 0n);
+
+  // The issuer pauses the stock: trades stop with the reason, fee payouts fail but the fees stay held.
+  await mined(stock.connect(creator).setPaused(true));
+  await assert.rejects(v4Trade(bw, item, 'buy', { amount: '0.01', slippage: '1' }), /paused this test stock/);
+  const hook = new Contract(launchpad.hook, v4Art('ElpidaV4Hook').abi, f.provider), held = (await hook.launches(launched.token)).protocolFees;
+  assert.ok(held > 0n);
+  const failed = await mined(hook.connect(buyer).withdrawFees(launched.token));
+  assert.ok(parse(hook, failed, 'FeePayoutFailed').length >= 1, 'the payout fails while paused');
+  assert.equal((await hook.launches(launched.token)).protocolFees, held, 'and the fees stay held for the treasury');
+  // It moves again: fees are paid and trading resumes.
+  await mined(stock.connect(creator).setPaused(false));
+  const paid = await mined(hook.connect(buyer).withdrawFees(launched.token));
+  assert.ok(parse(hook, paid, 'FeesWithdrawn').length >= 1);
+  assert.equal((await hook.launches(launched.token)).protocolFees, 0n);
+  await v4Trade(bw, item, 'buy', { amount: '0.01', slippage: '1' });
+  // An issuer that blocks the shared PoolManager stops trading too, with the reason.
+  await mined(stock.connect(creator).setBlocked(f.manager.target, true));
+  await assert.rejects(v4Trade(bw, item, 'sell', { amount: '1', slippage: '1' }), /blocked the Uniswap v4 pool contract/);
   await index.close();
 });

@@ -187,6 +187,20 @@ With tick spacing 1, a swap across the whole curve would walk about ninety bitma
 
 ## Later phase: tokenized stocks as a Model 11 pair (Malik, 6 November 2026)
 
+**Started on testnets, 6 November 2026 (BNB Chain testnet first).** Malik asked for stock pairs on BNB's Model 11 now,
+and decided what a frozen stock does: *it should not affect the liquidity at all; the treasury holds and accumulates
+the fees meanwhile, and buying resumes when the stock is back.* The hook already behaves that way with a stock as a
+plain ERC-20 quote, so no contract changed:
+- **Approval:** the operator approves each test stock in the Launchpads tab, once, at its Model 10 starting price.
+- **While the issuer pauses the stock** (or blocks the PoolManager):
+  - swaps cannot settle, and the page stops them first with the reason;
+  - fee payouts fail with `FeePayoutFailed` and the fees stay held for their recipients;
+  - the liquidity stays locked.
+- **When the stock moves again:** payouts and trading resume with nothing to redo. `tests/v4-browser.test.mjs` covers
+  the whole cycle.
+- **What testnet does not settle:** the pause gate is the page's check, as for Model 10, not the hook's. Real stocks
+  still need steps 1 to 5 below, starting with Ondo's answers.
+
 Model 11 pairs with the native coin and USDC only. Tokenized stocks stay on Model 10, which already checks the
 issuer's controls. Malik asked to plan stock pairs for Model 11 as a later phase.
 
