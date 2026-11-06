@@ -179,7 +179,43 @@ With tick spacing 1, a swap across the whole curve would walk about ninety bitma
 
 ## Next (phase 5, still no mainnet)
 
-1. Malik deploys the test launchpad on both Sepolias (`docs/HUMAN_ACTIONS.md`), and the deployment is pinned.
+1. ~~Malik deploys the test launchpad and it is pinned.~~ Done on 6 November 2026 on Ethereum Sepolia, Base Sepolia and
+   BNB Chain testnet (on a test copy of Uniswap's PoolManager there).
 2. Check the hook's swaps through Uniswap's Universal Router and an aggregator on a testnet.
 3. Build the page for the opt-in third-party liquidity (`openLiquidity`).
 4. An external audit of the hook and the router before any mainnet plan.
+
+## Later phase: tokenized stocks as a Model 11 pair (Malik, 6 November 2026)
+
+Model 11 pairs with the native coin and USDC only. Tokenized stocks stay on Model 10, which already checks the
+issuer's controls. Malik asked to plan stock pairs for Model 11 as a later phase.
+
+**Why they are left out today:**
+- **One frozen stock freezes every pool.** In Model 11 the stock sits in Uniswap's PoolManager, which holds every v4
+  pool's funds. If the issuer pauses the stock, or blocks the PoolManager's address, every Model 11 pool on that
+  stock stops. Its liquidity is locked from the first trade, so it would be stuck for good. In Model 10 the stock sits
+  in each token's own curve, behind the stock checks that run before trading and before graduation.
+- **No market gate.** The hook does not check the stock's feed or its market status (open, closed, corporate action).
+  It would trade through a closed market or a split at a price nobody can verify.
+- **Balances that rescale.** A stock that rescales balances on a split (Solana's ScaledUiAmount, or an EVM
+  equivalent) breaks the PoolManager's balance-delta accounting. Uniswap advises against such tokens in v4.
+- **Scope.** The 2 November decisions limited Model 11 to the native coin and team-approved, fixed-behaviour ERC-20s
+  (USDC) until the audit.
+
+**What the phase needs, in order:**
+1. **Ondo's answers.** Can they block the PoolManager or another shared contract? Will they turn on transfer hooks?
+   Do the EVM stocks rescale balances? These are the questions already sent (docs/HUMAN_ACTIONS.md, Ondo and
+   Chainlink). A stock that can rescale balances on EVM is not offered on Model 11 at all.
+2. **A stock gate in the hook's `beforeSwap`,** for stock-paired launches only. It refuses swaps while:
+   - the stock is paused;
+   - the reference feed is stale;
+   - the market is closed or in a corporate action.
+
+   This is the same rule as Model 10's stock checks, at swap time.
+3. **A frozen-stock plan for locked liquidity.** Decide what happens to a pool whose stock is frozen for good, for
+   example a treasury-only switch that lets holders exit to the stock once it moves again. Today nothing can be
+   withdrawn, by design.
+4. **Approval in the operator panel,** one stock at a time, as for Model 10. Test it on testnets with the Ondo-style
+   stand-ins (pause, blocklist and feed controls) before any real stock.
+5. **An audit of the stock gate and the frozen-stock plan,** with the rest of the hook, before mainnet.
+
