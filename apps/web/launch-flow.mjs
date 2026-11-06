@@ -234,7 +234,16 @@ export function renderLaunch(ctx) {
     } };
   }
 
+  /** Model 11 pairs with the native coin or USDC only: a saved stock or token pair falls back to the native coin. */
+  const V4_PAIRS = ['native', 'usdc'];
+  function fitPairToModel() {
+    if (!v4Chosen() || V4_PAIRS.includes(draft.pair)) return;
+    draft.pair = 'native';
+    const native = pairOptions()?.native?.assets?.[0];
+    if (native) { draft.quoteAsset = native.id; draft.firstBuy = defaultBuy('native', native); }
+  }
   function networkStep() {
+    fitPairToModel();
     const error = h('p.error-text', { role: 'alert' }, networkError);
     const connection = h('div.connection');
     if (!draft.chain) connection.append(h('p.muted', 'Choose a network to continue. You are asked to connect a wallet only after choosing a public testnet.'));
@@ -272,7 +281,7 @@ export function renderLaunch(ctx) {
     if (!stockCatalog() && pairs?.xstock?.assets?.length) loadStockCatalog().then(c => { if (c) draw(); });
     const pairGrid = h('div.choice-grid', { class: 'pair-grid', role: 'radiogroup', 'aria-label': 'Trading pair' }, PAIR_KINDS.map(kind => {
       const info = PAIR_INFO[kind], group = pairs?.[kind];
-      const reason = !draft.chain ? 'Choose a network first.' : !pairs ? 'Connect your wallet to see the assets on this network.' : group?.unavailable ?? (group?.assets.length ? null : 'Not available on this network.');
+      const reason = !draft.chain ? 'Choose a network first.' : v4Chosen() && !V4_PAIRS.includes(kind) ? 'Model 11 test launches pair with the native coin or USDC. Choose Model 10 above for this pair.' : !pairs ? 'Connect your wallet to see the assets on this network.' : group?.unavailable ?? (group?.assets.length ? null : 'Not available on this network.');
       const symbols = group?.assets.map(a => a.symbol).join(', ');
       const ownerSetup=kind==='usdc'&&!!reason&&draft.chain!=='local'&&!solana()&&connected()&&ctx.state?.pricing?.owner&&ctx.wallet.dex&&ctx.wallet.feeUsdc;
       const finish=ownerSetup?h('a.btn.btn-secondary.btn-sm',{href:'#/monkey?tab=pairs'},'Approve in the operator panel'):null;
@@ -297,11 +306,11 @@ export function renderLaunch(ctx) {
       asset.wsol ? callout('', 'info', 'You pay and receive plain SOL. Elpida wraps it for each trade and unwraps what is left in the same transaction.') : null) : null;
     return { body: [
       networkPicker(), connection,
-      h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'Choose native currency, USDC, an xStock or another approved token. Buyers pay in this asset, and the graduated pool keeps the same pair. Pay the $10 launch fee separately in native currency or USDC. Network gas is always paid in the native coin.'), pairGrid, assetBox),
       v4Offered() ? h('div.stack', h('h3', 'Launch model'), h('div.choice-grid', { role: 'radiogroup', 'aria-label': 'Launch model' },
         [['v10', 'Model 10 · bonding curve', `The curve sells the supply, then the buy that completes it moves the liquidity into a locked ${ctx.config.publicDexes?.[draft.chain]?.name ?? 'Uniswap v3'} pool.`], ['v11', 'Model 11 test · Uniswap v4', 'The same curve inside one Uniswap v4 pool, with the liquidity locked from the first trade: no graduation step. Native or USDC pairs, no token tax. Not audited; test networks only.']].map(([key, title, text]) =>
-          h('label.choice', h('input', { type: 'radio', name: 'launch-model', value: key, checked: (draft.launchModel ?? 'v10') === key, on: { change: () => { draft.launchModel = key; if (key === 'v11' && !['native', 'usdc'].includes(draft.pair)) draft.pair = 'native'; save(); draw(); } } }),
+          h('label.choice', h('input', { type: 'radio', name: 'launch-model', value: key, checked: (draft.launchModel ?? 'v10') === key, on: { change: () => { draft.launchModel = key; fitPairToModel(); save(); draw(); } } }),
             h('span.choice-title', icon(key === 'v11' ? 'flask-conical' : 'chart-line'), title), h('p', text), key === 'v11' ? h('span.chip', 'Test') : null)))) : null,
+      h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'Choose native currency, USDC, an xStock or another approved token. Buyers pay in this asset, and the graduated pool keeps the same pair. Pay the $10 launch fee separately in native currency or USDC. Network gas is always paid in the native coin.'), pairGrid, assetBox),
       draft.chain!=='local'&&(solana()?!solanaPriced():!ctx.config.oracles?.[draft.chain]?.available)?callout('warn','info',solana()?'USD pricing is not active on this Solana cluster yet. It turns on when the team upgrades the program and runs the deploy (solana-upgrade.cmd). Existing tokens can still be browsed and traded.':'Verified launch pricing is pending configuration on this network. Use simulation to test creation.') : null,
       error,
     ], validate: () => {
@@ -311,7 +320,7 @@ export function renderLaunch(ctx) {
       if (ctx.wallet.beta?.enabled && !ctx.wallet.beta.allowed) { error.textContent = 'This wallet is not on the beta launch list yet.'; return false; }
       const group = pairOptions()?.[draft.pair];
       if (!group?.assets.length) { error.textContent = group?.unavailable ?? 'Choose a trading pair.'; return false; }
-      if (v4Chosen() && !['native', 'usdc'].includes(draft.pair)) { error.textContent = 'Model 11 test launches pair with the native coin or USDC.'; return false; }
+      if (v4Chosen() && !V4_PAIRS.includes(draft.pair)) { error.textContent = 'Model 11 test launches pair with the native coin or USDC.'; return false; }
       if (!group.assets.some(a => a.id === draft.quoteAsset)) { draft.quoteAsset = group.assets[0].id; save(); }
       return true;
     } };
