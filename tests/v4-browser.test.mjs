@@ -155,7 +155,7 @@ test('BNB Chain testnet: the operator deploys a test copy of Uniswap\'s PoolMana
   const { deployTestPoolManager, v4PoolManager, savedTestPoolManager } = await import('../apps/web/v4-launchpad.mjs');
   const { testnets } = await import('../packages/core/networks.mjs');
   const bnb = testnets.find(n => n.key === 'bnb-testnet');
-  assert.equal(bnb.v4.testPoolManager, true); assert.equal(bnb.v4.poolManager, null, 'pinned only after Malik deploys it');
+  assert.equal(bnb.v4.testPoolManager, true); assert.match(bnb.v4.poolManager, /^0x[0-9a-fA-F]{40}$/, 'the test PoolManager Malik deployed is pinned');
   const net = { key: 'bnb-testnet', name: 'Local BNB', chainId: 31337, nativeCurrency: { symbol: 'tBNB' }, v4: { poolManager: null, testPoolManager: true, shared: null } };
   const w = await walletFor(f, owner, net);
   await assert.rejects(deployV4(w), /Deploy the test PoolManager first/);

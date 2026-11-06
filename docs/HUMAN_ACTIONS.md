@@ -2,6 +2,11 @@
 
 ## Model 11 on BNB Chain testnet, and test funds moved to the operator panel, 6 November 2026
 
+**Done, 6 November 12:15.** Pinned in `networks.mjs`: test PoolManager `0x251E30304241c21d76219e56f3611d8b53F03a13`
+(block 141138906), factory `0xA05eEe6f4443707EF6a88D4aE478c297342C0fd2`, hook `0x11C491F546491259f6B017E95fd918bBA7dC28CC`,
+router `0xA2DC3f5Ae12811404a4667C147c60D46748865fB`, from block 141139092. Once Railway has redeployed, launch a small
+Model 11 token on BNB Chain testnet and buy and sell it.
+
 BNB Chain testnet has no Uniswap v4 (Uniswap deployed it on BNB mainnet only), so Model 11 there runs on a labelled
 test copy of Uniswap's own PoolManager (the published v4-core 1.0.2 contract, unchanged). After this PR is merged and
 Railway has redeployed:

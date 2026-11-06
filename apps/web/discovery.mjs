@@ -1,8 +1,25 @@
 import { nowSeconds } from './clock.mjs';
-/** How old a reference price may be and still value tokens on screen (display only; launches verify their own). */
+/** Kept for callers that read it; display no longer drops an old reference (6 November 2026). */
 export const DISPLAY_MAX_AGE = 3600;
-/** The dollar rate to display: a fresh or briefly stale reference (a missed refresh never blanks every value). */
-export function freshUsd(token,now=nowSeconds()){const p=token.usdReference;return ['fresh','stale'].includes(p?.status)&&Number.isFinite(p.usd)&&p.usd>0&&now-p.updatedAt<=Math.max(p.maxAge??180,DISPLAY_MAX_AGE)?p.usd:null;}
+/**
+ * The dollar rate to display. Market cap, liquidity and price are only ever shown in dollars (Malik, 6 November 2026),
+ * so the latest real reference is used however old it is; the token page names its source and when it was set. Null
+ * only when the pair asset has never had a reference. Launches and trades never use this: contracts verify their own.
+ */
+export function freshUsd(token,now=nowSeconds()){const p=token?.usdReference;return p&&p.status!=='unavailable'&&Number.isFinite(p.usd)&&p.usd>0?p.usd:null;}
+/**
+ * Dollar references for tokens paired with another listed token (a graduated Elpida token as the pair asset): the pair
+ * asset's own market price times its dollar rate. Returns the tokens, with references filled in where possible.
+ */
+export function pairTokenReferences(tokens){
+  const byKey=new Map(tokens.map(t=>[`${t.network??'local'}:${String(t.address).toLowerCase()}`,t]));
+  return tokens.map(t=>{
+    if(freshUsd(t)!==null||t.pair!=='token'||!t.quoteAddress)return t;
+    const q=byKey.get(`${t.network??'local'}:${String(t.quoteAddress).toLowerCase()}`),rate=q?freshUsd(q):null,price=Number(q?.spotPrice);
+    if(rate===null||!(price>0))return t;
+    return {...t,usdReference:{status:q.usdReference.status,usd:price*rate,updatedAt:q.usdReference.updatedAt,maxAge:q.usdReference.maxAge,source:`${q.symbol} market price × ${q.usdReference.source??'its USD reference'}`}};
+  });
+}
 export function discoveryTokens(tokens,{query='',category='all'}={},now=nowSeconds()){
   const items=tokens.filter(t=>`${t.name} ${t.symbol}`.toLowerCase().includes(query.trim().toLowerCase())).filter(t=>category==='migrating'?t.complete&&!t.graduated:category==='graduated'?t.graduated:true);
   const identity=t=>`${t.network??'local'}:${t.address}`;

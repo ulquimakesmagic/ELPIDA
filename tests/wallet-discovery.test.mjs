@@ -65,3 +65,23 @@ test('Solana standard message signing binds the selected account and exact messa
   wallet.accounts=[];await assert.rejects(p.signMessage(message),/account changed/);
  }finally{remove();}
 });
+
+test('wallets Elpida does not know are found and named by their own flag; one entry per wallet (6 November 2026)',()=>{
+ const fox={request(){throw new Error('Must not prompt');},isFoxWallet:true,isMetaMask:true},xdefi={request(){},isXDEFI:true,isConnected:true};
+ assert.deepEqual(injectedEvmWallets({ethereum:{request(){},providers:[fox,xdefi]}}).map(w=>w.name),['Fox Wallet','XDEFI']);
+ assert.equal(injectedEvmWallets({ethereum:{request(){},isMetaMask:true}})[0].name,'MetaMask','a plain MetaMask flag is still MetaMask');
+ assert.equal(injectedEvmWallets({ethereum:{request(){}}})[0].name,'Browser wallet','no flag at all');
+ // The same wallet announced through EIP-6963 and injected the old way is listed once, with its announced name and icon.
+ const announced={request(){}},legacy={request(){},isRabby:true};
+ const list=injectedEvmWallets({ethereum:legacy,rabby:legacy},[{info:{rdns:'io.rabby',name:'Rabby',icon:'data:image/png;base64,x'},provider:announced}]);
+ assert.deepEqual(list.map(w=>[w.name,w.provider===announced]),[['Rabby',true]]);
+ // An unknown legacy Solana wallet keeps its own name too.
+ assert.equal(injectedSolanaWallets({solana:{connect(){},signTransaction(){},isGlowWallet:true}})[0].name,'Glow Wallet');
+});
+
+test('the wallet picker hears about wallets that appear after the page loaded',async()=>{
+ const {onWalletsChanged,walletsChanged}=await import('../apps/web/wallet-discovery.mjs');
+ let heard=0;const off=onWalletsChanged(()=>heard++);
+ walletsChanged();const remove=registerStandard({name:'Late wallet',chains:['solana:devnet'],features:{'standard:connect':{connect(){}},'solana:signTransaction':{signTransaction(){},supportedTransactionVersions:['legacy']}}});
+ assert.equal(heard,2,'a manual change and a wallet-standard registration');remove();assert.equal(heard,3);off();walletsChanged();assert.equal(heard,3);
+});
