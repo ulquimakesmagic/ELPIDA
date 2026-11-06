@@ -31,7 +31,8 @@
 
 /* ---------- Trending cards ---------- */
 .trending .scroll-fade { container: trend / inline-size; }
-.trend-track { grid-auto-columns: calc((100% - 3 * 14px) / 4); }
+.trend-track { grid-auto-columns: calc((100% - 4 * 14px) / 5); }
+@container trend (max-width: 1000px) { .trend-track { grid-auto-columns: calc((100% - 3 * 14px) / 4); } }
 @container trend (max-width: 900px) { .trend-track { grid-auto-columns: calc((100% - 2 * 14px) / 3); } }
 @container trend (max-width: 640px) { .trend-track { grid-auto-columns: calc((100% - 14px) / 2.2); } }
 @container trend (max-width: 440px) { .trend-track { grid-auto-columns: calc((100% - 14px) / 1.4); } }
@@ -45,7 +46,7 @@
   background: radial-gradient(circle at 50% 32%, var(--accent-tint), transparent 62%), linear-gradient(160deg, var(--panel-3), var(--panel-2)); }
 .tc-image img { transition: transform 220ms var(--ease); }
 .trend-card:hover .tc-image img { transform: scale(1.03); }
-.avatar.tc-image .initials { font: 700 clamp(48px, 9cqi, 72px)/1 var(--font-sans); letter-spacing: -.05em; color: var(--accent-text); transform: translateY(-18%); }
+.avatar.tc-image .initials { font: 700 clamp(40px, 8cqi, 64px)/1 var(--font-sans); letter-spacing: -.05em; color: var(--accent-text); transform: translateY(-26%); }
 .rank-chip { position: absolute; z-index: 2; pointer-events: none; top: 10px; left: 10px; padding: 4px 9px; border-radius: var(--r-pill); background: rgba(19, 19, 21, .47);
   border: .67px solid rgba(255, 255, 255, .145); color: #fff; font: 650 10px/1.2 var(--font-sans); -webkit-backdrop-filter: blur(8px); backdrop-filter: blur(8px); }
 .tc-pill { position: absolute; z-index: 2; top: 10px; right: 10px; pointer-events: none; }
@@ -384,3 +385,8 @@
 [data-theme="light"] .koth { --koth: #a87708; --koth-bg: rgba(245, 197, 66, .16); }
 [data-theme="light"] .koth-badge { background: rgba(255, 248, 225, .92); color: #8a6100; border-color: rgba(168, 119, 8, .4); }
 [data-theme="light"] .koth-crown { color: #a87708; }
+
+/* 24h (or since-launch) price change on list cards, next to the market cap. */
+.lc-cap-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+.lc-change:empty { display: none; }
+.lc-change .pct-pill { padding: 3px 7px; font-size: 10px; }

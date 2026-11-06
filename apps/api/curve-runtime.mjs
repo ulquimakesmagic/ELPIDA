@@ -6,7 +6,7 @@ import { compileContracts } from '../../scripts/compile.mjs';
 import { testnets, evmTestnets } from '../../packages/core/networks.mjs';
 import { amount } from './runtime.mjs';
 import { EvmIndexer } from '../../packages/indexer/evm-indexer.mjs';
-import { indexedActivity, activityOf } from '../web/discovery.mjs';
+import { indexedActivity, activityOf, indexedChange } from '../web/discovery.mjs';
 import {deployLocalV3,v3Artifacts,v3PoolAbi,baseSepoliaDex,testnetDexes} from '../../packages/core/uniswap.mjs';
 import { normalizeMetadata } from '../web/metadata.mjs';
 import { readFileSync, writeFileSync, mkdirSync, renameSync, existsSync, appendFileSync } from 'node:fs';
@@ -76,7 +76,7 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   const metadata = new Map(metadataPath && existsSync(metadataPath) ? Object.entries(JSON.parse(readFileSync(metadataPath,'utf8'))) : []);
   let taxRuntime,taxPending;
   const ensureTax=async()=>{taxPending??=createTaxRuntime({provider,signers,compiled,feed:usdFeed,coin:feeCoin,wrapped:v3.weth}).then(r=>{taxRuntime=r;config.taxLaunch.deployment=r.config;return r;});return taxPending;};
-  const listings = () => { const activity = indexedActivity(indexer.db); return [...indexer.listings().map(r => ({...r,metadata:metadata.get(r.hash) ?? {},...activityOf(activity,r.address)})),...(taxRuntime?.listings()??[])]; };
+  const listings = () => { const activity = indexedActivity(indexer.db); return [...indexer.listings().map(r => ({...r,metadata:metadata.get(r.hash) ?? {},...activityOf(activity,r.address),priceChange24h:indexedChange(indexer.db,r)})),...(taxRuntime?.listings()??[])]; };
   function saveMetadata(hash, value) {
     metadata.set(hash,value);
     if(metadataPath){mkdirSync(dirname(metadataPath),{recursive:true});writeFileSync(metadataPath+'.tmp',JSON.stringify(Object.fromEntries(metadata)));renameSync(metadataPath+'.tmp',metadataPath);}
