@@ -68,7 +68,9 @@ export const testnets = [
     // Model 11 test launchpad (6 Nov 2026). BNB Chain testnet has no Uniswap v4 (it is only on BNB mainnet), so the
     // operator deploys a labelled test copy of Uniswap's own PoolManager from the operator panel first. Pin its address
     // in `poolManager` and the launchpad in `shared` once deployed (docs/HUMAN_ACTIONS.md).
-    v4: { poolManager: null, testPoolManager: true, shared: null },
+    // Deployed by Malik from the operator panel, 6 Nov 2026: the test PoolManager (Uniswap v4-core 1.0.2, unchanged; block
+    // 141138906), then the Model 11 launchpad on it (factory created in block 141139092; treasury 0xf5B0…639D).
+    v4: { poolManager: '0x251E30304241c21d76219e56f3611d8b53F03a13', testPoolManager: true, shared: { factory: '0xA05eEe6f4443707EF6a88D4aE478c297342C0fd2', hook: '0x11C491F546491259f6B017E95fd918bBA7dC28CC', router: '0xA2DC3f5Ae12811404a4667C147c60D46748865fB', block: 141139092 } },
     shared: { factory: '0x4CabA05067171DbA4B840aDae1e652B8279dE499', block: 140398704, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1, reviewFixesVersion: 1 },
     legacy: [{ factory: '0x5795b25C7fA37638eEacd29848522f8Cd48a1156', block: 139102664, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE', block: 138485798, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },
