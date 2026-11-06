@@ -14,3 +14,12 @@ test('the launch model comes before the trading pair, and Model 11 limits the pa
   assert.match(flow, /function networkStep\(\) \{\n    fitPairToModel\(\);/, 'a saved pair is fitted before the step draws');
   assert.match(flow, /draft\.launchModel = key; fitPairToModel\(\);/, 'and again when the model changes');
 });
+
+test('the success screen describes a Model 11 launch as a Uniswap v4 pool, not a bonding curve', () => {
+  assert.match(flow, /v4Chosen\(\) \? `\$\{draft\.name\} is trading in its Uniswap v4 pool on/);
+});
+
+test('the launch summary and the review name the launch model wherever Model 11 is offered', () => {
+  assert.match(flow, /v4Offered\(\) \? \[h\('dt', 'Launch model'\), h\('dd', modelName\(\)\)\]/);
+  assert.match(flow, /v4Offered\(\) \? \[row\('Launch model', modelName\(\)\)\]/);
+});

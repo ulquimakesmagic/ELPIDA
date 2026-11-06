@@ -128,6 +128,7 @@ export function renderLaunch(ctx) {
   // Model 11 (Uniswap v4 hook) is offered where its test launchpad exists; it pairs with the native coin or USDC.
   const v4Offered = () => !!draft.chain && draft.chain !== 'local' && !solana() && !!v4Deployment(net());
   const v4Chosen = () => draft.launchModel === 'v11' && v4Offered();
+  const modelName = () => v4Chosen() ? 'Model 11 test · Uniswap v4' : 'Model 10 · bonding curve';
   const dexName = () => v4Chosen() ? 'Uniswap v4' : !draft.chain ? 'DEX' : solana() ? 'Raydium' : draft.chain === 'local' ? (ctx.config.dex ? 'Uniswap v3' : 'test') : draft.chain === 'base-sepolia' ? 'Uniswap v3' : ctx.config.publicDexes?.[draft.chain]?.name ?? 'test';
 
   async function loadRewards() {
@@ -152,6 +153,7 @@ export function renderLaunch(ctx) {
         h('p.desc', draft.description || 'Your description appears here.'), links,
         h('div.chips', { class: 'links' }, h('span.chip',chainIcon(draft.chain), draft.chain ? (draft.chain === 'local' ? 'Local simulation' : net()?.name ?? draft.chain) : 'Network not chosen'), h('span.chip',assetIcon(pairSymbol()), `Pair: ${pairSymbol()}`))),
       h('div.summary-card', h('h4', 'Launch summary'), h('dl.kv',
+        ...(v4Offered() ? [h('dt', 'Launch model'), h('dd', modelName())] : []),
         h('dt', 'Launch fee · $10'), h('dd', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`),
         h('dt', 'First purchase'), h('dd', buyText()),
         h('dt', 'Estimated tokens'), h('dd', est ? `${compact(est.tokens)}` : '—'),
@@ -470,7 +472,7 @@ export function renderLaunch(ctx) {
     return { body: [
       h('div.review',
         block('Token', 0, row('Name', draft.name), row('Symbol', `$${draft.symbol.toUpperCase()}`), row('Description', draft.description), row('Logo', draft.image ? (draft.image.startsWith('data:') ? 'Uploaded image' : draft.image) : '—'), row('Links', ['website', 'twitter', 'telegram', 'discord'].filter(k => draft[k]).map(k => ({ website: 'Website', twitter: 'X', telegram: 'Telegram', discord: 'Discord' })[k]).join(', ') || 'None')),
-        block('Network and trading pair', 1, row('Network', draft.chain === 'local' ? 'Local simulation' : net()?.name ?? '—'), row('Wallet', draft.chain === 'local' ? `Demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()}` : short(ctx.wallet.address)), row('Trading pair', `${PAIR_INFO[draft.pair]?.title ?? ''} · ${pairSymbol()}`), row('Graduates into', `A locked ${dexName()} pool`), notice?.live ? row('Partner tier', `${notice.tier} · ${notice.percent}% of fees buy back and burn`) : null),
+        block('Network and trading pair', 1, ...(v4Offered() ? [row('Launch model', modelName())] : []), row('Network', draft.chain === 'local' ? 'Local simulation' : net()?.name ?? '—'), row('Wallet', draft.chain === 'local' ? `Demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()}` : short(ctx.wallet.address)), row('Trading pair', `${PAIR_INFO[draft.pair]?.title ?? ''} · ${pairSymbol()}`), row('Graduates into', `A locked ${dexName()} pool`), notice?.live ? row('Partner tier', `${notice.tier} · ${notice.percent}% of fees buy back and burn`) : null),
         block('Creator rewards', 2, row('Strategy', STRATEGIES[draft.rewardMode].name), ...(['holders', 'paired', 'buyback'].includes(draft.rewardMode) ? [row('Distribution threshold', `${draft.threshold} ${pairSymbol()}`), row('Minimum token holding', `${number(draft.minimumHolding, 0)} ${draft.symbol.toUpperCase()}`)] : [row('Recipients', recipients)]), draft.rewardMode === 'paired' ? row('Reward asset', rewardData?.assets.find(a => a.address === draft.rewardToken)?.symbol ?? '—') : null, draft.rewardMode === 'buyback' ? row('Vesting', `${draft.vestingDays} days`) : null),
         block('Creator purchase and costs', 3, row('Launch fee · $10', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), row('First purchase', buyText()), payNative() ? row('Paid with', `${nativeSymbol()}, converted to ${pairSymbol()} in a separate confirmation first`) : null, row('Buy / sell token tax', `${draft.taxBuy||0}% / ${draft.taxSell||0}% · additional to trading fees`), row('Estimated tokens', estimate() ? compact(estimate().tokens) : 'Shown after launch'), row('Conversion',priceNote()),row('Network gas', 'Estimated before signing; paid separately'))),
       notice ? callout(notice.live ? '' : 'warn', notice.live ? 'flame' : 'info', notice.text) : null,
