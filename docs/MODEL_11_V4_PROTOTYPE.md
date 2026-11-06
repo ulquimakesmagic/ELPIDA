@@ -134,8 +134,52 @@ With tick spacing 1, a swap across the whole curve would walk about ninety bitma
   `tests/v4-locked-launch.test.mjs` (13 tests) adds the liquidity switch.
 - **Gas:** about the same as phase 2. Launch is 946k, because of the CREATE2 token and the oracle read.
 
-## Next (phase 4, still no mainnet)
+## Phase 4 (6 November 2026, test networks only)
 
-1. **Indexer:** read the hook's `Launched`, `Fee`, `BuybackBurned`, `Milestone` and `LiquidityOpened` events beside the PoolManager's `Swap`.
-2. **App:** launch, buy and sell on Model 11. Buy and sell go through a router, because v4 has no per-token curve contract.
-3. **Testnets:** a labelled test launchpad on Base Sepolia and Ethereum Sepolia, which have Uniswap v4. Malik deploys it from the browser, as with "Deploy reviewed launchpad". The hook address is mined in the browser before the deploy.
+1. **Router: `ElpidaV4Router`.** v4 has no per-token curve contract, so the site trades through a small router of
+   its own rather than Uniswap's Universal Router:
+   - exact-input `buy` and `sell`, with a minimum out and a deadline;
+   - one plain approval of the router for an ERC-20 input (USDC, or the token when selling), no Permit2;
+   - `quote(token, isBuy, amountIn)` runs the swap and undoes it, so a quote includes the hook's fee to the wei;
+   - `Swapped(token, trader, recipient, …)` names the real trader, which the hook's `Fee` event cannot (it only sees
+     the router);
+   - it holds nothing between transactions. Not audited.
+2. **Indexer: `packages/indexer/v4-indexer.mjs`.** It writes the same tables and rows as the curve indexer, so
+   listings, trades, candles, holders and balances are served by the same code. It reads:
+   - the factory's `Launched` and `MetadataPublished`;
+   - the hook's `Launched`, `Fee`, `BuybackBurned`, `Milestone`, `LiquidityOpened` and fee payouts;
+   - the PoolManager's `Swap`, filtered by each launch's pool id;
+   - the router's `Swapped`.
+
+   Each `Swap` is matched with the `Fee` that follows it, so a buy is recorded gross and a sell net of the fee. A swap
+   the hook makes itself is the creator's first buy (followed by `Fee`) or a buyback (followed by `BuybackBurned`,
+   not a trade). A trade through another router is attributed to the transaction's sender.
+3. **Shared maths: `packages/core/v4-model.mjs`.** It replays Uniswap's TickMath and SqrtPriceMath and the hook's
+   launch sizing, for the indexer's snapshot (price, quote in the locked positions, sale progress, quote left to the
+   milestone) and the launch form's first-buy estimate. The tests check it against the hook's own views.
+   - A v4 swap walks the tick bitmap one 256-tick word at a time and rounds each step's input up. So "buy the rest"
+     adds one wei per word of the sale range.
+4. **App.**
+   - Network and funds has a **Deploy Model 11 test launchpad** button. The hook's salt is mined in the page, and the
+     six steps resume where they stopped.
+   - The launch form offers **Launch model: Model 11 test** where that launchpad exists (native or USDC pairs, no token
+     tax).
+   - Token pages trade Model 11 tokens through the router and label them as tests.
+5. **Server.**
+   - `networks.mjs` has a `v4` block on Base Sepolia and Ethereum Sepolia: Uniswap's PoolManager, and the launchpad
+     once it is pinned.
+   - The public index adds a Model 11 entry beside each curve launchpad, after checking the factory, hook and router
+     point at each other.
+   - `/api/v4-artifacts` serves the bytecode the browser deploys, from the same pinned build the tests run.
+6. **Tests:**
+   - `tests/v4-router.test.mjs` (4 tests);
+   - `tests/v4-indexer.test.mjs` (4 tests, including the public index);
+   - `tests/v4-browser.test.mjs` (3 tests: the owner's deploy, then launch, quote, buy, sell and fee payout, as the
+     page calls them).
+
+## Next (phase 5, still no mainnet)
+
+1. Malik deploys the test launchpad on both Sepolias (`docs/HUMAN_ACTIONS.md`), and the deployment is pinned.
+2. Check the hook's swaps through Uniswap's Universal Router and an aggregator on a testnet.
+3. Build the page for the opt-in third-party liquidity (`openLiquidity`).
+4. An external audit of the hook and the router before any mainnet plan.

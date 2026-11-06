@@ -1,5 +1,26 @@
 # Actions that need Malik
 
+## Model 11 test launchpad (Uniswap v4) on Base Sepolia and Ethereum Sepolia, 6 November 2026
+
+Model 11 keeps the launch curve inside one Uniswap v4 pool, with its liquidity locked from the first trade. It is not
+audited: test networks only, and every Model 11 token is labelled as a test. Nothing here touches mainnet or the
+Model 10 launchpads, which keep working as before. After this PR is merged and Railway has redeployed, on each of
+Base Sepolia and Ethereum Sepolia:
+
+1. Open elpida.fun, switch to the network, connect the deployer wallet (it becomes this launchpad's treasury) and
+   open **Network and funds**. It needs a little test ETH for gas (about 0.05).
+2. Press **Deploy Model 11 test launchpad (about 7 confirmations)**: the CREATE2 deployer, the factory ($50 starting
+   FDV, token details required), the hook, connecting the hook, USD pricing, the USDC pair, then the router. The page
+   first spends a few seconds finding the hook's address (its last bits are its Uniswap v4 permissions). If a step is
+   rejected or fails, press the button again: finished steps are kept.
+3. Send Claude the addresses the page shows (factory, hook, router, block). Claude pins them in
+   `packages/core/networks.mjs` (`v4.shared`), so the site lists Model 11 tokens for every visitor.
+4. Then try it: on the launch form, under **Launch model**, choose **Model 11 test · Uniswap v4**, launch with a small
+   first buy, then buy and sell on the token page.
+
+Uniswap's own v4 PoolManager is used on each network (Base Sepolia `0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408`,
+Ethereum Sepolia `0xE03A1074c86CFeDd5C142C4F04F1a1536e203543`); the page checks it has code before deploying.
+
 ## Pay in SOL for Solana stock pairs on devnet, 5 November 2026
 
 **Status, 5 November 22:40:** the devnet program is upgraded (step 2 done). That run created a second tTSLAon
