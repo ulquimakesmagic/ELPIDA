@@ -201,6 +201,14 @@ test('Model 11 stock pairs (BNB testnet first): approved at the Model 10 price, 
   assert.deepEqual((await v4StockPairs(ow)).map(s => s.approved), [true]);
   assert.match((await approveV4Stock(ow, { asset: stock.target })).message, /already a Model 11 pair/);
 
+  // Explicit selection and test-only scope must also hold when bypassing the launch form.
+  const invalid = await withStocks(f.signers[0]);
+  await assert.rejects(v4LaunchQuote(invalid, { pair: 'xstock', quoteAsset: f.usdc.target }), /Choose a test stock/);
+  await assert.rejects(launchV4(invalid, { name: 'Wrong', symbol: 'WRONG', pair: 'xstock', quoteAsset: f.usdc.target }), /Choose a test stock/);
+  invalid.approvedQuotes = [{ ...record, test: false }];
+  await assert.rejects(v4LaunchQuote(invalid, { pair: 'xstock', quoteAsset: stock.target }), /Choose a test stock/);
+  await assert.rejects(launchV4(invalid, { name: 'Real', symbol: 'REAL', pair: 'xstock', quoteAsset: stock.target }), /Choose a test stock/);
+
   // A creator launches paired with the stock and pays the first buy in it.
   const creator = f.signers[0], cw = await withStocks(creator);
   await mined(stock.connect(creator).faucet(parseUnits('1', 18)));
@@ -235,5 +243,21 @@ test('Model 11 stock pairs (BNB testnet first): approved at the Model 10 price, 
   // An issuer that blocks the shared PoolManager stops trading too, with the reason.
   await mined(stock.connect(creator).setBlocked(f.manager.target, true));
   await assert.rejects(v4Trade(bw, item, 'sell', { amount: '1', slippage: '1' }), /blocked the Uniswap v4 pool contract/);
+  await mined(stock.connect(creator).setBlocked(f.manager.target, false));
+  await v4Trade(bw, item, 'sell', { amount: '1', slippage: '1' });
+  // Cross the milestone using the stock itself, then trade and claim in the same canonical pool.
+  const beforeMilestone = await hook.launches(launched.token);
+  await v4Trade(bw, item, 'buy', { amount: '0.8', slippage: '1' });
+  const afterMilestone = await hook.launches(launched.token);
+  assert.equal(afterMilestone.graduated, true);
+  assert.equal(beforeMilestone.graduated, false);
+  assert.ok(afterMilestone.milestoneLiquidity > 0n);
+  await v4Trade(bw, item, 'sell', { amount: '1', slippage: '1' });
+  await mined(hook.connect(buyer).withdrawFees(launched.token));
+  assert.equal((await hook.launches(launched.token)).protocolFees, 0n);
+  await index.sync();
+  assert.equal(index.listings()[0].graduated, true);
+  assert.ok(item.poolId);
+  assert.equal(index.listings()[0].poolId, item.poolId);
   await index.close();
 });

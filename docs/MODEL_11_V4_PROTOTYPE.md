@@ -201,10 +201,9 @@ plain ERC-20 quote, so no contract changed:
 - **What testnet does not settle:** the pause gate is the page's check, as for Model 10, not the hook's. Real stocks
   still need steps 1 to 5 below, starting with Ondo's answers.
 
-Model 11 pairs with the native coin and USDC only. Tokenized stocks stay on Model 10, which already checks the
-issuer's controls. Malik asked to plan stock pairs for Model 11 as a later phase.
+Real tokenized stocks remain excluded from Model 11. The test-only stand-ins above are an explicit rehearsal exception. Model 10 retains its existing issuer checks. The steps below are requirements for a future real-stock phase.
 
-**Why they are left out today:**
+**Why real stocks are left out today:**
 - **One frozen stock freezes every pool.** In Model 11 the stock sits in Uniswap's PoolManager, which holds every v4
   pool's funds. If the issuer pauses the stock, or blocks the PoolManager's address, every Model 11 pool on that
   stock stops. Its liquidity is locked from the first trade, so it would be stuck for good. In Model 10 the stock sits
@@ -233,3 +232,12 @@ issuer's controls. Malik asked to plan stock pairs for Model 11 as a later phase
    stand-ins (pause, blocklist and feed controls) before any real stock.
 5. **An audit of the stock gate and the frozen-stock plan,** with the rest of the hook, before mainnet.
 
+
+
+## Stock-pair completion review - 7 November 2026
+
+This finishes the unmerged testnet stock-pair branch without changing deployed contracts. Explicit stock selection is mandatory: an unknown asset cannot fall back to another stock, and both quoting and launching reject records not explicitly marked as test assets. Native-payment conversion for a Model 11 stock first buy remains unavailable; the first buy uses the stock itself. Real stock quotes remain excluded.
+
+The launch review now describes liquidity locked from launch in the same pool. Its stock warning distinguishes test issuer transfer controls from a future on-chain corporate-action gate; the current hook does not implement that gate.
+
+Local real-PoolManager coverage includes approval authorization, stock-denominated launch/buy/sell, unknown and non-test asset rejection, issuer pause with retained fee liabilities, unpause and payout recovery, blocked PoolManager rejection, milestone crossing with the same indexed pool ID, post-milestone trading and fee claims. Public BNB testnet approval and wallet rehearsal are still the operator actions in HUMAN_ACTIONS.md; no public transaction or deployment was sent by this review.

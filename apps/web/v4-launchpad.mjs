@@ -199,8 +199,8 @@ export async function deployTestPoolManager(w) {
 export const V4_PAIR_KINDS = Object.freeze(['native', 'usdc', 'xstock']);
 const stockRecord = (w, address) => (w.approvedQuotes ?? []).find(a => a.kind === 'xstock' && a.address.toLowerCase() === String(address ?? '').toLowerCase()) ?? null;
 function stockAsset(w, address) {
-  const record = stockRecord(w, address) ?? (w.approvedQuotes ?? []).find(a => a.kind === 'xstock');
-  if (!record) throw new Error('Choose a test stock that is approved on this network.');
+  const record = stockRecord(w, address);
+  if (!record || record.test !== true) throw new Error('Choose a test stock that is approved on this network.');
   return getAddress(record.address);
 }
 
