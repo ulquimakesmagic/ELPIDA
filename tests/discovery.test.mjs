@@ -4,9 +4,11 @@ import {DatabaseSync} from 'node:sqlite';
 import {discoveryTokens,indexedChange} from '../apps/web/discovery.mjs';
 const now=2000000000,ref={status:'fresh',usd:2000,updatedAt:now};
 const t=(address,price,extra={})=>({address,network:'base',name:address,symbol:address,spotPrice:price,supply:1e9,usdReference:ref,...extra});
-test('discovery compares USD caps, puts missing/stale rates last and orders ties deterministically',()=>{
- const a=t('a',2,{usdReference:{...ref,usd:1}}),b=t('b',1),c=t('c',100,{usdReference:null}),d=t('d',100,{usdReference:{...ref,updatedAt:now-3601}});
- assert.deepEqual(discoveryTokens([d,c,a,b],{},now).map(t=>t.address),['b','a','c','d']);
+test('discovery compares USD caps, puts tokens with no dollar reference last and orders ties deterministically',()=>{
+ // 6 November 2026: values are only ever in dollars, so an old reference (d) still values its token; only a pair asset
+ // that never had one (c) sorts last.
+ const a=t('a',2,{usdReference:{...ref,usd:1}}),b=t('b',1),c=t('c',100,{usdReference:null}),d=t('d',100,{usdReference:{...ref,status:'stale',updatedAt:now-86400}});
+ assert.deepEqual(discoveryTokens([d,c,a,b],{},now).map(t=>t.address),['d','b','a','c']);
  assert.deepEqual(discoveryTokens([a,b],{category:'new'},now).map(t=>t.address),['a','b']);
 });
 test('migration and graduation filters use confirmed lifecycle states',()=>{
