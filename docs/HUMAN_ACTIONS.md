@@ -1,5 +1,20 @@
 # Actions that need Malik
 
+## Model 11 on BNB Chain testnet, and test funds moved to the operator panel, 6 November 2026
+
+BNB Chain testnet has no Uniswap v4 (Uniswap deployed it on BNB mainnet only), so Model 11 there runs on a labelled
+test copy of Uniswap's own PoolManager (the published v4-core 1.0.2 contract, unchanged). After this PR is merged and
+Railway has redeployed:
+
+1. Operator panel (`elpida.fun/#/monkey`), **Launchpads** tab, switch to BNB Chain testnet and connect the deployer
+   wallet (it needs some tBNB; the faucet is now in the **Test funds** tab).
+2. Press **Deploy test PoolManager (1 confirmation)**.
+3. Then **Deploy Model 11 test launchpad (about 7 confirmations)**.
+4. Send Claude what the page shows (PoolManager, factory, hook, router, block) to be pinned.
+
+Test funds (the gas faucet, the test pair assets and Circle's test USDC) are now only in the operator panel's
+**Test funds** tab. The public Network and wallet dialog keeps the network choice and the wallet connection.
+
 ## Model 11 test launchpad (Uniswap v4) on Base Sepolia and Ethereum Sepolia, 6 November 2026
 
 **Done, 6 November 11:09.** Both test launchpads are deployed and pinned in `networks.mjs`:

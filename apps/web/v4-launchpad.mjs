@@ -20,14 +20,31 @@ const write = (key, value) => { try { localStorage.setItem(key, JSON.stringify(v
 
 /** True for a token launched on Model 11 (the public index tags its rows with the deployment model). */
 export const isV4Token = item => item?.deploymentModel === V4_MODEL || item?.model === V4_MODEL;
-/** Whether this network has Uniswap v4 for Model 11 (networks.mjs `v4`). */
-export const v4Available = net => !!net?.v4?.poolManager && V4_NETWORKS.includes(net.key) && !net.mainnet;
+const poolManagerKey = chainId => `elpida:v4:pool-manager:${chainId}`;
+/**
+ * Whether Model 11 can run on this network: one with Uniswap v4 (networks.mjs `v4.poolManager`), or a test network
+ * without it where the operator deploys a labelled test copy of Uniswap's own PoolManager (`v4.testPoolManager`).
+ */
+export const v4Available = net => !!net?.v4 && (!!net.v4.poolManager || !!net.v4.testPoolManager) && V4_NETWORKS.includes(net.key) && !net.mainnet;
+/** The network's v4 PoolManager: Uniswap's own or a pinned test copy, else a test copy this browser deployed. */
+export function v4PoolManager(net) {
+  if (!v4Available(net)) return null;
+  if (net.v4.poolManager) return net.v4.poolManager;
+  const saved = read(poolManagerKey(net.chainId));
+  return saved?.address && isAddress(saved.address) ? saved.address : null;
+}
 /** The network's Model 11 launchpad: the team deployment pinned in networks.mjs, else one this browser deployed. */
 export function v4Deployment(net) {
-  if (!v4Available(net)) return null;
-  if (net.v4.shared?.factory) return { ...net.v4.shared, poolManager: net.v4.poolManager, pinned: true };
+  const manager = v4PoolManager(net);
+  if (!manager) return null;
+  if (net.v4.shared?.factory) return { ...net.v4.shared, poolManager: manager, pinned: true };
   const saved = read(savedKey(net.chainId));
-  return saved?.factory && saved.poolManager?.toLowerCase() === net.v4.poolManager.toLowerCase() ? { ...saved, pinned: false } : null;
+  return saved?.factory && saved.poolManager?.toLowerCase() === manager.toLowerCase() ? { ...saved, pinned: false } : null;
+}
+/** A test copy of the PoolManager this browser deployed and that is not pinned yet ({ address, block }), or null. */
+export function savedTestPoolManager(net) {
+  if (!v4Available(net) || net.v4.poolManager) return null;
+  return read(poolManagerKey(net.chainId));
 }
 
 /**
@@ -98,14 +115,15 @@ export async function deployV4(w, body = {}) {
   await w.checkNetwork();
   const net = w.net;
   if (!v4Available(net)) throw new Error(`${net.name} has no Uniswap v4 for Model 11. Use Base Sepolia or Ethereum Sepolia.`);
+  if (!v4PoolManager(net)) throw new Error(`${net.name} has no Uniswap v4. Deploy the test PoolManager first (same tab). Nothing was deployed.`);
   if (net.v4.shared?.factory) throw new Error(`The ${net.name} Model 11 test launchpad is already pinned. Use it for launches.`);
   if (v4Deployment(net)) throw new Error(`A ${net.name} Model 11 test launchpad was already deployed from this browser (factory ${v4Deployment(net).factory}). Send its addresses to be pinned; nothing was deployed.`);
   const entered = String(body.treasury ?? '').trim();
   if (entered && (!isAddress(entered) || getAddress(entered) !== getAddress(w.address))) throw new Error('The Model 11 test launchpad uses the connected wallet as its treasury. Leave the treasury empty. Nothing was deployed.');
   if (!w.oracle?.available) throw new Error(`Verified USD pricing is not configured for ${net.name}. Nothing was deployed.`);
   await w.oraclePrice();
-  const poolManager = getAddress(net.v4.poolManager);
-  if (!await hasCode(w.provider, poolManager, { wait: true, tries: 2 })) throw new Error(`Uniswap's v4 PoolManager ${poolManager} has no code on ${net.name}. Nothing was deployed.`);
+  const poolManager = getAddress(v4PoolManager(net));
+  if (!await hasCode(w.provider, poolManager, { wait: true, tries: 2 })) throw new Error(`The v4 PoolManager ${poolManager} has no code on ${net.name}. Nothing was deployed.`);
   if (await w.provider.getBalance(w.address) === 0n) throw new Error(`Get ${net.nativeCurrency.symbol} on ${net.name} from a faucet to pay deployment gas.`);
   const a = await artifacts(), progress = read(savedKey(net.chainId) + ':progress') ?? {};
   const save = () => write(savedKey(net.chainId) + ':progress', progress);
@@ -146,6 +164,30 @@ export async function deployV4(w, body = {}) {
   if (!write(savedKey(net.chainId), record)) throw new Error(`Deployed, but this browser blocks storage. Save factory ${record.factory}, hook ${record.hook}, router ${record.router} (block ${record.block}).`);
   try { localStorage.removeItem(savedKey(net.chainId) + ':progress'); } catch { /* kept for a retry */ }
   return { record, message: `The ${net.name} Model 11 test launchpad is deployed: factory ${record.factory}, hook ${record.hook}, router ${record.router}, from block ${record.block}. Send these to be pinned in networks.mjs (v4.shared) so the site lists its tokens.` };
+}
+
+/**
+ * Deploys a labelled test copy of Uniswap's own v4 PoolManager (the published v4-core 1.0.2 bytecode, unchanged) on a
+ * test network that has none, with the connected wallet as its owner (it can only set protocol fees, which stay 0).
+ * Testnet only: on mainnet Model 11 uses Uniswap's own deployment.
+ */
+export async function deployTestPoolManager(w) {
+  await w.checkNetwork();
+  const net = w.net;
+  if (!v4Available(net) || net.v4.poolManager || !net.v4.testPoolManager) throw new Error(`${net.name} does not take a test PoolManager.`);
+  const saved = savedTestPoolManager(net);
+  if (saved?.address && await hasCode(w.provider, saved.address, { wait: true })) throw new Error(`A test PoolManager was already deployed from this browser (${saved.address}). Send it to be pinned; nothing was deployed.`);
+  if (await w.provider.getBalance(w.address) === 0n) throw new Error(`Get ${net.nativeCurrency.symbol} on ${net.name} from a faucet to pay deployment gas.`);
+  const a = await artifacts();
+  if (!a.poolManager?.bytecode) throw new Error('The PoolManager bytecode is unavailable. Nothing was deployed.');
+  w.onProgress(`Confirm the test Uniswap v4 PoolManager on ${net.name} (Uniswap's own published contract, labelled as a test deployment)…`);
+  const c = await new ContractFactory(a.poolManager.abi, a.poolManager.bytecode, w.signer).deploy(w.address);
+  await c.waitForDeployment();
+  const tx = c.deploymentTransaction(), receipt = await tx.wait();
+  await walletCaughtUp(w, tx.nonce);
+  const record = { address: await c.getAddress(), block: receipt.blockNumber, owner: w.address, label: 'Elpida test deployment of Uniswap v4 PoolManager (v4-core 1.0.2)' };
+  if (!write(poolManagerKey(net.chainId), record)) throw new Error(`Deployed, but this browser blocks storage. Save the PoolManager ${record.address} (block ${record.block}).`);
+  return { hash: tx.hash, record, message: `The test Uniswap v4 PoolManager is deployed on ${net.name}: ${record.address} (block ${record.block}). Now deploy the Model 11 test launchpad, then send both to be pinned.` };
 }
 
 async function stageMetadata(w, name, symbol, body) {

@@ -65,6 +65,10 @@ export const testnets = [
     // Reviewed launchpad (security review fixes E-1 to E-3), deployed by Malik 2 Nov 2026; pricing turned on in tx
     // 0x17e922cb…c5e6 (block 140398704; no launch can precede it). Factory and adapter 0x5343…ed9a both report
     // REVIEW_FIXES_VERSION 1. The 139102664 factory moves to legacy and stays indexed. No new launches go there.
+    // Model 11 test launchpad (6 Nov 2026). BNB Chain testnet has no Uniswap v4 (it is only on BNB mainnet), so the
+    // operator deploys a labelled test copy of Uniswap's own PoolManager from the operator panel first. Pin its address
+    // in `poolManager` and the launchpad in `shared` once deployed (docs/HUMAN_ACTIONS.md).
+    v4: { poolManager: null, testPoolManager: true, shared: null },
     shared: { factory: '0x4CabA05067171DbA4B840aDae1e652B8279dE499', block: 140398704, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1, reviewFixesVersion: 1 },
     legacy: [{ factory: '0x5795b25C7fA37638eEacd29848522f8Cd48a1156', block: 139102664, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE', block: 138485798, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },
