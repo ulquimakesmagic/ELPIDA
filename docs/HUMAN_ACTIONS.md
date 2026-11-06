@@ -2,6 +2,13 @@
 
 ## Model 11 test launchpad (Uniswap v4) on Base Sepolia and Ethereum Sepolia, 6 November 2026
 
+**Status, 6 November 10:45:** the first Ethereum Sepolia run stopped after the hook. The CREATE2 deployer, the factory
+and the hook (`0xbe3C898140D32DFcAa1DeE5B1BaDE36BCe4B68cC`, block 12075678) are deployed. The hook is not connected
+yet: the page's check right after the hook asked a public RPC node that had not seen it yet, and stopped. Once this PR
+is merged and Railway has redeployed, press the button again in the same browser, in the **Launchpads** tab. It finds
+the same hook and reuses it, then asks only for the remaining steps: connecting the hook, pricing, the USDC pair and
+the router.
+
 Model 11 keeps the launch curve inside one Uniswap v4 pool, with its liquidity locked from the first trade. It is not
 audited: test networks only, and every Model 11 token is labelled as a test. Nothing here touches mainnet or the
 Model 10 launchpads, which keep working as before. After this PR is merged and Railway has redeployed, on each of

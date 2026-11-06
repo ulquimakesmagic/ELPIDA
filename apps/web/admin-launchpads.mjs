@@ -14,7 +14,13 @@ export function renderLaunchpads(ctx, { connect }) {
   const root = h('div.op-dash.pr');
   const error = h('p.error-text', { role: 'alert' });
   const fail = e => { error.textContent = errorText(e); };
-  const run = async (action, body = {}) => { error.textContent = ''; const r = downloadSafeBatch(await ctx.run(action, body)); draw(); return r; };
+  // One live status line for a multi-step deployment, instead of a notification per step.
+  const status = h('p.small.op-status', { role: 'status', 'aria-live': 'polite' });
+  const run = async (action, body = {}) => {
+    error.textContent = ''; status.textContent = '';
+    try { const r = downloadSafeBatch(await ctx.run(action, body, { onProgress: message => { status.textContent = message; } })); status.textContent = ''; draw(); return r; }
+    catch (e) { status.textContent = ''; throw e; }
+  };
   const card = (title, ...content) => h('section.tk-card.op-card', h('h2.tk-h', title), ...content.filter(Boolean));
   const button = (label, action, body) => h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: () => run(action, typeof body === 'function' ? body() : body).catch(fail) } }, label);
 
@@ -68,7 +74,7 @@ export function renderLaunchpads(ctx, { connect }) {
     if (ctx.mode !== 'testnet' || !net) { root.replaceChildren(card('Launchpads', h('p.small.muted', 'Launchpads are per network. Switch to Base, Ethereum, BNB Chain or Robinhood Chain in Network and funds, then come back here.'))); return; }
     if (!w.address) { root.replaceChildren(card('Launchpads', h('p.small.muted', `Connect the operator wallet on ${net.name} to set up its launchpads.`), h('button.btn.btn-secondary', { type: 'button', on: { click: connect } }, 'Connect wallet'))); return; }
     const head = h('header.op-head', h('div', h('h1', h('span.op-net', chainIcon(net.key), `Launchpads · ${net.name}`)), h('p.small.muted', 'Deployments send from the connected wallet. Each one is pinned in networks.mjs before visitors use it.')));
-    root.replaceChildren(head, error, h('div.op-grid', ...[testDexCard(w, net), curveCard(w, net), v4Card(net)].filter(Boolean)));
+    root.replaceChildren(head, status, error, h('div.op-grid', ...[testDexCard(w, net), curveCard(w, net), v4Card(net)].filter(Boolean)));
   }
   queueMicrotask(draw);
   return { root, update: draw };
