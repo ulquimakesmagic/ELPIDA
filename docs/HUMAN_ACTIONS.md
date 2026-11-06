@@ -7,8 +7,9 @@ audited: test networks only, and every Model 11 token is labelled as a test. Not
 Model 10 launchpads, which keep working as before. After this PR is merged and Railway has redeployed, on each of
 Base Sepolia and Ethereum Sepolia:
 
-1. Open elpida.fun, switch to the network, connect the deployer wallet (it becomes this launchpad's treasury) and
-   open **Network and funds**. It needs a little test ETH for gas (about 0.05).
+1. Open the operator panel (`elpida.fun/#/monkey`), sign in, and open the **Launchpads** tab (6 November: every
+   launchpad deployment moved there; visitors no longer see setup buttons). Switch to the network and connect the
+   deployer wallet: it becomes this launchpad's treasury and needs a little test ETH for gas (about 0.05).
 2. Press **Deploy Model 11 test launchpad (about 7 confirmations)**: the CREATE2 deployer, the factory ($50 starting
    FDV, token details required), the hook, connecting the hook, USD pricing, the USDC pair, then the router. The page
    first spends a few seconds finding the hook's address (its last bits are its Uniswap v4 permissions). If a step is

@@ -9,7 +9,7 @@ import { stockApprovalGate } from './stock-approval.mjs';
 // tools moved here too. Approvals are on-chain treasury calls: sent from the connected wallet when it is the
 // treasury, otherwise downloaded as a Safe Transaction Builder file. The public account panel no longer shows any of it.
 
-function downloadSafeBatch(result) {
+export function downloadSafeBatch(result) {
   if (!result?.safeBatch) return result;
   const url = URL.createObjectURL(new Blob([JSON.stringify(result.safeBatch, null, 2)], { type: 'application/json' }));
   const link = h('a', { href: url, download: `elpida-treasury-${result.safeBatch.chainId}-${Date.now()}.json` });

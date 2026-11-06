@@ -1,0 +1,75 @@
+import { h, short, errorText } from './ui.mjs';
+import { chainIcon } from './chain-ui.mjs';
+import { downloadSafeBatch } from './admin-pairs.mjs';
+import { v4Available, v4Deployment } from './v4-launchpad.mjs';
+
+// Operator panel, Launchpads tab (#/monkey?tab=launchpads, 6 November 2026). Setting up a network is an operator job,
+// so every deployment lives here and only here (Malik, 6 November 2026: "limited to admin panel only and not everyone"):
+// the Model 10 launchpad and its upgrades, the USD price feed activation, the test DEX and relayed price feed on a
+// test chain without them, and the Model 11 test launchpad. The public account panel and the launch form only say
+// whether a network is set up. The contracts themselves are permissionless, so this hides the controls; what visitors
+// use is decided by the deployments pinned in networks.mjs.
+
+export function renderLaunchpads(ctx, { connect }) {
+  const root = h('div.op-dash.pr');
+  const error = h('p.error-text', { role: 'alert' });
+  const fail = e => { error.textContent = errorText(e); };
+  const run = async (action, body = {}) => { error.textContent = ''; const r = downloadSafeBatch(await ctx.run(action, body)); draw(); return r; };
+  const card = (title, ...content) => h('section.tk-card.op-card', h('h2.tk-h', title), ...content.filter(Boolean));
+  const button = (label, action, body) => h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: () => run(action, typeof body === 'function' ? body() : body).catch(fail) } }, label);
+
+  function curveCard(w, net) {
+    const deployed = !!w.deployment, state = ctx.state;
+    const upgrade = w.launchUpgradeAvailable ? 'Deploy automatic-graduation launchpad' : w.partnerUpgradeAvailable ? 'Deploy partner-tier launchpad' : w.reviewUpgradeAvailable ? 'Deploy reviewed launchpad'
+      : w.feeFixUpgradeAvailable ? 'Deploy corrected Base Sepolia launchpad' : w.modelUpgradeAvailable || w.needsMetadataUpgrade ? 'Set up the newer launchpad' : deployed ? null : 'Set up launchpad';
+    // The treasury is immutable: on mainnet it must be a Safe; on testnet it defaults to this wallet.
+    const treasury = !deployed && w.dex ? h('input.input', { placeholder: net.mainnet ? '0x… Safe address (required)' : '0x… Safe address (optional; empty = this wallet)', spellcheck: false, autocomplete: 'off', 'aria-label': 'Treasury Safe address' }) : null;
+    const why = w.reviewUpgradeAvailable ? 'This launchpad predates the 1 November security fixes: partner buybacks that cannot be sandwiched, and graduation leftovers paid to the fee splitter.'
+      : w.partnerUpgradeAvailable ? 'This launchpad predates partner tiers (10% or 20% of fees buy back and burn).'
+      : w.feeFixUpgradeAvailable ? 'The current Model 10 factory predates the shared-recipient fee fix.'
+      : w.modelUpgradeAvailable ? 'This is the older model 9 launchpad. Model 10 adds launch protection, the 10x curve and the graduation escape hatch.'
+      : w.needsMetadataUpgrade ? 'A newer version with shared token metadata is available.' : null;
+    const external = w.deployment?.treasury && w.deployment.treasury.toLowerCase() !== String(w.address).toLowerCase();
+    return card('Model 10 launchpad',
+      h('p.small.muted', deployed ? [`${w.deployment.shared ? 'Shared team' : 'This browser’s'} launchpad: `, h('span.mono', short(w.deployment.factory)), '.'] : `${net.name} has no launchpad yet.`),
+      why ? h('p.small.muted', why, ' Test gas only. Existing tokens keep their contracts and stay listed. After deployment, send the factory address so it can be pinned for all visitors.') : null,
+      treasury ? h('label.field', h('span.small.muted', 'Treasury: receives launch fees and alone can finish the setup. It can never be changed. Use a Safe multisig for anything beyond testing.'), treasury) : null,
+      upgrade ? button(upgrade, 'deploy', () => ({ treasury: treasury?.value ?? '' })) : null,
+      deployed ? h('p.small.muted', state?.pricing?.verified ? `$10 launch fee, converted by the on-chain price feed at execution. Starting FDV: $${Number(w.startFdvUsd ?? 5000).toLocaleString()} before the first purchase.` : state ? 'USD pricing must be activated before launching.' : 'Checking this launchpad’s USD pricing…') : null,
+      deployed && state && !state.pricing?.verified ? button(external ? 'Download the Safe setup file' : 'Activate price feed', 'apply-pricing', {}) : null);
+  }
+
+  function testDexCard(w, net) {
+    if (!net.testDex || w.dex) return null;
+    const saved = w.savedTestDex?.(), done = !!saved?.feed, relay = ctx.config.relay;
+    return card('Test DEX and price feed',
+      h('p.small.muted', `${net.name} has no Uniswap v3 and no Chainlink price feed yet. Tokens here graduate into an Elpida test deployment of Uniswap v3 (Uniswap's own published contracts, with a test WETH), and launches are priced by Chainlink ETH / USD relayed from ${relay?.networks?.[net.key]?.source?.network ?? 'another test network'} by the Elpida server, with Chainlink's own timestamps. Testnet only.`),
+      done ? h('div.stack', h('p.small', 'Deployed from this browser. Send these addresses to be registered, then set up the launchpad:'), h('pre.small.selectable', JSON.stringify(saved, null, 2))) : null,
+      !done ? (relay?.address ? button(saved ? 'Finish the test DEX setup' : 'Set up test DEX and price feed (6 confirmations)', 'deploy-test-dex', {}) : h('p.small.muted', 'The server price relay is not configured yet, so the price feed cannot be deployed.')) : null);
+  }
+
+  function v4Card(net) {
+    if (!v4Available(net)) return null;
+    const v4 = v4Deployment(net);
+    return card('Model 11 test launchpad (Uniswap v4)',
+      h('p.small.muted', 'Model 11 keeps the launch curve inside one Uniswap v4 pool, with its liquidity locked from the first trade. Trades go through the Elpida v4 router. Not audited: test networks only, and every Model 11 token says so.'),
+      v4?.pinned ? h('p.small.muted', 'Shared team launchpad: factory ', h('span.mono', short(v4.factory)), ', router ', h('span.mono', short(v4.router)), '.') : null,
+      v4 && !v4.pinned ? h('div.stack', h('p.small', 'Deployed from this browser. Send these addresses to be pinned in networks.mjs so the site lists its tokens for every visitor:'), h('pre.small.selectable', JSON.stringify({ factory: v4.factory, hook: v4.hook, router: v4.router, block: v4.block }, null, 2))) : null,
+      !v4 ? button('Deploy Model 11 test launchpad (about 7 confirmations)', 'deploy-v4', {}) : null,
+      !v4 ? h('p.small.muted', 'This wallet becomes its treasury. The hook address is found in this browser first (a few seconds): its last bits are its Uniswap v4 permissions. A step that fails or is rejected resumes where it stopped.') : null);
+  }
+
+  function draw() {
+    const w = ctx.wallet, net = w?.net;
+    if (ctx.mode === 'testnet' && net?.kind === 'solana') {
+      root.replaceChildren(card('Launchpads', h('p.small.muted', w.deployment ? ['Solana program ', h('span.mono', short(w.deployment.programId)), '. It is deployed and upgraded from the command line with the deploy key: ', h('code', 'node scripts/solana-deploy.mjs --upgrade --keypair <deploy key>'), '.'] : 'The Solana program is not deployed. Deploy it from the command line: npm run solana:deploy.')));
+      return;
+    }
+    if (ctx.mode !== 'testnet' || !net) { root.replaceChildren(card('Launchpads', h('p.small.muted', 'Launchpads are per network. Switch to Base, Ethereum, BNB Chain or Robinhood Chain in Network and funds, then come back here.'))); return; }
+    if (!w.address) { root.replaceChildren(card('Launchpads', h('p.small.muted', `Connect the operator wallet on ${net.name} to set up its launchpads.`), h('button.btn.btn-secondary', { type: 'button', on: { click: connect } }, 'Connect wallet'))); return; }
+    const head = h('header.op-head', h('div', h('h1', h('span.op-net', chainIcon(net.key), `Launchpads · ${net.name}`)), h('p.small.muted', 'Deployments send from the connected wallet. Each one is pinned in networks.mjs before visitors use it.')));
+    root.replaceChildren(head, error, h('div.op-grid', ...[testDexCard(w, net), curveCard(w, net), v4Card(net)].filter(Boolean)));
+  }
+  queueMicrotask(draw);
+  return { root, update: draw };
+}

@@ -160,7 +160,7 @@ With tick spacing 1, a swap across the whole curve would walk about ninety bitma
    - A v4 swap walks the tick bitmap one 256-tick word at a time and rounds each step's input up. So "buy the rest"
      adds one wei per word of the sale range.
 4. **App.**
-   - Network and funds has a **Deploy Model 11 test launchpad** button. The hook's salt is mined in the page, and the
+   - The operator panel's **Launchpads** tab has a **Deploy Model 11 test launchpad** button (operators only). The hook's salt is mined in the page, and the
      six steps resume where they stopped.
    - The launch form offers **Launch model: Model 11 test** where that launchpad exists (native or USDC pairs, no token
      tax).

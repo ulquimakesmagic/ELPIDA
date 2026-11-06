@@ -241,17 +241,14 @@ export function renderLaunch(ctx) {
     else if (draft.chain === 'local') connection.append(h('div.connection-row', icon('flask-conical'), h('div.grow', h('strong', 'Local simulation ready'), h('p.small.muted', `Using the demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()} account with simulated ETH.`))));
     else {
       const n = net();
-      if(!solana()&&ctx.wallet.deployment&&connected()&&!ctx.wallet.price)connection.append(h('button.btn.btn-secondary',{type:'button',on:{click:async()=>{try{await ctx.run('apply-pricing',{});}catch(e){networkError=errorText(e);}draw();}}},'Activate price feed'));
       if (!connected()) connection.append(h('div.connection-row', icon('wallet'), h('div.grow', h('strong', `Connect your wallet to ${n.name}`), h('p.small.muted', `Choose the wallet to use. It asks you to approve the connection${n.kind === 'solana' ? '' : ' and to switch to ' + n.name + ' if needed'}.`)),
         ctx.walletButtons(n, { onDone: () => { networkError = ''; draw(); }, onError: e => { networkError = errorText(e); draw(); } })));
       else {
         connection.append(h('div.connection-row', icon('circle-check'), h('div.grow', h('strong', `Connected to ${n.name}${/^your/i.test(ctx.wallet.walletName ?? 'your') ? '' : ' with ' + ctx.wallet.walletName}`), h('p.small.muted', ctx.wallet.address)), h('button.btn.btn-ghost.btn-sm', { type: 'button', on: { click: async () => { networkError = ''; try { await ctx.connect(draft.chain); } catch (e) { networkError = errorText(e); } draw(); } } }, 'Reconnect')));
         if (ctx.wallet.beta?.enabled && !ctx.wallet.beta.allowed) connection.append(callout('warn', 'lock', 'Launching is invite-only during the mainnet beta, and this wallet is not on the list yet. You can still browse and trade; ask the Elpida team to add this wallet to launch.'));
         else if (n.mainnet) connection.append(callout('warn', 'triangle-alert', 'Mainnet beta: this launch uses real funds and new, unaudited contracts.'));
-        if (!ctx.wallet.deployment) connection.append(n.kind === 'solana'
-          ? callout('warn', 'triangle-alert', 'The Elpida program is not deployed on this network. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.')
-          : h('div.connection-row', callout('warn', 'triangle-alert', `${n.name} needs a one-time launchpad setup from your wallet before the first token. ${ctx.wallet.dex ? 'This includes the native and USDC trading pairs, with wallet confirmations for deployment and registration.' : 'It takes two wallet confirmations.'} Setup costs only gas. Launches are then charged ${ctx.wallet.feeText?.() ?? ''} ${n.nativeCurrency.symbol} each, the on-chain equivalent of $10 (or 10 USDC).`),
-            h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { networkError = ''; error.textContent = ''; try { await ctx.run('deploy', {}); } catch (e) { networkError = errorText(e); } draw(); } } }, 'Set up launchpad')));
+        // Launchpad setup is operator work (operator panel, Launchpads); a visitor only learns the network is not ready.
+        if (!ctx.wallet.deployment) connection.append(callout('warn', 'triangle-alert', `${n.name} is not set up for launches yet. Choose another network, or try again later.`));
       }
     }
     // Network cards with each chain's icon. Choosing one switches the app's chain, exactly like the header menu.
@@ -310,7 +307,7 @@ export function renderLaunch(ctx) {
     ], validate: () => {
       if (!draft.chain) { error.textContent = 'Choose a network.'; return false; }
       if (!connected()) { error.textContent = draft.chain === 'local' ? 'The local simulation is not running.' : 'Connect your wallet to continue.'; return false; }
-      if (!ready()) { error.textContent = solana()?(!solanaPriced()?'USD pricing is not active on this Solana cluster yet. Use simulation, or ask the team to run the Solana upgrade.':'The on-chain SOL/USD price is stale right now. Wait a moment, then refresh.'):!ctx.config.oracles?.[draft.chain]?.available?'A verified USD feed has not been configured for this network.':!ctx.wallet.deployment?'Fund your connected wallet with test ETH, then click Set up launchpad above. Approve the wallet confirmations before continuing.':'Click Activate price feed above, or in Network and test funds. You need test ETH for its network fee.'; return false; }
+      if (!ready()) { error.textContent = solana()?(!solanaPriced()?'USD pricing is not active on this Solana cluster yet. Use simulation, or ask the team to run the Solana upgrade.':'The on-chain SOL/USD price is stale right now. Wait a moment, then refresh.'):!ctx.config.oracles?.[draft.chain]?.available?'A verified USD feed has not been configured for this network.':!ctx.wallet.deployment?'This network is not set up for launches yet. Choose another network.':'Launch pricing is not active on this network yet. Choose another network, or try again later.'; return false; }
       if (ctx.wallet.beta?.enabled && !ctx.wallet.beta.allowed) { error.textContent = 'This wallet is not on the beta launch list yet.'; return false; }
       const group = pairOptions()?.[draft.pair];
       if (!group?.assets.length) { error.textContent = group?.unavailable ?? 'Choose a trading pair.'; return false; }
