@@ -2,6 +2,8 @@ import {prepareTestLiquidity,testLiquidityCalls,TEST_MANAGER_ABI} from './test-s
 import {verifyNativeRouter,findCurveNonce} from './native-trade-router.mjs';
 import { nowSeconds } from './clock.mjs';
 import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
+import { isV4Token, v4Available, v4Deployment, deployV4, launchV4, v4Quote, v4Trade, v4WithdrawFees, v4TokenState } from './v4-launchpad.mjs';
+import { V4_MODEL } from '/v4-model.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress } from '/vendor/ethers.js';
 import { routerAbi, swapCalldata } from '/dex-router.mjs';
@@ -883,6 +885,7 @@ export class TestnetWallet {
     const tokens = await Promise.all([...this.launches.values()].reverse().map(async item => {
       item = {...item,metadata:withSavedMetadata(item.metadata,await readMetadataCache(metadataKey(this.net.chainId,item.factory??this.deployment.factory,item.address)))};
       if(item.metadataURI){try{const response=await fetch('/api/metadata/resolve?uri='+encodeURIComponent(item.metadataURI));if(!response.ok)throw new Error('unavailable');item.metadata=normalizeMetadata(await response.json());item.metadataStatus='published';}catch{item.metadataStatus='unavailable';}}
+      if(isV4Token(item))return v4TokenState(this,item);
       if(item.tax)return readTaxMarket(this,item);
       const d = this.qd(item);
       const token = new Contract(item.address, this.config.contracts.token.abi, this.provider);
@@ -908,7 +911,8 @@ export class TestnetWallet {
     const treasury = await factory.treasury();
     // Live factory pricing and freshness are authoritative for creation.
     const pricing = { verified:true,price:this.price,launchFee: this.launchFee===undefined?'Unavailable':formatUnits(this.launchFee, 18), startFdv: this.nativeVirtualQuote===undefined?'Unavailable':formatUnits(this.model===DEX_MODEL?this.nativeVirtualQuote * 9n / 10n:this.nativeVirtualQuote * 15n / 16n, 18), symbol: native, matches:true, owner: treasury.toLowerCase() === this.address.toLowerCase() };
-    return { wallet: this.address, balance, balanceSymbol: native, pairBalances, nativeBalance: balance, nativeSymbol: native, wrappedNativeBalance:this.dex?formatUnits(await new Contract(this.dex.weth,this.config.contracts.quote.abi,this.provider).balanceOf(this.address),18):undefined, tokens, activity: [], pricing, treasuryBalance: formatUnits(await this.provider.getBalance(treasury), 18) };
+    const v4=v4Available(this.net)?{deployment:v4Deployment(this.net),owner:(v4Deployment(this.net)?.treasury??'').toLowerCase()===this.address.toLowerCase()}:null;
+    return { wallet: this.address, v4, balance, balanceSymbol: native, pairBalances, nativeBalance: balance, nativeSymbol: native, wrappedNativeBalance:this.dex?formatUnits(await new Contract(this.dex.weth,this.config.contracts.quote.abi,this.provider).balanceOf(this.address),18):undefined, tokens, activity: [], pricing, treasuryBalance: formatUnits(await this.provider.getBalance(treasury), 18) };
   }
   /** The connected wallet's early-partner registration in this network's factory ({ buybackBps, expiresAt }), or null. */
   async partnerTier(){
@@ -953,6 +957,7 @@ export class TestnetWallet {
     await this.checkNetwork();
     const item = this.launches.get(token.toLowerCase());
     if (!item) throw new Error('Token not found. Refresh the launchpad.');
+    if(isV4Token(item))return v4Quote(this,item,side,amount);
     if(item.tax)return quoteTaxMarket(this,item,side,amount);
     const curve = await this.market(item);
     const d = this.qd(item);
@@ -975,6 +980,15 @@ export class TestnetWallet {
   async transact(action, body) {
     await this.checkNetwork();
     if(action==='launch'&&body.tax)return launchPublicTax(this,body);
+    // Model 11 (Uniswap v4 hook): its own factory, hook and router; never the curve launchpad below.
+    if(action==='deploy-v4')return deployV4(this,body??{});
+    if(action==='launch'&&body?.model===V4_MODEL)return launchV4(this,body);
+    {const v4item=body?.token?this.launches.get(String(body.token).toLowerCase()):null;
+      if(v4item&&isV4Token(v4item)){
+        if(action==='buy'||action==='sell'){const r=await v4Trade(this,v4item,action,body);return {hash:r.tx.hash,message:`Trade confirmed on ${this.net.name} (Uniswap v4).`};}
+        if(action==='withdraw'){const r=await v4WithdrawFees(this,v4item);return {hash:r.tx.hash,message:'Fees distributed to their recipient wallets.'};}
+        throw new Error('This action is not available for Model 11 tokens.');
+      }}
     const factory = (await this.verifyFactory()).connect(this.signer);
     let result;
     if (action === 'deploy-native-router') return this.deployNativeTradeRouter();

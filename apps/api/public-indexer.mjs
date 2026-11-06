@@ -2,6 +2,8 @@ import { JsonRpcProvider, Contract, verifyMessage, keccak256, toUtf8Bytes } from
 import { join } from 'node:path';
 import { readFileSync, existsSync, writeFileSync, renameSync } from 'node:fs';
 import { EvmIndexer, mapLimit } from '../../packages/indexer/evm-indexer.mjs';
+import { V4Indexer, verifyV4Deployment } from '../../packages/indexer/v4-indexer.mjs';
+import { V4_MODEL } from '../../packages/core/v4-model.mjs';
 import { normalizeMetadata } from '../web/metadata.mjs';
 import { isDexModel, MODEL_VERSIONS } from '../../packages/core/curve-model.mjs';
 import { testnetDexes } from '../../packages/core/uniswap.mjs';
@@ -40,6 +42,8 @@ export class PublicIndexer {
       const older=(net.legacy??[]).filter(d=>d?.factory&&d.factory.toLowerCase()!==net.shared.factory.toLowerCase());
       this.legacy.set(net.key,older.map(deployment=>openEntry({net,deployment,provider,contracts,dataDir,legacy:true})));
       if(net.taxDeployment?.factory)this.legacy.get(net.key).push(openEntry({net,deployment:{...net.taxDeployment,model:'curve-tax-v10'},provider,contracts,dataDir}));
+      // Model 11 (Uniswap v4 hook) test launchpad: its own index beside the curve launchpads, once pinned in networks.mjs.
+      if(net.v4?.shared?.factory)this.legacy.get(net.key).push(openV4Entry({net,provider,dataDir}));
     }
   }
   /** The current deployment first, then any legacy deployments on the same network. */
@@ -65,10 +69,11 @@ export class PublicIndexer {
     this.inFlight=(this.inFlight??0)+due.length;
     try{await mapLimit(due,TICK_CONCURRENCY,async e=>{
       try{
+        if(!e.validated&&e.v4){const d=deploymentOf(e);if(Number((await e.provider.getNetwork()).chainId)!==e.net.chainId)throw new Error('Deployment identity mismatch');await verifyV4Deployment(e.provider,{...d,poolManager:e.net.v4.poolManager});e.validated=true;}
         if(!e.validated){const d=deploymentOf(e),chain=Number((await e.provider.getNetwork()).chainId),v=Number(await new Contract(d.factory,['function MODEL_VERSION() view returns(uint256)'],e.provider).MODEL_VERSION());if(chain!==e.net.chainId||v!==MODEL_VERSIONS[d.model])throw new Error('Deployment identity mismatch');e.validated=true;}
         await e.index.sync();e.error=null;e.errorCode=null;e.lastSuccess=new Date().toISOString();
         this.publishFresh(e);
-        if(!e.legacy){const r=this.rpcs?.get(e.net.key);if(r)r.failures=0;}
+        if(!e.legacy&&!e.v4){const r=this.rpcs?.get(e.net.key);if(r)r.failures=0;}
         for(const t of e.index.tokens())if(t.metadataURI){
           // Only factory events synchronized by the validated chain index authorize retention.
           try{this.metadataStore.retainPublished(t.metadataURI);if(!e.metadata.has(t.address))e.metadata.set(t.address,normalizeMetadata(await this.metadataStore.resolve(t.metadataURI)));}catch{/* IPFS outage does not discard chain history. */}
@@ -77,7 +82,7 @@ export class PublicIndexer {
       }catch(error){
         e.error='Indexing unavailable; retrying.';e.errorCode=errorCode(error);
         this.log(JSON.stringify({event:'public_indexer_error',network:e.net.key,...(e.legacy?{factory:deploymentOf(e).factory}:{}),code:e.errorCode,rpc:rpcHost(this.rpcs?.get(e.net.key)),message:e.error}));
-        if(!e.legacy)this.failover(e.net.key);
+        if(!e.legacy&&!e.v4)this.failover(e.net.key);
       }finally{e.busy=false;this.inFlight--;}
     });}catch{/* each deployment reports its own error above */}
   }
@@ -113,7 +118,7 @@ export class PublicIndexer {
   start(){this.job=this.tick();this.timer=setInterval(()=>{this.job=this.tick();},TICK_MS);this.timer.unref();return this;}
   status(key){const e=this.entries.get(key);return e?{...e.index.status(),error:e.error,errorCode:e.errorCode??null,rpc:rpcHost(this.rpcs?.get(key)),lastSuccess:e.lastSuccess,enabled:true,
     // Earlier launchpads on the same network have their own index; a stuck one must be visible too.
-    legacy:(this.legacy?.get(key)??[]).map(l=>{const s=l.index.status();return {factory:deploymentOf(l).factory,indexedBlock:s.indexedBlock,lag:s.lag,error:l.error??null,errorCode:l.errorCode??null,lastSuccess:l.lastSuccess??null};})}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}
+    legacy:(this.legacy?.get(key)??[]).map(l=>{const s=l.index.status();return {factory:deploymentOf(l).factory,model:deploymentOf(l).model??null,indexedBlock:s.indexedBlock,lag:s.lag,error:l.error??null,errorCode:l.errorCode??null,lastSuccess:l.lastSuccess??null};})}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}
   quotes(key){const e=this.entries.get(key);if(!e)return null;const status=e.index.status();if(!e.validated||status.indexedBlock==null)return null;const factory=deploymentOf(e).factory;return {factory,chainId:e.net.chainId,indexedBlock:status.indexedBlock,assets:e.index.db.prepare("SELECT data FROM events WHERE json_extract(data,'$.name')='QuoteApproved' ORDER BY height,idx").all().map(r=>JSON.parse(r.data)).filter(r=>r.kind==='factory'&&r.address.toLowerCase()===factory.toLowerCase()).map(r=>r.args[0])};}
   /** Tokens from every deployment on the network. `extra(entry, token)` adds per-deployment fields. */
   /** The listing row for a single token; `listings(key)` exists for the market list, not for one page. */
@@ -151,6 +156,14 @@ export function feedTrades(network,rows,listings){
     if(!token||!(row.hash??row.tx))return [];
     return [{...recentTrade(network,token,row),priceQuote:Number(row.priceQuote)||null,quoteSymbol:token.quoteSymbol??row.quoteSymbol??null,quoteAmount:row.quoteAmount??null,tokenAmount:row.tokenAmount??null,account:row.account??null,venue:row.venue??null,launch:Boolean(row.launch)}];
   });
+}
+/** A Model 11 launchpad: factory, hook and router from networks.mjs `v4.shared`, Uniswap's PoolManager from `v4`. */
+function openV4Entry({net,provider,dataDir}){
+  const deployment={...net.v4.shared,model:V4_MODEL},factory=deployment.factory.toLowerCase();
+  const index=new V4Indexer({provider,factory:deployment.factory,hook:deployment.hook,poolManager:net.v4.poolManager,router:deployment.router??null,path:join(dataDir,`public-v4-${net.chainId}-${factory}.sqlite`),chainId:net.chainId,fromBlock:deployment.block,confirmations:EVM_CONFIRMATIONS,nativeSymbol:net.nativeCurrency.symbol,batchSize:100,fullRefreshMs:60000});
+  const metadataPath=join(dataDir,`public-metadata-${net.chainId}-${factory}.json`);
+  const metadata=new Map(existsSync(metadataPath)?Object.entries(JSON.parse(readFileSync(metadataPath,'utf8'))):[]);
+  return {net,deployment,legacy:false,v4:true,index,provider,metadata,metadataPath,validated:false,error:null,lastSuccess:null};
 }
 function openEntry({net,deployment,provider,contracts,dataDir,legacy=false}){
   const tax=deployment.model==='curve-tax-v10',dex=isDexModel(deployment.model)||tax,factory=deployment.factory.toLowerCase();

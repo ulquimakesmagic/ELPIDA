@@ -40,7 +40,7 @@
     "test:dex": "node --test --test-concurrency=1 tests/dex-migration.test.mjs tests/dex-runtime.test.mjs",
     "test:solana-host": "cargo test --release --manifest-path contracts/solana/host-tests/Cargo.toml",
     "compile:v4": "node scripts/compile-v4.mjs",
-    "test:v4": "node --test tests/v4-locked-launch.test.mjs"
+    "test:v4": "node --test tests/v4-locked-launch.test.mjs tests/v4-factory.test.mjs tests/v4-router.test.mjs tests/v4-indexer.test.mjs tests/v4-browser.test.mjs"
   },
   "overrides": {
     "solc": {

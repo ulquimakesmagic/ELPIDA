@@ -16,6 +16,7 @@
   background: var(--panel-2); font: 500 12px/1 var(--font-sans); color: var(--ink-2); white-space: nowrap; }
 .tk-tag-strong { color: var(--accent-text); border-color: var(--accent-line); background: var(--accent-tint); font-weight: 600; }
 .tk-tag-live { color: var(--up); }
+.tk-tag-test { color: var(--warn, #f5b84a); gap: 4px; }
 .tk-tag-burn { color: #ff9a6b; gap: 4px; }
 .tk-tag-stock { gap: 4px; color: var(--up); }
 .tk-tag-stock[data-ok="false"] { color: var(--down); }

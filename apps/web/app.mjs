@@ -12,6 +12,7 @@ import { renderTermsPage } from './terms.mjs';
 // portfolio and the network/test-funds panel. Views live in launch-flow.mjs, token-page.mjs and
 // rewards-view.mjs and receive the shared `ctx` object below.
 import { TestnetWallet, evmWallets, chosenEvmWallet } from './wallet.mjs';
+import { v4Available, v4Deployment } from './v4-launchpad.mjs';
 import { SolanaWallet, solanaWallets, chosenSolanaWallet } from './solana-wallet.mjs';
 import { browserWalletCatalog, walletIcon } from './wallet-discovery.mjs';
 import { storage, $, $$, h, icon, short, number, compact, avatar, bar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, usdRate, toast, errorText, closeOnBackdrop, callout } from './ui.mjs';
@@ -430,6 +431,16 @@ async function openTools() {
         deployed ? h('div.stack', h('p.small.muted', state?.pricing?.verified ? `$10 launch fee, converted by the on-chain price feed at execution. Starting FDV: $${Number(wallet.startFdvUsd ?? 5000).toLocaleString()} before the first purchase.` : state ? 'USD pricing must be activated before launching.' : 'Checking this launchpad’s USD pricing… If this stays, the network’s public RPC is slow: refresh in a minute.'), state && !state?.pricing?.verified ? h('button.btn.btn-secondary',{type:'button',on:{click:()=>act('apply-pricing',{}).then(r=>{downloadSafeBatch(r);openTools();})}},wallet.deployment?.treasury&&wallet.deployment.treasury.toLowerCase()!==String(wallet.address).toLowerCase()?'Download the Safe setup file':'Activate price feed') : null) : null,
         deployed && wallet.dex && wallet.address && state?.pricing?.owner ? h('p.small.muted', 'Trading pairs, test stocks and their issuer controls are managed in the operator panel: ', h('a', { href: '#/monkey?tab=pairs', on: { click: () => $('#tools-dialog').close() } }, 'Pairs'), '.') : null,
         null));
+      // Model 11 (Uniswap v4 hook), labelled and test-only: the owner deploys it once; the team pins it for everyone.
+      if (v4Available(net)) {
+        const v4 = v4Deployment(net);
+        funds.append(h('div.tools-section', h('h4', 'Model 11 test launchpad (Uniswap v4)'),
+          h('p.small.muted', 'Model 11 keeps the launch curve inside one Uniswap v4 pool, with its liquidity locked from the first trade. Trades go through the Elpida v4 router. Not audited: test networks only, and every Model 11 token says so.'),
+          v4?.pinned ? h('p.small.muted', `Shared team launchpad: factory ${short(v4.factory)}, router ${short(v4.router)}.`) : null,
+          v4 && !v4.pinned ? h('div.stack', h('p.small', 'Deployed from this browser. Send these addresses to the team so the site lists its tokens for every visitor:'), h('pre.small.selectable', JSON.stringify({ factory: v4.factory, hook: v4.hook, router: v4.router, block: v4.block }, null, 2))) : null,
+          !v4 && wallet.address ? h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run('deploy-v4', {}); openTools(); } catch (e) { fail(e); } } } }, 'Deploy Model 11 test launchpad (about 7 confirmations)') : null,
+          !v4 && wallet.address ? h('p.small.muted', 'This wallet becomes its treasury. The hook address is found in this browser first (a few seconds): its last bits are its Uniswap v4 permissions. A step that fails or is rejected resumes where it stopped.') : null));
+      }
     } else funds.append(h('p.small.muted', wallet.deployment ? `Solana program: ${short(wallet.deployment.programId)}.${state?.pricing ? ` Creation fee ${number(state.pricing.launchFee, 6)} SOL. New USD-priced launches are pending a verified-oracle program upgrade.` : ''}` : 'The Solana program is not deployed. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.'));
   }
   body.replaceChildren(envSection, funds, circleFundingPanel({ config: config.circle, csrf: config.csrf, connected: mode === 'testnet' ? { address: wallet.address, network: wallet.net.key } : null }), error);

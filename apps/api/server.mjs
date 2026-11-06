@@ -14,6 +14,7 @@ import {createStockCatalog} from './stock-catalog.mjs';
 import {testnetDexes} from '../../packages/core/uniswap.mjs';
 import { FeedRelay } from './feed-relay.mjs';
 import { testDexArtifacts } from './test-dex-artifacts.mjs';
+import { v4Artifacts } from './v4-artifacts.mjs';
 import { createStaticAssets, contentVersion } from './static-assets.mjs';
 import { PublicIndexer, recentTrade, feedTrades } from './public-indexer.mjs';
 import { TradeFeed } from './trade-feed.mjs';
@@ -75,6 +76,7 @@ resources.set('/stock-approval.mjs',['stock-approval.mjs','text/javascript']);
 resources.set('/partners-view.mjs',['partners-view.mjs','text/javascript']);
 resources.set('/tax-policy.mjs',['tax-policy.mjs','text/javascript']);
 resources.set('/tax-wallet.mjs',['tax-wallet.mjs','text/javascript']);
+resources.set('/v4-launchpad.mjs',['v4-launchpad.mjs','text/javascript']);
 resources.set('/tax-allocation.mjs',['tax-allocation.mjs','text/javascript']);
 resources.set('/wallet-discovery.mjs', ['wallet-discovery.mjs','text/javascript']);
 resources.set('/wallet-token.mjs', ['wallet-token.mjs','text/javascript']);
@@ -129,6 +131,7 @@ const vendorFiles = new Map([
   ['/stock-catalog.mjs', fileURLToPath(new URL('../../packages/core/stock-catalog.mjs', import.meta.url))],
   ['/dex-router.mjs', fileURLToPath(new URL('../../packages/core/dex-router.mjs', import.meta.url))],
   ['/curve-model.mjs', fileURLToPath(new URL('../../packages/core/curve-model.mjs', import.meta.url))],
+  ['/v4-model.mjs', fileURLToPath(new URL('../../packages/core/v4-model.mjs', import.meta.url))],
 ]);
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const IMMUTABLE = 'public, max-age=31536000, immutable';
@@ -468,6 +471,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
             return send(200,data);}
         // Bytecode for the labelled test DEX and relay feed, fetched only when the launchpad owner deploys them.
         if (url.pathname === '/api/test-dex-artifacts') return send(200, testDexArtifacts());
+        if (url.pathname === '/api/v4-artifacts') return send(200, v4Artifacts());
         if (url.pathname === '/api/config') return send(200, { ...runtime.config, serverTime: Date.now()/1000, vanity: vanity.status(), circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), relay: feedRelay.publicConfig(), consent: consentConfig, csrf });
         if(url.pathname==='/api/metadata/resolve')return send(200,await metadataStore.resolve(url.searchParams.get('uri')));
         if(url.pathname.startsWith('/api/content/')){const record=metadataStore.get(url.pathname.slice('/api/content/'.length));if(!record)return send(404,{error:'Content not found.'});res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}
