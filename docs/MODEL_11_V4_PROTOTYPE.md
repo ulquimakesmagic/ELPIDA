@@ -241,3 +241,5 @@ This finishes the unmerged testnet stock-pair branch without changing deployed c
 The launch review now describes liquidity locked from launch in the same pool. Its stock warning distinguishes test issuer transfer controls from a future on-chain corporate-action gate; the current hook does not implement that gate.
 
 Local real-PoolManager coverage includes approval authorization, stock-denominated launch/buy/sell, unknown and non-test asset rejection, issuer pause with retained fee liabilities, unpause and payout recovery, blocked PoolManager rejection, milestone crossing with the same indexed pool ID, post-milestone trading and fee claims. Public BNB testnet approval and wallet rehearsal are still the operator actions in HUMAN_ACTIONS.md; no public transaction or deployment was sent by this review.
+
+Validation for the completion review: full npm test checkpoint 790 total, 755 passed, 35 skipped, 0 failures. Final extended stock lifecycle 1/1 and final launch-model checks 3/3 passed separately after the last refinements; focused browser/model checkpoint 10/10. git diff --check clean. These are local integration results, not public-chain rehearsal evidence.
