@@ -16,14 +16,8 @@ export const V4_VIRTUAL_TOKEN = 1_111_111_111_111_111n * 10n ** 12n;
 /** beforeInitialize | beforeAddLiquidity | beforeSwap | afterSwap | beforeSwapReturnDelta | afterSwapReturnDelta. */
 export const V4_HOOK_FLAGS = (1n << 13n) | (1n << 11n) | (1n << 7n) | (1n << 6n) | (1n << 3n) | (1n << 2n);
 export const V4_FLAG_MASK = (1n << 14n) - 1n;
-/**
- * Uniswap v4 on the test networks Model 11 runs on (developers.uniswap.org, v4 deployments, checked 6 November 2026).
- * The deploy flow checks each address has code before it uses it.
- */
-export const V4_POOL_MANAGERS = Object.freeze({
-  'ethereum-sepolia': '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543',
-  'base-sepolia': '0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408',
-});
+/** The networks Model 11 may be deployed on: those with Uniswap v4 (their PoolManager is in networks.mjs `v4`). */
+export const V4_NETWORKS = Object.freeze(['base-sepolia', 'ethereum-sepolia']);
 
 const Q96 = 1n << 96n, Q128 = 1n << 128n, MAX_UINT256 = (1n << 256n) - 1n;
 const MIN_SQRT_PRICE = 4295128739n, MAX_SQRT_PRICE = 1461446703485210103287273052203988822378723970342n;

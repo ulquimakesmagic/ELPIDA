@@ -111,3 +111,26 @@ test('v4 indexer: USDC pairs, a remaining-buy that reaches the milestone, and ot
   assert.equal(index.trades(native.token.target).length, 0);
   await index.close();
 });
+
+test('public index: a pinned Model 11 launchpad is indexed beside the network\'s curve launchpad and listed with its model', async t => {
+  const { PublicIndexer } = await import('../apps/api/public-indexer.mjs');
+  const { mkdtempSync } = await import('node:fs'), { tmpdir } = await import('node:os'), { join } = await import('node:path');
+  const f = await setup(t), l = await launchV4(f, { firstBuy: parseEther('0.01') });
+  await f.buy(l, f.signers[1], parseEther('0.02'));
+  const block = 0;
+  const net = { key: 'base-sepolia', name: 'Local v4', chainId: 31337, rpcUrl: 'http://local.invalid', explorer: 'https://example.invalid', nativeCurrency: { symbol: 'ETH' },
+    // The curve launchpad entry is a stand-in that fails validation; the v4 entry must not depend on it.
+    shared: { factory: f.factory.target, block, model: 'curve-dex-v10' },
+    v4: { poolManager: f.manager.target, shared: { factory: f.factory.target, hook: f.hook.target, router: f.v4router.target, block } } };
+  const logs = [];
+  const empty = { abi: [] }, index = new PublicIndexer({ networks: [net], contracts: { dexFactory: empty, dexCurve: empty, pool: empty, token: empty }, dataDir: mkdtempSync(join(tmpdir(), 'elpida-v4-public-')), metadataStore: { retainPublished() {}, async resolve() { return {}; } }, providerFactory: () => f.provider, log: line => logs.push(JSON.parse(line)) });
+  t.after(() => index.close());
+  await index.tick();
+  const entry = index.all('base-sepolia').find(e => e.v4);
+  assert.equal(entry.validated, true); assert.equal(entry.error, null);
+  const [row] = index.listings('base-sepolia').filter(r => r.deploymentModel === V4_MODEL);
+  assert.equal(row.address, l.token.target.toLowerCase()); assert.equal(row.legacyDeployment, false);
+  assert.equal(index.detail('base-sepolia', l.token.target, 'trades').length, 2);
+  assert.equal(index.status('base-sepolia').legacy.find(x => x.model === V4_MODEL).error, null);
+  assert.ok(logs.some(x => x.event === 'public_indexer_synced' && x.model === V4_MODEL));
+});
