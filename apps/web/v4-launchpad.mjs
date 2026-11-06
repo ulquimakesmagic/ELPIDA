@@ -63,6 +63,26 @@ async function settled(read, { tries = 15, delay = 2000 } = {}) {
   for (let i = 0; ; i++) { try { return await read(); } catch (error) { if (i >= tries) throw error; await pause(delay); } }
 }
 
+/**
+ * Waits until the wallet's own RPC counts a transaction we just saw confirmed. A wallet picks the next transaction's
+ * nonce from its RPC; one that lags a block reuses the confirmed nonce, and the network then refuses the next
+ * signature ("replacement transaction underpriced"; Trust Wallet on Ethereum Sepolia, 6 November 2026).
+ */
+export async function walletCaughtUp(w, nonce, { tries = 20, delay = 1500 } = {}) {
+  const provider = w.signer?.provider;
+  if (!provider || nonce == null) return;
+  for (let i = 0; i < tries; i++) {
+    try { if (await provider.getTransactionCount(w.address, 'latest') > nonce) return; } catch { /* ask again */ }
+    await pause(delay);
+  }
+}
+/** w.wait, then wait for the wallet's RPC to see the transaction before the next signature is requested. */
+async function step(w, pending, message) {
+  const result = await w.wait(pending, message);
+  await walletCaughtUp(w, result?.tx?.nonce);
+  return result;
+}
+
 async function artifacts() {
   const response = await fetch('/api/v4-artifacts');
   if (!response.ok) throw new Error('The Model 11 contracts are unavailable. Nothing was deployed.');
@@ -91,7 +111,7 @@ export async function deployV4(w, body = {}) {
   const save = () => write(savedKey(net.chainId) + ':progress', progress);
   // A saved step was mined earlier, so its contract exists: wait out a lagging node rather than deploying it again.
   const fresh = async (key, check) => !!progress[key] && await hasCode(w.provider, progress[key], { wait: true }) && (!check || await settled(() => check(progress[key])));
-  const deploy = async (art, args, message) => { w.onProgress(message); const c = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(...args); await c.waitForDeployment(); return { address: await c.getAddress(), receipt: await c.deploymentTransaction().wait() }; };
+  const deploy = async (art, args, message) => { w.onProgress(message); const c = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(...args); await c.waitForDeployment(); await walletCaughtUp(w, c.deploymentTransaction().nonce); return { address: await c.getAddress(), receipt: await c.deploymentTransaction().wait() }; };
   if (!await fresh('create2')) { progress.create2 = (await deploy(a.create2, [], `Step 1 of 6: confirm the CREATE2 deployer for the hook (${LABEL})…`)).address; save(); }
   if (!await fresh('factory', async f => (await new Contract(f, V4_FACTORY_ABI, w.provider).treasury()).toLowerCase() === w.address.toLowerCase())) {
     const d = await deploy(a.factory, [w.address, TESTNET_START_FDV_USD, true], `Step 2 of 6: confirm the Model 11 factory ($${TESTNET_START_FDV_USD} starting FDV, token details required)…`);
@@ -106,7 +126,7 @@ export async function deployV4(w, body = {}) {
     const mined = await mineHookSalt(progress.create2, initCode);
     if (!await hasCode(w.provider, mined.address)) {
       const deployer = new Contract(progress.create2, ['function deploy(bytes,bytes32) returns(address)'], w.signer);
-      await w.wait(deployer.deploy(initCode, mined.salt), `Step 3 of 6: confirm the hook deployment at ${mined.address}…`);
+      await step(w, deployer.deploy(initCode, mined.salt), `Step 3 of 6: confirm the hook deployment at ${mined.address}…`);
       if (!await hasCode(w.provider, mined.address, { wait: true })) throw new Error('The hook transaction confirmed, but the network does not show the hook yet. Press the button again in a minute: finished steps are kept.');
     }
     progress.hook = mined.address; save();
@@ -114,12 +134,12 @@ export async function deployV4(w, body = {}) {
   const hook = new Contract(progress.hook, HOOK_ABI, w.provider);
   const [hookFactory, hookTreasury] = await settled(() => Promise.all([hook.factory(), hook.protocolTreasury()]));
   if (hookFactory.toLowerCase() !== progress.factory.toLowerCase() || hookTreasury.toLowerCase() !== w.address.toLowerCase()) throw new Error('The hook is wired to another factory or treasury. Nothing more was sent.');
-  if ((await settled(() => factory.hook())) === ZeroAddress) await w.wait(factory.setHook(progress.hook), 'Step 4 of 6: confirm connecting the hook to the factory…');
-  if ((await settled(() => factory.usdFeed())) === ZeroAddress) await w.wait(factory.configureUsdPricing(w.oracle.feed, w.oracle.maxAge, w.oracle.usdc ?? ZeroAddress), 'Step 5 of 6: confirm verified USD pricing (the $10 launch fee and the starting FDV)…');
+  if ((await settled(() => factory.hook())) === ZeroAddress) await step(w, factory.setHook(progress.hook), 'Step 4 of 6: confirm connecting the hook to the factory…');
+  if ((await settled(() => factory.usdFeed())) === ZeroAddress) await step(w, factory.configureUsdPricing(w.oracle.feed, w.oracle.maxAge, w.oracle.usdc ?? ZeroAddress), 'Step 5 of 6: confirm verified USD pricing (the $10 launch fee and the starting FDV)…');
   const usdc = w.oracle.usdc && w.oracle.usdc !== ZeroAddress ? getAddress(w.oracle.usdc) : null;
   if (usdc && (await settled(() => factory.approvedQuotes(usdc))) === 0n) {
     const decimals = Number(await new Contract(usdc, ERC20, w.provider).decimals());
-    await w.wait(factory.approveQuote(usdc, usdQuoteTemplate(TESTNET_START_FDV_USD, decimals)), 'Step 5 of 6: confirm the USDC pair…');
+    await step(w, factory.approveQuote(usdc, usdQuoteTemplate(TESTNET_START_FDV_USD, decimals)), 'Step 5 of 6: confirm the USDC pair…');
   }
   if (!await fresh('router', async r => { const c = new Contract(r, V4_ROUTER_ABI, w.provider); return (await c.hook()).toLowerCase() === progress.hook.toLowerCase(); })) { progress.router = (await deploy(a.router, [poolManager, progress.hook], 'Step 6 of 6: confirm the Model 11 router (buys and sells)…')).address; save(); }
   const record = { factory: progress.factory, hook: progress.hook, router: progress.router, create2: progress.create2, block: progress.block, poolManager, treasury: w.address, model: V4_MODEL, deployedAt: Date.now() };
@@ -172,7 +192,7 @@ export async function launchV4(w, body) {
   if (await w.provider.getBalance(w.address) < value) throw new Error(`You need ${formatUnits(value, 18)} ${w.net.nativeCurrency.symbol} for the $10 launch fee${quote ? '' : ' and your first buy'}, plus gas.`);
   if (quote && firstBuy > 0n) {
     if (await quote.balanceOf(w.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, decimals)} USDC for the first buy.`);
-    if (await quote.allowance(w.address, d.factory) < firstBuy) await w.wait(quote.approve(d.factory, firstBuy), 'Approve exactly the first buy in USDC…');
+    if (await quote.allowance(w.address, d.factory) < firstBuy) await step(w, quote.approve(d.factory, firstBuy), 'Approve exactly the first buy in USDC…');
   }
   const published = await stageMetadata(w, name, symbol, body);
   await w.checkNetwork();

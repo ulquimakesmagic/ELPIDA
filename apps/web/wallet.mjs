@@ -53,6 +53,8 @@ export function walletErrorText(error, name = 'your wallet') {
   if (code === -32002) return `A request is already waiting in ${name}. Open the wallet extension and approve or reject it, then try again.`;
   if (code === 4001 || code === 'ACTION_REJECTED') return 'You cancelled the wallet request. Nothing was submitted.';
   if (code === 4100) return `${name} has not authorised Elpida yet. Connect again and approve the request.`;
+  // The wallet's RPC lagged a block and reused a confirmed nonce: nothing was sent, and a moment later it is fine.
+  if (/replacement (transaction )?underpriced|nonce too low/i.test(String(error?.message ?? error?.info?.error?.message ?? ''))) return `${name} tried to reuse the last transaction's number because its network connection is a block behind. Nothing was sent. Wait a minute, then press the button again: finished steps are kept.`;
   return null;
 }
 const metadataKey = (chain, factory, token) => `elpida:metadata:${chain}:${factory.toLowerCase()}:${token.toLowerCase()}`;
@@ -611,7 +613,8 @@ export class TestnetWallet {
   }
   async wait(pending, message) {
     this.onProgress(message);
-    const tx = await pending;
+    let tx;
+    try { tx = await pending; } catch (error) { const text = walletErrorText(error, this.walletName); if (text) throw Object.assign(new Error(text), { code: error.code }); throw error; }
     this.onProgress('Transaction submitted. Waiting for confirmation…');
     const receipt = await tx.wait();
     if (!receipt || receipt.status !== 1) throw new Error('Transaction did not succeed.');

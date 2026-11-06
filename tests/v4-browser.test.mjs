@@ -136,3 +136,15 @@ test('the deploy waits out an RPC node that lags behind, and a retry reuses a ho
   assert.equal(again.record.factory, record.factory);
   assert.ok(!retry.progress.some(m => /confirm the hook deployment|connecting the hook|USD pricing|USDC pair/.test(m)), 'only the missing router is sent again');
 });
+
+test('between signatures the deploy waits until the wallet\'s own RPC has counted the last transaction', async t => {
+  const { walletCaughtUp } = await import('../apps/web/v4-launchpad.mjs');
+  const { walletErrorText } = await import('../apps/web/wallet.mjs');
+  let calls = 0;
+  const w = { address: '0x1', signer: { provider: { getTransactionCount: async () => (++calls < 3 ? 7 : 8) } } };
+  await walletCaughtUp(w, 7, { delay: 1 });
+  assert.equal(calls, 3, 'asked until the count passed the confirmed nonce');
+  calls = 0; await walletCaughtUp({ ...w, signer: { provider: { getTransactionCount: async () => { calls++; return 7; } } } }, 7, { tries: 4, delay: 1 });
+  assert.equal(calls, 4, 'gives up after its tries instead of hanging');
+  assert.match(walletErrorText({ message: 'could not coalesce error (error={ "code": -32000, "message": "replacement transaction underpriced" })' }, 'Trust Wallet'), /a block behind\. Nothing was sent/);
+});
