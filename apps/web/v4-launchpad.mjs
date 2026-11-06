@@ -190,6 +190,46 @@ export async function deployTestPoolManager(w) {
   return { hash: tx.hash, record, message: `The test Uniswap v4 PoolManager is deployed on ${net.name}: ${record.address} (block ${record.block}). Now deploy the Model 11 test launchpad, then send both to be pinned.` };
 }
 
+/**
+ * Pairs a Model 11 launch can use: the native coin, USDC, and test stocks the operator approved for Model 11 (6 November
+ * 2026, BNB Chain testnet first). A stock stays a plain ERC-20 quote in the hook: while its issuer pauses it, swaps and
+ * fee payouts simply fail, the fees stay held for their recipients and the liquidity stays locked; both resume when the
+ * stock moves again. Test networks only (docs/MODEL_11_V4_PROTOTYPE.md, tokenized stocks phase).
+ */
+export const V4_PAIR_KINDS = Object.freeze(['native', 'usdc', 'xstock']);
+const stockRecord = (w, address) => (w.approvedQuotes ?? []).find(a => a.kind === 'xstock' && a.address.toLowerCase() === String(address ?? '').toLowerCase()) ?? null;
+function stockAsset(w, address) {
+  const record = stockRecord(w, address);
+  if (!record || record.test !== true) throw new Error('Choose a test stock that is approved on this network.');
+  return getAddress(record.address);
+}
+
+/** The network's test stocks (approved on Model 10) and whether each is approved for Model 11 yet. */
+export async function v4StockPairs(w) {
+  const d = v4Deployment(w.net);
+  if (!d) return [];
+  const factory = new Contract(d.factory, V4_FACTORY_ABI, w.provider);
+  const stocks = (w.approvedQuotes ?? []).filter(a => a.kind === 'xstock' && a.test);
+  return Promise.all(stocks.map(async s => ({ address: s.address, symbol: s.symbol, approved: (await factory.approvedQuotes(s.address)) > 0n })));
+}
+
+/**
+ * Operator: approves a test stock as a Model 11 pair at the same starting price as its Model 10 approval (the treasury
+ * of the Model 11 launchpad signs; one confirmation, permanent).
+ */
+export async function approveV4Stock(w, { asset } = {}) {
+  await w.checkNetwork();
+  const d = v4Deployment(w.net);
+  if (!d) throw new Error(`There is no Model 11 launchpad on ${w.net.name}.`);
+  const record = stockRecord(w, asset);
+  if (!record || !record.test) throw new Error('Only a test stock approved on this network\'s Model 10 launchpad can be approved for Model 11.');
+  const factory = new Contract(d.factory, [...V4_FACTORY_ABI, 'function approveQuote(address,uint256)'], w.signer);
+  if ((await factory.treasury()).toLowerCase() !== w.address.toLowerCase()) throw new Error('Only the Model 11 launchpad\'s treasury wallet can approve its pairs. Connect that wallet.');
+  if ((await factory.approvedQuotes(record.address)) > 0n) return { message: `${record.symbol} is already a Model 11 pair.` };
+  const result = await step(w, factory.approveQuote(record.address, record.virtualQuote), `Approve ${record.symbol} as a Model 11 test pair (same starting price as on Model 10)…`);
+  return { hash: result.tx.hash, message: `${record.symbol} is now a Model 11 test pair on ${w.net.name}.` };
+}
+
 async function stageMetadata(w, name, symbol, body) {
   const details = normalizeMetadata(body);
   w.onProgress('Preparing public token details for the launch transaction…');
@@ -204,11 +244,12 @@ async function stageMetadata(w, name, symbol, body) {
 const slippageBps = value => { const p = Number(value ?? '1'); if (!Number.isFinite(p) || p < 0.1 || p > 5) throw new Error('Slippage must be between 0.1% and 5%.'); return BigInt(Math.round(p * 100)); };
 
 /** Tokens a creator's first buy would get at launch (exact for a first buy inside the sale range). */
-export async function v4LaunchQuote(w, { firstBuy = '0', pair = 'native' } = {}) {
+export async function v4LaunchQuote(w, { firstBuy = '0', pair = 'native', quoteAsset = null } = {}) {
   const d = v4Deployment(w.net); if (!d) throw new Error('No Model 11 launchpad on this network.');
-  const factory = new Contract(d.factory, V4_FACTORY_ABI, w.provider), usdc = pair === 'usdc' ? await factory.feeUsdc() : null;
-  const decimals = usdc ? Number(await new Contract(usdc, ERC20, w.provider).decimals()) : 18;
-  const vq = usdc ? await factory.approvedQuotes(usdc) : await factory.nativeVirtualQuote(), input = parseUnits(String(firstBuy || '0'), decimals);
+  const factory = new Contract(d.factory, V4_FACTORY_ABI, w.provider), quote = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? stockAsset(w, quoteAsset) : null;
+  const decimals = quote ? Number(await new Contract(quote, ERC20, w.provider).decimals()) : 18;
+  const vq = quote ? await factory.approvedQuotes(quote) : await factory.nativeVirtualQuote(), input = parseUnits(String(firstBuy || '0'), decimals);
+  if (vq === 0n) throw new Error('This pair is not approved for Model 11.');
   return { tokens: formatUnits(firstBuyOut(vq, input), 18), launchFee: formatUnits(await factory.launchFee(), 18) };
 }
 
@@ -221,11 +262,15 @@ export async function launchV4(w, body) {
   const name = String(body.name ?? '').trim(), symbol = String(body.symbol ?? '').trim().toUpperCase();
   if (!name || name.length > 40 || !/^[A-Z0-9]{1,10}$/.test(symbol)) throw new Error('Check the token name and symbol.');
   const pair = body.pair ?? 'native';
-  if (!['native', 'usdc'].includes(pair)) throw new Error('Model 11 test launches pair with the native coin or USDC.');
+  if (!V4_PAIR_KINDS.includes(pair)) throw new Error('Model 11 test launches pair with the native coin, USDC or a test stock approved for Model 11.');
   const reward = body.reward || w.address;
   if (!isAddress(reward) || reward === ZeroAddress) throw new Error('Enter a valid creator reward wallet.');
-  const asset = pair === 'usdc' ? await factory.feeUsdc() : ZeroAddress;
+  const asset = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? stockAsset(w, body.quoteAsset) : ZeroAddress;
   if (pair === 'usdc' && (asset === ZeroAddress || (await factory.approvedQuotes(asset)) === 0n)) throw new Error('USDC is not approved on this Model 11 launchpad. Launch with the native coin.');
+  if (pair === 'xstock') {
+    if ((await factory.approvedQuotes(asset)) === 0n) throw new Error(`${stockRecord(w, asset)?.symbol ?? 'This stock'} is not approved for Model 11 yet: the operator approves it in the operator panel (Launchpads). Launch it on Model 10, or pair with the native coin. Nothing was submitted.`);
+    await w.stockPreflight?.({ pair: 'xstock', quoteAddress: asset }, 'launch');
+  }
   const quote = asset === ZeroAddress ? null : new Contract(asset, ERC20, w.signer), decimals = quote ? Number(await quote.decimals()) : 18;
   const firstBuy = parseUnits(String(body.firstBuy || '0'), decimals);
   const vq = quote ? await factory.approvedQuotes(asset) : await factory.nativeVirtualQuote();
@@ -233,8 +278,9 @@ export async function launchV4(w, body) {
   const fee = await factory.launchFee(), value = (fee * 101n + 99n) / 100n + (quote ? 0n : firstBuy);
   if (await w.provider.getBalance(w.address) < value) throw new Error(`You need ${formatUnits(value, 18)} ${w.net.nativeCurrency.symbol} for the $10 launch fee${quote ? '' : ' and your first buy'}, plus gas.`);
   if (quote && firstBuy > 0n) {
-    if (await quote.balanceOf(w.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, decimals)} USDC for the first buy.`);
-    if (await quote.allowance(w.address, d.factory) < firstBuy) await step(w, quote.approve(d.factory, firstBuy), 'Approve exactly the first buy in USDC…');
+    const sym = await quote.symbol();
+    if (await quote.balanceOf(w.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, decimals)} ${sym} for the first buy.`);
+    if (await quote.allowance(w.address, d.factory) < firstBuy) await step(w, quote.approve(d.factory, firstBuy), `Approve exactly the first buy in ${sym}…`);
   }
   const published = await stageMetadata(w, name, symbol, body);
   await w.checkNetwork();
@@ -265,6 +311,12 @@ export async function v4Quote(w, item, side, amount) {
 export async function v4Trade(w, item, side, body) {
   await w.checkNetwork();
   const { router } = routerFor(w, item, w.signer), d = quoteDecimals(item), buy = side === 'buy', native = item.pair === 'native';
+  // A test stock the issuer has paused, or that has blocked this wallet, stops here with the reason (Model 10's rule).
+  if (item.pair === 'xstock') {
+    await w.stockPreflight?.(item, side);
+    let poolBlocked = false; try { poolBlocked = await new Contract(item.quoteAddress, ['function blocked(address) view returns(bool)'], w.provider).blocked(v4PoolManager(w.net)); } catch { /* no blocklist */ }
+    if (poolBlocked) throw new Error(`The ${item.quoteSymbol} issuer has blocked the Uniswap v4 pool contract, so ${item.symbol} cannot trade until it is unblocked. Its liquidity stays locked and its fees stay held. Nothing was sent.`);
+  }
   const bps = slippageBps(body.slippage), input = parseUnits(String(body.amount), buy ? d : 18);
   if (input <= 0n) throw new Error('Enter a positive amount.');
   const [, out] = await router.quote.staticCall(item.address, buy, input);

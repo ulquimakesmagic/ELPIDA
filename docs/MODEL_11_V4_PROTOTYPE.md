@@ -179,7 +179,67 @@ With tick spacing 1, a swap across the whole curve would walk about ninety bitma
 
 ## Next (phase 5, still no mainnet)
 
-1. Malik deploys the test launchpad on both Sepolias (`docs/HUMAN_ACTIONS.md`), and the deployment is pinned.
+1. ~~Malik deploys the test launchpad and it is pinned.~~ Done on 6 November 2026 on Ethereum Sepolia, Base Sepolia and
+   BNB Chain testnet (on a test copy of Uniswap's PoolManager there).
 2. Check the hook's swaps through Uniswap's Universal Router and an aggregator on a testnet.
 3. Build the page for the opt-in third-party liquidity (`openLiquidity`).
 4. An external audit of the hook and the router before any mainnet plan.
+
+## Later phase: tokenized stocks as a Model 11 pair (Malik, 6 November 2026)
+
+**Started on testnets, 6 November 2026 (BNB Chain testnet first).** Malik asked for stock pairs on BNB's Model 11 now,
+and decided what a frozen stock does: *it should not affect the liquidity at all; the treasury holds and accumulates
+the fees meanwhile, and buying resumes when the stock is back.* The hook already behaves that way with a stock as a
+plain ERC-20 quote, so no contract changed:
+- **Approval:** the operator approves each test stock in the Launchpads tab, once, at its Model 10 starting price.
+- **While the issuer pauses the stock** (or blocks the PoolManager):
+  - swaps cannot settle, and the page stops them first with the reason;
+  - fee payouts fail with `FeePayoutFailed` and the fees stay held for their recipients;
+  - the liquidity stays locked.
+- **When the stock moves again:** payouts and trading resume with nothing to redo. `tests/v4-browser.test.mjs` covers
+  the whole cycle.
+- **What testnet does not settle:** the pause gate is the page's check, as for Model 10, not the hook's. Real stocks
+  still need steps 1 to 5 below, starting with Ondo's answers.
+
+Real tokenized stocks remain excluded from Model 11. The test-only stand-ins above are an explicit rehearsal exception. Model 10 retains its existing issuer checks. The steps below are requirements for a future real-stock phase.
+
+**Why real stocks are left out today:**
+- **One frozen stock freezes every pool.** In Model 11 the stock sits in Uniswap's PoolManager, which holds every v4
+  pool's funds. If the issuer pauses the stock, or blocks the PoolManager's address, every Model 11 pool on that
+  stock stops. Its liquidity is locked from the first trade, so it would be stuck for good. In Model 10 the stock sits
+  in each token's own curve, behind the stock checks that run before trading and before graduation.
+- **No market gate.** The hook does not check the stock's feed or its market status (open, closed, corporate action).
+  It would trade through a closed market or a split at a price nobody can verify.
+- **Balances that rescale.** A stock that rescales balances on a split (Solana's ScaledUiAmount, or an EVM
+  equivalent) breaks the PoolManager's balance-delta accounting. Uniswap advises against such tokens in v4.
+- **Scope.** The 2 November decisions limited Model 11 to the native coin and team-approved, fixed-behaviour ERC-20s
+  (USDC) until the audit.
+
+**What the phase needs, in order:**
+1. **Ondo's answers.** Can they block the PoolManager or another shared contract? Will they turn on transfer hooks?
+   Do the EVM stocks rescale balances? These are the questions already sent (docs/HUMAN_ACTIONS.md, Ondo and
+   Chainlink). A stock that can rescale balances on EVM is not offered on Model 11 at all.
+2. **A stock gate in the hook's `beforeSwap`,** for stock-paired launches only. It refuses swaps while:
+   - the stock is paused;
+   - the reference feed is stale;
+   - the market is closed or in a corporate action.
+
+   This is the same rule as Model 10's stock checks, at swap time.
+3. **A frozen-stock plan for locked liquidity.** Decide what happens to a pool whose stock is frozen for good, for
+   example a treasury-only switch that lets holders exit to the stock once it moves again. Today nothing can be
+   withdrawn, by design.
+4. **Approval in the operator panel,** one stock at a time, as for Model 10. Test it on testnets with the Ondo-style
+   stand-ins (pause, blocklist and feed controls) before any real stock.
+5. **An audit of the stock gate and the frozen-stock plan,** with the rest of the hook, before mainnet.
+
+
+
+## Stock-pair completion review - 7 November 2026
+
+This finishes the unmerged testnet stock-pair branch without changing deployed contracts. Explicit stock selection is mandatory: an unknown asset cannot fall back to another stock, and both quoting and launching reject records not explicitly marked as test assets. Native-payment conversion for a Model 11 stock first buy remains unavailable; the first buy uses the stock itself. Real stock quotes remain excluded.
+
+The launch review now describes liquidity locked from launch in the same pool. Its stock warning distinguishes test issuer transfer controls from a future on-chain corporate-action gate; the current hook does not implement that gate.
+
+Local real-PoolManager coverage includes approval authorization, stock-denominated launch/buy/sell, unknown and non-test asset rejection, issuer pause with retained fee liabilities, unpause and payout recovery, blocked PoolManager rejection, milestone crossing with the same indexed pool ID, post-milestone trading and fee claims. Public BNB testnet approval and wallet rehearsal are still the operator actions in HUMAN_ACTIONS.md; no public transaction or deployment was sent by this review.
+
+Validation for the completion review: full npm test checkpoint 790 total, 755 passed, 35 skipped, 0 failures. Final extended stock lifecycle 1/1 and final launch-model checks 3/3 passed separately after the last refinements; focused browser/model checkpoint 10/10. git diff --check clean. These are local integration results, not public-chain rehearsal evidence.

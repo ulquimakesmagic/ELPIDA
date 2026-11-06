@@ -1,7 +1,7 @@
 import { h, short, errorText } from './ui.mjs';
 import { chainIcon } from './chain-ui.mjs';
 import { downloadSafeBatch } from './admin-pairs.mjs';
-import { v4Available, v4Deployment, v4PoolManager, savedTestPoolManager } from './v4-launchpad.mjs';
+import { v4Available, v4Deployment, v4PoolManager, savedTestPoolManager, v4StockPairs } from './v4-launchpad.mjs';
 
 // Operator panel, Launchpads tab (#/monkey?tab=launchpads, 6 November 2026). Setting up a network is an operator job,
 // so every deployment lives here and only here (Malik, 6 November 2026: "limited to admin panel only and not everyone"):
@@ -64,6 +64,19 @@ export function renderLaunchpads(ctx, { connect }) {
         : button('Deploy test PoolManager (1 confirmation)', 'deploy-v4-pool-manager', {}));
   }
 
+  // Test stocks as Model 11 pairs (6 November 2026): each is approved once, at its Model 10 starting price. While the
+  // issuer pauses a stock its pools stop trading, the fees stay held and the liquidity stays locked; both resume after.
+  function stockPairs(net) {
+    const box = h('div.stack', h('h3.small', 'Test stock pairs'), h('p.small.muted', 'Loading the test stocks on this network…'));
+    v4StockPairs(ctx.wallet).then(list => {
+      if (!list.length) { box.replaceChildren(h('h3.small', 'Test stock pairs'), h('p.small.muted', 'No test stock is approved on this network\u2019s Model 10 launchpad yet (Pairs tab).')); return; }
+      box.replaceChildren(h('h3.small', 'Test stock pairs'),
+        h('p.small.muted', 'A stock pair starts at the same price as on Model 10. If the issuer pauses the stock, its pools stop trading, fees stay held for their recipients and the liquidity stays locked; everything resumes when the stock moves again.'),
+        h('ul.plain', list.map(s => h('li', h('strong', s.symbol), ' ', h('span.mono.small.muted', short(s.address)), ' · ', s.approved ? h('span.small', 'Model 11 pair') : button(`Approve ${s.symbol} for Model 11`, 'approve-v4-stock', { asset: s.address })))));
+    }).catch(e => { box.replaceChildren(h('h3.small', 'Test stock pairs'), h('p.small.muted', errorText(e))); });
+    return box;
+  }
+
   function v4Card(net) {
     if (!v4Available(net)) return null;
     if (!v4PoolManager(net)) return card('Model 11 test launchpad (Uniswap v4)', h('p.small.muted', 'Deploy the test PoolManager first; the launchpad is deployed on top of it.'));
@@ -73,6 +86,7 @@ export function renderLaunchpads(ctx, { connect }) {
       v4?.pinned ? h('p.small.muted', 'Shared team launchpad: factory ', h('span.mono', short(v4.factory)), ', router ', h('span.mono', short(v4.router)), '.') : null,
       v4 && !v4.pinned ? h('div.stack', h('p.small', 'Deployed from this browser. Send these addresses to be pinned in networks.mjs so the site lists its tokens for every visitor:'), h('pre.small.selectable', JSON.stringify({ factory: v4.factory, hook: v4.hook, router: v4.router, block: v4.block, ...(net.v4.poolManager ? {} : { poolManager: v4.poolManager }) }, null, 2))) : null,
       !v4 ? button('Deploy Model 11 test launchpad (about 7 confirmations)', 'deploy-v4', {}) : null,
+      v4 ? stockPairs(net) : null,
       !v4 ? h('p.small.muted', 'This wallet becomes its treasury. The hook address is found in this browser first (a few seconds): its last bits are its Uniswap v4 permissions. A step that fails or is rejected resumes where it stopped.') : null);
   }
 

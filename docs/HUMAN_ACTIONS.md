@@ -1,5 +1,16 @@
 # Actions that need Malik
 
+## Model 11 stock pairs on BNB Chain testnet, 6 November 2026
+
+After this PR is merged and Railway has redeployed:
+1. Open the operator panel, **Launchpads** tab, on BNB Chain testnet, with the treasury wallet (`0xf5B0…639D`).
+2. Under **Test stock pairs** in the Model 11 card, press **Approve tNVDAon for Model 11** (one confirmation each;
+   the other test stocks the same way). It starts at the same price as on Model 10.
+3. Launch with **Launch model: Model 11 test** and the tNVDAon pair, with a small first buy in tNVDAon (get some from
+   the **Test funds** tab). Then buy and sell it.
+4. Optional: pause tNVDAon in the Pairs tab. Trades should stop with the reason and fees stay held. Unpause it, and
+   trades and fee payouts resume.
+
 ## Model 11 on BNB Chain testnet, and test funds moved to the operator panel, 6 November 2026
 
 **Done, 6 November 12:15.** Pinned in `networks.mjs`: test PoolManager `0x251E30304241c21d76219e56f3611d8b53F03a13`

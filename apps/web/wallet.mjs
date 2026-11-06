@@ -2,7 +2,7 @@ import {prepareTestLiquidity,testLiquidityCalls,TEST_MANAGER_ABI} from './test-s
 import {verifyNativeRouter,findCurveNonce} from './native-trade-router.mjs';
 import { nowSeconds } from './clock.mjs';
 import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
-import { isV4Token, v4Available, v4Deployment, deployV4, deployTestPoolManager, launchV4, v4Quote, v4Trade, v4WithdrawFees, v4TokenState } from './v4-launchpad.mjs';
+import { isV4Token, v4Available, v4Deployment, deployV4, deployTestPoolManager, approveV4Stock, launchV4, v4Quote, v4Trade, v4WithdrawFees, v4TokenState } from './v4-launchpad.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress } from '/vendor/ethers.js';
@@ -988,6 +988,7 @@ export class TestnetWallet {
     // Model 11 (Uniswap v4 hook): its own factory, hook and router; never the curve launchpad below.
     if(action==='deploy-v4')return deployV4(this,body??{});
     if(action==='deploy-v4-pool-manager')return deployTestPoolManager(this);
+    if(action==='approve-v4-stock')return approveV4Stock(this,body??{});
     if(action==='launch'&&body?.model===V4_MODEL)return launchV4(this,body);
     {const v4item=body?.token?this.launches.get(String(body.token).toLowerCase()):null;
       if(v4item&&isV4Token(v4item)){
