@@ -20,14 +20,31 @@ const write = (key, value) => { try { localStorage.setItem(key, JSON.stringify(v
 
 /** True for a token launched on Model 11 (the public index tags its rows with the deployment model). */
 export const isV4Token = item => item?.deploymentModel === V4_MODEL || item?.model === V4_MODEL;
-/** Whether this network has Uniswap v4 for Model 11 (networks.mjs `v4`). */
-export const v4Available = net => !!net?.v4?.poolManager && V4_NETWORKS.includes(net.key) && !net.mainnet;
+const poolManagerKey = chainId => `elpida:v4:pool-manager:${chainId}`;
+/**
+ * Whether Model 11 can run on this network: one with Uniswap v4 (networks.mjs `v4.poolManager`), or a test network
+ * without it where the operator deploys a labelled test copy of Uniswap's own PoolManager (`v4.testPoolManager`).
+ */
+export const v4Available = net => !!net?.v4 && (!!net.v4.poolManager || !!net.v4.testPoolManager) && V4_NETWORKS.includes(net.key) && !net.mainnet;
+/** The network's v4 PoolManager: Uniswap's own or a pinned test copy, else a test copy this browser deployed. */
+export function v4PoolManager(net) {
+  if (!v4Available(net)) return null;
+  if (net.v4.poolManager) return net.v4.poolManager;
+  const saved = read(poolManagerKey(net.chainId));
+  return saved?.address && isAddress(saved.address) ? saved.address : null;
+}
 /** The network's Model 11 launchpad: the team deployment pinned in networks.mjs, else one this browser deployed. */
 export function v4Deployment(net) {
-  if (!v4Available(net)) return null;
-  if (net.v4.shared?.factory) return { ...net.v4.shared, poolManager: net.v4.poolManager, pinned: true };
+  const manager = v4PoolManager(net);
+  if (!manager) return null;
+  if (net.v4.shared?.factory) return { ...net.v4.shared, poolManager: manager, pinned: true };
   const saved = read(savedKey(net.chainId));
-  return saved?.factory && saved.poolManager?.toLowerCase() === net.v4.poolManager.toLowerCase() ? { ...saved, pinned: false } : null;
+  return saved?.factory && saved.poolManager?.toLowerCase() === manager.toLowerCase() ? { ...saved, pinned: false } : null;
+}
+/** A test copy of the PoolManager this browser deployed and that is not pinned yet ({ address, block }), or null. */
+export function savedTestPoolManager(net) {
+  if (!v4Available(net) || net.v4.poolManager) return null;
+  return read(poolManagerKey(net.chainId));
 }
 
 /**
@@ -63,6 +80,26 @@ async function settled(read, { tries = 15, delay = 2000 } = {}) {
   for (let i = 0; ; i++) { try { return await read(); } catch (error) { if (i >= tries) throw error; await pause(delay); } }
 }
 
+/**
+ * Waits until the wallet's own RPC counts a transaction we just saw confirmed. A wallet picks the next transaction's
+ * nonce from its RPC; one that lags a block reuses the confirmed nonce, and the network then refuses the next
+ * signature ("replacement transaction underpriced"; Trust Wallet on Ethereum Sepolia, 6 November 2026).
+ */
+export async function walletCaughtUp(w, nonce, { tries = 20, delay = 1500 } = {}) {
+  const provider = w.signer?.provider;
+  if (!provider || nonce == null) return;
+  for (let i = 0; i < tries; i++) {
+    try { if (await provider.getTransactionCount(w.address, 'latest') > nonce) return; } catch { /* ask again */ }
+    await pause(delay);
+  }
+}
+/** w.wait, then wait for the wallet's RPC to see the transaction before the next signature is requested. */
+async function step(w, pending, message) {
+  const result = await w.wait(pending, message);
+  await walletCaughtUp(w, result?.tx?.nonce);
+  return result;
+}
+
 async function artifacts() {
   const response = await fetch('/api/v4-artifacts');
   if (!response.ok) throw new Error('The Model 11 contracts are unavailable. Nothing was deployed.');
@@ -78,20 +115,21 @@ export async function deployV4(w, body = {}) {
   await w.checkNetwork();
   const net = w.net;
   if (!v4Available(net)) throw new Error(`${net.name} has no Uniswap v4 for Model 11. Use Base Sepolia or Ethereum Sepolia.`);
+  if (!v4PoolManager(net)) throw new Error(`${net.name} has no Uniswap v4. Deploy the test PoolManager first (same tab). Nothing was deployed.`);
   if (net.v4.shared?.factory) throw new Error(`The ${net.name} Model 11 test launchpad is already pinned. Use it for launches.`);
   if (v4Deployment(net)) throw new Error(`A ${net.name} Model 11 test launchpad was already deployed from this browser (factory ${v4Deployment(net).factory}). Send its addresses to be pinned; nothing was deployed.`);
   const entered = String(body.treasury ?? '').trim();
   if (entered && (!isAddress(entered) || getAddress(entered) !== getAddress(w.address))) throw new Error('The Model 11 test launchpad uses the connected wallet as its treasury. Leave the treasury empty. Nothing was deployed.');
   if (!w.oracle?.available) throw new Error(`Verified USD pricing is not configured for ${net.name}. Nothing was deployed.`);
   await w.oraclePrice();
-  const poolManager = getAddress(net.v4.poolManager);
-  if (!await hasCode(w.provider, poolManager, { wait: true, tries: 2 })) throw new Error(`Uniswap's v4 PoolManager ${poolManager} has no code on ${net.name}. Nothing was deployed.`);
+  const poolManager = getAddress(v4PoolManager(net));
+  if (!await hasCode(w.provider, poolManager, { wait: true, tries: 2 })) throw new Error(`The v4 PoolManager ${poolManager} has no code on ${net.name}. Nothing was deployed.`);
   if (await w.provider.getBalance(w.address) === 0n) throw new Error(`Get ${net.nativeCurrency.symbol} on ${net.name} from a faucet to pay deployment gas.`);
   const a = await artifacts(), progress = read(savedKey(net.chainId) + ':progress') ?? {};
   const save = () => write(savedKey(net.chainId) + ':progress', progress);
   // A saved step was mined earlier, so its contract exists: wait out a lagging node rather than deploying it again.
   const fresh = async (key, check) => !!progress[key] && await hasCode(w.provider, progress[key], { wait: true }) && (!check || await settled(() => check(progress[key])));
-  const deploy = async (art, args, message) => { w.onProgress(message); const c = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(...args); await c.waitForDeployment(); return { address: await c.getAddress(), receipt: await c.deploymentTransaction().wait() }; };
+  const deploy = async (art, args, message) => { w.onProgress(message); const c = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(...args); await c.waitForDeployment(); await walletCaughtUp(w, c.deploymentTransaction().nonce); return { address: await c.getAddress(), receipt: await c.deploymentTransaction().wait() }; };
   if (!await fresh('create2')) { progress.create2 = (await deploy(a.create2, [], `Step 1 of 6: confirm the CREATE2 deployer for the hook (${LABEL})…`)).address; save(); }
   if (!await fresh('factory', async f => (await new Contract(f, V4_FACTORY_ABI, w.provider).treasury()).toLowerCase() === w.address.toLowerCase())) {
     const d = await deploy(a.factory, [w.address, TESTNET_START_FDV_USD, true], `Step 2 of 6: confirm the Model 11 factory ($${TESTNET_START_FDV_USD} starting FDV, token details required)…`);
@@ -106,7 +144,7 @@ export async function deployV4(w, body = {}) {
     const mined = await mineHookSalt(progress.create2, initCode);
     if (!await hasCode(w.provider, mined.address)) {
       const deployer = new Contract(progress.create2, ['function deploy(bytes,bytes32) returns(address)'], w.signer);
-      await w.wait(deployer.deploy(initCode, mined.salt), `Step 3 of 6: confirm the hook deployment at ${mined.address}…`);
+      await step(w, deployer.deploy(initCode, mined.salt), `Step 3 of 6: confirm the hook deployment at ${mined.address}…`);
       if (!await hasCode(w.provider, mined.address, { wait: true })) throw new Error('The hook transaction confirmed, but the network does not show the hook yet. Press the button again in a minute: finished steps are kept.');
     }
     progress.hook = mined.address; save();
@@ -114,18 +152,42 @@ export async function deployV4(w, body = {}) {
   const hook = new Contract(progress.hook, HOOK_ABI, w.provider);
   const [hookFactory, hookTreasury] = await settled(() => Promise.all([hook.factory(), hook.protocolTreasury()]));
   if (hookFactory.toLowerCase() !== progress.factory.toLowerCase() || hookTreasury.toLowerCase() !== w.address.toLowerCase()) throw new Error('The hook is wired to another factory or treasury. Nothing more was sent.');
-  if ((await settled(() => factory.hook())) === ZeroAddress) await w.wait(factory.setHook(progress.hook), 'Step 4 of 6: confirm connecting the hook to the factory…');
-  if ((await settled(() => factory.usdFeed())) === ZeroAddress) await w.wait(factory.configureUsdPricing(w.oracle.feed, w.oracle.maxAge, w.oracle.usdc ?? ZeroAddress), 'Step 5 of 6: confirm verified USD pricing (the $10 launch fee and the starting FDV)…');
+  if ((await settled(() => factory.hook())) === ZeroAddress) await step(w, factory.setHook(progress.hook), 'Step 4 of 6: confirm connecting the hook to the factory…');
+  if ((await settled(() => factory.usdFeed())) === ZeroAddress) await step(w, factory.configureUsdPricing(w.oracle.feed, w.oracle.maxAge, w.oracle.usdc ?? ZeroAddress), 'Step 5 of 6: confirm verified USD pricing (the $10 launch fee and the starting FDV)…');
   const usdc = w.oracle.usdc && w.oracle.usdc !== ZeroAddress ? getAddress(w.oracle.usdc) : null;
   if (usdc && (await settled(() => factory.approvedQuotes(usdc))) === 0n) {
     const decimals = Number(await new Contract(usdc, ERC20, w.provider).decimals());
-    await w.wait(factory.approveQuote(usdc, usdQuoteTemplate(TESTNET_START_FDV_USD, decimals)), 'Step 5 of 6: confirm the USDC pair…');
+    await step(w, factory.approveQuote(usdc, usdQuoteTemplate(TESTNET_START_FDV_USD, decimals)), 'Step 5 of 6: confirm the USDC pair…');
   }
   if (!await fresh('router', async r => { const c = new Contract(r, V4_ROUTER_ABI, w.provider); return (await c.hook()).toLowerCase() === progress.hook.toLowerCase(); })) { progress.router = (await deploy(a.router, [poolManager, progress.hook], 'Step 6 of 6: confirm the Model 11 router (buys and sells)…')).address; save(); }
   const record = { factory: progress.factory, hook: progress.hook, router: progress.router, create2: progress.create2, block: progress.block, poolManager, treasury: w.address, model: V4_MODEL, deployedAt: Date.now() };
   if (!write(savedKey(net.chainId), record)) throw new Error(`Deployed, but this browser blocks storage. Save factory ${record.factory}, hook ${record.hook}, router ${record.router} (block ${record.block}).`);
   try { localStorage.removeItem(savedKey(net.chainId) + ':progress'); } catch { /* kept for a retry */ }
   return { record, message: `The ${net.name} Model 11 test launchpad is deployed: factory ${record.factory}, hook ${record.hook}, router ${record.router}, from block ${record.block}. Send these to be pinned in networks.mjs (v4.shared) so the site lists its tokens.` };
+}
+
+/**
+ * Deploys a labelled test copy of Uniswap's own v4 PoolManager (the published v4-core 1.0.2 bytecode, unchanged) on a
+ * test network that has none, with the connected wallet as its owner (it can only set protocol fees, which stay 0).
+ * Testnet only: on mainnet Model 11 uses Uniswap's own deployment.
+ */
+export async function deployTestPoolManager(w) {
+  await w.checkNetwork();
+  const net = w.net;
+  if (!v4Available(net) || net.v4.poolManager || !net.v4.testPoolManager) throw new Error(`${net.name} does not take a test PoolManager.`);
+  const saved = savedTestPoolManager(net);
+  if (saved?.address && await hasCode(w.provider, saved.address, { wait: true })) throw new Error(`A test PoolManager was already deployed from this browser (${saved.address}). Send it to be pinned; nothing was deployed.`);
+  if (await w.provider.getBalance(w.address) === 0n) throw new Error(`Get ${net.nativeCurrency.symbol} on ${net.name} from a faucet to pay deployment gas.`);
+  const a = await artifacts();
+  if (!a.poolManager?.bytecode) throw new Error('The PoolManager bytecode is unavailable. Nothing was deployed.');
+  w.onProgress(`Confirm the test Uniswap v4 PoolManager on ${net.name} (Uniswap's own published contract, labelled as a test deployment)…`);
+  const c = await new ContractFactory(a.poolManager.abi, a.poolManager.bytecode, w.signer).deploy(w.address);
+  await c.waitForDeployment();
+  const tx = c.deploymentTransaction(), receipt = await tx.wait();
+  await walletCaughtUp(w, tx.nonce);
+  const record = { address: await c.getAddress(), block: receipt.blockNumber, owner: w.address, label: 'Elpida test deployment of Uniswap v4 PoolManager (v4-core 1.0.2)' };
+  if (!write(poolManagerKey(net.chainId), record)) throw new Error(`Deployed, but this browser blocks storage. Save the PoolManager ${record.address} (block ${record.block}).`);
+  return { hash: tx.hash, record, message: `The test Uniswap v4 PoolManager is deployed on ${net.name}: ${record.address} (block ${record.block}). Now deploy the Model 11 test launchpad, then send both to be pinned.` };
 }
 
 async function stageMetadata(w, name, symbol, body) {
@@ -172,7 +234,7 @@ export async function launchV4(w, body) {
   if (await w.provider.getBalance(w.address) < value) throw new Error(`You need ${formatUnits(value, 18)} ${w.net.nativeCurrency.symbol} for the $10 launch fee${quote ? '' : ' and your first buy'}, plus gas.`);
   if (quote && firstBuy > 0n) {
     if (await quote.balanceOf(w.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, decimals)} USDC for the first buy.`);
-    if (await quote.allowance(w.address, d.factory) < firstBuy) await w.wait(quote.approve(d.factory, firstBuy), 'Approve exactly the first buy in USDC…');
+    if (await quote.allowance(w.address, d.factory) < firstBuy) await step(w, quote.approve(d.factory, firstBuy), 'Approve exactly the first buy in USDC…');
   }
   const published = await stageMetadata(w, name, symbol, body);
   await w.checkNetwork();

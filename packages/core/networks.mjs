@@ -25,7 +25,8 @@ export const testnets = [
     // Model 11 test launchpad (Uniswap v4 hook, liquidity locked from launch; NOT AUDITED, test networks only).
     // poolManager is Uniswap's own v4 PoolManager here (developers.uniswap.org, v4 deployments, 6 Nov 2026). Pin the
     // launchpad in `shared` once Malik deploys it from the site (docs/HUMAN_ACTIONS.md, Model 11); until then it is off.
-    v4: { poolManager: '0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408', shared: null },
+    // Deployed by Malik from the operator panel, 6 Nov 2026 (factory created in block 55188766; treasury 0xf5B0…639D).
+    v4: { poolManager: '0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408', shared: { factory: '0x70e5E07a4EBBCcE5144DEd022a1ADE2019538Da3', hook: '0x8D4342B2fB2E52822CD6c4ceECb4628b1B90e8cC', router: '0x1136B6D2410b1B32Ec6039aD92a0B110A934aCE9', block: 55188766 } },
     legacy: [{ factory: '0xb5dAE15BCCe080a49e8b776E59B3d982269aC74C', block: 50624512, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0x98a0E75dbBe9EdA5D228319C72D496b814bA7145', block: 48289973, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }, { factory: '0x8194285faC2aFa04867a1C421EFee9f28ab0290f', block: 48272244, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1 }, { factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 48209837, model: 'curve-dex-v10', metadataVersion: 1 }, { factory: '0xe605787F7260F5Dae2768d2F9E93E7F18EE14f91', block: 47994800, model: 'curve-dex-v9', metadataVersion: 1 }],
   },
   {
@@ -46,7 +47,9 @@ export const testnets = [
     // Model 11 test launchpad (Uniswap v4 hook, liquidity locked from launch; NOT AUDITED, test networks only).
     // poolManager is Uniswap's own v4 PoolManager here (developers.uniswap.org, v4 deployments, 6 Nov 2026). Pin the
     // launchpad in `shared` once Malik deploys it from the site (docs/HUMAN_ACTIONS.md, Model 11); until then it is off.
-    v4: { poolManager: '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543', shared: null },
+    // Deployed by Malik from the operator panel, 6 Nov 2026 (factory created in block 12075675, hook in 12075678, the
+    // rest after a resumed run; treasury 0xf5B0…639D).
+    v4: { poolManager: '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543', shared: { factory: '0x1136B6D2410b1B32Ec6039aD92a0B110A934aCE9', hook: '0xbe3C898140D32DFcAa1DeE5B1BaDE36BCe4B68cC', router: '0xC5FA99cFd6c752199BCb37f9dEF3fb94279b7B3c', block: 12075675 } },
     legacy: [{ factory: '0x5aA283B8B12786314e76ac4E977B1E9275b407f6', block: 12000324, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 11972040, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },
   {
@@ -62,6 +65,10 @@ export const testnets = [
     // Reviewed launchpad (security review fixes E-1 to E-3), deployed by Malik 2 Nov 2026; pricing turned on in tx
     // 0x17e922cb…c5e6 (block 140398704; no launch can precede it). Factory and adapter 0x5343…ed9a both report
     // REVIEW_FIXES_VERSION 1. The 139102664 factory moves to legacy and stays indexed. No new launches go there.
+    // Model 11 test launchpad (6 Nov 2026). BNB Chain testnet has no Uniswap v4 (it is only on BNB mainnet), so the
+    // operator deploys a labelled test copy of Uniswap's own PoolManager from the operator panel first. Pin its address
+    // in `poolManager` and the launchpad in `shared` once deployed (docs/HUMAN_ACTIONS.md).
+    v4: { poolManager: null, testPoolManager: true, shared: null },
     shared: { factory: '0x4CabA05067171DbA4B840aDae1e652B8279dE499', block: 140398704, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1, reviewFixesVersion: 1 },
     legacy: [{ factory: '0x5795b25C7fA37638eEacd29848522f8Cd48a1156', block: 139102664, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE', block: 138485798, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },

@@ -679,7 +679,7 @@ export class SolanaWallet {
       else {
         if (BigInt(await this.connection.getBalance(this.publicKey)) < solNeeded) throw new Error(`You need about ${formatAmount(solNeeded, 9)} SOL for the creation fee${nativeLamports ? ', the first purchase' : ''} and account rent.${getSol}`);
         if (pending !== null && await this.quoteBalance(this.publicKey, config) < pending) { localStorage.removeItem(ckey); throw new Error(`The ${formatAmount(pending, d)} ${config.symbol} converted earlier is no longer in this wallet. Press again to convert anew. Nothing was submitted.`); }
-        if (!payNative && await this.quoteBalance(this.publicKey, config) < q.gross) throw new Error(`You need ${formatAmount(q.gross, d)} ${config.symbol} for the first buy.${config.test ? ' Use its test faucet in Network and funds.' : ''}`);
+        if (!payNative && await this.quoteBalance(this.publicKey, config) < q.gross) throw new Error(`You need ${formatAmount(q.gross, d)} ${config.symbol} for the first buy.${config.test ? ' It is a test asset with no value; pay in SOL instead from the currency menu where offered.' : ''}`);
       }
       if (payNative && pending === null) {
         const before = await this.quoteBalance(this.publicKey, config);
@@ -780,7 +780,7 @@ export class SolanaWallet {
       const grossIn = parseAmount(body.amount, d);
       const q = quoteBuy(pool, grossIn, feeBps, config.baseFeeBps);
       const held = await this.quoteBalance(this.publicKey, config);
-      if (held < q.gross + (config.wsol ? 5_000_000n : 0n)) throw new Error(`Not enough ${config.symbol} on ${this.net.name}.${config.test ? ' Use its test faucet in Network and funds.' : config.wsol ? ' Get devnet SOL at faucet.solana.com.' : ''}`);
+      if (held < q.gross + (config.wsol ? 5_000_000n : 0n)) throw new Error(`Not enough ${config.symbol} on ${this.net.name}.${config.test ? ' It is a test asset with no value; pay in SOL instead from the currency menu where offered.' : config.wsol ? ' Get devnet SOL at faucet.solana.com.' : ''}`);
       // Only what the trade actually charges is wrapped; a partial final fill leaves the rest unspent.
       const wrap = await this.wrapFor(config, q.gross), buyIx = this.client.buy({ buyer: this.publicKey, config: refs, mint, grossIn: q.gross, minTokensOut: q.tokens * (10000n - bps) / 10000n });
       // A locked-pool pair opens its pool inside the completing buy itself: nothing to migrate.

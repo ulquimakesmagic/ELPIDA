@@ -43,7 +43,7 @@ export class PublicIndexer {
       this.legacy.set(net.key,older.map(deployment=>openEntry({net,deployment,provider,contracts,dataDir,legacy:true})));
       if(net.taxDeployment?.factory)this.legacy.get(net.key).push(openEntry({net,deployment:{...net.taxDeployment,model:'curve-tax-v10'},provider,contracts,dataDir}));
       // Model 11 (Uniswap v4 hook) test launchpad: its own index beside the curve launchpads, once pinned in networks.mjs.
-      if(net.v4?.shared?.factory)this.legacy.get(net.key).push(openV4Entry({net,provider,dataDir}));
+      if(net.v4?.shared?.factory&&net.v4.poolManager)this.legacy.get(net.key).push(openV4Entry({net,provider,dataDir}));
     }
   }
   /** The current deployment first, then any legacy deployments on the same network. */

@@ -22,7 +22,6 @@ import { renderRewards } from './rewards-view.mjs';
 import { portfolioView } from './portfolio-view.mjs';
 import { renderAdmin } from './admin-view.mjs';
 import { partnersView } from './partners-view.mjs';
-import { circleFundingPanel } from './circle-funding.mjs';
 import { initShell, renderLastSale, syncSearch } from './shell.mjs';
 import { startResilience } from './resilience.mjs';
 import { connectTradeStream, mergeTrades } from './live-trades.mjs';
@@ -314,7 +313,7 @@ function loadingView() { return currentRoute.name === 'explore' ? exploreSkeleto
 
 /* Portfolio lives in portfolio-view.mjs. */
 
-/* ---------- Network and test funds ---------- */
+/* ---------- Network and wallet ---------- */
 /** Wallet picker for the current network: one row per wallet this browser announces. */
 function openWalletDialog(net = wallet.net) {
   const dialog = $('#wallet-dialog'), body = $('#wallet-body'), error = h('p.error-text', { role: 'alert' });
@@ -411,31 +410,19 @@ async function openTools() {
     h('div.choice-grid', [{ key: 'local', name: 'Local simulation', note: 'Demo accounts, instant test funds', env: 'sim' }, ...networks().map(net => ({ key: net.key, name: net.name, note: net.kind === 'solana' ? 'Phantom, Solflare or Backpack' : 'Browser wallet such as MetaMask', env: 'testnet', mainnet: !!net.mainnet }))].map(item =>
       h('button.choice', { type: 'button', 'data-busy-disable': '', 'aria-pressed': String(currentChain() === item.key), on: { click: async () => { error.textContent = ''; try { if (item.key === 'local') await useLocal(); else await connect(item.key); $('#tools-dialog').close(); toast(`Switched to ${item.key === 'local' ? 'the local simulation' : item.name}.`, { kind: 'success' }); } catch (e) { fail(e); } } } },
         h('span.choice-title', item.name, currentChain() === item.key ? h('span.chip.chip-positive', 'Current') : null), h('p', item.note), h(`span.chip.chip-${item.env}`, item.env === 'sim' ? 'Simulated funds' : item.mainnet ? 'Mainnet beta · real funds' : 'Public testnet')))));
-  const funds = h('section.tools-section', h('h4', 'Test funds'));
+  // Only the account and the wallet connection here (Malik, 6 November 2026). The faucets, test assets and the launchpad
+  // status are operator tools in the operator panel (#/monkey?tab=funds, ?tab=launchpads).
+  const walletSection = h('section.tools-section', h('h4', local ? 'Demo account' : 'Wallet'));
   if (local) {
-    funds.append(h('div.field', h('label', { for: 'demo-account' }, 'Demo account'),
+    walletSection.append(h('div.field', h('label', { for: 'demo-account' }, 'Demo account'),
       h('select.select#demo-account', { on: { change: async e => { account = e.target.value; await refresh(); updateChrome(); } } }, config.accounts.map(a => h('option', { value: a.id, selected: a.id === account }, `${a.name} · ${short(a.address)}`))),
-      h('p.hint', 'Switch accounts to try trading against your own launches.')),
-      h('p.small.muted', `Demo accounts hold simulated local ETH. Each launch pays a ${config.local?.launchFee ?? ''} ETH creation fee, the simulated oracle equivalent of $10. USDC fee payment is also available.`));
+      h('p.hint', 'Switch accounts to try trading against your own launches.')));
   } else {
     const net = wallet.net;
-    // A free faucet for every test pair asset (the test xStock and the test paired token).
-    let pairs = null; try { pairs = wallet.address ? wallet.pairOptions?.() : null; } catch {}
-    const faucets = Object.values(pairs ?? {}).flatMap(group => group.assets).filter(a => a.faucet && !a.faucet.href);
-    if (faucets.length) funds.append(h('div.wallet-choices', faucets.map(a => h('button.btn.btn-secondary', { type: 'button', 'data-busy-disable': '', on: { click: async () => { error.textContent = ''; try { await run(a.faucet.action, a.faucet.body); } catch (e) { fail(e); } } } }, icon('droplet'), a.faucet.label))),
-      h('p.hint', 'Test assets are free and have no value. TEST-STOCK is a simulated stock, not an issued xStock.'));
-    const links = net.gasFaucet ? [[`${net.nativeCurrency.symbol} faucet (network fees, creation fees and ${net.nativeCurrency.symbol}-paired launches)`, net.gasFaucet]] : [];
-    funds.append(h('div.links', links.map(([label, href]) => h('a', { href, target: '_blank', rel: 'noopener noreferrer' }, label, icon('external-link', 'icon-sm')))));
-    if (!wallet.address) funds.append(h('h4', 'Connect a wallet'), walletButtons(net, { onDone: () => openTools(), onError: fail }));
-    else funds.append(h('p.small.muted', `Connected${/^your/i.test(wallet.walletName ?? 'your') ? '' : ' with ' + wallet.walletName}: ${wallet.address}`), h('details.small', h('summary', 'Use a different wallet'), walletButtons(net, { onDone: () => openTools(), onError: fail })));
-    if (net.kind !== 'solana') {
-      // Launchpad deployments are operator work and live in the operator panel only (#/monkey?tab=launchpads).
-      const d = wallet.deployment;
-      funds.append(h('div.tools-section', h('h4', 'Launchpad on this network'),
-        h('p.small.muted', d ? `${d.shared ? 'Shared team' : 'This browser\u2019s'} launchpad: ${short(d.factory)}.${state?.pricing?.verified ? ` $10 launch fee, converted by the on-chain price feed at execution. Starting FDV: $${Number(wallet.startFdvUsd ?? 5000).toLocaleString()} before the first purchase.` : ''}` : `${net.name} is not set up for launches yet. Browsing and trading existing tokens still work.`)));
-    } else funds.append(h('p.small.muted', wallet.deployment ? `Solana program: ${short(wallet.deployment.programId)}.${state?.pricing ? ` Creation fee ${number(state.pricing.launchFee, 6)} SOL. New USD-priced launches are pending a verified-oracle program upgrade.` : ''}` : 'The Solana program is not deployed. Run npm.cmd run solana:deploy in the elpida-v1 folder, then restart npm run dev.'));
+    if (!wallet.address) walletSection.append(h('p.small.muted', 'Connect a wallet'), walletButtons(net, { onDone: () => openTools(), onError: fail }));
+    else walletSection.append(h('p.small.muted', `Connected${/^your/i.test(wallet.walletName ?? 'your') ? '' : ' with ' + wallet.walletName}: ${wallet.address}`), h('details.small', h('summary', 'Use a different wallet'), walletButtons(net, { onDone: () => openTools(), onError: fail })));
   }
-  body.replaceChildren(envSection, funds, circleFundingPanel({ config: config.circle, csrf: config.csrf, connected: mode === 'testnet' ? { address: wallet.address, network: wallet.net.key } : null }), error);
+  body.replaceChildren(envSection, walletSection, error);
   $('#tools-intro').textContent = local ? 'You are using the local simulation. Choose a network when you create a token, or switch here.' : `You are connected to ${wallet.net.name}.`;
   updateChrome();
   if (!$('#tools-dialog').open) $('#tools-dialog').showModal();

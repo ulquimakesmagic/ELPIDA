@@ -2,7 +2,7 @@ import {prepareTestLiquidity,testLiquidityCalls,TEST_MANAGER_ABI} from './test-s
 import {verifyNativeRouter,findCurveNonce} from './native-trade-router.mjs';
 import { nowSeconds } from './clock.mjs';
 import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
-import { isV4Token, v4Available, v4Deployment, deployV4, launchV4, v4Quote, v4Trade, v4WithdrawFees, v4TokenState } from './v4-launchpad.mjs';
+import { isV4Token, v4Available, v4Deployment, deployV4, deployTestPoolManager, launchV4, v4Quote, v4Trade, v4WithdrawFees, v4TokenState } from './v4-launchpad.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress } from '/vendor/ethers.js';
@@ -55,6 +55,8 @@ export function walletErrorText(error, name = 'your wallet') {
   if (code === -32002) return `A request is already waiting in ${name}. Open the wallet extension and approve or reject it, then try again.`;
   if (code === 4001 || code === 'ACTION_REJECTED') return 'You cancelled the wallet request. Nothing was submitted.';
   if (code === 4100) return `${name} has not authorised Elpida yet. Connect again and approve the request.`;
+  // The wallet's RPC lagged a block and reused a confirmed nonce: nothing was sent, and a moment later it is fine.
+  if (/replacement (transaction )?underpriced|nonce too low/i.test(String(error?.message ?? error?.info?.error?.message ?? ''))) return `${name} tried to reuse the last transaction's number because its network connection is a block behind. Nothing was sent. Wait a minute, then press the button again: finished steps are kept.`;
   return null;
 }
 const metadataKey = (chain, factory, token) => `elpida:metadata:${chain}:${factory.toLowerCase()}:${token.toLowerCase()}`;
@@ -239,7 +241,7 @@ export class TestnetWallet {
     const missing = kind => !this.dex
       ? `${this.net.name} uses the basic launchpad, which supports ${native} pairs. xStock and paired-token launches need DEX graduation (Base Sepolia).`
       : !this.deployment ? 'Set up the launchpad on this network first.'
-      : `No ${kind === 'xstock' ? 'xStock' : 'paired token'} is approved on ${this.net.name} yet. The launchpad owner can add the test assets from Network and funds.`;
+      : `No ${kind === 'xstock' ? 'xStock' : 'paired token'} is approved on ${this.net.name} yet. The launchpad operator can add the test assets.`;
     return {
       native: { assets: [{ id: 'native', symbol: native, name: this.net.nativeCurrency.name, decimals: 18, ...fee, curve: this.previewCurve() }] },
       usdc: approved('usdc').length ? { assets: approved('usdc') } : { assets: [], unavailable: !this.dex ? 'USDC trading pairs need a DEX graduation adapter on this network.' : 'USDC trading setup is incomplete on this deployment. The owner can finish it here once; it then becomes available to everyone.' },
@@ -394,7 +396,7 @@ export class TestnetWallet {
   async getNativePairTradeQuote(body) {
     await this.checkNetwork();await this.verifyFactory();
     const nativeRouter=await this.nativeTradeRouter();
-    if(!nativeRouter&&!await this.canBatch())throw new Error(this.net.chainId===11155111?'Set up the ordinary-wallet native router in Network and test funds before trading with native coin.':'Native trading on this network currently requires an atomic-capable wallet. Direct pair-asset trading remains available.');
+    if(!nativeRouter&&!await this.canBatch())throw new Error(this.net.chainId===11155111?'Native-coin trading here needs a wallet with batched transactions until the operator sets up the native router. Direct pair-asset trading remains available.':'Native trading on this network currently requires an atomic-capable wallet. Direct pair-asset trading remains available.');
     const item=this.launches.get(String(body.token).toLowerCase());
     if(!item||item.pair==='native'||item.tax)throw new Error('Atomic native trading requires a standard non-native pair.');
     if(!['buy','sell'].includes(body.side))throw new Error('Invalid native trade side.');
@@ -613,7 +615,8 @@ export class TestnetWallet {
   }
   async wait(pending, message) {
     this.onProgress(message);
-    const tx = await pending;
+    let tx;
+    try { tx = await pending; } catch (error) { const text = walletErrorText(error, this.walletName); if (text) throw Object.assign(new Error(text), { code: error.code }); throw error; }
     this.onProgress('Transaction submitted. Waiting for confirmation…');
     const receipt = await tx.wait();
     if (!receipt || receipt.status !== 1) throw new Error('Transaction did not succeed.');
@@ -833,9 +836,9 @@ export class TestnetWallet {
     const factory=this.factoryContract(),version=Number(await factory.MODEL_VERSION());
     await this.checkFeeAccounting(factory);
     await this.checkLaunchFeatures(factory);
-    if(version!==MODEL_VERSIONS[this.model]||(this.dex?!isDexModel(this.model):this.model!==BETA_MODEL))throw new Error('This launchpad needs the verified USD version. Set up a new launchpad from Network and funds.');
+    if(version!==MODEL_VERSIONS[this.model]||(this.dex?!isDexModel(this.model):this.model!==BETA_MODEL))throw new Error('This launchpad needs the verified USD version, which its operator has not set up yet. Nothing was submitted.');
     if(this.model===DEX_MODEL&&!this.factoryStartFdvUsd)this.factoryStartFdvUsd=Number(await factory.startFdvUsd());
-    if(!this.oracle?.available||(await factory.usdFeed()).toLowerCase()!==this.oracle.feed.toLowerCase()||await factory.maxPriceAge()!==BigInt(this.oracle.maxAge)||(await factory.feeUsdc()).toLowerCase()!==(this.oracle.usdc??ZeroAddress).toLowerCase())throw new Error('Activate verified USD pricing from Network and funds before launching.');
+    if(!this.oracle?.available||(await factory.usdFeed()).toLowerCase()!==this.oracle.feed.toLowerCase()||await factory.maxPriceAge()!==BigInt(this.oracle.maxAge)||(await factory.feeUsdc()).toLowerCase()!==(this.oracle.usdc??ZeroAddress).toLowerCase())throw new Error('Launch pricing is not active on this launchpad yet. Its operator turns it on in the operator panel. Nothing was submitted.');
     this.feeUsdc=await factory.feeUsdc();
     try{[this.launchFee,this.nativeVirtualQuote,this.price]=await Promise.all([factory.launchFee(),factory.nativeVirtualQuote(),this.oraclePrice()]);}
     catch(error){this.launchFee=undefined;this.nativeVirtualQuote=undefined;this.price={...this.config.prices?.[this.net.key],status:'stale'};if(launch)throw error;}
@@ -984,6 +987,7 @@ export class TestnetWallet {
     if(action==='launch'&&body.tax)return launchPublicTax(this,body);
     // Model 11 (Uniswap v4 hook): its own factory, hook and router; never the curve launchpad below.
     if(action==='deploy-v4')return deployV4(this,body??{});
+    if(action==='deploy-v4-pool-manager')return deployTestPoolManager(this);
     if(action==='launch'&&body?.model===V4_MODEL)return launchV4(this,body);
     {const v4item=body?.token?this.launches.get(String(body.token).toLowerCase()):null;
       if(v4item&&isV4Token(v4item)){
@@ -1010,7 +1014,7 @@ export class TestnetWallet {
       result = await this.wait(c.faucet(limit), `Confirm the free ${a.symbol} test mint in your wallet…`);
       return { hash: result.tx.hash, message: `Added ${formatUnits(limit, a.decimals)} ${a.symbol} (test asset, no value).` };
     }
-    if (action === 'faucet') throw new Error(`Get test ${this.net.nativeCurrency.symbol} from the network faucet linked in Network and funds.`);
+    if (action === 'faucet') throw new Error(`Get test ${this.net.nativeCurrency.symbol} from the network's public faucet.`);
     let metadataSaved = true, metadataPublished = false, launchedToken, metadataStorage;
     if (action === 'launch') {
       const pendingKey='elpida:launch-batch:'+this.net.chainId+':'+this.address.toLowerCase(),pending=localStorage.getItem(pendingKey);
@@ -1058,7 +1062,7 @@ export class TestnetWallet {
       const fundingError=nativeFundingError({balance:await this.provider.getBalance(this.address),value:value+(payNative&&converted===null?nativeBuy:0n),native,network:this.net.name,feeInUsdc:inUsdc});
       if(fundingError)throw new Error(fundingError);
       const pairToken = paired ? new Contract(asset.address, this.config.contracts.quote.abi, this.signer) : null;
-      if (paired && !payNative && await pairToken.balanceOf(this.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, asset.decimals)} ${asset.symbol} for the first buy.${asset.test ? ' Use its test faucet in Network and funds.' : ''}`);
+      if (paired && !payNative && await pairToken.balanceOf(this.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, asset.decimals)} ${asset.symbol} for the first buy.${asset.test ? ' It is a test asset with no value.' : ''}`);
       let published;
       // Token details always go into the launch transaction, never afterwards. Where they cannot, nothing launches.
       const detailsError=launchDetailsError({chain:this.net.key,networkName:this.net.name,metadataSupported:!this.needsMetadataUpgrade,publiclyIndexed:!!this.deployment?.shared&&this.model===DEX_MODEL});
