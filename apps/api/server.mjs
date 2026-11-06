@@ -78,6 +78,7 @@ resources.set('/tax-policy.mjs',['tax-policy.mjs','text/javascript']);
 resources.set('/tax-wallet.mjs',['tax-wallet.mjs','text/javascript']);
 resources.set('/v4-launchpad.mjs',['v4-launchpad.mjs','text/javascript']);
 resources.set('/admin-launchpads.mjs',['admin-launchpads.mjs','text/javascript']);
+resources.set('/admin-funds.mjs',['admin-funds.mjs','text/javascript']);
 resources.set('/tax-allocation.mjs',['tax-allocation.mjs','text/javascript']);
 resources.set('/wallet-discovery.mjs', ['wallet-discovery.mjs','text/javascript']);
 resources.set('/wallet-token.mjs', ['wallet-token.mjs','text/javascript']);

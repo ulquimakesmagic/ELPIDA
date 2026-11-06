@@ -13,7 +13,7 @@ export function launchProfile(chain) {
  */
 export function launchDetailsError({chain,networkName,metadataSupported,publiclyIndexed=false}) {
   if(publishForLaunch({chain,metadataSupported,publiclyIndexed}))return null;
-  if(metadataSupported!==true)return 'This launchpad predates token details at launch. Set up the current launchpad from Network and funds. Nothing was submitted.';
+  if(metadataSupported!==true)return 'This launchpad predates token details at launch. Its operator needs to set up the current launchpad. Nothing was submitted.';
   return `Launches on ${networkName} open once Elpida's shared launchpad is set up there, so token details are always published in the launch transaction. Nothing was submitted.`;
 }
 export function publishForLaunch({chain,publicEnabled,metadataSupported,publiclyIndexed=false}) {

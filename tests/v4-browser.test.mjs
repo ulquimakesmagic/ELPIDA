@@ -45,7 +45,8 @@ test('the page mines the same hook salt as the test fixture and only on networks
   const v4 = { poolManager: '0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408', shared: null };
   assert.equal(v4Available({ key: 'base-sepolia', v4 }), true);
   assert.equal(v4Available({ key: 'base-sepolia', v4, mainnet: true }), false, 'never on mainnet');
-  assert.equal(v4Available({ key: 'bnb-testnet', v4 }), false);
+  assert.equal(v4Available({ key: 'robinhood-testnet', v4 }), false, 'no Model 11 on Robinhood testnet');
+  assert.equal(v4Available({ key: 'bnb-testnet', v4: { poolManager: null, testPoolManager: true, shared: null } }), true, 'BNB testnet, on a test PoolManager');
   assert.equal(v4Deployment({ key: 'base-sepolia', chainId: 1, v4: { ...v4, shared: { factory: '0x1', hook: '0x2', router: '0x3', block: 9 } } }).pinned, true);
   assert.equal(isV4Token({ deploymentModel: V4_MODEL }), true); assert.equal(isV4Token({ deploymentModel: 'curve-dex-v10' }), false);
   const { testnets } = await import('../packages/core/networks.mjs');
@@ -135,4 +136,44 @@ test('the deploy waits out an RPC node that lags behind, and a retry reuses a ho
   assert.equal(again.record.hook, record.hook, 'the same hook, not a colliding redeploy');
   assert.equal(again.record.factory, record.factory);
   assert.ok(!retry.progress.some(m => /confirm the hook deployment|connecting the hook|USD pricing|USDC pair/.test(m)), 'only the missing router is sent again');
+});
+
+test('between signatures the deploy waits until the wallet\'s own RPC has counted the last transaction', async t => {
+  const { walletCaughtUp } = await import('../apps/web/v4-launchpad.mjs');
+  const { walletErrorText } = await import('../apps/web/wallet.mjs');
+  let calls = 0;
+  const w = { address: '0x1', signer: { provider: { getTransactionCount: async () => (++calls < 3 ? 7 : 8) } } };
+  await walletCaughtUp(w, 7, { delay: 1 });
+  assert.equal(calls, 3, 'asked until the count passed the confirmed nonce');
+  calls = 0; await walletCaughtUp({ ...w, signer: { provider: { getTransactionCount: async () => { calls++; return 7; } } } }, 7, { tries: 4, delay: 1 });
+  assert.equal(calls, 4, 'gives up after its tries instead of hanging');
+  assert.match(walletErrorText({ message: 'could not coalesce error (error={ "code": -32000, "message": "replacement transaction underpriced" })' }, 'Trust Wallet'), /a block behind\. Nothing was sent/);
+});
+
+test('BNB Chain testnet: the operator deploys a test copy of Uniswap\'s PoolManager, then Model 11 on it, and it trades', async t => {
+  const store = browser(t), f = await v4Fixture(t), owner = f.signers[2];
+  const { deployTestPoolManager, v4PoolManager, savedTestPoolManager } = await import('../apps/web/v4-launchpad.mjs');
+  const { testnets } = await import('../packages/core/networks.mjs');
+  const bnb = testnets.find(n => n.key === 'bnb-testnet');
+  assert.equal(bnb.v4.testPoolManager, true); assert.equal(bnb.v4.poolManager, null, 'pinned only after Malik deploys it');
+  const net = { key: 'bnb-testnet', name: 'Local BNB', chainId: 31337, nativeCurrency: { symbol: 'tBNB' }, v4: { poolManager: null, testPoolManager: true, shared: null } };
+  const w = await walletFor(f, owner, net);
+  await assert.rejects(deployV4(w), /Deploy the test PoolManager first/);
+  const pm = await deployTestPoolManager(w);
+  assert.equal(v4PoolManager(net), pm.record.address); assert.equal(savedTestPoolManager(net).address, pm.record.address);
+  const manager = new Contract(pm.record.address, ['function owner() view returns(address)', 'function protocolFeeController() view returns(address)'], f.provider);
+  assert.equal(await manager.owner(), w.address);
+  await assert.rejects(deployTestPoolManager(w), /already deployed from this browser/);
+  const { record } = await deployV4(w);
+  assert.equal(record.poolManager, pm.record.address, 'the launchpad sits on the test PoolManager');
+  const cw = await walletFor(f, f.signers[0], net), launched = await launchV4(cw, { name: 'Bee', symbol: 'BEE', firstBuy: '0.01', description: '', image: '' });
+  const index = new V4Indexer({ provider: f.provider, factory: record.factory, hook: record.hook, poolManager: pm.record.address, router: record.router, fromBlock: record.block, nativeSymbol: 'tBNB' });
+  await index.sync();
+  const item = { ...index.listings()[0], deploymentModel: V4_MODEL, factory: record.factory };
+  assert.equal(item.address, launched.token.toLowerCase()); assert.equal(item.quoteSymbol, 'tBNB');
+  const bw = await walletFor(f, f.signers[1], net);
+  await v4Trade(bw, item, 'buy', { amount: '0.02', slippage: '1' });
+  await index.sync();
+  assert.equal(index.trades(launched.token).length, 2);
+  await index.close();
 });

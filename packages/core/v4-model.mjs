@@ -16,8 +16,11 @@ export const V4_VIRTUAL_TOKEN = 1_111_111_111_111_111n * 10n ** 12n;
 /** beforeInitialize | beforeAddLiquidity | beforeSwap | afterSwap | beforeSwapReturnDelta | afterSwapReturnDelta. */
 export const V4_HOOK_FLAGS = (1n << 13n) | (1n << 11n) | (1n << 7n) | (1n << 6n) | (1n << 3n) | (1n << 2n);
 export const V4_FLAG_MASK = (1n << 14n) - 1n;
-/** The networks Model 11 may be deployed on: those with Uniswap v4 (their PoolManager is in networks.mjs `v4`). */
-export const V4_NETWORKS = Object.freeze(['base-sepolia', 'ethereum-sepolia']);
+/**
+ * The networks Model 11 may be deployed on: the Sepolias with Uniswap v4, and BNB Chain testnet with a labelled test copy
+ * of Uniswap's PoolManager (Malik, 6 November 2026; BNB mainnet has Uniswap v4 itself). networks.mjs `v4` holds each.
+ */
+export const V4_NETWORKS = Object.freeze(['base-sepolia', 'ethereum-sepolia', 'bnb-testnet']);
 
 const Q96 = 1n << 96n, Q128 = 1n << 128n, MAX_UINT256 = (1n << 256n) - 1n;
 const MIN_SQRT_PRICE = 4295128739n, MAX_SQRT_PRICE = 1461446703485210103287273052203988822378723970342n;

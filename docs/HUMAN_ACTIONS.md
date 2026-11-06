@@ -1,13 +1,30 @@
 # Actions that need Malik
 
+## Model 11 on BNB Chain testnet, and test funds moved to the operator panel, 6 November 2026
+
+BNB Chain testnet has no Uniswap v4 (Uniswap deployed it on BNB mainnet only), so Model 11 there runs on a labelled
+test copy of Uniswap's own PoolManager (the published v4-core 1.0.2 contract, unchanged). After this PR is merged and
+Railway has redeployed:
+
+1. Operator panel (`elpida.fun/#/monkey`), **Launchpads** tab, switch to BNB Chain testnet and connect the deployer
+   wallet (it needs some tBNB; the faucet is now in the **Test funds** tab).
+2. Press **Deploy test PoolManager (1 confirmation)**.
+3. Then **Deploy Model 11 test launchpad (about 7 confirmations)**.
+4. Send Claude what the page shows (PoolManager, factory, hook, router, block) to be pinned.
+
+Test funds (the gas faucet, the test pair assets and Circle's test USDC) are now only in the operator panel's
+**Test funds** tab. The public Network and wallet dialog keeps the network choice and the wallet connection.
+
 ## Model 11 test launchpad (Uniswap v4) on Base Sepolia and Ethereum Sepolia, 6 November 2026
 
-**Status, 6 November 10:45:** the first Ethereum Sepolia run stopped after the hook. The CREATE2 deployer, the factory
-and the hook (`0xbe3C898140D32DFcAa1DeE5B1BaDE36BCe4B68cC`, block 12075678) are deployed. The hook is not connected
-yet: the page's check right after the hook asked a public RPC node that had not seen it yet, and stopped. Once this PR
-is merged and Railway has redeployed, press the button again in the same browser, in the **Launchpads** tab. It finds
-the same hook and reuses it, then asks only for the remaining steps: connecting the hook, pricing, the USDC pair and
-the router.
+**Done, 6 November 11:09.** Both test launchpads are deployed and pinned in `networks.mjs`:
+- Ethereum Sepolia: factory `0x1136B6D2410b1B32Ec6039aD92a0B110A934aCE9`, hook `0xbe3C898140D32DFcAa1DeE5B1BaDE36BCe4B68cC`, router
+  `0xC5FA99cFd6c752199BCb37f9dEF3fb94279b7B3c`, from block 12075675;
+- Base Sepolia: factory `0x70e5E07a4EBBCcE5144DEd022a1ADE2019538Da3`, hook `0x8D4342B2fB2E52822CD6c4ceECb4628b1B90e8cC`, router
+  `0x1136B6D2410b1B32Ec6039aD92a0B110A934aCE9`, from block 55188766.
+
+The Ethereum Sepolia run stopped twice on lagging RPC nodes (after the hook, and at the third signature with "replacement
+transaction underpriced"); both are handled now. Once Railway has redeployed, try step 4 below.
 
 Model 11 keeps the launch curve inside one Uniswap v4 pool, with its liquidity locked from the first trade. It is not
 audited: test networks only, and every Model 11 token is labelled as a test. Nothing here touches mainnet or the
