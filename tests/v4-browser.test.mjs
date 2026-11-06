@@ -115,3 +115,24 @@ test('a USDC-paired Model 11 launch pays its first buy in USDC after one exact a
   assert.ok(await token.balanceOf(cw.address) > 0n);
   await assert.rejects(launchV4(cw, { name: 'X', symbol: 'X', pair: 'xstock' }), /native coin or USDC/);
 });
+
+test('the deploy waits out an RPC node that lags behind, and a retry reuses a hook an earlier attempt deployed', async t => {
+  const store = browser(t), f = await v4Fixture(t), owner = f.signers[2];
+  const net = { key: 'ethereum-sepolia', name: 'Local v4', chainId: 31337, nativeCurrency: { symbol: 'ETH' }, v4: { poolManager: f.manager.target, shared: null } };
+  // A load-balanced public RPC: the first time a new contract shows code, this node still answers "no code".
+  const real = f.provider.getCode.bind(f.provider), lagged = new Set();
+  f.provider.getCode = async (address, tag) => { const code = await real(address, tag), a = String(address).toLowerCase(); if (code !== '0x' && !lagged.has(a)) { lagged.add(a); return '0x'; } return code; };
+  t.after(() => { f.provider.getCode = real; });
+  const w = await walletFor(f, owner, net);
+  const { record } = await deployV4(w);
+  assert.ok(w.progress.some(m => /confirm the hook deployment/.test(m)));
+  // 6 November 2026 on Ethereum Sepolia: the hook was mined, then the check after it failed. A retry then found the
+  // same address and tried to deploy it again. Now a retry reuses it and carries on to the remaining steps.
+  const key = `elpida:v4:deployment:${net.chainId}`;
+  store.delete(key);
+  store.set(key + ':progress', JSON.stringify({ create2: record.create2, factory: record.factory, block: record.block }));
+  const retry = await walletFor(f, owner, net), again = await deployV4(retry);
+  assert.equal(again.record.hook, record.hook, 'the same hook, not a colliding redeploy');
+  assert.equal(again.record.factory, record.factory);
+  assert.ok(!retry.progress.some(m => /confirm the hook deployment|connecting the hook|USD pricing|USDC pair/.test(m)), 'only the missing router is sent again');
+});

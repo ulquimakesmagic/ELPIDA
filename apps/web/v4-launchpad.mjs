@@ -46,6 +46,23 @@ export async function mineHookSalt(deployer, initCode, { flags = V4_HOOK_FLAGS, 
   throw new Error('No hook address found. Nothing was deployed for the hook.');
 }
 
+const pause = ms => new Promise(resolve => setTimeout(resolve, ms));
+/**
+ * Whether `address` has code. Public RPCs balance requests over several nodes, and the one answering can be a block or
+ * two behind the one that mined our transaction: with `wait`, keep asking for up to 30 s before saying no.
+ */
+export async function hasCode(provider, address, { wait = false, tries = 15, delay = 2000 } = {}) {
+  for (let i = 0; ; i++) {
+    if (await provider.getCode(address) !== '0x') return true;
+    if (!wait || i >= tries) return false;
+    await pause(delay);
+  }
+}
+/** A view call on a contract we just deployed or changed, retried while a lagging node cannot answer it yet. */
+async function settled(read, { tries = 15, delay = 2000 } = {}) {
+  for (let i = 0; ; i++) { try { return await read(); } catch (error) { if (i >= tries) throw error; await pause(delay); } }
+}
+
 async function artifacts() {
   const response = await fetch('/api/v4-artifacts');
   if (!response.ok) throw new Error('The Model 11 contracts are unavailable. Nothing was deployed.');
@@ -68,11 +85,12 @@ export async function deployV4(w, body = {}) {
   if (!w.oracle?.available) throw new Error(`Verified USD pricing is not configured for ${net.name}. Nothing was deployed.`);
   await w.oraclePrice();
   const poolManager = getAddress(net.v4.poolManager);
-  if (await w.provider.getCode(poolManager) === '0x') throw new Error(`Uniswap's v4 PoolManager ${poolManager} has no code on ${net.name}. Nothing was deployed.`);
+  if (!await hasCode(w.provider, poolManager, { wait: true, tries: 2 })) throw new Error(`Uniswap's v4 PoolManager ${poolManager} has no code on ${net.name}. Nothing was deployed.`);
   if (await w.provider.getBalance(w.address) === 0n) throw new Error(`Get ${net.nativeCurrency.symbol} on ${net.name} from a faucet to pay deployment gas.`);
   const a = await artifacts(), progress = read(savedKey(net.chainId) + ':progress') ?? {};
   const save = () => write(savedKey(net.chainId) + ':progress', progress);
-  const fresh = async (key, check) => progress[key] && await w.provider.getCode(progress[key]) !== '0x' && (!check || await check(progress[key]));
+  // A saved step was mined earlier, so its contract exists: wait out a lagging node rather than deploying it again.
+  const fresh = async (key, check) => !!progress[key] && await hasCode(w.provider, progress[key], { wait: true }) && (!check || await settled(() => check(progress[key])));
   const deploy = async (art, args, message) => { w.onProgress(message); const c = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(...args); await c.waitForDeployment(); return { address: await c.getAddress(), receipt: await c.deploymentTransaction().wait() }; };
   if (!await fresh('create2')) { progress.create2 = (await deploy(a.create2, [], `Step 1 of 6: confirm the CREATE2 deployer for the hook (${LABEL})…`)).address; save(); }
   if (!await fresh('factory', async f => (await new Contract(f, V4_FACTORY_ABI, w.provider).treasury()).toLowerCase() === w.address.toLowerCase())) {
@@ -80,21 +98,26 @@ export async function deployV4(w, body = {}) {
     progress.factory = d.address; progress.block = d.receipt.blockNumber; progress.hook = null; save();
   }
   const factory = new Contract(progress.factory, [...V4_FACTORY_ABI, 'function setHook(address)', 'function configureUsdPricing(address,uint256,address)', 'function approveQuote(address,uint256)'], w.signer);
-  if (!progress.hook || await w.provider.getCode(progress.hook) === '0x') {
+  if (!progress.hook || !await hasCode(w.provider, progress.hook, { wait: true })) {
     const initCode = concat([a.hook.bytecode, AbiCoder.defaultAbiCoder().encode(['address', 'address', 'address'], [poolManager, progress.factory, w.address])]);
-    w.onProgress('Step 3 of 6: finding the hook address (its last bits are its Uniswap v4 permissions)…');
-    const mined = await mineHookSalt(progress.create2, initCode, { onProgress: n => w.onProgress(`Step 3 of 6: finding the hook address… ${n.toLocaleString()} tried`) });
-    const deployer = new Contract(progress.create2, ['function deploy(bytes,bytes32) returns(address)'], w.signer);
-    await w.wait(deployer.deploy(initCode, mined.salt), `Step 3 of 6: confirm the hook deployment at ${mined.address}…`);
-    if (await w.provider.getCode(mined.address) === '0x') throw new Error('The hook was not deployed at its mined address. Retry; finished steps are kept.');
+    w.onProgress('Step 3 of 6: finding the hook address (its last bits are its Uniswap v4 permissions). This takes a few seconds…');
+    // The search is deterministic: a retry finds the same address. If an earlier attempt already deployed the hook
+    // there (and only the check after it failed), it is reused; deploying again would collide and revert.
+    const mined = await mineHookSalt(progress.create2, initCode);
+    if (!await hasCode(w.provider, mined.address)) {
+      const deployer = new Contract(progress.create2, ['function deploy(bytes,bytes32) returns(address)'], w.signer);
+      await w.wait(deployer.deploy(initCode, mined.salt), `Step 3 of 6: confirm the hook deployment at ${mined.address}…`);
+      if (!await hasCode(w.provider, mined.address, { wait: true })) throw new Error('The hook transaction confirmed, but the network does not show the hook yet. Press the button again in a minute: finished steps are kept.');
+    }
     progress.hook = mined.address; save();
   }
   const hook = new Contract(progress.hook, HOOK_ABI, w.provider);
-  if ((await hook.factory()).toLowerCase() !== progress.factory.toLowerCase() || (await hook.protocolTreasury()).toLowerCase() !== w.address.toLowerCase()) throw new Error('The hook is wired to another factory or treasury. Nothing more was sent.');
-  if ((await factory.hook()) === ZeroAddress) await w.wait(factory.setHook(progress.hook), 'Step 4 of 6: confirm connecting the hook to the factory…');
-  if ((await factory.usdFeed()) === ZeroAddress) await w.wait(factory.configureUsdPricing(w.oracle.feed, w.oracle.maxAge, w.oracle.usdc ?? ZeroAddress), 'Step 5 of 6: confirm verified USD pricing (the $10 launch fee and the starting FDV)…');
+  const [hookFactory, hookTreasury] = await settled(() => Promise.all([hook.factory(), hook.protocolTreasury()]));
+  if (hookFactory.toLowerCase() !== progress.factory.toLowerCase() || hookTreasury.toLowerCase() !== w.address.toLowerCase()) throw new Error('The hook is wired to another factory or treasury. Nothing more was sent.');
+  if ((await settled(() => factory.hook())) === ZeroAddress) await w.wait(factory.setHook(progress.hook), 'Step 4 of 6: confirm connecting the hook to the factory…');
+  if ((await settled(() => factory.usdFeed())) === ZeroAddress) await w.wait(factory.configureUsdPricing(w.oracle.feed, w.oracle.maxAge, w.oracle.usdc ?? ZeroAddress), 'Step 5 of 6: confirm verified USD pricing (the $10 launch fee and the starting FDV)…');
   const usdc = w.oracle.usdc && w.oracle.usdc !== ZeroAddress ? getAddress(w.oracle.usdc) : null;
-  if (usdc && (await factory.approvedQuotes(usdc)) === 0n) {
+  if (usdc && (await settled(() => factory.approvedQuotes(usdc))) === 0n) {
     const decimals = Number(await new Contract(usdc, ERC20, w.provider).decimals());
     await w.wait(factory.approveQuote(usdc, usdQuoteTemplate(TESTNET_START_FDV_USD, decimals)), 'Step 5 of 6: confirm the USDC pair…');
   }
