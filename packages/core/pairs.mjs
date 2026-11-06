@@ -13,7 +13,7 @@ export const PAIR_KINDS = ['native', 'usdc', 'xstock', 'token'];
  * USD reference for a token's quote asset, used to show prices, liquidity and market caps in dollars.
  * Native pairs use the chain's oracle price (`nativeReference`). USDC pairs are valued at $1 per USDC:
  * an explicit parity assumption, labelled as such, not an oracle reading. Other kinds keep whatever
- * reference they already carry (usually none, so values stay in the pair asset).
+ * reference they already carry; labelled test assets on test networks fall back to the price their approval implies.
  */
 export const USDC_PARITY_SOURCE = 'USDC valued at $1 (assumed parity)';
 export function usdReferenceFor(token, nativeReference, now = Math.floor(Date.now() / 1000)) {
@@ -27,12 +27,32 @@ export function usdReferenceFor(token, nativeReference, now = Math.floor(Date.no
     // (5 November 2026: STKTEST showed "USD unavailable" once the test feed had not been set for five days). The source
     // says when it was last set. The graduation gate still checks the on-chain feed's freshness itself.
     const usd=Number(stock.price),updatedAt=Number(stock.updatedAt),age=now-updatedAt;
-    if(stock.paused||!['open','closed'].includes(stock.marketStatus)||!Number.isFinite(usd)||usd<=0||!Number.isFinite(updatedAt)||age<-300)return null;
+    // Paused or in a corporate action, the stock still has its last price: shown, never traded on (the gates check).
+    if(!Number.isFinite(usd)||usd<=0||!Number.isFinite(updatedAt)||age<-300)return testPairReference(token,now);
     if(age<=172800)return {status:'fresh',usd,updatedAt:Math.min(now,updatedAt),maxAge:172800,source:'Simulated test-stock USD feed (no monetary value)',feed:stock.feed};
     return {status:'fresh',usd,updatedAt:now,maxAge:172800,source:`Simulated test-stock USD feed, last set ${new Date(updatedAt*1000).toISOString().slice(0,16).replace('T',' ')} UTC (no monetary value)`,feed:stock.feed};
   }
-  return token?.usdReference ?? null;
+  if(token?.usdReference)return token.usdReference;
+  return testPairReference(token,now);
 }
+
+/** The test networks (and the local simulation), where test pair assets carry an implied test price. */
+const TEST_NETWORKS=['ethereum-sepolia','base-sepolia','bnb-testnet','robinhood-testnet','local'];
+/**
+ * A labelled test asset with no market (TEST-MEME, TEST-STOCK, an Ondo-style stand-in whose feed is unset) is valued at
+ * the price its pair approval implies: the launchpad's $50 test starting FDV over the asset's starting FDV in units
+ * (TEST-MEME: $50 / 500,000), or the stand-in's round test price. Test networks only; the source says so.
+ */
+export function testPairReference(token,now=Math.floor(Date.now()/1000)){
+  if(!['token','xstock'].includes(token?.pair)||!TEST_NETWORKS.includes(token.network??'local'))return null;
+  const t=EVM_TEST_PAIRS.find(p=>p.symbol===token.quoteSymbol);
+  if(!t)return null;
+  const usd=t.ondo?Number(t.ondo.price):TEST_PAIR_START_FDV_USD/Number(t.startFdv);
+  if(!(usd>0))return null;
+  return {status:'fresh',usd,updatedAt:now,maxAge:Number.MAX_SAFE_INTEGER,source:t.ondo?`${t.symbol} round test price (no monetary value)`:`Test price implied by the ${t.symbol} pair: $${TEST_PAIR_START_FDV_USD} starting FDV / ${Number(t.startFdv).toLocaleString('en-US')} ${t.symbol} (no monetary value)`};
+}
+/** The test launchpads' starting FDV in dollars (curve-model.mjs TESTNET_START_FDV_USD). */
+const TEST_PAIR_START_FDV_USD=50;
 
 export const PAIR_INFO = {
   native: { title: 'Native coin', glyph: 'coins', note: symbol => `Buyers pay in ${symbol}, the network’s own coin.` },

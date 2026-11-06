@@ -61,7 +61,7 @@ export function renderToken(ctx, address) {
   const external = (href, label) => href ? h('a.icon-link', { href, target: '_blank', rel: 'noopener noreferrer', 'aria-label': label, title: label }, icon('external-link', 'icon-sm')) : null;
   const social = token.metadata ?? {};
 
-  const priceSource=usdRate(token)===null?`USD conversion unavailable or stale; values shown in ${q}.`:`USD estimate · ${token.usdReference.source??'Price reference'} · updated ${new Date(token.usdReference.updatedAt*1000).toLocaleTimeString()}`;
+  const priceSource=usdRate(token)===null?`No dollar price reference for ${q} yet.`:`USD estimate · ${token.usdReference.source??'Price reference'} · updated ${new Date(token.usdReference.updatedAt*1000).toLocaleString()}`;
   const pill=(href,label,glyph)=>h('a.tk-pill',{href,target:'_blank',rel:'noopener noreferrer',title:label},icon(glyph,'icon-sm'),label);
   const linkPills=[['website','Website','globe'],['twitter','X','at-sign'],['telegram','Telegram','send'],['discord','Discord','message-circle']].filter(([k])=>social[k]).map(([k,label,glyph])=>pill(social[k],label,glyph));
   const explorerHref=token.url??addressUrl(token.address);
@@ -75,9 +75,9 @@ export function renderToken(ctx, address) {
   const target = reserve + remainingNet, raisedPct = token.complete || token.graduated ? 100 : target > 0 ? reserve / target * 100 : pct;
   const curve = h('section.curve-strip', { 'aria-label': 'Bonding curve progress' },
     h('div.curve-line', h('span', token.graduated ? `Graduated to ${dex === 'test' ? 'a locked test pool' : dex}` : token.complete ? 'Curve complete · ready to graduate' : 'Curve'),
-      h('span.meta', token.graduated ? 'Liquidity locked permanently' : target > 0 ? `${number(raisedPct, raisedPct < 1 ? 2 : 1)}% of ${number(target, 2)} ${q}` : `${number(pct, 1)}% sold`)),
+      h('span.meta', token.graduated ? 'Liquidity locked permanently' : target > 0 ? `${number(raisedPct, raisedPct < 1 ? 2 : 1)}% of ${fmtValue(target, token)}` : `${number(pct, 1)}% sold`)),
     bar(raisedPct, token.complete || token.graduated, 'Bonding curve progress'),
-    !token.graduated ? h('p.small.muted', token.complete ? `Anyone can graduate it: the ${number(reserve, 4)} ${q} reserve and the remaining tokens open a ${dex} pool with permanently locked liquidity.` : `Virtual bonding curve: purchases build the reserve. About ${number(remainingDisplay, 4)} ${q} more completes it, then the liquidity moves into a locked ${dex} pool.`) : null);
+    !token.graduated ? h('p.small.muted', token.complete ? `Anyone can graduate it: the ${fmtValue(reserve, token)} reserve and the remaining tokens open a ${dex} pool with permanently locked liquidity.` : `Virtual bonding curve: purchases build the reserve. About ${fmtValue(Number(remainingDisplay || 0), token)} more completes it, then the liquidity moves into a locked ${dex} pool.`) : null);
 
   const holdersValue = h('strong', '—'),volumeValue=h('strong',token.volume24h!=null?fmtValue(token.volume24h,token):'—');
   const creatorFeesTotal=h('strong','Loading…');
@@ -90,13 +90,12 @@ export function renderToken(ctx, address) {
     tile('Venue', token.graduated ? (dex === 'test' ? 'Locked test pool' : dex) : 'Bonding curve')));
 
   const change = token.priceChange24h, hasChange = change && Number.isFinite(change.percent), up = hasChange && change.percent >= 0;
-  const usdOn = usdRate(token) !== null;
   const buys = token.buys24h, sells = token.sells24h;
   const tile2 = (label, value, cls = '', title = null) => h(`div.tk-strip-tile${cls}`, { title }, h('span', label), value);
   const changePill = hasChange ? h(`span.pct-pill.${up ? 'pct-up' : 'pct-down'}`, { title: change.basis ?? '24h change' }, `${up ? '+' : ''}${number(change.percent, 2)}%`) : null;
   const txValue = h('strong', buys != null && sells != null ? [String(number(Number(buys) + Number(sells), 0)), ' ', h('small', h('span.up', `${number(buys, 0)} ${Number(buys) === 1 ? 'buy' : 'buys'}`), ' · ', h('span.down', `${number(sells, 0)} ${Number(sells) === 1 ? 'sell' : 'sells'}`))] : (token.trades24h != null ? number(token.trades24h, 0) : '—'));
   const strip = h('section.tk-strip', { 'aria-label': 'Market numbers' },
-    tile2(usdOn ? 'Price' : `Price in ${q}`, h('div.tk-strip-price', odometer(fmtPrice(token), 'tk-price-value'), changePill)),
+    tile2('Price', h('div.tk-strip-price', odometer(fmtPrice(token), 'tk-price-value'), changePill)),
     tile2('Market cap', h('strong.tk-accent', fmtMarketCap(token)), '.tk-strip-cap', 'Price × total supply (1B)'),
     tile2('Liquidity', h('strong', fmtValue(Number(token.reserve ?? 0), token)), '', 'Actual quote assets in the curve or pool; virtual reserves are excluded.'),
     tile2('24h volume', volumeValue),
@@ -168,7 +167,7 @@ export function renderToken(ctx, address) {
     token.pumpPool ? [h('dt', `${token.venue ?? 'DEX'} pool`), h('dd', token.pumpPool)] : null,
     token.quoteAddress && !/^0x0+$/.test(token.quoteAddress) ? [h('dt', `${q} address`), h('dd', token.quoteAddress)] : null,
     h('dt', 'Creator'), h('dd', token.creator ?? '—'), h('dt', 'Creator fee wallet'), h('dd', token.reward ?? '—'),
-    h('dt', 'Trading reserve'), h('dd', `${number(token.reserve, 6)} ${q}`),
+    h('dt', 'Trading reserve'), h('dd', fmtValue(Number(token.reserve ?? 0), token)),
     h('dt', 'Fees not yet distributed'), h('dd', `${number(token.creatorFees, 6)} ${q} to the creator`),
     h('dt','Market cap convention'),h('dd','Market cap = price × total supply (1,000,000,000). The whole supply is minted at launch into the curve, so circulating supply equals total supply.'),
     token.metadataURI ? [h('dt', 'Metadata URI'), h('dd', token.metadataURI)] : null));
@@ -232,8 +231,8 @@ function marketActivity(ctx,token,q,{addressUrl,isCreator,me,info,onCounts,onHol
     // network looks identical to an indexer outage.
     catch(error){if(error&&typeof error==='object'){error.requestUrl=url;error.kind=kind;}throw error;}};
   const usd=usdRate(token);
-  const priceCell=row=>{const price=Number(row.quoteAmount)/Number(row.tokenAmount);return Number.isFinite(price)&&price>0?(usd!==null?formatPrice(price*usd):`${formatPrice(price,'')} ${q}`):'—';};
-  const money=v=>{v=Number(v);if(!Number.isFinite(v))return '—';if(usd===null)return `${number(v,Math.abs(v)<0.001?6:3)} ${q}`;const d=v*usd;return d!==0&&Math.abs(d)<0.01?(d<0?'-<$0.01':'<$0.01'):(d<0?'-$':'$')+number(Math.abs(d),2);};
+  const priceCell=row=>{const price=Number(row.quoteAmount)/Number(row.tokenAmount);return Number.isFinite(price)&&price>0&&usd!==null?formatPrice(price*usd):'—';};
+  const money=v=>{v=Number(v);if(!Number.isFinite(v)||usd===null)return '—';const d=v*usd;return d!==0&&Math.abs(d)<0.01?(d<0?'-<$0.01':'<$0.01'):(d<0?'-$':'$')+number(Math.abs(d),2);};
   const amountCell=row=>money(row.quoteAmount);
   const isMe=a=>me&&a&&String(a).toLowerCase()===String(me).toLowerCase();
   const trader=a=>h('span.trader',h('a.tk-trader',{href:addressUrl(a)??'#',target:'_blank',rel:'noopener noreferrer'},short(a),icon('arrow-up-right','icon-xs')),isCreator(a)?h('span.badge-dev',{title:'The creator of this token'},'Dev'):null,isMe(a)?h('span.badge-you',{title:'Your connected wallet'},'You'):null);

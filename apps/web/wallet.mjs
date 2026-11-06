@@ -27,13 +27,15 @@ import {prepareUploadProof} from './upload-proof.mjs';
 
 // EIP-6963: every installed EVM wallet announces itself, so Elpida can use the one the person picks
 // instead of whichever extension last claimed window.ethereum (Phantom, Coinbase and MetaMask all try).
-import { injectedEvmWallets } from './wallet-discovery.mjs';
+import { injectedEvmWallets, walletsChanged } from './wallet-discovery.mjs';
 const announced = new Map();
 if (typeof window !== 'undefined') {
-  window.addEventListener('eip6963:announceProvider', event => { const d = event.detail; if (d?.info?.rdns && d.provider) announced.set(d.info.rdns, d); });
+  window.addEventListener('eip6963:announceProvider', event => { const d = event.detail; if (!d?.info?.rdns || !d.provider) return; const fresh = announced.get(d.info.rdns)?.provider !== d.provider; announced.set(d.info.rdns, d); if (fresh) walletsChanged(); });
   window.dispatchEvent(new Event('eip6963:requestProvider'));
 }
 const EVM_CHOICE = 'elpida:evm-wallet';
+/** Asks every installed EVM wallet to announce itself again (one that loaded late answers now). */
+export function requestEvmWallets() { if (typeof window !== 'undefined') window.dispatchEvent(new Event('eip6963:requestProvider')); }
 /** Installed EVM wallets: [{ id, name, icon }]. Falls back to window.ethereum when none announce. */
 export function evmWallets() { return injectedEvmWallets(typeof window==='undefined'?{}:window,[...announced.values()]); }
 export function chosenEvmWallet() { try { return localStorage.getItem(EVM_CHOICE); } catch { return null; } }

@@ -2,7 +2,7 @@ import {restoreTradeDraft} from './trade-draft.mjs';
 import { nowSeconds, syncClock } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
 import { usdReferenceFor } from '/pairs.mjs';
-import { exploreHash, overlayToken, tokenKey } from './discovery.mjs';
+import { exploreHash, overlayToken, tokenKey, pairTokenReferences } from './discovery.mjs';
 import { createExplore, exploreSkeleton } from './explore-view.mjs';
 import { assetIcon, chainIcon, chainSelector } from './chain-ui.mjs';
 import { renderAnalytics } from './analytics-view.mjs';
@@ -11,9 +11,9 @@ import { renderTermsPage } from './terms.mjs';
 // Elpida web app shell: environment (local simulation or public testnet), wallets, routing, discovery,
 // portfolio and the network/test-funds panel. Views live in launch-flow.mjs, token-page.mjs and
 // rewards-view.mjs and receive the shared `ctx` object below.
-import { TestnetWallet, evmWallets, chosenEvmWallet } from './wallet.mjs';
+import { TestnetWallet, evmWallets, chosenEvmWallet, requestEvmWallets } from './wallet.mjs';
 import { SolanaWallet, solanaWallets, chosenSolanaWallet } from './solana-wallet.mjs';
-import { browserWalletCatalog, walletIcon } from './wallet-discovery.mjs';
+import { browserWalletCatalog, walletIcon, onWalletsChanged } from './wallet-discovery.mjs';
 import { storage, $, $$, h, icon, short, number, compact, avatar, bar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, usdRate, toast, errorText, closeOnBackdrop, callout } from './ui.mjs';
 import { renderLaunch } from './launch-flow.mjs';
 import { renderDocs } from './docs-view.mjs';
@@ -71,6 +71,17 @@ async function run(action, body = {}, { quiet = false, onProgress } = {}) {
 async function act(action, body, opts) { try { return await run(action, body, opts); } catch (error) { toast(errorText(error), { kind: 'error' }); return null; } }
 
 let pendingRefresh=null,pendingRefreshKey=null;
+/** A price reference that can value tokens on screen: it has a dollar amount (a stale one still does). */
+const usable=p=>p&&p.status!=='unavailable'&&Number(p.usd)>0?p:null;
+/**
+ * Dollar values on screen never disappear because one price refresh failed (Malik, 6 November 2026): a network whose new
+ * reference has no dollar amount keeps the last one it had, with that reference's own time and source.
+ */
+function keepPrices(previous,latest){
+  const out={...(latest??{})};
+  for(const [key,p] of Object.entries(previous??{}))if(!usable(out[key])&&usable(p))out[key]={...p,status:'stale'};
+  return out;
+}
 function refresh(options={}){
   options={...options,walletRead:options.walletRead??!['explore','analytics'].includes(currentRoute.name)};
   const key=mode+':'+currentChain()+':'+(wallet.address??account)+':'+options.walletRead;
@@ -81,7 +92,7 @@ function refresh(options={}){
 }
 async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
   const revision = ++refreshRevision;
-  try{const latest=await api('prices');config.prices=latest;}catch{}
+  try{const latest=await api('prices');config.prices=keepPrices(config.prices,latest);}catch{}
   if(mode==='local'){try{const c=await api('config');config.local=c.local;config.pricing=c.pricing;}catch{}}
   let next;
   if (mode === 'testnet' && (!wallet.address || !walletRead)) {
@@ -96,8 +107,9 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
     next={wallet:wallet.address,balance:'0',nativeBalance:'0',tokens:await wallet.publicTokens(),activity:[],disconnected:true,walletReadError:true};
   }}
   if (revision !== refreshRevision) return state;
-  const reference=config.prices?.[currentChain()]??wallet.price;
+  const reference=usable(config.prices?.[currentChain()])??usable(wallet.price)??config.prices?.[currentChain()]??null;
   for(const t of next.tokens??[]){t.network??=currentChain();t.usdReference=usdReferenceFor(t,reference,nowSeconds());}
+  if(next.tokens)next.tokens=pairTokenReferences(next.tokens);
   state = next; updateChrome(); rerender(preserveInput ? 'background' : 'data');
   if(mode==='testnet'){
     const results=await Promise.allSettled(config.testnets.map(async net=>(await api(`public/tokens?network=${encodeURIComponent(net.key)}`)).map(t=>({...t,network:net.key,usdReference:usdReferenceFor({...t,network:net.key},config.prices?.[net.key],nowSeconds())}))));
@@ -112,7 +124,7 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
     const indexed=[...results.flatMap(r=>r.status==='fulfilled'?r.value:[]),...solana];
     const merged=new Map(indexed.map(t=>[tokenKey(t.network,t.address),t]));
     for(const t of next.tokens??[]){const key=tokenKey(currentChain(),t.address);merged.set(key,{...overlayToken(merged.get(key),t),network:currentChain()});}
-    allTokens=[...merged.values()];
+    allTokens=pairTokenReferences([...merged.values()]);
     if(currentRoute.name==='explore'||currentRoute.name==='portfolio')rerender('background');
     refreshLastSale();
   }else{allTokens=next.tokens;refreshLastSale();}
@@ -154,7 +166,21 @@ async function useLocal() {
  * One button per installed wallet of the network's kind, so the person picks which extension opens
  * (several extensions compete for window.ethereum; the wrong one never shows a prompt for some chains).
  */
-function walletButtons(net, { onDone = () => {}, onError = () => {} } = {}) {
+/**
+ * The wallet picker for a network. It lists every wallet the browser has, known or not, and redraws itself when one
+ * appears after the page loaded (EIP-6963 announcement, wallet-standard registration or a late injection).
+ */
+function walletButtons(net, options = {}) {
+  const box = h('div.wallet-picker');
+  const draw = () => box.replaceChildren(walletChoices(net, options));
+  // Stops listening once the picker has been shown and then removed (the dialog closed or redrew).
+  let attached = false, off = () => {};
+  off = onWalletsChanged(() => { if (box.isConnected) attached = true; else if (attached) { off(); return; } draw(); });
+  if (net.kind !== 'solana') requestEvmWallets();
+  draw();
+  return box;
+}
+function walletChoices(net, { onDone = () => {}, onError = () => {} } = {}) {
   const solana = net.kind === 'solana';
   const list = solana ? solanaWallets(net.mainnet?'solana:mainnet':'solana:devnet') : evmWallets();
   const chosen = solana ? chosenSolanaWallet() : chosenEvmWallet();

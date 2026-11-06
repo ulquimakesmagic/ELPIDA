@@ -64,8 +64,10 @@ export function pricing(token) {
 }
 /** The dollar rate to display (see `freshUsd`: a missed price refresh does not blank every dollar value). */
 export function usdRate(token) { return freshUsd(token, nowSeconds()); }
-export const fmtPrice = token => usdRate(token)!==null ? formatPrice(pricing(token).price*usdRate(token)) : `${formatPrice(pricing(token).price, '')} ${token.quoteSymbol ?? ''}`.trim();
-export const fmtValue = (value, token) => usdRate(token)!==null ? '$'+compact(value*usdRate(token)) : `${compact(value)} ${token.quoteSymbol ?? ''}`.trim();
+// Price, market cap, liquidity and volume are only ever shown in dollars (Malik, 6 November 2026): never in the pair
+// asset. Without any dollar reference they show a dash.
+export const fmtPrice = token => usdRate(token)!==null ? formatPrice(pricing(token).price*usdRate(token)) : '—';
+export const fmtValue = (value, token) => usdRate(token)!==null ? '$'+compact(Number(value)*usdRate(token)) : '—';
 export function progressOf(token) {
   const cap = Number(token.saleCap ?? token.supply);
   return Math.min(100, Math.max(0, cap > 0 ? Number(token.sold) / cap * 100 : 0));
@@ -159,6 +161,5 @@ export const storage = {
   remove(key) { try { sessionStorage.removeItem(key); } catch {} },
 };
 
-// Market cap in dollars; a pair whose asset has no dollar price at all (a test paired token) shows it in that asset,
-// like the price and volume, instead of "USD unavailable".
-export const fmtMarketCap = (token, value = pricing(token).marketCap) => usdRate(token) === null ? `${compact(Number(value))} ${token.quoteSymbol ?? ''}`.trim() : '$' + compact(Number(value) * usdRate(token));
+/** Market cap in dollars only (see fmtPrice). */
+export const fmtMarketCap = (token, value = pricing(token).marketCap) => usdRate(token) === null ? '—' : '$' + compact(Number(value) * usdRate(token));
