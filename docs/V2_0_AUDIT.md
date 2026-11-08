@@ -167,6 +167,20 @@ flywheel slot and a large airdrop share. The spec asks for anti-wash filters; th
 2. Cap each wallet's airdrop share (spec §13.4.7), and exclude wallets that traded only the token they created.
 3. Pay airdrops in proportion to **fees paid**, capped, rather than ranked top-N, so buying rank has no cliff.
 
+### Decisions (Malik, 8 November 2026)
+
+- **C4 — Partner tiers are dropped for V2 launches.** Every V2 token uses the plain 30/30/10/10/20 split. Partner
+  tiers on existing Model 10 / Model 11 / Solana tokens are deployed and stay as they are until their windows end.
+- **C5 — The creator's chosen fee continues after graduation,** with the same five-way split. Replaces the flat 1%
+  after the Model 11 milestone (2 November) for V2 launches.
+- **C7 — The $10 launch fee stays payable in the native coin at an oracle price or in 10 USDC.** Elpida receives
+  $10 either way.
+- **C9 — Hardened ranking.** Flywheel: net buy volume from wallets not linked to the creator, with a minimum number
+  of independent traders. Trader airdrop: pro-rata to fees paid, capped per wallet. Creator-linked wallets are
+  excluded from both.
+- C1, C2, C3, C6 (on-chain flywheel vault, real burns) and C8 (build V2 on Model 11) follow the spec and this
+  audit's recommendations.
+
 ## 12. Security considerations
 
 - The hook is the highest-risk code (custom accounting). V2 adds per-pool fee storage and five ledgers to it.
@@ -182,7 +196,7 @@ flywheel slot and a large airdrop share. The spec asks for anti-wash filters; th
 
 ## 13. Roadmap (dependency order)
 
-1. **Decisions C4, C5, C7, C9** (this document).
+1. ~~Decisions C4, C5, C7, C9~~ **Decided 8 November** (§11).
 2. ~~Reference economics in `packages/core`~~ **Done on `v2.0`:** `packages/core/v2-economics.mjs` and its tests.
    The minimum fee is a required caller parameter until it is approved. For a ×5 multiple the hook's sale range is
    16,100 ticks (×5.002), against 23,030 for ×10 today.
