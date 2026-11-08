@@ -20,12 +20,13 @@ export const V4_SETTINGS = {
 
 /** Contracts from today's build that Model 11 reuses unchanged, and (for tests) the shared mocks. */
 const SHARED = ['contracts/evm/src/ElpidaToken.sol', 'contracts/evm/src/ElpidaUsdPricing.sol'];
-const MOCKS = ['tests/fixtures/MockUsdFeed.sol', 'tests/fixtures/MockUSDC.sol'];
+const MOCKS = ['tests/fixtures/MockUsdFeed.sol', 'tests/fixtures/MockUSDC.sol', 'tests/fixtures/MockIssuerStock.sol'];
 
 function sources(includeMocks) {
   const out = {};
-  for (const file of readdirSync(join(root, 'contracts/evm/v4')).filter(n => n.endsWith('.sol')))
-    out[`contracts/evm/v4/${file}`] = { content: readFileSync(join(root, 'contracts/evm/v4', file), 'utf8') };
+  // Model 11 (contracts/evm/v4) and ELPIDA V2.0 (contracts/evm/v2) share this build.
+  for (const dir of ['contracts/evm/v4', 'contracts/evm/v2'])
+    for (const file of readdirSync(join(root, dir)).filter(n => n.endsWith('.sol'))) out[`${dir}/${file}`] = { content: readFileSync(join(root, dir, file), 'utf8') };
   for (const file of [...SHARED, ...(includeMocks ? MOCKS : [])]) out[file] = { content: readFileSync(join(root, file), 'utf8') };
   return out;
 }
