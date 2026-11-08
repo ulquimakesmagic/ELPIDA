@@ -69,8 +69,12 @@ Nothing is on mainnet. Each network keeps several legacy factories indexed.
 
 ## 5. Tests
 
-Baseline on `main`: see §12 (recorded once the full run finishes). Before this audit the last recorded count was
-in the PR #187 notes. Solana validator tests skip in this environment because the Solana CLI is not installed.
+Baseline on `main` at `d81ff67`, `npm test`, 8 November 2026: **790 tests, 755 pass, 0 fail, 35 skipped**
+(11 min 12 s). The 35 skips are the Solana validator suite: this environment has no Solana CLI, so those tests
+were **not run** here. No broken tests were found.
+
+The `v2.0` branch adds `tests/v2-economics.test.mjs` (9 tests, all pass): the spec's acceptance checks for the
+start and graduation values, fee range, the five-way split and its rounding, the 3% cap, and the ticker rule.
 
 ## 6. Reusable as is
 
@@ -179,8 +183,9 @@ flywheel slot and a large airdrop share. The spec asks for anti-wash filters; th
 ## 13. Roadmap (dependency order)
 
 1. **Decisions C4, C5, C7, C9** (this document).
-2. Reference economics in `packages/core` for the V2 curve, fee range, first-buy cap and five-way split, with
-   tests (no contract change; safe to merge).
+2. ~~Reference economics in `packages/core`~~ **Done on `v2.0`:** `packages/core/v2-economics.mjs` and its tests.
+   The minimum fee is a required caller parameter until it is approved. For a ×5 multiple the hook's sale range is
+   16,100 ticks (×5.002), against 23,030 for ×10 today.
 3. V2 token with `burn()`, V2 hook and factory on a local chain: start, milestone, fee range, cap, split.
 4. Fee ledgers and the three new vaults (flywheel, trader airdrop, holder rewards) on a local chain.
 5. Indexer and UI support for both versions; launch form fee selector and split preview.
