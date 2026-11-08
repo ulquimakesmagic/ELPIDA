@@ -135,3 +135,32 @@ function isqrt(n) {
   while ((x + 1n) * (x + 1n) <= n) x++;
   return x;
 }
+
+/**
+ * Test networks run the same ×5 curve at test size, so free faucet funds can reach graduation: $50 → $250. Every test
+ * token says so. Mainnet V2 launchpads must use V2.startFdvUsdE6 (assertV2DeploymentTerms).
+ */
+export const V2_TESTNET_START_FDV_USD_E6 = 50_000_000n;
+
+/** Anti-snipe, kept from Models 10 and 11: the fee starts at 90% and falls to the token's own fee over 60 seconds. */
+export const V2_SNIPE_START_BPS = 9_000;
+export const V2_SNIPE_WINDOW_SECONDS = 60;
+
+/** The fee charged `elapsed` seconds after launch for a token whose own fee is `feeBps` (the hook rounds the same way). */
+export function feeAt(elapsed, feeBps) {
+  const e = Math.max(0, Math.floor(Number(elapsed)));
+  if (e >= V2_SNIPE_WINDOW_SECONDS) return feeBps;
+  return feeBps + Math.floor((V2_SNIPE_START_BPS - feeBps) * (V2_SNIPE_WINDOW_SECONDS - e) / V2_SNIPE_WINDOW_SECONDS);
+}
+
+/**
+ * Checks a V2 launchpad's terms before deployment: mainnet at the specified $20,000 with an approved minimum fee, test
+ * networks at the labelled test size. The minimum fee stays unapproved for mainnet until Malik sets it (spec §25.1).
+ */
+export function assertV2DeploymentTerms(net, { startFdvUsdE6, minFeeBps, approvedMinFeeBps = null }) {
+  const expected = net?.mainnet ? V2.startFdvUsdE6 : V2_TESTNET_START_FDV_USD_E6;
+  if (startFdvUsdE6 !== expected) throw new Error(`V2 on ${net?.name ?? 'this network'} starts at $${(Number(expected) / 1e6).toLocaleString('en-US')}.`);
+  if (!Number.isInteger(minFeeBps) || minFeeBps < 1 || minFeeBps > V2.defaultFeeBps) throw new Error('Minimum fee must be set and at most the default.');
+  if (net?.mainnet && minFeeBps !== approvedMinFeeBps) throw new Error('The minimum fee for mainnet is not approved yet.');
+  return true;
+}

@@ -102,3 +102,23 @@ test('tickers: 1–10 ASCII letters or digits; duplicates are not a format conce
   for (const ok of ['A', 'ELPIDA', 'pepe2', '1234567890']) assert.equal(isValidTicker(ok), true, ok);
   for (const bad of ['', 'ABCDEFGHIJK', 'PE PE', 'PEPE!', 'ÉLP', 'ELP\n', null]) assert.equal(isValidTicker(bad), false, String(bad));
 });
+
+test('anti-snipe falls from 90% to the token’s own fee over 60 seconds', async () => {
+  const { feeAt } = await import('../packages/core/v2-economics.mjs');
+  assert.equal(feeAt(0, 125), 9000); assert.equal(feeAt(60, 125), 125); assert.equal(feeAt(3600, 400), 400);
+  assert.equal(feeAt(30, 400), 400 + Math.floor((9000 - 400) / 2));
+  assert.equal(feeAt(-5, 125), 9000, 'clock skew never lowers the fee');
+  for (let s = 1; s <= 60; s++) assert.ok(feeAt(s, 125) <= feeAt(s - 1, 125));
+});
+
+test('deployment terms: mainnet at $20,000 with an approved minimum; test networks at the labelled test size', async () => {
+  const { assertV2DeploymentTerms, V2_TESTNET_START_FDV_USD_E6 } = await import('../packages/core/v2-economics.mjs');
+  const testnet = { name: 'Base Sepolia', mainnet: false }, mainnet = { name: 'Base', mainnet: true };
+  assert.equal(V2_TESTNET_START_FDV_USD_E6, 50_000_000n);
+  assert.equal(assertV2DeploymentTerms(testnet, { startFdvUsdE6: 50_000_000n, minFeeBps: 100 }), true);
+  assert.throws(() => assertV2DeploymentTerms(testnet, { startFdvUsdE6: V2.startFdvUsdE6, minFeeBps: 100 }), /starts at \$50/);
+  assert.throws(() => assertV2DeploymentTerms(mainnet, { startFdvUsdE6: 50_000_000n, minFeeBps: 100 }), /starts at \$20,000/);
+  assert.throws(() => assertV2DeploymentTerms(testnet, { startFdvUsdE6: 50_000_000n, minFeeBps: 150 }), /at most the default/);
+  assert.throws(() => assertV2DeploymentTerms(mainnet, { startFdvUsdE6: V2.startFdvUsdE6, minFeeBps: 100 }), /not approved/);
+  assert.equal(assertV2DeploymentTerms(mainnet, { startFdvUsdE6: V2.startFdvUsdE6, minFeeBps: 100, approvedMinFeeBps: 100 }), true);
+});
