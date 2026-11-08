@@ -1,6 +1,7 @@
 // ELPIDA V2.0 reference economics (docs/V2_0_AUDIT.md). Browser-safe: plain BigInt, no imports.
-// Reference math only: no contract uses these values yet. Contracts, indexer and UI must match this module, and its
-// tests are the spec's acceptance checks for launch economics, fees, the first-buy cap and the five-way split.
+// The V2 contracts (contracts/evm/v2), the indexers and the launch form all match this module; its tests are the spec's
+// acceptance checks for launch economics, fees, the first-buy cap and the five-way split. Served to the browser as
+// /v2-economics.mjs.
 
 /** Approved V2.0 parameters (spec §4). Amounts in USD micro-units (6 decimals) where they are money. */
 export const V2 = Object.freeze({
@@ -176,3 +177,7 @@ export function splitAccrued(accrued, treasuryExtra = 0n) {
   const reserve = accrued - Object.values(s).reduce((a, b) => a + b, 0n);
   return { ...s, treasury: s.treasury + treasuryExtra, reserve };
 }
+
+/** The site's model id for V2 launches (index records, token pages, routing). */
+export const V2_MODEL = 'v2-hook';
+export const V2_MODEL_VERSION = 20;

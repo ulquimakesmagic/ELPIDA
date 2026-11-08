@@ -155,6 +155,12 @@ contract ElpidaV2Hook is BaseHook, IUnlockCallback {
         return (l.quote, l.creatorVault, l.launchedAt, l.feeBps, l.graduated, l.upperTick, l.lowerTick, l.liquidityBonus, l.accrued);
     }
 
+    /// The hook's positions in `token`'s pool: the sale range, the upper range and, after the milestone, the locked range.
+    function liquidityOf(address token) external view returns (uint128 sale, uint128 upper, uint128 milestone) {
+        Launch storage l = launches[token];
+        return (l.saleLiquidity, l.upperLiquidity, l.milestoneLiquidity);
+    }
+
     /// The five ledgers of `token`: owed now and paid so far, in the quote, in Recipient order.
     function ledgers(address token) external view returns (uint256[5] memory owed, uint128[5] memory paid) {
         Launch storage l = launches[token];

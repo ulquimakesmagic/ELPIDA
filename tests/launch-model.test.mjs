@@ -19,7 +19,12 @@ test('the success screen describes a Model 11 launch as a Uniswap v4 pool, not a
   assert.match(flow, /v4Chosen\(\) \? `\$\{draft\.name\} is trading in its Uniswap v4 pool on/);
 });
 
-test('the launch summary and the review name the launch model wherever Model 11 is offered', () => {
-  assert.match(flow, /v4Offered\(\) \? \[h\('dt', 'Launch model'\), h\('dd', modelName\(\)\)\]/);
-  assert.match(flow, /v4Offered\(\) \? \[row\('Launch model', modelName\(\)\)\]/);
+test('the launch summary and the review name the launch model wherever Model 11 or V2 is offered', () => {
+  assert.match(flow, /const modelsOffered = \(\) => v4Offered\(\) \|\| v2Offered\(\);/);
+  assert.match(flow, /modelsOffered\(\) \? \[h\('dt', 'Launch model'\), h\('dd', modelName\(\)\)\]/);
+  assert.match(flow, /modelsOffered\(\) \? \[row\('Launch model', modelName\(\)\)\]/);
+  // V2: the creator's fee is chosen in the form, reviewed, and sent with the launch.
+  assert.match(flow, /v2Chosen\(\) \? feeSelector\(\) : null/);
+  assert.match(flow, /row\('Trading fee', `\$\{feePercent\(\)\}% on every trade, fixed for good`\)/);
+  assert.match(flow, /if \(v2Chosen\(\)\) \{ body\.model = V2_MODEL; body\.feeBps = draft\.feeBps \?\? V2\.defaultFeeBps;/);
 });

@@ -10,6 +10,8 @@ let cached;
 export function v4Artifacts() {
   if (cached) return cached;
   const out = compileV4(), find = name => Object.values(out).find(entries => entries[name]?.evm?.bytecode?.object)?.[name];
-  cached = { create2: pick(find('ElpidaCreate2Deployer')), factory: pick(find('ElpidaV4Factory')), hook: pick(find('ElpidaV4Hook')), router: pick(find('ElpidaV4Router')), token: { abi: find('ElpidaToken').abi }, poolManager: (a => ({ abi: a.abi, bytecode: a.bytecode.startsWith('0x') ? a.bytecode : '0x' + a.bytecode }))(uniswapV4Artifact('PoolManager')), label: 'Model 11 test launchpad (Uniswap v4 hook). Not audited; test networks only.' };
+  cached = { create2: pick(find('ElpidaCreate2Deployer')), factory: pick(find('ElpidaV4Factory')), hook: pick(find('ElpidaV4Hook')), router: pick(find('ElpidaV4Router')), token: { abi: find('ElpidaToken').abi }, poolManager: (a => ({ abi: a.abi, bytecode: a.bytecode.startsWith('0x') ? a.bytecode : '0x' + a.bytecode }))(uniswapV4Artifact('PoolManager')), label: 'Model 11 test launchpad (Uniswap v4 hook). Not audited; test networks only.',
+    // ELPIDA V2.0 (contracts/evm/v2): the factory, the hook, the two reward distributors and the flywheel vault.
+    v2: { factory: pick(find('ElpidaV2Factory')), hook: pick(find('ElpidaV2Hook')), distributor: pick(find('ElpidaV2Distributor')), flywheel: pick(find('ElpidaV2FlywheelVault')), token: { abi: find('ElpidaV2Token').abi }, label: 'ELPIDA V2 test launchpad (Uniswap v4 hook). Not audited; test networks only.' } };
   return cached;
 }

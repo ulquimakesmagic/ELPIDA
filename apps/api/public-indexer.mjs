@@ -4,6 +4,8 @@ import { readFileSync, existsSync, writeFileSync, renameSync } from 'node:fs';
 import { EvmIndexer, mapLimit } from '../../packages/indexer/evm-indexer.mjs';
 import { V4Indexer, verifyV4Deployment } from '../../packages/indexer/v4-indexer.mjs';
 import { V4_MODEL } from '../../packages/core/v4-model.mjs';
+import { V2Indexer, verifyV2Deployment } from '../../packages/indexer/v2-indexer.mjs';
+import { V2_MODEL } from '../../packages/core/v2-economics.mjs';
 import { normalizeMetadata } from '../web/metadata.mjs';
 import { isDexModel, MODEL_VERSIONS } from '../../packages/core/curve-model.mjs';
 import { testnetDexes } from '../../packages/core/uniswap.mjs';
@@ -44,6 +46,8 @@ export class PublicIndexer {
       if(net.taxDeployment?.factory)this.legacy.get(net.key).push(openEntry({net,deployment:{...net.taxDeployment,model:'curve-tax-v10'},provider,contracts,dataDir}));
       // Model 11 (Uniswap v4 hook) test launchpad: its own index beside the curve launchpads, once pinned in networks.mjs.
       if(net.v4?.shared?.factory&&net.v4.poolManager)this.legacy.get(net.key).push(openV4Entry({net,provider,dataDir}));
+      // ELPIDA V2.0 test launchpad (same pool design and router as Model 11), once pinned in networks.mjs (`v2.shared`).
+      if(net.v2?.shared?.factory&&net.v4?.poolManager&&!net.mainnet)this.legacy.get(net.key).push(openV2Entry({net,provider,dataDir}));
     }
   }
   /** The current deployment first, then any legacy deployments on the same network. */
@@ -69,7 +73,7 @@ export class PublicIndexer {
     this.inFlight=(this.inFlight??0)+due.length;
     try{await mapLimit(due,TICK_CONCURRENCY,async e=>{
       try{
-        if(!e.validated&&e.v4){const d=deploymentOf(e);if(Number((await e.provider.getNetwork()).chainId)!==e.net.chainId)throw new Error('Deployment identity mismatch');await verifyV4Deployment(e.provider,{...d,poolManager:e.net.v4.poolManager});e.validated=true;}
+        if(!e.validated&&e.v4){const d=deploymentOf(e);if(Number((await e.provider.getNetwork()).chainId)!==e.net.chainId)throw new Error('Deployment identity mismatch');await (e.v2?verifyV2Deployment:verifyV4Deployment)(e.provider,{...d,poolManager:e.net.v4.poolManager});e.validated=true;}
         if(!e.validated){const d=deploymentOf(e),chain=Number((await e.provider.getNetwork()).chainId),v=Number(await new Contract(d.factory,['function MODEL_VERSION() view returns(uint256)'],e.provider).MODEL_VERSION());if(chain!==e.net.chainId||v!==MODEL_VERSIONS[d.model])throw new Error('Deployment identity mismatch');e.validated=true;}
         await e.index.sync();e.error=null;e.errorCode=null;e.lastSuccess=new Date().toISOString();
         this.publishFresh(e);
@@ -164,6 +168,14 @@ function openV4Entry({net,provider,dataDir}){
   const metadataPath=join(dataDir,`public-metadata-${net.chainId}-${factory}.json`);
   const metadata=new Map(existsSync(metadataPath)?Object.entries(JSON.parse(readFileSync(metadataPath,'utf8'))):[]);
   return {net,deployment,legacy:false,v4:true,index,provider,metadata,metadataPath,validated:false,error:null,lastSuccess:null};
+}
+/** An ELPIDA V2 launchpad: factory, hook and router from networks.mjs `v2.shared`, Uniswap's PoolManager from `v4`. */
+function openV2Entry({net,provider,dataDir}){
+  const deployment={...net.v2.shared,model:V2_MODEL},factory=deployment.factory.toLowerCase();
+  const index=new V2Indexer({provider,factory:deployment.factory,hook:deployment.hook,poolManager:net.v4.poolManager,router:deployment.router??null,path:join(dataDir,`public-v2-${net.chainId}-${factory}.sqlite`),chainId:net.chainId,fromBlock:deployment.block,confirmations:EVM_CONFIRMATIONS,nativeSymbol:net.nativeCurrency.symbol,batchSize:100,fullRefreshMs:60000});
+  const metadataPath=join(dataDir,`public-metadata-${net.chainId}-${factory}.json`);
+  const metadata=new Map(existsSync(metadataPath)?Object.entries(JSON.parse(readFileSync(metadataPath,'utf8'))):[]);
+  return {net,deployment,legacy:false,v4:true,v2:true,index,provider,metadata,metadataPath,validated:false,error:null,lastSuccess:null};
 }
 function openEntry({net,deployment,provider,contracts,dataDir,legacy=false}){
   const tax=deployment.model==='curve-tax-v10',dex=isDexModel(deployment.model)||tax,factory=deployment.factory.toLowerCase();
