@@ -91,7 +91,7 @@ every trade in its pools fails at the transfer, and every payout fails inside it
 
 Matches the V2.0 values: $10 fee, $20k start, $100k graduation (×5), default 1.25%, max 4%, 30/30/10/10/20, 3% cap,
 duplicate tickers without a surcharge. The anti-snipe surplus (first 60 seconds only) is locked as liquidity rather
-than split, as in Models 10 and 11. Malik may want to confirm that. The minimum fee is still open.
+than split, as in Models 10 and 11 (confirmed by Malik, 8 November). The minimum fee is still open.
 
 ## Compatibility by chain
 

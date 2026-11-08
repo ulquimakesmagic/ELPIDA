@@ -181,6 +181,19 @@ flywheel slot and a large airdrop share. The spec asks for anti-wash filters; th
 - C1, C2, C3, C6 (on-chain flywheel vault, real burns) and C8 (build V2 on Model 11) follow the spec and this
   audit's recommendations.
 
+### Decisions (Malik, 8 November 2026, later)
+
+- **Trader airdrop formula:** small traders first, big traders still rewarded. Each month, per chain: 20% of the pool
+  equally among qualifying traders, 40% by the square root of fees paid, 40% pro-rata to fees paid; at most 1% of
+  the pool per trader (20× the average share while few traders qualify). A trader is a group of linked wallets;
+  creator-linked groups are excluded. Qualifying: at least $20 of volume, on at least two days, from a wallet at
+  least seven days old. Payouts under $1 carry to the next month. Reference: `packages/core/v2-airdrop.mjs`.
+  Simulated (30,000 traders): median trader 4.3× plain pro-rata; bottom half 18% of the pool instead of 2%; traders of
+  $1k / $10k / $100k a month get back about 50% / 23% / 16% of their fees.
+- **Anti-snipe surplus** stays in the locked liquidity, as in Models 10 and 11.
+- **Audit:** done in house with professional tools (static analysis, invariant fuzzing, symbolic checks of the split),
+  with a public bug bounty and a staged mainnet start.
+
 ## 12. Security considerations
 
 - The hook is the highest-risk code (custom accounting). V2 adds per-pool fee storage and five ledgers to it.
