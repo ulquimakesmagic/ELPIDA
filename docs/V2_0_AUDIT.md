@@ -200,12 +200,30 @@ flywheel slot and a large airdrop share. The spec asks for anti-wash filters; th
 2. ~~Reference economics in `packages/core`~~ **Done on `v2.0`:** `packages/core/v2-economics.mjs` and its tests.
    The minimum fee is a required caller parameter until it is approved. For a ×5 multiple the hook's sale range is
    16,100 ticks (×5.002), against 23,030 for ×10 today.
-3. V2 token with `burn()`, V2 hook and factory on a local chain: start, milestone, fee range, cap, split.
+3. ~~V2 token with `burn()`, V2 hook and factory on a local chain~~ **Done on `v2.0`, local only:** see
+   `docs/V2_0_CONTRACTS.md`.
 4. Fee ledgers and the three new vaults (flywheel, trader airdrop, holder rewards) on a local chain.
 5. Indexer and UI support for both versions; launch form fee selector and split preview.
 6. Solana program changes.
 7. Testnet deployments from the operator panel (Malik), then the keepers.
 8. Analytics, concentration, then the audit package.
+
+## 14a. Trader airdrop at scale (simulation, 8 November)
+
+30,000 wallets, heavy-tailed activity (top 1% pay 58% of fees), pro-rata to fees paid, 1% per-wallet cap, payouts
+under $1 carried forward. Pro-rata to fees makes the airdrop a cashback of roughly 30–40% of fees paid, whatever the
+pool size.
+
+| Monthly pool | $100k | $250k | $500k | $1M |
+|---|---|---|---|---|
+| Monthly volume needed at 1.25% | $26.7M | $66.7M | $133M | $267M |
+| Biggest wallet (capped) | $1,000 | $2,500 | $5,000 | $10,000 |
+| Top 1% / top 10% of wallets | 35.6% / 62.9% | same | same | same |
+| Median trader | $1.13 | $2.82 | $5.63 | $11.26 |
+| Carried forward (< $1) | $9,953 | $0 | $0 | $0 |
+
+Recommended additions: a minimum of about $5 of fees paid in the month to qualify, and a higher minimum payout on
+Ethereum mainnet (or a Merkle claim there) because each push transfer costs real gas.
 
 ## 14. Spec parameters still open (§25)
 
