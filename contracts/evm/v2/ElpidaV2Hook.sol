@@ -30,8 +30,10 @@ interface IV2Token {
 ///  - start at the factory's starting market cap, graduate (the milestone) at ×5: $20,000 → $100,000 on mainnet;
 ///  - each token's fee is chosen at launch, from `minFeeBps` to 4.00% (1.25% default), and never changes, before or
 ///    after graduation (decision C5, 8 November 2026);
-///  - every fee is split 30% creator / 30% trader airdrops / 10% flywheel / 10% holder rewards / 20% treasury, four
-///    shares rounded down and the remainder to the treasury, into five ledgers per token, paid in the quote;
+///  - every fee is split 30% creator / 30% trader airdrops / 10% flywheel / 10% holder rewards / 20% treasury, paid in
+///    the quote. A trade adds its fee to one running total per token (`accrued`); each recipient is owed its share of
+///    that total, rounded down, less what it has been paid. One storage write per trade instead of five, the split
+///    exact, and the rounding remainder (at most 4 base units per token, ever) kept by the hook for good;
 ///  - the creator's optional first buy may receive at most 3% of the supply;
 ///  - no partner tiers (decision C4); tokens are burned with `burn()`, never sent to a dead address.
 /// @dev currency0 is the quote (address 0 for the native coin) and currency1 the token, so a buy is zeroForOne. At launch
@@ -64,7 +66,7 @@ contract ElpidaV2Hook is BaseHook, IUnlockCallback {
     uint256 public constant AIRDROP_BPS = 3000;
     uint256 public constant FLYWHEEL_BPS = 1000;
     uint256 public constant HOLDER_BPS = 1000;
-    /// The treasury's 20% is the remainder, so the five shares always add up to the fee.
+    uint256 public constant TREASURY_BPS = 2000;
     uint256 public constant MODEL_VERSION = 20;
     uint256 private constant Q96 = 0x1000000000000000000000000;
     bytes32 private constant FEE_SLOT = keccak256("elpida.v2.fee");
@@ -85,11 +87,13 @@ contract ElpidaV2Hook is BaseHook, IUnlockCallback {
         int24 lowerTick;
         uint128 saleLiquidity;
         uint128 upperLiquidity;
-        uint128 milestoneLiquidity;
+        /// Every fee at the token's own rate so far, in the quote: the five shares are worked out from this.
+        uint128 accrued;
         /// Anti-snipe surplus over the token's fee. Added to the locked liquidity at the milestone; never paid out.
         uint128 liquidityBonus;
-        /// Owed, in the quote, by Recipient.
-        uint128[5] owed;
+        uint128 milestoneLiquidity;
+        /// Rounding dust from the milestone, the treasury's alone.
+        uint128 treasuryExtra;
         /// Paid so far, in the quote, by Recipient.
         uint128[5] paid;
     }
@@ -102,7 +106,8 @@ contract ElpidaV2Hook is BaseHook, IUnlockCallback {
     /// The lowest fee a creator may choose on this launchpad (spec §25.1: not decided; fixed per deployment).
     uint256 public immutable minFeeBps;
     mapping(address token => Launch) internal launches;
-    /// Per quote asset: every launch's owed fees plus pre-milestone liquidity bonus; equals the hook's ERC-6909 claims.
+    /// Per quote asset: every launch's unpaid fees (with the rounding remainder) plus pre-milestone liquidity bonus;
+    /// equals the hook's ERC-6909 claims.
     mapping(address quote => uint256) public totalOwed;
     bool private entered;
 
@@ -111,7 +116,6 @@ contract ElpidaV2Hook is BaseHook, IUnlockCallback {
     event Launched(address indexed token, address indexed quote, address indexed creatorVault, uint256 feeBps, int24 upperTick, int24 lowerTick, uint128 saleLiquidity, uint128 upperLiquidity, uint256 dustBurned);
     /// Every fee the hook takes, and its five shares. `lockedBonus` is the anti-snipe surplus added to the liquidity.
     event Fee(address indexed token, address indexed trader, bool buy, uint256 feeBps, uint256 fee, uint256 lockedBonus);
-    event FeeSplit(address indexed token, uint256 creator, uint256 traderAirdrop, uint256 flywheel, uint256 holderRewards, uint256 treasury);
     event Milestone(address indexed token, uint256 saleQuote, uint256 bonus, uint128 liquidity, uint256 dust, uint256 tokensBurned);
     event FeesWithdrawn(address indexed token, Recipient indexed recipient, address to, uint256 amount);
     event FeePayoutFailed(address indexed token, Recipient indexed recipient, address to, uint256 amount);
@@ -146,14 +150,23 @@ contract ElpidaV2Hook is BaseHook, IUnlockCallback {
         return PoolKey(Currency.wrap(launches[token].quote), Currency.wrap(token), 0, TICK_SPACING, IHooks(address(this)));
     }
 
-    function launchOf(address token) external view returns (address quote, address creatorVault, uint64 launchedAt, uint16 feeBps, bool graduated, int24 upperTick, int24 lowerTick, uint128 liquidityBonus) {
+    function launchOf(address token) external view returns (address quote, address creatorVault, uint64 launchedAt, uint16 feeBps, bool graduated, int24 upperTick, int24 lowerTick, uint128 liquidityBonus, uint128 accrued) {
         Launch storage l = launches[token];
-        return (l.quote, l.creatorVault, l.launchedAt, l.feeBps, l.graduated, l.upperTick, l.lowerTick, l.liquidityBonus);
+        return (l.quote, l.creatorVault, l.launchedAt, l.feeBps, l.graduated, l.upperTick, l.lowerTick, l.liquidityBonus, l.accrued);
     }
 
     /// The five ledgers of `token`: owed now and paid so far, in the quote, in Recipient order.
-    function ledgers(address token) external view returns (uint128[5] memory owed, uint128[5] memory paid) {
-        return (launches[token].owed, launches[token].paid);
+    function ledgers(address token) external view returns (uint256[5] memory owed, uint128[5] memory paid) {
+        Launch storage l = launches[token];
+        for (uint256 i = 0; i < 5; i++) owed[i] = _entitled(l, i) - l.paid[i];
+        paid = l.paid;
+    }
+
+    /// What recipient `i` has earned from `token` so far: its share of every fee, rounded down (plus the milestone dust
+    /// for the treasury). Never decreases, so it is never below what was paid.
+    function _entitled(Launch storage l, uint256 i) private view returns (uint256) {
+        uint256 bps = i == 0 ? CREATOR_BPS : i == 1 ? AIRDROP_BPS : i == 2 ? FLYWHEEL_BPS : i == 3 ? HOLDER_BPS : TREASURY_BPS;
+        return uint256(l.accrued) * bps / 10000 + (i == 4 ? l.treasuryExtra : 0);
     }
 
     function feeBpsOf(address token) external view returns (uint256) {
@@ -330,19 +343,13 @@ contract ElpidaV2Hook is BaseHook, IUnlockCallback {
         if (base > fee) base = fee;
     }
 
-    /// Splits the base fee five ways (four shares rounded down, the remainder to the treasury), locks the anti-snipe
-    /// surplus, then moves the sale position at the milestone if this trade reached it.
+    /// Adds the fee at the token's rate to the running total (one slot with the bonus), locks the anti-snipe surplus,
+    /// then moves the sale position at the milestone if this trade reached it.
     function _afterTrade(PoolKey memory key, address token, Launch storage l, uint256 fee, uint256 base) private {
         if (fee > 0) {
-            uint256 c = base * CREATOR_BPS / 10000;
-            uint256 a = base * AIRDROP_BPS / 10000;
-            uint256 f = base * FLYWHEEL_BPS / 10000;
-            uint256 h = base * HOLDER_BPS / 10000;
-            uint256 t = base - c - a - f - h;
-            l.owed[0] += c.toUint128(); l.owed[1] += a.toUint128(); l.owed[2] += f.toUint128(); l.owed[3] += h.toUint128(); l.owed[4] += t.toUint128();
-            l.liquidityBonus += (fee - base).toUint128();
+            l.accrued += base.toUint128();
+            if (fee > base) l.liquidityBonus += (fee - base).toUint128();
             totalOwed[l.quote] += fee;
-            emit FeeSplit(token, c, a, f, h, t);
         }
         if (!l.graduated) {
             (uint160 price,,,) = poolManager.getSlot0(key.toId());
@@ -371,7 +378,7 @@ contract ElpidaV2Hook is BaseHook, IUnlockCallback {
         if (dust > bonus) poolManager.mint(address(this), _id(key), dust - bonus);
         else if (bonus > dust) poolManager.burn(address(this), _id(key), bonus - dust);
         totalOwed[l.quote] = totalOwed[l.quote] + dust - bonus;
-        l.liquidityBonus = 0; l.owed[4] += dust.toUint128(); l.milestoneLiquidity = liquidity;
+        l.liquidityBonus = 0; l.treasuryExtra += dust.toUint128(); l.milestoneLiquidity = liquidity;
         emit Milestone(token, q, bonus, liquidity, dust, donated);
     }
 
@@ -383,13 +390,13 @@ contract ElpidaV2Hook is BaseHook, IUnlockCallback {
         Launch storage l = launches[token];
         if (l.launchedAt == 0) revert NotLaunched();
         uint256 i = uint256(r);
-        uint128 amount = l.owed[i];
+        uint256 amount = _entitled(l, i) - l.paid[i];
         if (amount == 0) return true;
         address to = recipientOf(token, r);
-        l.owed[i] = 0; totalOwed[l.quote] -= amount;
-        ok = abi.decode(poolManager.unlock(abi.encode(Action.Payout, l.quote, to, uint256(amount))), (bool));
-        if (ok) { l.paid[i] += amount; emit FeesWithdrawn(token, r, to, amount); return true; }
-        l.owed[i] = amount; totalOwed[l.quote] += amount;
+        l.paid[i] += amount.toUint128(); totalOwed[l.quote] -= amount;
+        ok = abi.decode(poolManager.unlock(abi.encode(Action.Payout, l.quote, to, amount)), (bool));
+        if (ok) { emit FeesWithdrawn(token, r, to, amount); return true; }
+        l.paid[i] -= uint128(amount); totalOwed[l.quote] += amount;
         emit FeePayoutFailed(token, r, to, amount);
     }
 

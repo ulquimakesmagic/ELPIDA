@@ -164,3 +164,15 @@ export function assertV2DeploymentTerms(net, { startFdvUsdE6, minFeeBps, approve
   if (net?.mainnet && minFeeBps !== approvedMinFeeBps) throw new Error('The minimum fee for mainnet is not approved yet.');
   return true;
 }
+
+/**
+ * The V2 hook's ledgers: each token keeps one running total of fees at its own rate (`accrued`); each recipient is owed
+ * its share of that total rounded down, and the treasury also the milestone's rounding dust. `reserve` is the split's
+ * rounding remainder (0 to 4 base units per token), which stays in the hook. Shares only grow as `accrued` grows.
+ */
+export function splitAccrued(accrued, treasuryExtra = 0n) {
+  if (typeof accrued !== 'bigint' || accrued < 0n || typeof treasuryExtra !== 'bigint' || treasuryExtra < 0n) throw new Error('Invalid amount.');
+  const s = Object.fromEntries(Object.entries(V2_FEE_SPLIT).map(([k, bps]) => [k, accrued * BigInt(bps) / BPS]));
+  const reserve = accrued - Object.values(s).reduce((a, b) => a + b, 0n);
+  return { ...s, treasury: s.treasury + treasuryExtra, reserve };
+}

@@ -122,3 +122,17 @@ test('deployment terms: mainnet at $20,000 with an approved minimum; test networ
   assert.throws(() => assertV2DeploymentTerms(mainnet, { startFdvUsdE6: V2.startFdvUsdE6, minFeeBps: 100 }), /not approved/);
   assert.equal(assertV2DeploymentTerms(mainnet, { startFdvUsdE6: V2.startFdvUsdE6, minFeeBps: 100, approvedMinFeeBps: 100 }), true);
 });
+
+test('hook ledgers from one running total: shares rounded down, a remainder of at most 4, never shrinking', async () => {
+  const { splitAccrued } = await import('../packages/core/v2-economics.mjs');
+  assert.deepEqual(splitAccrued(1_250n), { creator: 375n, traderAirdrop: 375n, flywheel: 125n, holderRewards: 125n, treasury: 250n, reserve: 0n });
+  assert.deepEqual(splitAccrued(7n, 2n), { creator: 2n, traderAirdrop: 2n, flywheel: 0n, holderRewards: 0n, treasury: 3n, reserve: 2n });
+  let last = splitAccrued(0n);
+  for (let a = 1n; a < 3_000n; a++) {
+    const s = splitAccrued(a), keys = ['creator', 'traderAirdrop', 'flywheel', 'holderRewards', 'treasury'];
+    assert.equal(keys.reduce((x, k) => x + s[k], 0n) + s.reserve, a);
+    assert.ok(s.reserve >= 0n && s.reserve <= 4n);
+    for (const k of keys) assert.ok(s[k] >= last[k], `${k} never decreases`);
+    last = s;
+  }
+});

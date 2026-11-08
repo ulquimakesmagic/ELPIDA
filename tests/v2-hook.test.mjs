@@ -6,20 +6,23 @@ import { parseEther, ZeroAddress, Wallet } from 'ethers';
 import { v2Fixture, launchV2, trade, revertsWith, errorSelector, parse, mined, v4Art, LAUNCH_FEE, NATIVE_VIRTUAL_QUOTE, ETH_USD, RECIPIENTS } from './helpers/v2-fixture.mjs';
 import { poolPrice } from './helpers/v4-fixture.mjs';
 import { uniswapV4Artifact } from '../scripts/compile-v4.mjs';
-import { V2, splitFee, maxFirstBuyGross, firstBuyCapTokens, saleTokens, virtualToken } from '../packages/core/v2-economics.mjs';
+import { V2, splitAccrued, maxFirstBuyGross, firstBuyCapTokens, saleTokens, virtualToken } from '../packages/core/v2-economics.mjs';
 
 const E18 = 10n ** 18n, SUPPLY = V2.tokenSupply;
 /** Market cap in US dollars from the pool's sqrt price (tokens per quote unit, both with 18 decimals; ETH at $2,500). */
 const mcapUsd = sqrtPrice => { const p = (Number(sqrtPrice) / 2 ** 96) ** 2; return 1e9 / p * Number(ETH_USD); };
 
-/** Checks the hook's books for one launch: claims held = everything owed + the locked-in-waiting bonus, and returns them. */
+/** Checks the hook's books for one launch: claims held = everything owed + the bonus waiting for the liquidity + the
+ * split's rounding remainder (0–4 base units), and returns them. */
 async function books(f, l) {
   const [owedR, paidR] = await f.hook.ledgers(l.token.target), owed = [...owedR], paid = [...paidR], info = await f.hook.launchOf(l.token.target);
   const total = await f.hook.totalOwed(l.asset), claims = await f.claims(l.asset);
   assert.equal(total, claims, 'the hook holds exactly the claims it owes');
-  assert.equal(owed.reduce((a, b) => a + b, 0n) + info.liquidityBonus, total, 'five ledgers + bonus = total owed');
-  return { owed, paid, info };
+  const reserve = total - owed.reduce((a, b) => a + b, 0n) - info.liquidityBonus;
+  assert.ok(reserve >= 0n && reserve <= 4n, `five ledgers + bonus + remainder = total owed (remainder ${reserve})`);
+  return { owed, paid, info, reserve };
 }
+const RECIPIENT_KEYS = ['creator', 'traderAirdrop', 'flywheel', 'holderRewards', 'treasury'];
 
 test('V2 starts at $20,000, sells 69.1% of supply on the curve and graduates at $100,000 (×5)', async t => {
   const f = await v2Fixture(t);
@@ -104,22 +107,20 @@ test('each token’s fee is chosen at launch, from the minimum to 4%, and never 
   }
 });
 
-test('every fee splits 30/30/10/10/20 into five ledgers, exactly, and the hook’s claims match after every trade', async t => {
+test('every fee splits 30/30/10/10/20, exactly, and the hook’s claims match after every trade', async t => {
   const f = await v2Fixture(t);
   const l = await launchV2(f, { feeBps: 250, firstBuy: parseEther('0.05') });
-  const expected = [0n, 0n, 0n, 0n, 0n];
-  const record = receipt => {
-    const fees = parse(f.hook, receipt, 'Fee'), splits = parse(f.hook, receipt, 'FeeSplit');
-    assert.equal(fees.length, splits.length);
-    fees.forEach((fe, i) => {
-      const want = splitFee(fe.args.fee - fe.args.lockedBonus), got = splits[i].args;
-      assert.deepEqual([got.creator, got.traderAirdrop, got.flywheel, got.holderRewards, got.treasury], RECIPIENTS.map(k => want[k]));
-      RECIPIENTS.forEach((k, j) => { expected[j] += want[k]; });
-    });
+  let accrued = 0n;
+  const record = receipt => { for (const fe of parse(f.hook, receipt, 'Fee')) accrued += fe.args.fee - fe.args.lockedBonus; };
+  const expectBooks = async (extra = 0n, label = '') => {
+    const b = await books(f, l), want = splitAccrued(accrued, extra);
+    assert.equal(b.info.accrued, accrued, `running total ${label}`);
+    assert.deepEqual(b.owed.map((x, i) => x + b.paid[i]), RECIPIENT_KEYS.map(k => want[k]), `shares ${label}`);
+    assert.equal(b.reserve, want.reserve);
+    return b;
   };
   record(l.receipt);
-  let b = await books(f, l);
-  assert.deepEqual(b.owed, expected);
+  let b = await expectBooks(0n, 'after launch');
   // Trades inside the anti-snipe window, then normal ones, buys and sells of uneven sizes.
   const seq = [['buy', '0.3'], ['buy', '0.0000123'], ['sell', 0.5], ['wait'], ['buy', '1.7'], ['sell', 0.33], ['buy', '0.9'], ['sell', 0.1]];
   for (const [side, amount] of seq) {
@@ -128,31 +129,32 @@ test('every fee splits 30/30/10/10/20 into five ledgers, exactly, and the hook�
       ? await trade(f, l, { buy: true, amount: parseEther(amount) })
       : await trade(f, l, { buy: false, amount: (await l.token.balanceOf(f.addresses[1])) * BigInt(Math.round(amount * 100)) / 100n });
     record(r);
-    b = await books(f, l);
-    assert.deepEqual(b.owed, expected, `after ${side} ${amount}`);
+    b = await expectBooks(0n, `after ${side} ${amount}`);
   }
   assert.ok(b.info.liquidityBonus > 0n, 'the anti-snipe surplus waits for the locked liquidity');
-  // Graduate: the bonus joins the locked liquidity; rounding dust goes to the treasury ledger.
+  // A recipient paid mid-way keeps earning from where it was.
+  await mined(f.hook.claim(l.token.target, 2));
+  b = await expectBooks(0n, 'after the flywheel was paid');
+  assert.equal(b.owed[2], 0n);
+  // Graduate: the bonus joins the locked liquidity; the milestone's rounding dust goes to the treasury.
   const g = await trade(f, l, { buy: true, amount: parseEther('16') });
   record(g);
   const [m] = parse(f.hook, g, 'Milestone');
-  expected[4] += m.args.dust;
-  b = await books(f, l);
+  b = await expectBooks(m.args.dust, 'after the milestone');
   assert.equal(b.info.liquidityBonus, 0n);
-  assert.deepEqual(b.owed, expected);
-  // Anyone pays all five; each recipient receives exactly its ledger.
-  const before = await Promise.all(RECIPIENTS.map(r => f.provider.getBalance(f.recipient(l, r))));
+  // Anyone pays all five; each recipient receives exactly what it is owed.
+  const owedNow = b.owed;
+  const before = await Promise.all(RECIPIENT_KEYS.map(r => f.provider.getBalance(f.recipient(l, r))));
   const w = await mined(f.hook.connect(f.signers[3]).withdrawFees(l.token.target));
-  assert.equal(parse(f.hook, w, 'FeesWithdrawn').length, 5);
-  const after = await Promise.all(RECIPIENTS.map(r => f.provider.getBalance(f.recipient(l, r))));
-  assert.deepEqual(after.map((x, i) => x - before[i]), expected);
-  b = await books(f, l);
-  assert.deepEqual(b.owed, [0n, 0n, 0n, 0n, 0n]); assert.deepEqual(b.paid, expected);
-  assert.equal(await f.claims(ZeroAddress), 0n);
-  // The ratios themselves: creator = airdrop = 3 × flywheel = 3 × holder (to rounding), treasury ≈ 20%.
-  const total = expected.reduce((a, x) => a + x, 0n);
-  assert.ok(expected[0] === expected[1] && [299n, 300n].includes(expected[0] * 1000n / total));
-  assert.ok(expected[4] * 1000n / total >= 200n);
+  assert.equal(parse(f.hook, w, 'FeesWithdrawn').length, 5, 'the flywheel earned again from the graduating buy');
+  const after = await Promise.all(RECIPIENT_KEYS.map(r => f.provider.getBalance(f.recipient(l, r))));
+  assert.deepEqual(after.map((x, i) => x - before[i]), owedNow);
+  b = await expectBooks(m.args.dust, 'after payouts');
+  assert.deepEqual(b.owed, [0n, 0n, 0n, 0n, 0n]);
+  assert.equal(await f.claims(ZeroAddress), b.reserve, 'only the rounding remainder stays');
+  const want = splitAccrued(accrued, m.args.dust);
+  assert.equal(want.creator, want.traderAirdrop); assert.equal(want.flywheel, want.holderRewards);
+  assert.equal(want.creator * 10n / accrued, 2n); // 30% rounded down to tenths
 });
 
 test('a paused stock quote suspends trading and payouts but keeps every entitlement (spec §17)', async t => {

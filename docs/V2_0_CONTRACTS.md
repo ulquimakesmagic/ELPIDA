@@ -19,7 +19,7 @@ trader-airdrop simulation (`V2_0_AUDIT.md` §14a) are kept as they were.
 | `package.json` | `npm run test:v2` (reference economics and contracts) |
 
 The existing `ElpidaV4Router` trades V2 tokens unchanged (it needs only `poolKey` and `currentFeeBps`). Sizes: hook
-18,077 bytes, factory 10,960, token 1,794 (limit 24,576). Model 11's bytecode is unchanged by the shared build.
+17,971 bytes, factory 10,960, token 1,794 (limit 24,576). Model 11's bytecode is unchanged by the shared build.
 
 ## What changed from Model 11
 
@@ -28,8 +28,8 @@ The existing `ElpidaV4Router` trades V2 tokens unchanged (it needs only `poolKey
 | Start / milestone | $5k / ×10 (23,030 ticks) | **$20k / ×5 (16,100 ticks = ×5.002)**; virtual token 1.25B, virtual quote = start × 5/4 |
 | Fee | 1.25% fixed, 1% after the milestone | **Creator picks `minFeeBps`–4% at launch; fixed for life; same fee after the milestone** (C5) |
 | Anti-snipe | 90% → 1.25% over 60 s | 90% → the token's own fee over 60 s; the surplus still joins the locked liquidity, never paid out |
-| Split | creator 50% / Elpida 50%, partner burn from Elpida's half | **creator 30 / trader airdrop 30 / flywheel 10 / holder rewards 10 / treasury 20**, per trade: four shares rounded down, remainder (and milestone dust) to the treasury |
-| Ledgers | creator and protocol balances | **five owed and five paid totals per token** (`ledgers(token)`), a `FeeSplit` event per fee |
+| Split | creator 50% / Elpida 50%, partner burn from Elpida's half | **creator 30 / trader airdrop 30 / flywheel 10 / holder rewards 10 / treasury 20** of the running total, each rounded down; the milestone's dust to the treasury; the split's remainder (0–4 base units per token, ever) stays in the hook |
+| Ledgers | creator and protocol balances, updated per trade | **one running fee total per token**; each recipient is owed its share of it, rounded down, less what it was paid (`ledgers(token)`). One storage write per trade instead of five |
 | Recipients | creator vault, treasury | creator vault per token; trader-airdrop vault, flywheel vault, holder-reward vault and treasury fixed per hook |
 | First buy | uncapped, base fee | **at most 3% of supply** on the tokens received, at the token's own fee; above it the whole launch reverts (`FirstBuyAboveCap`) |
 | Partner tiers | yes | **none** (C4) |
@@ -41,6 +41,16 @@ The existing `ElpidaV4Router` trades V2 tokens unchanged (it needs only `poolKey
 `minFeeBps` is a constructor value of each hook (1–125) because the spec leaves the minimum open (§25.1). Tests use
 100 (1.00%), the audit's recommendation.
 
+## Gas
+
+Five ledgers written on every trade cost about 17,000 gas more per trade than one running total (51,000 more on a
+token's first trade, when the slots are new). Measured on a local chain through the Elpida router, at 1.25%:
+
+| | First buy | Next buy | Sell |
+|---|---|---|---|
+| Five ledgers per trade | 289,831 | 154,512 | 158,446 |
+| **One running total (current)** | **238,291** | **137,172** | **141,106** |
+
 ## Issuer pause (spec §17)
 
 Nothing in the hook swaps one asset for another. When the quote is an Ondo stock and the issuer pauses transfers,
@@ -49,7 +59,7 @@ every trade in its pools fails at the transfer, and every payout fails inside it
 
 ## Tests
 
-`npm run test:v2`: 20 pass (11 reference-economics, 9 on chain). On chain:
+`npm run test:v2`: 26 pass (12 reference economics, 5 airdrop, 9 on chain). On chain:
 
 - **Start and graduation:** $20,000 at launch, never cheaper (tick rounding at most +0.1%); 16,100-tick sale range;
   sale position within 0.01% of 69.1% of supply; a buy crossing the milestone moves about $30.9k (12.36 ETH at $2,500)
@@ -58,9 +68,10 @@ every trade in its pools fails at the transfer, and every payout fails inside it
   USDC; 0.5–1% more reverts with `FirstBuyAboveCap`; the full 3% costs about $623.
 - **Fee:** 0, 99, 401 and 9,000 bps revert; 100/125/250/400 launch and are reported; anti-snipe, then the
   token's own fee; a 4% token still charges 4% after graduating; no setter exists on the hook or the factory.
-- **Split:** every `FeeSplit` equals `splitFee()` of the fee at the token's rate, through the anti-snipe window,
-  dust-sized trades, sells and the milestone; after every trade the hook's claims equal the five ledgers plus the
-  bonus; `withdrawFees` (anyone may call) pays all five their exact ledgers and records them as paid.
+- **Split:** after every trade (anti-snipe window, dust-sized trades, sells, the milestone, a recipient paid mid-way)
+  the running total equals the sum of the `Fee` events at the token's rate, each recipient's share equals
+  `splitAccrued()`, and the hook's claims equal what is owed plus the bonus plus a remainder of at most 4;
+  `withdrawFees` (anyone may call) pays all five exactly what they are owed.
 - **§17:** a paused stock quote stops trading and holds all five payouts owed; after unpausing they pay in full and
   trading resumes.
 - **Locked:** adding liquidity, creating a pool on the hook, and calling `launch` directly all revert.
