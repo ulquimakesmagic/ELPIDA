@@ -1,4 +1,5 @@
 import {h,icon,number,compact,short,avatar} from './ui.mjs';
+import {rewardsSection} from './v2-rewards-view.mjs';
 
 export function renderAnalytics({api}){
   let period='7d',network='all',metric='volumeUsd',revision=0,data=null,flywheel=null;
@@ -6,7 +7,8 @@ export function renderAnalytics({api}){
   const periods=h('div.analytics-filters',{'aria-label':'Analytics period'},['24h','7d','30d','all'].map(p=>h('button.btn.btn-secondary.btn-sm',{type:'button','aria-pressed':String(p===period),on:{click:()=>{period=p;for(const b of periods.children)b.setAttribute('aria-pressed',b.dataset.period===p);load();}},'data-period':p},p==='all'?'All time':p)));
   const chain=h('select',{ 'aria-label':'Analytics chain',on:{change:()=>{network=chain.value;load();}}},h('option',{value:'all'},'All chains'));
   const refresh=h('button.round-button.analytics-refresh',{type:'button','aria-label':'Refresh analytics',title:'Refresh',on:{click:load}},icon('refresh-cw','icon-sm'));
-  root.append(h('div.page-head',h('div',h('p.an-eyebrow',icon('chart-column','icon-sm'),'Analytics · public protocol data'),h('h1','Analytics'),h('p.muted','Launches, markets and fees across Elpida networks. No wallet required.')),h('div.analytics-controls',periods,chain,refresh)),status,body);
+  const rewards=rewardsSection({api});
+  root.append(h('div.page-head',h('div',h('p.an-eyebrow',icon('chart-column','icon-sm'),'Analytics · public protocol data'),h('h1','Analytics'),h('p.muted','Launches, markets and fees across Elpida networks. No wallet required.')),h('div.analytics-controls',periods,chain,refresh)),status,rewards.root,body);
   const usd=v=>'$'+compact(v), metricCard=(title,value,note,glyph,hl)=>h('div.tile.analytics-metric',{'data-hl':hl?'true':null},h('p.an-tile-label',icon(glyph,'icon-sm'),title),h('strong',value),h('p.small.muted',note));
   function chart(){
     const values=data.series.map(b=>b[metric]),max=Math.max(1,...values),plot=h('div.analytics-plot');
@@ -65,5 +67,5 @@ export function renderAnalytics({api}){
     finally{if(id===revision){refresh.disabled=false;body.setAttribute('aria-busy','false');}}
   }
   const timer=setInterval(()=>{if(root.isConnected&&!document.hidden)load();},30000);
-  load();return {root,dispose:()=>clearInterval(timer)};
+  load();return {root,dispose:()=>{clearInterval(timer);rewards.dispose();}};
 }

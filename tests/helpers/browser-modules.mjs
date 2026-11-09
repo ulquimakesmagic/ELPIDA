@@ -9,6 +9,7 @@ const map = {
   '/stock-catalog.mjs': ${JSON.stringify(new URL('../../packages/core/stock-catalog.mjs', import.meta.url).href)},
   '/curve-model.mjs': ${JSON.stringify(new URL('../../packages/core/curve-model.mjs', import.meta.url).href)},
   '/v4-model.mjs': ${JSON.stringify(new URL('../../packages/core/v4-model.mjs', import.meta.url).href)},
+  '/v2-economics.mjs': ${JSON.stringify(new URL('../../packages/core/v2-economics.mjs', import.meta.url).href)},
   '/dex-router.mjs': ${JSON.stringify(new URL('../../packages/core/dex-router.mjs', import.meta.url).href)},
   '/elpida-solana.mjs': ${JSON.stringify(new URL('../../packages/solana/client.mjs', import.meta.url).href)},
   '/paced-rpc.mjs': ${JSON.stringify(new URL('../../apps/web/paced-rpc.mjs', import.meta.url).href)},

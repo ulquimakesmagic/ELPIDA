@@ -38,16 +38,16 @@ export async function v4Slot0(manager, poolId, call = {}) {
 }
 
 export class V4Indexer extends EvmIndexer {
-  constructor({ provider, factory, hook, poolManager, router = null, path = ':memory:', chainId = 31337, fromBlock = 0, confirmations = 0, nativeSymbol = 'ETH', batchSize = 100, fullRefreshMs = 0 }) {
-    super({ provider, factory, contracts: { factory: { abi: V4_ABIS.factory }, curve: { abi: V4_ABIS.hook }, pool: { abi: V4_ABIS.pool }, token: { abi: V4_ABIS.token } }, path, chainId, fromBlock, confirmations, nativeSymbol, batchSize, dexName: 'Uniswap v4', fullRefreshMs });
+  constructor({ provider, factory, hook, poolManager, router = null, path = ':memory:', chainId = 31337, fromBlock = 0, confirmations = 0, nativeSymbol = 'ETH', batchSize = 100, fullRefreshMs = 0, abis = V4_ABIS }) {
+    super({ provider, factory, contracts: { factory: { abi: abis.factory }, curve: { abi: abis.hook }, pool: { abi: abis.pool }, token: { abi: abis.token } }, path, chainId, fromBlock, confirmations, nativeSymbol, batchSize, dexName: 'Uniswap v4', fullRefreshMs });
     this.hook = hook.toLowerCase(); this.poolManager = poolManager.toLowerCase(); this.router = router ? router.toLowerCase() : null;
-    this.interfaces.hook = this.interfaces.curve; this.interfaces.router = new Interface(V4_ABIS.router);
-    this.hookContract = new Contract(hook, V4_ABIS.hook, provider); this.managerContract = new Contract(poolManager, V4_ABIS.pool, provider);
+    this.abis = abis; this.interfaces.hook = this.interfaces.curve; this.interfaces.router = new Interface(abis.router);
+    this.hookContract = new Contract(hook, abis.hook, provider); this.managerContract = new Contract(poolManager, V4_ABIS.pool, provider);
   }
   /** Contract handles follow an RPC failover (PublicIndexer replaces `provider`). */
   bind() {
     if (this.boundTo === this.provider) return;
-    this.hookContract = new Contract(this.hook, V4_ABIS.hook, this.provider); this.managerContract = new Contract(this.poolManager, V4_ABIS.pool, this.provider);
+    this.hookContract = new Contract(this.hook, this.abis.hook, this.provider); this.managerContract = new Contract(this.poolManager, V4_ABIS.pool, this.provider);
     this.boundTo = this.provider;
   }
   kindOf(address) {
@@ -101,22 +101,21 @@ export class V4Indexer extends EvmIndexer {
       const address = x.e.args.token.toLowerCase(), quote = x.e.args.quote, native = quote === ZeroAddress;
       const placed = parsed.find(y => y.kind === 'hook' && y.e.name === 'Launched' && y.e.args.token.toLowerCase() === address);
       if (!placed) throw new Error('Launch without hook positions; retry indexing.');
-      const token = new Contract(address, V4_ABIS.token, this.provider), [name, symbol] = await Promise.all([token.name(call), token.symbol(call)]);
+      const token = new Contract(address, this.abis.token, this.provider), [name, symbol] = await Promise.all([token.name(call), token.symbol(call)]);
       let pair = native ? 'native' : 'token', quoteSymbol = this.nativeSymbol, quoteDecimals = 18;
       if (!native) {
-        const q = new Contract(quote, V4_ABIS.token, this.provider);
+        const q = new Contract(quote, this.abis.token, this.provider);
         [quoteSymbol, quoteDecimals] = await Promise.all([q.symbol(call), q.decimals(call).then(Number)]);
-        try { if ((await new Contract(this.factory, V4_ABIS.factory, this.provider).feeUsdc(call)).toLowerCase() === quote.toLowerCase()) pair = 'usdc'; } catch { /* pricing not configured */ }
+        try { if ((await new Contract(this.factory, this.abis.factory, this.provider).feeUsdc(call)).toLowerCase() === quote.toLowerCase()) pair = 'usdc'; } catch { /* pricing not configured */ }
         // Test stocks (and later approved real ones) describe themselves: pairKind() === 'xstock'.
         if (pair === 'token') try { if (await new Contract(quote, ['function pairKind() view returns(string)'], this.provider).pairKind(call) === 'xstock') pair = 'xstock'; } catch { /* a plain token */ }
       }
-      const launch = await this.hookContract.launches(address, call);
       const positions = { upperTick: Number(placed.e.args.upperTick), lowerTick: Number(placed.e.args.lowerTick), saleLiquidity: placed.e.args.saleLiquidity.toString(), upperLiquidity: placed.e.args.upperLiquidity.toString() };
       const saleTokens = v4PoolState({ ...positions, milestoneLiquidity: 0n, graduated: false }, 0n).saleTokens;
       const key = v4PoolKey(quote, x.e.args.token, getAddress(this.hook));
       const r = { address, metadataURI: uris.get(address) ?? '', curve: this.hook, hook: this.hook, poolManager: this.poolManager, poolId: v4PoolId(key), poolKey: key, creator: x.e.args.creator, reward: placed.e.args.creatorVault, name, symbol, pair, quoteAddress: quote, quoteDecimals, quoteSymbol,
-        saleCapRaw: saleTokens.toString(), created: block.timestamp * 1000, creationBlock: height, hash: x.l.transactionHash, curveModel: 11, model: V4_MODEL, venue: 'Uniswap v4', partialFill: false,
-        launchedAt: Number(launch.launchedAt), feeSchedule: { base: V4_FEE.base, start: V4_FEE.start, window: V4_FEE.window }, poolFeeBps: V4_FEE.pool, buybackBps: Number(launch.buybackBps), dustBurned: placed.e.args.dustBurned.toString(), ...positions,
+        saleCapRaw: saleTokens.toString(), created: block.timestamp * 1000, creationBlock: height, hash: x.l.transactionHash, venue: 'Uniswap v4', partialFill: false,
+        dustBurned: placed.e.args.dustBurned.toString(), ...positions, ...await this.launchFields(address, x.e, placed.e, call),
         devBoughtRaw: x.e.args.bought.toString(), devBoughtPct: supplyPercent(x.e.args.bought.toString()) };
       fresh.push(r); records.set(address, r);
     }
@@ -181,6 +180,11 @@ export class V4Indexer extends EvmIndexer {
       for (const [r, s] of snapshots) this.db.prepare('INSERT INTO snapshots VALUES(?,?,?)').run(r.address, height, json(s));
       this.db.exec('COMMIT');
     } catch (e) { this.db.exec('ROLLBACK'); throw e; }
+  }
+  /** The model's own fields of a new launch record (Model 11: fixed 1.25% fee, 1% after the milestone, partner tiers). */
+  async launchFields(address, factoryEvent, hookEvent, call) {
+    const launch = await this.hookContract.launches(address, call);
+    return { curveModel: 11, model: V4_MODEL, launchedAt: Number(launch.launchedAt), feeSchedule: { base: V4_FEE.base, start: V4_FEE.start, window: V4_FEE.window }, poolFeeBps: V4_FEE.pool, buybackBps: Number(launch.buybackBps) };
   }
   async readSnapshot(r, height, block) {
     const call = { blockTag: height }, t = new Contract(r.address, V4_ABIS.token, this.provider), d = r.quoteDecimals;
