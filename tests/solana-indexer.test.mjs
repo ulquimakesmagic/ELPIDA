@@ -205,3 +205,13 @@ test('a launch newer than the pool snapshot reloads the pools before its trades 
     assert.equal(loads, 1);
   } finally { f.index.close(); }
 });
+
+test('Solana RPC rotator list: SOLANA_RPC_URL first, then SOLANA_RPC_URLS; duplicates dropped, invalid entries counted and never echoed', async () => {
+  const { solanaRpcList, rpcHost } = await import('../packages/solana/rpc-config.mjs');
+  const list = solanaRpcList({ SOLANA_RPC_URL: 'https://devnet.helius-rpc.com/?api-key=one', SOLANA_RPC_URLS: 'https://solana-devnet.g.alchemy.com/v2/two, https://devnet.helius-rpc.com/?api-key=one\nhttp://plain.example/?k=LEAK  https://x.quiknode.pro/three/' });
+  assert.deepEqual(list.urls, ['https://devnet.helius-rpc.com/?api-key=one', 'https://solana-devnet.g.alchemy.com/v2/two', 'https://x.quiknode.pro/three/']);
+  assert.equal(list.invalid, 1);
+  assert.doesNotMatch(JSON.stringify(list), /LEAK/);
+  assert.deepEqual(solanaRpcList({}), { urls: [], invalid: 0 });
+  assert.equal(rpcHost('https://devnet.helius-rpc.com/?api-key=one'), 'devnet.helius-rpc.com', 'only the host is ever shown');
+});

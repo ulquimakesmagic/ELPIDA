@@ -9,7 +9,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { Contract, JsonRpcProvider, NonceManager, Wallet, ZeroAddress, getAddress } from 'ethers';
 import { buildRound } from '../../packages/core/v2-rounds.mjs';
-import { airdropRound, holderRound, flywheelOrders, personalFunder, boundedFunderLinks, HOLDER_RULES, FLYWHEEL_RULES } from '../../packages/core/v2-keeper-plan.mjs';
+import { airdropRound, holderRound, flywheelOrders, personalFunder, boundedFunderLinks, HOLDER_RULES, FLYWHEEL_RULES, latestJobs } from '../../packages/core/v2-keeper-plan.mjs';
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 
 const DAY = 86_400, BATCH = 80;
@@ -227,7 +227,8 @@ export class V2Keeper {
 
   status() {
     return { enabled: true, chains: this.workers.map(w => ({ chain: w.chain, keeper: w.signer.address ?? null, airdropNext: this.get(`${w.chain}:airdrop:next`, 0), holderNext: this.get(`${w.chain}:holder:next`, 0),
-      runs: this.db.prepare('SELECT job,at,status FROM v2k_runs WHERE chain=? ORDER BY id DESC LIMIT 8').all(w.chain) })) };
+      runs: this.db.prepare('SELECT job,at,status FROM v2k_runs WHERE chain=? ORDER BY id DESC LIMIT 8').all(w.chain),
+      jobs: latestJobs(this.db.prepare('SELECT job,at,status,detail FROM v2k_runs WHERE id IN (SELECT MAX(id) FROM v2k_runs WHERE chain=? GROUP BY job) ORDER BY job').all(w.chain)) })) };
   }
 }
 

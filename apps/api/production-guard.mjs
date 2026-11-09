@@ -1,7 +1,7 @@
 // Production guard (mainnet checklist C4). When the server is configured for mainnet it refuses to start with test-only
 // features or missing safety configuration. Testnet and local runs are never affected. Reports name settings only;
 // no environment value is ever printed or returned.
-import { validateSolanaRpc } from '../../packages/solana/rpc-config.mjs';
+import { solanaRpcList } from '../../packages/solana/rpc-config.mjs';
 import { publicOrigin } from './network-policy.mjs';
 
 /**
@@ -23,8 +23,10 @@ export function productionGuard({ env = {}, solana = null } = {}) {
   else if (d.build !== 'mainnet') error('solana_test_build', `The Solana deployment record is the "${d.build ?? 'unknown'}" build. Mainnet needs the build that rejects test faucet instructions (build "mainnet").`);
 
   // A private RPC so the browser never talks to a public, rate-limited endpoint or sees the provider key.
-  try { const url = new URL(validateSolanaRpc(env.SOLANA_RPC_URL)); if (['127.0.0.1', 'localhost'].includes(url.hostname)) error('solana_rpc_local', 'SOLANA_RPC_URL points at a local validator; mainnet needs a hosted HTTPS RPC.'); }
-  catch { error('solana_rpc_missing', 'SOLANA_RPC_URL must be one hosted HTTPS mainnet RPC (for example Helius).'); }
+  const rpcs = solanaRpcList(env);
+  if (!rpcs.urls.length) error('solana_rpc_missing', 'Set SOLANA_RPC_URL (and optionally more in SOLANA_RPC_URLS) to hosted HTTPS mainnet RPCs (for example Helius).');
+  else if (rpcs.urls.some(u => ['127.0.0.1', 'localhost'].includes(new URL(u).hostname))) error('solana_rpc_local', 'A Solana RPC points at a local validator; mainnet needs hosted HTTPS RPCs.');
+  if (rpcs.invalid) error('solana_rpc_invalid', `${rpcs.invalid} SOLANA_RPC_URL(S) entr${rpcs.invalid === 1 ? 'y is' : 'ies are'} not a single HTTPS URL.`);
 
   // Public identity, pinned metadata, durable state and verified off-site backups.
   try { if (!publicOrigin(env)) error('public_url_missing', 'Set ELPIDA_PUBLIC_URL (or RAILWAY_PUBLIC_DOMAIN) so origin checks and link previews use the real domain.'); }

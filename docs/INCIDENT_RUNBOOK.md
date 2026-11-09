@@ -67,7 +67,10 @@ minutes, and data on the volume is untouched. Then revert or fix the PR on GitHu
 
 Trades still settle on-chain, but the site shows stale data. Set `ELPIDA_RPC_<chainId>` (for example
 `ELPIDA_RPC_84532` for Base Sepolia) to another provider's URL in Railway variables, and redeploy. The indexer
-resumes from its last block. Remove the override when the default RPC recovers. Solana uses `SOLANA_RPC_URL`.
+resumes from its last block. Remove the override when the default RPC recovers. Solana uses `SOLANA_RPC_URL`, then the endpoints in `SOLANA_RPC_URLS`: it moves to the next one after three failed
+passes, or at once when an endpoint rate-limits or rejects the key, and tries the first one again after 30 minutes.
+Adding a fresh key to `SOLANA_RPC_URLS` is the quickest fix when a provider runs out of credits. The indexer,
+the V2 keeper and the rewards reader all follow the switch (`public_indexer_rpc_switched` in the logs).
 
 ## D. Stale prices
 

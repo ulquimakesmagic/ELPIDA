@@ -189,3 +189,8 @@ export function flywheelOrders({ trades, now, balances, links = [], creatorLinke
   }
   return orders.sort((a, b) => b.netBuyUsd - a.netBuyUsd);
 }
+
+/** Each job's latest run, with the error text when it failed (for the admin page). */
+export function latestJobs(rows) {
+  return rows.map(r => { let error = null; try { error = r.detail ? JSON.parse(r.detail).error ?? null : null; } catch { error = null; } return { job: r.job, at: r.at, status: r.status, error: error ? String(error).slice(0, 240) : null }; });
+}

@@ -30,3 +30,22 @@ test('Solana RPC proxy forwards allowed methods only and rate limits each addres
   assert.equal((await call({ jsonrpc: '2.0', id: 10, method: 'getSlot' })).status, 429, 'burst of 3 used up');
   assert.equal(seen.length, 1);
 });
+
+test('Solana RPC proxy with several endpoints: a refused or failing endpoint is skipped, the one that answers is kept', async t => {
+  const hits = { a: 0, b: 0 };
+  const serve = (name, status) => createServer(async (req, res) => { for await (const _ of req); hits[name]++; res.writeHead(status(), { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ jsonrpc: '2.0', id: 1, result: name })); });
+  let aStatus = 429;
+  const a = serve('a', () => aStatus), b = serve('b', () => 200);
+  for (const s of [a, b]) { await new Promise(r => s.listen(0, '127.0.0.1', r)); t.after(() => s.close()); }
+  const url = s => `http://127.0.0.1:${s.address().port}/?api-key=K`;
+  assert.equal(createRpcProxy(['http://example.com/?k=1', 'not a url']), null, 'no valid endpoint, no proxy');
+  const proxy = createRpcProxy([url(a), 'http://example.com/?k=1', url(b)]);
+  const app = createServer((req, res) => proxy(req, res, (code, data) => { res.writeHead(code, { 'Content-Type': 'application/json' }); res.end(JSON.stringify(data)); }));
+  await new Promise(r => app.listen(0, '127.0.0.1', r)); t.after(() => app.close());
+  const call = async () => (await (await fetch(`http://127.0.0.1:${app.address().port}/`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'getSlot' }) })).json()).result;
+  assert.equal(await call(), 'b', 'the rate-limited endpoint is skipped');
+  assert.equal(await call(), 'b', 'and the answering one is kept');
+  assert.deepEqual(hits, { a: 1, b: 2 });
+  aStatus = 200;
+  assert.equal(await call(), 'b');
+});
