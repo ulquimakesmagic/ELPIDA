@@ -119,7 +119,8 @@ test('deployment terms: mainnet at $20,000 with an approved minimum; test networ
   assert.throws(() => assertV2DeploymentTerms(testnet, { startFdvUsdE6: V2.startFdvUsdE6, minFeeBps: 100 }), /starts at \$50/);
   assert.throws(() => assertV2DeploymentTerms(mainnet, { startFdvUsdE6: 50_000_000n, minFeeBps: 100 }), /starts at \$20,000/);
   assert.throws(() => assertV2DeploymentTerms(testnet, { startFdvUsdE6: 50_000_000n, minFeeBps: 150 }), /at most the default/);
-  assert.throws(() => assertV2DeploymentTerms(mainnet, { startFdvUsdE6: V2.startFdvUsdE6, minFeeBps: 100 }), /not approved/);
+  assert.equal(assertV2DeploymentTerms(mainnet, { startFdvUsdE6: V2.startFdvUsdE6, minFeeBps: 100 }), true, 'Malik approved 1.00% for mainnet (9 November)');
+  assert.throws(() => assertV2DeploymentTerms(mainnet, { startFdvUsdE6: V2.startFdvUsdE6, minFeeBps: 50 }), /not approved/);
   assert.equal(assertV2DeploymentTerms(mainnet, { startFdvUsdE6: V2.startFdvUsdE6, minFeeBps: 100, approvedMinFeeBps: 100 }), true);
 });
 

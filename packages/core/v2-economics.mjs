@@ -16,10 +16,12 @@ export const V2 = Object.freeze({
 });
 
 /**
- * Minimum creator-selectable fee. NOT an approved parameter (spec §25.1): kept configurable and passed in by callers.
- * The audit recommends 100 bps; this default only exists so tests and previews have a value.
+ * Minimum creator-selectable fee (spec §25.1), passed in by callers. The audit recommended 100 bps, and Malik approved
+ * 1.00% for mainnet on 9 November 2026 (V2_MAINNET_MIN_FEE_BPS).
  */
 export const V2_PROPOSED_MIN_FEE_BPS = 100;
+/** Malik, 9 November 2026: the minimum fee for a mainnet V2 launchpad (deploying to mainnet still needs his approval). */
+export const V2_MAINNET_MIN_FEE_BPS = 100;
 
 /** Five-way split of collected trading fees, in basis points of the whole fee (spec §11). Sums to 10,000. */
 export const V2_FEE_SPLIT = Object.freeze({ creator: 3_000, traderAirdrop: 3_000, flywheel: 1_000, holderRewards: 1_000, treasury: 2_000 });
@@ -158,7 +160,7 @@ export function feeAt(elapsed, feeBps) {
  * Checks a V2 launchpad's terms before deployment: mainnet at the specified $20,000 with an approved minimum fee, test
  * networks at the labelled test size. The minimum fee stays unapproved for mainnet until Malik sets it (spec §25.1).
  */
-export function assertV2DeploymentTerms(net, { startFdvUsdE6, minFeeBps, approvedMinFeeBps = null }) {
+export function assertV2DeploymentTerms(net, { startFdvUsdE6, minFeeBps, approvedMinFeeBps = V2_MAINNET_MIN_FEE_BPS }) {
   const expected = net?.mainnet ? V2.startFdvUsdE6 : V2_TESTNET_START_FDV_USD_E6;
   if (startFdvUsdE6 !== expected) throw new Error(`V2 on ${net?.name ?? 'this network'} starts at $${(Number(expected) / 1e6).toLocaleString('en-US')}.`);
   if (!Number.isInteger(minFeeBps) || minFeeBps < 1 || minFeeBps > V2.defaultFeeBps) throw new Error('Minimum fee must be set and at most the default.');

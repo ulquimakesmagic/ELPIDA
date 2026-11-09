@@ -15,7 +15,7 @@
   blend as the airdrop (20% equal, 40% square root, 40% pro-rata), over their time-weighted balance in the week,
   with the same 1% cap, "so both the big traders and the small traders and the whales win". Holding longer earns
   more; holdings shorter than a day in total don't count.
-- **Assumed, not yet confirmed by Malik:**
+- **Confirmed by Malik (9 November):**
   - Linked wallets: wallets that received a token directly from its creator, and wallets first funded by the same
     **personal** wallet. Finding the funder needs a block-explorer key (`ELPIDA_EXPLORER_API_KEY`, Etherscan's
     multichain API). Without one, only creator transfers link wallets.
@@ -26,6 +26,9 @@
     - any funder of more than 200 of the period's wallets.
     
     A funder's status is re-checked weekly.
+
+- **Mainnet values (Malik, 9 November):** a minimum trading fee of 1.00% (`V2_MAINNET_MIN_FEE_BPS`) and a holder
+  payout threshold of $25. Recorded for a future mainnet deployment, which still needs Malik's explicit approval.
 
 ## Contract change
 

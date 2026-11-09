@@ -8,8 +8,8 @@
 //    and whales all win, and holding longer earns more). Native pairs pay native, stock pairs pay the stock, USDC pairs are
 //    converted to native first (the distributor's convertToNative).
 //  - Flywheel: the top 10 V2 tokens by net buying from independent wallets over 7 days are bought and burned.
-//  - Linked wallets count as one and creator-linked wallets are excluded everywhere. The linking rule (assumed, Malik
-//    9 November): wallets first funded by the same personal wallet (never an exchange, faucet, bridge or other
+//  - Linked wallets count as one and creator-linked wallets are excluded everywhere. The linking rule (confirmed by
+//    Malik, 9 November): wallets first funded by the same personal wallet (never an exchange, faucet, bridge or other
 //    service: LINK_RULES), and wallets that received a token directly from its creator.
 import { AIRDROP_RULES, allocateAirdrop, linkWallets, qualifies, walletPayouts } from './v2-airdrop.mjs';
 
@@ -35,7 +35,7 @@ export function boundedFunderLinks(links, rules = LINK_RULES) {
 
 export const HOLDER_RULES = Object.freeze({
   ...AIRDROP_RULES,
-  /** A token's holder share is paid once it is worth at least this (spec §25; Malik to confirm). */
+  /** A token's holder share is paid once it is worth at least this (spec §25; Malik, 9 November: $25 on mainnet). */
   thresholdUsd: { mainnet: 25, testnet: 0.25 },
   /** Holders must have held for at least this long in the period to count (blocks buy-snapshot-sell). */
   minHoldSeconds: 86_400,
