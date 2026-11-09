@@ -24,6 +24,7 @@ import {
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { buildSolanaRound, verifySolanaProof } from '../packages/solana/v2-rounds.mjs';
 import { ensureV2, v2Genesis, v2SolParams } from '../packages/solana/v2-setup.mjs';
+import { SolanaV2Keeper, configuredSolanaV2Keeper } from '../apps/api/v2-keeper-solana.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
 import { vaultUpgrade, vaultHandBack, closeProgram, readProgramData } from '../scripts/squads-devnet-trial.mjs';
 import { deployProgram, upgradeProgram, ensurePairConfigs, pricingUpdates, ensurePricing, ensureBetaGate, rejectsTestInstructions, prepareUpgradeBuffer, transferUpgradeAuthority, send, airdrop } from '../packages/solana/deploy.mjs';
@@ -1727,4 +1728,37 @@ test('Solana V2 setup (step 4a): the SOL pair and the distributors are created o
   assert.equal(record.flywheelVault, f.client.v2VaultPda('flywheel').toBase58());
   const again = await run();
   assert.deepEqual(again.distributors, record.distributors, 'a second run changes nothing');
+});
+
+test('Solana V2 keeper (step 4b): pays owed fees, harvests quietly, sweeps vault SOL, and plans flywheel orders by the rules', { skip: raySkip }, async () => {
+  const payer = Keypair.generate();
+  await airdrop(f.connection, payer.publicKey, 5 * web3.LAMPORTS_PER_SOL);
+  const deployment = { programId: f.programId.toBase58(), v2: { config: f.client.configV2For(f.quoteMint).toBase58() } };
+  const keeper = new SolanaV2Keeper({ connection: f.connection, payer, deployment, cluster: 'devnet' });
+  const pools = await keeper.pools();
+  assert.ok(pools.length >= 2 && pools.every(p => p.v2), 'the V2 pools of this pair');
+  assert.ok(pools.some(p => v2Owed(p.v2).some(v => v > 0n)), 'a pool owes fees before the run');
+  await keeper.fees();
+  for (const p of await keeper.pools()) assert.deepEqual(v2Owed(p.v2), [0n, 0n, 0n, 0n, 0n], 'every share paid');
+  await keeper.harvest();
+  assert.equal(keeper.status().runs[0].status, 'ok', 'nothing to harvest is not a failure');
+  // SOL vault sweep (the holder vault holds wrapped SOL from the Raydium V2 test).
+  const solKeeper = new SolanaV2Keeper({ connection: f.connection, payer, deployment: { ...deployment, v2: { config: f.client.configV2For(new PublicKey(WSOL_MINT)).toBase58() } } });
+  const holderVault = f.client.distVault(V2_DIST.holder), before = await f.connection.getBalance(holderVault);
+  await solKeeper.sweep();
+  assert.ok(await f.connection.getBalance(holderVault) > before, 'holder vault SOL is now plain SOL');
+  // Flywheel plan: only tokens a day old, at most ten, equal slices of 10% of the vault; nothing young is ordered.
+  const now = Math.floor(Date.now() / 1000), mk = (age, reserve, status = 0) => ({ createdAt: BigInt(now - age), realQuote: BigInt(reserve), status, mint: Keypair.generate().publicKey, v2: { feeBps: 125 } });
+  assert.deepEqual(keeper.plan([mk(60, 10)], 1_000n, now), []);
+  const plan = keeper.plan([mk(2 * 86_400, 5), mk(2 * 86_400, 9, 2), ...Array.from({ length: 12 }, (_, i) => mk(3 * 86_400, 100 + i))], 1_000_000n, now);
+  assert.equal(plan.length, 10); assert.ok(plan.every(o => o.amountIn === 10_000n), 'ten slices of 10% of the vault');
+  assert.equal(plan[0].pool.realQuote, 111n, 'largest reserve first');
+  await keeper.flywheel();
+  assert.equal(keeper.status().runs[0].job, 'flywheel');
+  // Configuration: off without the key, waiting without a V2 setup, never on mainnet.
+  assert.equal(configuredSolanaV2Keeper({ env: {}, net: { deployment }, connection: f.connection }).status().state, 'not_configured');
+  const key = JSON.stringify([...payer.secretKey]);
+  assert.equal(configuredSolanaV2Keeper({ env: { ELPIDA_V2_KEEPER_SOLANA_KEY: key }, net: { deployment: { programId: deployment.programId } }, connection: f.connection }).status().state, 'waiting_for_v2_setup');
+  assert.equal(configuredSolanaV2Keeper({ env: { ELPIDA_V2_KEEPER_SOLANA_KEY: key }, net: { mainnet: true, deployment }, connection: f.connection }).status().state, 'mainnet_needs_approval');
+  assert.equal(configuredSolanaV2Keeper({ env: { ELPIDA_V2_KEEPER_SOLANA_KEY: key }, net: { deployment }, connection: f.connection, path: ':memory:' }).enabled, true);
 });
