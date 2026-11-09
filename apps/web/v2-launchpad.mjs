@@ -142,7 +142,7 @@ export async function v2StockPairs(w) {
   const d = v2Deployment(w.net);
   if (!d) return [];
   const factory = new Contract(d.factory, V2_FACTORY_ABI, w.provider);
-  return Promise.all((w.approvedQuotes ?? []).filter(a => a.kind === 'xstock' && a.test).map(async s => ({ address: s.address, symbol: s.symbol, approved: (await factory.approvedQuotes(s.address)) > 0n })));
+  return Promise.all([...new Map((w.approvedQuotes ?? []).filter(a => a.kind === 'xstock' && a.test).map(a => [a.address.toLowerCase(), a])).values()].map(async s => ({ address: s.address, symbol: s.symbol, approved: (await factory.approvedQuotes(s.address)) > 0n })));
 }
 
 /**

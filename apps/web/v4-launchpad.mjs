@@ -222,7 +222,7 @@ export async function v4StockPairs(w) {
   const d = v4Deployment(w.net);
   if (!d) return [];
   const factory = new Contract(d.factory, V4_FACTORY_ABI, w.provider);
-  const stocks = (w.approvedQuotes ?? []).filter(a => a.kind === 'xstock' && a.test);
+  const stocks = [...new Map((w.approvedQuotes ?? []).filter(a => a.kind === 'xstock' && a.test).map(a => [a.address.toLowerCase(), a])).values()];
   return Promise.all(stocks.map(async s => ({ address: s.address, symbol: s.symbol, approved: (await factory.approvedQuotes(s.address)) > 0n })));
 }
 

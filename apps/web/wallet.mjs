@@ -488,6 +488,8 @@ export class TestnetWallet {
       // Ondo-style test stocks describe their issuer model and their total-return feed (contracts/evm/testnet).
       if(kind==='xstock'){try{const s=new Contract(address,['function stockProvider() view returns(string)','function referenceFeed() view returns(address)'],this.provider);const provider=await s.stockProvider();if(provider==='ondo-test')stock={provider,feed:await s.referenceFeed()};}catch{}}
       if (this.feeUsdc && address.toLowerCase() === this.feeUsdc.toLowerCase()) kind='usdc';
+      // Two overlapping loads (the panel redraws while pairs are read) must not list an asset twice.
+      if(this.approvedQuotes.some(a=>a.address.toLowerCase()===address.toLowerCase()))return;
       this.approvedQuotes.push({id:address,address,kind,symbol,name,decimals:Number(decimals),virtualQuote:template.virtualQuote,test:faucetLimit>0n,stock,faucet:faucetLimit>0n?{label:'Get '+formatUnits(faucetLimit,decimals).replace(/\.0$/,'')+' '+symbol,action:'faucet',body:{asset:address}}:null});
     };
     if(this.pairsScanned===undefined&&this.deployment.shared){

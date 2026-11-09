@@ -50,6 +50,10 @@ export const testnets = [
     // Deployed by Malik from the operator panel, 6 Nov 2026 (factory created in block 12075675, hook in 12075678, the
     // rest after a resumed run; treasury 0xf5B0…639D).
     v4: { poolManager: '0xE03A1074c86CFeDd5C142C4F04F1a1536e203543', shared: { factory: '0x1136B6D2410b1B32Ec6039aD92a0B110A934aCE9', hook: '0xbe3C898140D32DFcAa1DeE5B1BaDE36BCe4B68cC', router: '0xC5FA99cFd6c752199BCb37f9dEF3fb94279b7B3c', block: 12075675 } },
+    // ELPIDA V2 test launchpad (contracts/evm/v2), deployed by Malik from the operator panel, 9 Nov 2026 (factory from
+    // block 12096986; treasury 0xf5B0…639D). The distributors and the flywheel vault are run by the server keeper
+    // 0x95d3…5124 (ELPIDA_V2_KEEPER_KEY); the public index checks the wiring on chain before listing anything.
+    v2: { shared: { factory: '0xb70Db4E38C5668713967187dDe88a187c6afA3Bc', hook: '0x137FfB83950Ea837BcE397909e03Fa600f9428Cc', router: '0x0D749010DCee1A70F61D458d0E92Fa5e1269Ea0B', airdrop: '0xf3FAb645403542A933949eAD9C053247913C694f', holder: '0x155a8B63e43a0a64D32bEd959375d00643918885', flywheel: '0x651FD708EFa8D5EF46115bb3CeDF7664fF1511F5', keeper: '0x95d3fAea73006C4557b02aC81593d8312ff25124', block: 12096986, minFeeBps: 100 } },
     legacy: [{ factory: '0x5aA283B8B12786314e76ac4E977B1E9275b407f6', block: 12000324, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 11972040, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },
   {
