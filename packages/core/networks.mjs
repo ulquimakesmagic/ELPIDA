@@ -90,9 +90,13 @@ export const testnets = [
     chainId: 46630, rpcUrl: 'https://rpc.testnet.chain.robinhood.com', explorer: 'https://explorer.testnet.chain.robinhood.com',
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     gasFaucet: 'https://faucet.testnet.chain.robinhood.com',
-    // No Uniswap v4 on this testnet either (9 Nov 2026): as on BNB testnet, the operator deploys a labelled test copy of
-    // Uniswap's own PoolManager from the operator panel, then the ELPIDA V2 launchpad on it. Pin both once deployed.
-    v4: { poolManager: null, testPoolManager: true, shared: null },
+    // No Uniswap v4 on this testnet either: as on BNB testnet, a labelled test copy of Uniswap's own PoolManager (v4-core
+    // 1.0.2, unchanged), deployed by Malik from the operator panel, 9 Nov 2026 (block 150924125, tx 0x7eac8d8b…5d8f).
+    v4: { poolManager: '0xa9E3183680eDef78b14f6d2e60d6AF65c4d47D4C', testPoolManager: true, shared: null },
+    // ELPIDA V2 test launchpad on that PoolManager, deployed by Malik from the operator panel, 9 Nov 2026 (factory from
+    // block 150924467; treasury 0xf5B0…639D; reward contracts run by the server keeper 0x95d3…5124). USD pricing from the
+    // relay feed below.
+    v2: { shared: { factory: '0xDDCc87C34eD8D8bEB6D5fAFc6C14e7cE8578fd41', hook: '0x74f2f46A45fCAc130252552880402b57aF3328Cc', router: '0xD8D64a0835BAF274077Ce92dc25F7a09984fEb59', airdrop: '0x3a4B7128b400CF2502E77341AE444B08F926a57d', holder: '0x3ED5280488e335f3eF70f7F78F4Fb78Cc0910CE9', flywheel: '0x1798C56A217A37f13D4a36001608Ae9773E9f37A', keeper: '0x95d3fAea73006C4557b02aC81593d8312ff25124', block: 150924467, minFeeBps: 100 } },
     // This testnet has neither Uniswap v3 nor a Chainlink feed (24 Oct 2026). The launchpad owner deploys a labelled
     // Elpida test deployment of Uniswap v3 and an ElpidaRelayFeed from the site; the server relay (apps/api/feed-relay.mjs)
     // copies Chainlink ETH / USD from Base Sepolia into it, keeping Chainlink's timestamps. Mainnet uses the real ones.
