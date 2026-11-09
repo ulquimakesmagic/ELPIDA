@@ -60,3 +60,15 @@ The launch form was checked in Chromium: the model choice, the fee presets at 3%
 - The holder-reward formula (§25).
 - Solana.
 - Pinning V2 on test networks once Malik deploys it from the operator panel.
+
+## Deploy fixes (9 November)
+
+- **Lagging wallets.** Every V2 deploy step sends its own nonce: the highest of the wallet's and the site's pending
+  counts, and the last one sent + 1. A step refused as "nonce too low", "already known" or "replacement transaction
+  underpriced" is asked again, up to three times. Trust Wallet's RPC builds from a block behind.
+- **Resuming.** A payout contract or flywheel vault from an earlier attempt is reused only if it names the intended
+  operator: the server keeper when `/api/config` shows one, otherwise the wallet. A holder distributor must also have
+  the intended conversion settings. Otherwise the contract is deployed again, then the hook after it.
+- **Test stock pairs on V2.** The V2 card lists the network's test stocks (from the Pairs tab) with **Approve for V2**.
+  The pair is approved at the same starting market cap as on Model 10: V2's virtual quote is 9/8 of Model 10's. The
+  launch form offers stock pairs on V2, and holders of a stock-paired token are paid in that stock.

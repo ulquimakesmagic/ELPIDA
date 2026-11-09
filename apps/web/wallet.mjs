@@ -5,7 +5,7 @@ import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './
 import { isV4Token, v4Available, v4Deployment, deployV4, deployTestPoolManager, approveV4Stock, launchV4, v4Quote, v4Trade, v4WithdrawFees, v4TokenState } from './v4-launchpad.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
 import { V2_MODEL } from '/v2-economics.mjs';
-import { deployV2, launchV2 } from './v2-launchpad.mjs';
+import { deployV2, launchV2, approveV2Stock } from './v2-launchpad.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress } from '/vendor/ethers.js';
 import { routerAbi, swapCalldata } from '/dex-router.mjs';
@@ -994,6 +994,7 @@ export class TestnetWallet {
     if(action==='launch'&&body?.model===V4_MODEL)return launchV4(this,body);
     // ELPIDA V2.0: its own factory, hook, reward contracts and router; trades use the Model 11 path below.
     if(action==='deploy-v2')return deployV2(this,body??{});
+    if(action==='approve-v2-stock')return approveV2Stock(this,body??{});
     if(action==='launch'&&body?.model===V2_MODEL)return launchV2(this,body);
     {const v4item=body?.token?this.launches.get(String(body.token).toLowerCase()):null;
       if(v4item&&isV4Token(v4item)){

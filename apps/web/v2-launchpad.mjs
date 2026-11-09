@@ -61,8 +61,28 @@ export async function deployV2(w, body = {}) {
   const all = await response.json(), a = all.v2, progress = read(progressKey(net.chainId)) ?? {};
   const save = () => write(progressKey(net.chainId), progress);
   const fresh = async (key, check) => !!progress[key] && await hasCode(w.provider, progress[key], { wait: true }) && (!check || await settled(() => check(progress[key])));
-  const deploy = async (art, args, message) => { w.onProgress(message); const c = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(...args); await c.waitForDeployment(); await walletCaughtUp(w, c.deploymentTransaction().nonce); return { address: await c.getAddress(), receipt: await c.deploymentTransaction().wait() }; };
-  const step = async (pending, message) => { const r = await w.wait(pending, message); await walletCaughtUp(w, r?.tx?.nonce); return r; };
+  // Some wallets (Trust Wallet) build the next transaction from an RPC a block behind and reuse a spent nonce ("nonce
+  // too low", "replacement transaction underpriced"). Every step names its nonce (the highest of the wallet's and the
+  // site's pending counts and the last one sent + 1) and a step refused that way is asked again, up to three times.
+  let lastNonce = -1;
+  const nextNonce = async () => {
+    const counts = await Promise.all([w.signer?.provider?.getTransactionCount(w.address, 'pending').catch(() => 0), w.provider.getTransactionCount(w.address, 'pending').catch(() => 0)]);
+    return Math.max(...counts.map(Number), lastNonce + 1);
+  };
+  const stale = e => /nonce too low|nonce has already been used|replacement transaction underpriced|already known/i.test(`${e?.shortMessage ?? ''} ${e?.message ?? ''} ${e?.info?.error?.message ?? ''}`);
+  const attempt = async send => {
+    for (let i = 0; ; i++) {
+      try { return await send({ nonce: await nextNonce() }); }
+      catch (e) { if (!stale(e) || i >= 2) throw e; w.onProgress('Your wallet reused a transaction number its network already counted. Asking again in a few seconds…'); await pause(4000 + i * 3000); }
+    }
+  };
+  const deploy = async (art, args, message) => {
+    w.onProgress(message);
+    const c = await attempt(overrides => new ContractFactory(art.abi, art.bytecode, w.signer).deploy(...args, overrides));
+    await c.waitForDeployment(); const tx = c.deploymentTransaction(); lastNonce = tx.nonce; await walletCaughtUp(w, tx.nonce);
+    return { address: await c.getAddress(), receipt: await tx.wait() };
+  };
+  const step = async (send, message) => { const r = await attempt(overrides => w.wait(send(overrides), message)); lastNonce = r?.tx?.nonce ?? lastNonce; await walletCaughtUp(w, r?.tx?.nonce); return r; };
   const starts = progress.starts ?? (progress.starts = roundStarts());
   if (!await fresh('create2')) { progress.create2 = (await deploy(all.create2, [], `Step 1 of 10: confirm the CREATE2 deployer for the hook (${LABEL})…`)).address; save(); }
   if (!await fresh('factory', async f => (await new Contract(f, V2_FACTORY_ABI, w.provider).treasury()).toLowerCase() === w.address.toLowerCase())) {
@@ -74,9 +94,15 @@ export async function deployV2(w, body = {}) {
   // the network's Uniswap v3 router (SwapRouter02) when it has one.
   const dex = w.dex, usdcAsset = w.oracle.usdc && w.oracle.usdc !== Z ? getAddress(w.oracle.usdc) : null;
   const conversion = dex?.router && dex?.weth && usdcAsset && (dex.routerVersion ?? 2) === 2 ? [usdcAsset, getAddress(dex.router), getAddress(dex.weth)] : [Z, Z, Z];
-  if (!await fresh('airdrop')) { progress.airdrop = (await deploy(a.distributor, [keeper, 0, starts.month, 'trader-airdrop', Z, Z, Z], 'Step 3 of 10: confirm the trader-airdrop distributor (monthly rounds, from the 1st of this month UTC)…')).address; progress.hook = null; save(); }
-  if (!await fresh('holder')) { progress.holder = (await deploy(a.distributor, [keeper, 7 * 86400, starts.today, 'holder-rewards', ...conversion], `Step 4 of 10: confirm the holder-reward distributor (weekly rounds${conversion[0] === Z ? '' : ', USDC paid as the native coin'})…`)).address; progress.hook = null; save(); }
-  if (!await fresh('flywheel')) { progress.flywheel = (await deploy(a.flywheel, [keeper, progress.factory], 'Step 5 of 10: confirm the flywheel vault (it can only buy V2 tokens and burn them)…')).address; progress.hook = null; save(); }
+  // A reward contract from an earlier attempt is reused only if it names the intended operator (the server keeper when
+  // it is configured) and, for holder rewards, the intended conversion; otherwise it is deployed again (and the hook,
+  // which records the three addresses, after it).
+  const READ = ['function operator() view returns(address)', 'function convertible() view returns(address)', 'function swapRouter() view returns(address)'];
+  const operatedBy = async x => (await new Contract(x, READ, w.provider).operator()).toLowerCase() === keeper.toLowerCase();
+  const converts = async x => { const c = new Contract(x, READ, w.provider); return (await c.convertible()).toLowerCase() === conversion[0].toLowerCase() && (await c.swapRouter()).toLowerCase() === conversion[1].toLowerCase(); };
+  if (!await fresh('airdrop', operatedBy)) { progress.airdrop = (await deploy(a.distributor, [keeper, 0, starts.month, 'trader-airdrop', Z, Z, Z], 'Step 3 of 10: confirm the trader-airdrop distributor (monthly rounds, from the 1st of this month UTC)…')).address; progress.hook = null; save(); }
+  if (!await fresh('holder', async x => await operatedBy(x) && await converts(x))) { progress.holder = (await deploy(a.distributor, [keeper, 7 * 86400, starts.today, 'holder-rewards', ...conversion], `Step 4 of 10: confirm the holder-reward distributor (weekly rounds${conversion[0] === Z ? '' : ', USDC paid as the native coin'})…`)).address; progress.hook = null; save(); }
+  if (!await fresh('flywheel', operatedBy)) { progress.flywheel = (await deploy(a.flywheel, [keeper, progress.factory], 'Step 5 of 10: confirm the flywheel vault (it can only buy V2 tokens and burn them)…')).address; progress.hook = null; save(); }
   const factory = new Contract(progress.factory, V2_FACTORY_ABI, w.signer);
   if (!progress.hook || !await hasCode(w.provider, progress.hook, { wait: true })) {
     const args = AbiCoder.defaultAbiCoder().encode(['address', 'address', 'address', 'address', 'address', 'address', 'uint256'], [poolManager, progress.factory, w.address, progress.airdrop, progress.flywheel, progress.holder, minFeeBps]);
@@ -84,7 +110,7 @@ export async function deployV2(w, body = {}) {
     w.onProgress('Step 6 of 10: finding the hook address (its last bits are its Uniswap v4 permissions). This takes a few seconds…');
     const mined = await mineHookSalt(progress.create2, initCode);
     if (!await hasCode(w.provider, mined.address)) {
-      await step(new Contract(progress.create2, ['function deploy(bytes,bytes32) returns(address)'], w.signer).deploy(initCode, mined.salt), `Step 6 of 10: confirm the hook at ${mined.address} (minimum fee ${(minFeeBps / 100).toFixed(2)}%)…`);
+      await step(o => new Contract(progress.create2, ['function deploy(bytes,bytes32) returns(address)'], w.signer).deploy(initCode, mined.salt, o), `Step 6 of 10: confirm the hook at ${mined.address} (minimum fee ${(minFeeBps / 100).toFixed(2)}%)…`);
       if (!await hasCode(w.provider, mined.address, { wait: true })) throw new Error('The hook transaction confirmed, but the network does not show the hook yet. Press the button again in a minute: finished steps are kept.');
     }
     progress.hook = mined.address; progress.minFeeBps = minFeeBps; save();
@@ -92,21 +118,47 @@ export async function deployV2(w, body = {}) {
   const hook = new Contract(progress.hook, HOOK_ABI, w.provider);
   const wiring = await settled(() => Promise.all([hook.factory(), hook.protocolTreasury(), hook.traderAirdropVault(), hook.flywheelVault(), hook.holderRewardVault()]));
   if (wiring.map(x => x.toLowerCase()).join() !== [progress.factory, w.address, progress.airdrop, progress.flywheel, progress.holder].map(x => x.toLowerCase()).join()) throw new Error('The hook is wired to other contracts. Nothing more was sent.');
-  if ((await settled(() => factory.hook())) === ZeroAddress) await step(factory.setHook(progress.hook), 'Step 7 of 10: confirm connecting the hook to the factory…');
-  if ((await settled(() => factory.usdFeed())) === ZeroAddress) await step(factory.configureUsdPricing(w.oracle.feed, w.oracle.maxAge, w.oracle.usdc ?? ZeroAddress), 'Step 8 of 10: confirm verified USD pricing (the $10 launch fee and the starting market cap)…');
+  if ((await settled(() => factory.hook())) === ZeroAddress) await step(o => factory.setHook(progress.hook, o), 'Step 7 of 10: confirm connecting the hook to the factory…');
+  if ((await settled(() => factory.usdFeed())) === ZeroAddress) await step(o => factory.configureUsdPricing(w.oracle.feed, w.oracle.maxAge, w.oracle.usdc ?? ZeroAddress, o), 'Step 8 of 10: confirm verified USD pricing (the $10 launch fee and the starting market cap)…');
   const usdc = w.oracle.usdc && w.oracle.usdc !== ZeroAddress ? getAddress(w.oracle.usdc) : null;
   if (usdc && (await settled(() => factory.approvedQuotes(usdc))) === 0n) {
     const decimals = Number(await new Contract(usdc, ERC20, w.provider).decimals());
     // Virtual quote = start × 5/4, in USDC units.
-    await step(factory.approveQuote(usdc, V2_TESTNET_START_FDV_USD_E6 * 5n / 4n * 10n ** BigInt(decimals) / 10n ** 6n), 'Step 8 of 10: confirm the USDC pair…');
+    await step(o => factory.approveQuote(usdc, V2_TESTNET_START_FDV_USD_E6 * 5n / 4n * 10n ** BigInt(decimals) / 10n ** 6n, o), 'Step 8 of 10: confirm the USDC pair…');
   }
   if (!await fresh('router', async r => (await new Contract(r, V4_ROUTER_ABI, w.provider).hook()).toLowerCase() === progress.hook.toLowerCase())) { progress.router = (await deploy(all.router, [poolManager, progress.hook], 'Step 9 of 10: confirm the V2 router (buys and sells)…')).address; save(); }
   const flywheel = new Contract(progress.flywheel, ['function router() view returns(address)', 'function setRouter(address)'], w.signer);
-  if ((await settled(() => flywheel.router())) === ZeroAddress) await step(flywheel.setRouter(progress.router), 'Step 10 of 10: confirm the flywheel vault\'s router…');
+  if ((await settled(() => flywheel.router())) === ZeroAddress) await step(o => flywheel.setRouter(progress.router, o), 'Step 10 of 10: confirm the flywheel vault\'s router…');
   const record = { factory: progress.factory, hook: progress.hook, router: progress.router, airdrop: progress.airdrop, holder: progress.holder, flywheel: progress.flywheel, keeper, create2: progress.create2, block: progress.block, poolManager, treasury: w.address, minFeeBps: progress.minFeeBps ?? minFeeBps, model: V2_MODEL, deployedAt: Date.now() };
   if (!saveV2Deployment(net, record)) throw new Error(`Deployed, but this browser blocks storage. Save these addresses: ${JSON.stringify(record)}.`);
   try { localStorage.removeItem(progressKey(net.chainId)); } catch { /* kept for a retry */ }
   return { record, message: `The ${net.name} V2 test launchpad is deployed with its reward contracts, from block ${record.block}. Send the addresses to be pinned in networks.mjs (v2.shared) so the site lists its tokens and shows its Rewards analytics.` };
+}
+
+const testStock = (w, address) => (w.approvedQuotes ?? []).find(a => a.kind === 'xstock' && a.test && a.address.toLowerCase() === String(address ?? '').toLowerCase()) ?? null;
+
+/** The network's test stocks (approved on its Model 10 launchpad) and whether each is a V2 pair yet. */
+export async function v2StockPairs(w) {
+  const d = v2Deployment(w.net);
+  if (!d) return [];
+  const factory = new Contract(d.factory, V2_FACTORY_ABI, w.provider);
+  return Promise.all((w.approvedQuotes ?? []).filter(a => a.kind === 'xstock' && a.test).map(async s => ({ address: s.address, symbol: s.symbol, approved: (await factory.approvedQuotes(s.address)) > 0n })));
+}
+
+/**
+ * Operator: approves a test stock as a V2 pair at the same starting market cap as on Model 10. V2's virtual quote is
+ * start × 5/4 and Model 10's is start × 10/9, so V2's is 9/8 of Model 10's. The V2 treasury signs, once, permanently.
+ */
+export async function approveV2Stock(w, { asset } = {}) {
+  await w.checkNetwork();
+  const d = v2Deployment(w.net); if (!d) throw new Error(`There is no V2 launchpad on ${w.net.name}.`);
+  const record = testStock(w, asset);
+  if (!record?.virtualQuote) throw new Error('Only a test stock approved on this network\'s Model 10 launchpad (Pairs tab) can be approved for V2.');
+  const factory = new Contract(d.factory, V2_FACTORY_ABI, w.signer);
+  if ((await factory.treasury()).toLowerCase() !== w.address.toLowerCase()) throw new Error('Only the V2 launchpad\'s treasury wallet can approve its pairs. Connect that wallet.');
+  if ((await factory.approvedQuotes(record.address)) > 0n) return { message: `${record.symbol} is already a V2 pair.` };
+  const result = await step(w, factory.approveQuote(record.address, BigInt(record.virtualQuote) * 9n / 8n), `Approve ${record.symbol} as a V2 test pair (same starting market cap as on Model 10)…`);
+  return { hash: result.tx.hash, message: `${record.symbol} is now a V2 test pair on ${w.net.name}. Its holders are paid in ${record.symbol}.` };
 }
 
 /** Whole basis points from a percentage typed in the launch form ("1.25" → 125). */
@@ -123,10 +175,12 @@ export function splitPreview(amount, feeBps, decimals = 18) {
 }
 
 /** The launch form's numbers: the minimum fee, the largest first buy within 3% of supply, and the launch fee. */
-export async function v2LaunchTerms(w, { pair = 'native', feeBps = V2.defaultFeeBps } = {}) {
+export async function v2LaunchTerms(w, { pair = 'native', feeBps = V2.defaultFeeBps, quoteAsset } = {}) {
   const d = v2Deployment(w.net); if (!d) throw new Error('No V2 launchpad on this network.');
   const factory = new Contract(d.factory, V2_FACTORY_ABI, w.provider), hook = new Contract(d.hook, HOOK_ABI, w.provider);
-  const asset = pair === 'usdc' ? await factory.feeUsdc() : ZeroAddress, decimals = asset === ZeroAddress ? 18 : Number(await new Contract(asset, ERC20, w.provider).decimals());
+  const asset = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? testStock(w, quoteAsset)?.address : ZeroAddress;
+  if (!asset) throw new Error('Choose a test stock approved for V2.');
+  const decimals = asset === ZeroAddress ? 18 : Number(await new Contract(asset, ERC20, w.provider).decimals());
   const [vQ, minFee, launchFee] = await Promise.all([asset === ZeroAddress ? factory.nativeVirtualQuote() : factory.approvedQuotes(asset), hook.minFeeBps(), factory.launchFee()]);
   if (vQ === 0n) throw new Error('This pair is not approved for V2.');
   return { minFeeBps: Number(minFee), maxFeeBps: V2.maxFeeBps, defaultFeeBps: V2.defaultFeeBps, decimals,
@@ -152,13 +206,18 @@ export async function launchV2(w, body) {
   const feeBps = Number(body.feeBps ?? V2.defaultFeeBps), minFee = Number(await hook.minFeeBps());
   if (!Number.isInteger(feeBps) || feeBps < minFee || feeBps > V2.maxFeeBps) throw new Error(`Choose a fee from ${(minFee / 100).toFixed(2)}% to 4.00%.`);
   const pair = body.pair ?? 'native';
-  if (!['native', 'usdc'].includes(pair)) throw new Error('V2 test launches pair with the native coin or USDC.');
+  if (!['native', 'usdc', 'xstock'].includes(pair)) throw new Error('V2 test launches pair with the native coin, USDC or a test stock approved for V2.');
   const reward = body.reward || w.address;
   if (!isAddress(reward) || reward === ZeroAddress) throw new Error('Enter a valid creator reward wallet.');
-  const asset = pair === 'usdc' ? await factory.feeUsdc() : ZeroAddress;
+  const asset = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? getAddress(testStock(w, body.quoteAsset)?.address ?? ZeroAddress) : ZeroAddress;
+  if (pair === 'xstock') {
+    if (asset === ZeroAddress) throw new Error('Choose a test stock that is approved on this network.');
+    if ((await factory.approvedQuotes(asset)) === 0n) throw new Error(`${testStock(w, asset)?.symbol ?? 'This stock'} is not a V2 pair yet: the operator approves it in the operator panel (Launchpads, V2 card). Pair with the native coin or USDC, or use Model 10.`);
+    await w.stockPreflight?.({ pair: 'xstock', quoteAddress: asset }, 'launch');
+  }
   const quote = asset === ZeroAddress ? null : new Contract(asset, ERC20, w.signer), decimals = quote ? Number(await quote.decimals()) : 18;
   const vQ = quote ? await factory.approvedQuotes(asset) : await factory.nativeVirtualQuote();
-  if (vQ === 0n) throw new Error('USDC is not approved on this V2 launchpad. Launch with the native coin.');
+  if (vQ === 0n) throw new Error('This pair is not approved on this V2 launchpad. Launch with the native coin.');
   const firstBuy = parseUnits(String(body.firstBuy || '0'), decimals), cap = maxFirstBuyGross({ feeBps, vQ });
   if (firstBuy > cap) throw new Error(`The first buy can take at most 3% of the supply: up to ${formatUnits(cap, decimals)} ${quote ? await quote.symbol() : w.net.nativeCurrency.symbol} at a ${(feeBps / 100).toFixed(2)}% fee. Nothing was submitted.`);
   const slippage = BigInt(Math.round(Math.min(5, Math.max(0.1, Number(body.slippage ?? 1))) * 100));

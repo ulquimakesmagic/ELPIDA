@@ -2,7 +2,7 @@ import { h, short, errorText } from './ui.mjs';
 import { chainIcon } from './chain-ui.mjs';
 import { downloadSafeBatch } from './admin-pairs.mjs';
 import { v4Available, v4Deployment, v4PoolManager, savedTestPoolManager, v4StockPairs, v2Deployment } from './v4-launchpad.mjs';
-import { v2Available } from './v2-launchpad.mjs';
+import { v2Available, v2StockPairs } from './v2-launchpad.mjs';
 
 // Operator panel, Launchpads tab (#/monkey?tab=launchpads, 6 November 2026). Setting up a network is an operator job,
 // so every deployment lives here and only here (Malik, 6 November 2026: "limited to admin panel only and not everyone"):
@@ -91,6 +91,18 @@ export function renderLaunchpads(ctx, { connect }) {
       !v4 ? h('p.small.muted', 'This wallet becomes its treasury. The hook address is found in this browser first (a few seconds): its last bits are its Uniswap v4 permissions. A step that fails or is rejected resumes where it stopped.') : null);
   }
 
+  /** V2 test stock pairs: each test stock (Pairs tab) is approved once for V2, at its Model 10 starting market cap. */
+  function v2StockList() {
+    const box = h('div.stack', h('h3.small', 'V2 test stock pairs'), h('p.small.muted', 'Loading the test stocks on this network…'));
+    v2StockPairs(ctx.wallet).then(list => {
+      if (!list.length) { box.replaceChildren(h('h3.small', 'V2 test stock pairs'), h('p.small.muted', 'No test stock exists on this network yet. Deploy and approve one on Model 10 in the Pairs tab, then approve it here for V2.')); return; }
+      box.replaceChildren(h('h3.small', 'V2 test stock pairs'),
+        h('p.small.muted', 'Same starting market cap as on Model 10. Holders of a stock-paired V2 token are paid in that stock. If the issuer pauses it, its pools stop trading and payouts wait until it resumes.'),
+        h('ul.plain', list.map(s => h('li', h('strong', s.symbol), ' ', h('span.mono.small.muted', short(s.address)), ' · ', s.approved ? h('span.small', 'V2 pair') : button(`Approve ${s.symbol} for V2`, 'approve-v2-stock', { asset: s.address })))));
+    }).catch(e => { box.replaceChildren(h('h3.small', 'V2 test stock pairs'), h('p.small.muted', errorText(e))); });
+    return box;
+  }
+
   /** ELPIDA V2 test launchpad: the factory, the hook, the router and the three reward contracts the hook pays. */
   function v2Card(net) {
     if (!v2Available(net) || net.mainnet) return null;
@@ -100,6 +112,7 @@ export function renderLaunchpads(ctx, { connect }) {
     return card('ELPIDA V2 test launchpad',
       h('p.small.muted', 'V2: $50 test starting market cap, graduation at ×5, each creator picks a fee from the minimum to 4% (1.25% default) for good, and every fee splits 30% creator / 30% trader airdrop / 10% flywheel / 10% holder rewards / 20% treasury, paid straight to their contracts. First buys are capped at 3% of supply. Not audited: test networks only.'),
       v2?.pinned ? h('p.small.muted', 'Shared team launchpad: factory ', h('span.mono', short(v2.factory)), ', router ', h('span.mono', short(v2.router)), '.') : null,
+      v2 ? v2StockList() : null,
       v2 && !v2.pinned ? h('div.stack', h('p.small', 'Deployed from this browser. Send these addresses to be pinned in networks.mjs (v2.shared) so the site lists its tokens and shows its Rewards analytics:'),
         h('pre.small.selectable', JSON.stringify({ factory: v2.factory, hook: v2.hook, router: v2.router, airdrop: v2.airdrop, holder: v2.holder, flywheel: v2.flywheel, keeper: v2.keeper, block: v2.block, minFeeBps: v2.minFeeBps }, null, 2))) : null,
       minFee ? h('label.field', h('span.small.muted', 'Minimum trading fee a creator may choose (percent). Fixed for this launchpad; 1.00% is the recommendation until a mainnet value is approved.'), minFee) : null,

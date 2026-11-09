@@ -3,14 +3,14 @@
 // site calls them, on a local cancun chain with Uniswap's own PoolManager.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Contract, formatUnits, parseEther } from 'ethers';
+import { Contract, ContractFactory, formatUnits, parseEther } from 'ethers';
 import './helpers/browser-modules.mjs';
-import { v4Fixture, v4Art, TEST_URI } from './helpers/v4-fixture.mjs';
+import { v4Fixture, v4Art, mined, TEST_URI } from './helpers/v4-fixture.mjs';
 import { v4Artifacts } from '../apps/api/v4-artifacts.mjs';
 import { V2Indexer } from '../packages/indexer/v2-indexer.mjs';
 import { V2_MODEL, splitFee } from '../packages/core/v2-economics.mjs';
 
-const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom } = await import('../apps/web/v2-launchpad.mjs');
+const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom, v2StockPairs, approveV2Stock } = await import('../apps/web/v2-launchpad.mjs');
 const { v2Deployment, v4Quote, v4Trade, isV4Token, isV2Token, v4WithdrawFees } = await import('../apps/web/v4-launchpad.mjs');
 
 function browser(t) {
@@ -96,4 +96,44 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   await v4WithdrawFees(bw, item);
   assert.ok(await f.provider.getBalance(record.flywheel) > 0n);
   await assert.rejects(v4Trade(bw, { ...item, factory: '0x0000000000000000000000000000000000000001' }, 'buy', { amount: '0.01' }), /another V2 launchpad/);
+});
+
+test('V2 deploy: a lagging wallet’s reused nonce is asked again; a resumed deploy replaces reward contracts run by the wrong operator; test stocks become V2 pairs', async t => {
+  browser(t); const f = await v4Fixture(t), owner = f.signers[2], keeper = await f.signers[3].getAddress();
+  const net = { key: 'base-sepolia', name: 'Local v4', chainId: 31337, nativeCurrency: { symbol: 'ETH' }, v4: { poolManager: f.manager.target, shared: null } };
+  const ow = await walletFor(f, owner, net), send = owner.sendTransaction.bind(owner);
+  let sends = 0, refusedNonce = false;
+  owner.sendTransaction = async tx => {
+    sends++;
+    if (sends === 2 && !refusedNonce) { refusedNonce = true; throw new Error('could not coalesce error (error={ "code": -32000, "message": "nonce too low: next nonce 135, tx nonce 134" })'); }
+    if (sends === 5) throw Object.assign(new Error('user rejected action'), { code: 'ACTION_REJECTED' });
+    return send(tx);
+  };
+  // First attempt: no keeper configured (the wallet would run the reward contracts); the operator rejects step 4.
+  await assert.rejects(deployV2(ow), /rejected/);
+  assert.ok(refusedNonce && ow.progress.some(m => /reused a transaction number/.test(m)), 'the reused nonce was asked again');
+  // Second attempt, with the server keeper: the airdrop distributor run by the wallet is replaced.
+  const { record } = await deployV2(ow, { keeper });
+  owner.sendTransaction = send;
+  for (const k of ['airdrop', 'holder', 'flywheel']) assert.equal((await new Contract(record[k], ['function operator() view returns(address)'], f.provider).operator()).toLowerCase(), keeper.toLowerCase(), `${k} is run by the keeper`);
+  assert.equal(record.keeper.toLowerCase(), keeper.toLowerCase());
+  const hook = new Contract(record.hook, v4Art('ElpidaV2Hook').abi, f.provider);
+  assert.equal((await hook.traderAirdropVault()).toLowerCase(), record.airdrop.toLowerCase(), 'the hook pays the new airdrop distributor');
+  // A test stock (approved on Model 10 at start × 10/9) becomes a V2 pair at start × 5/4, and a creator launches on it.
+  const stock = await new ContractFactory(v4Art('MockIssuerStock').abi, v4Art('MockIssuerStock').evm.bytecode.object, owner).deploy();
+  await stock.waitForDeployment();
+  const m10 = 55_555_555_555_555_555_555n; // Model 10's virtual quote for this test stock
+  const listed = [{ kind: 'xstock', test: true, address: stock.target, symbol: 'mSTK', virtualQuote: m10.toString() }];
+  ow.approvedQuotes = listed;
+  assert.deepEqual((await v2StockPairs(ow)).map(s => s.approved), [false]);
+  await approveV2Stock(ow, { asset: stock.target });
+  const factory = new Contract(record.factory, v4Art('ElpidaV2Factory').abi, f.provider);
+  assert.equal(await factory.approvedQuotes(stock.target), m10 * 9n / 8n);
+  assert.match((await approveV2Stock(ow, { asset: stock.target })).message, /already a V2 pair/);
+  const cw = await walletFor(f, f.signers[0], net); cw.approvedQuotes = listed;
+  await mined(stock.mint(cw.address, parseEther('10')));
+  const launched = await launchV2(cw, { name: 'Stocky', symbol: 'STK', feeBps: 200, pair: 'xstock', quoteAsset: stock.target, firstBuy: '1', description: '', image: '' });
+  const token = new Contract(launched.token, v4Art('ElpidaV2Token').abi, f.provider);
+  assert.ok(await token.balanceOf(cw.address) > 0n);
+  assert.equal((await hook.launchOf(launched.token)).quote.toLowerCase(), stock.target.toLowerCase());
 });
