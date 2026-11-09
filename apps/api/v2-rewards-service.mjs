@@ -33,6 +33,9 @@ export class V2RewardsService {
     }) };
   }
 
+  /** The V2 flywheel's burns on one network (lowercase token → base units); empty where V2 is not deployed. */
+  burnedByToken(key) { return this.entries.find(e => e.net.key === key)?.index.burnedByToken() ?? new Map(); }
+
   payouts(wallet) {
     if (!/^0x[0-9a-fA-F]{40}$/.test(String(wallet ?? ''))) throw new Error('Enter a wallet address.');
     return { wallet: wallet.toLowerCase(), chains: this.entries.map(({ net, index }) => ({ key: net.key, name: net.name, payouts: toJson(index.payoutsOf(wallet)) })) };

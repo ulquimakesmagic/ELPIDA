@@ -22,7 +22,7 @@ test('launchpad deployments and the price feed activation are only in the operat
     assert.ok(!app.includes(label) && !flow.includes(label), `"${label}" is not shown to visitors`);
   }
   assert.match(panel, /tab=launchpads/); assert.match(panel, /renderLaunchpads\(ctx/);
-  // The tab is reached only after the server-checked operator sign-in, like Pairs and Partners.
+  // The tab is reached only after the server-checked operator sign-in, like Pairs.
   assert.ok(panel.indexOf("if (!session.signedIn)") < panel.indexOf("if (tab === 'launchpads')"));
 });
 

@@ -4,7 +4,6 @@ import { protocolAnalytics } from './protocol-analytics.mjs';
 import { AdminAuth, parseAdminAddresses, sessionCookie, clearCookie } from './admin-auth.mjs';
 import { readTreasuries, operatorAddresses, cachedLoader } from './admin-overview.mjs';
 import { SiteAnalytics, cleanEvent, telemetryLimiter, restrictedJurisdictions } from './site-analytics.mjs';
-import { PartnerApplications, registryStatus, registrationCall, solanaPartnerStatus } from './partner-applications.mjs';
 import { createElpidaSolana } from '../../packages/solana/client.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
 import {configuredGraduationKeeper} from './graduation-keeper.mjs';
@@ -63,7 +62,7 @@ resources.set('/chat-signature.mjs',['chat-signature.mjs','text/javascript']);
 resources.set('/holder-chat.mjs',['holder-chat.mjs','text/javascript']);
 resources.set('/trade-filter.mjs',['trade-filter.mjs','text/javascript']);
 resources.set('/token-insights.mjs',['token-insights.mjs','text/javascript']);
-resources.set('/partner-labels.mjs',['partner-labels.mjs','text/javascript']);
+resources.set('/burn-labels.mjs',['burn-labels.mjs','text/javascript']);
 resources.set('/native-trade-router.mjs',['native-trade-router.mjs','text/javascript']);
 resources.set('/trade-draft.mjs',['trade-draft.mjs','text/javascript']);
 resources.set('/test-stock-liquidity-ui.mjs',['test-stock-liquidity-ui.mjs','text/javascript']);
@@ -72,10 +71,8 @@ resources.set('/test-stock.mjs',['test-stock.mjs','text/javascript']);
 resources.set('/portfolio-view.mjs',['portfolio-view.mjs','text/javascript']);
 resources.set('/portfolio-model.mjs',['portfolio-model.mjs','text/javascript']);
 resources.set('/admin-view.mjs',['admin-view.mjs','text/javascript']);
-resources.set('/admin-partners.mjs',['admin-partners.mjs','text/javascript']);
 resources.set('/admin-pairs.mjs',['admin-pairs.mjs','text/javascript']);
 resources.set('/stock-approval.mjs',['stock-approval.mjs','text/javascript']);
-resources.set('/partners-view.mjs',['partners-view.mjs','text/javascript']);
 resources.set('/tax-policy.mjs',['tax-policy.mjs','text/javascript']);
 resources.set('/tax-wallet.mjs',['tax-wallet.mjs','text/javascript']);
 resources.set('/v4-launchpad.mjs',['v4-launchpad.mjs','text/javascript']);
@@ -257,6 +254,10 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const stockCatalog=injectedStockCatalog??createStockCatalog({dataDir:port===0?null:resolve(dataDir,dataPrefix+'stock-catalog'),autoRefresh:port!==0,log:e=>console.log(JSON.stringify(e))}).start();
   // ELPIDA V2.0 rewards (vault sizes, rounds, countdowns, flywheel burns): only networks with a pinned V2 deployment.
   const v2Rewards=new V2RewardsService({networks:port===0?[]:evmTestnets}).start();
+  // Tokens the flywheels bought and burned on a network (V2 vault burns on chain, plus the Model 10 keeper's burns),
+  // keyed by lowercase token address, in base units. Explore cards and token pages show it as a share of supply.
+  const flywheelBurns=key=>{const total=new Map();for(const m of [v2Rewards.burnedByToken(key),flywheelKeeper.burnedByToken?.(key)])for(const [token,amount] of m??[])total.set(token,(total.get(token)??0n)+amount);return total;};
+  const burnFields=(burns,address)=>{const n=burns.get(String(address).toLowerCase());return n>0n?{flywheelBurned:formatUnits(n,18)}:{};};
   // ELPIDA V2.0 keeper: daily fee payouts, monthly airdrop and weekly holder rounds, daily flywheel. Off until
   // ELPIDA_V2_KEEPER_KEY is set and a V2 deployment is pinned; test networks only.
   let v2Keeper={enabled:false,status:()=>({enabled:false,state:'not_configured'}),manifest:()=>null,close:async()=>{}};
@@ -276,17 +277,10 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const adminAddresses=parseAdminAddresses(process.env.ELPIDA_ADMIN_ADDRESSES);
   const treasuryNetworks=()=>evmTestnets.filter(n=>publicIndex.entries.get(n.key)).map(n=>({key:n.key,name:n.name,explorer:n.explorer,nativeSymbol:n.nativeCurrency?.symbol,factory:n.shared?.factory,provider:publicIndex.entries.get(n.key).index.provider}));
   const treasuries=cachedLoader(()=>readTreasuries(treasuryNetworks()),60000);
-  // Early-partner applications: private, reviewed in the admin panel; registration is a treasury-signed setPartner.
   const siteHost=(()=>{try{return publicUrl?new URL(publicUrl).host:'localhost';}catch{return 'elpida';}})();
-  const partnerApps=new PartnerApplications({path:port===0?':memory:':dataFile('partner-applications.sqlite'),host:siteHost});
   // Opt-in visitor analytics for the Visitors tab (docs/SITE_ANALYTICS.md). No IP or user agent is stored.
   const siteAnalytics=new SiteAnalytics({path:port===0?':memory:':dataFile('site-analytics.sqlite')}),telemetryLimit=telemetryLimiter();
   const consentConfig={restricted:restrictedJurisdictions(process.env.ELPIDA_RESTRICTED_JURISDICTIONS)};
-  let partnerWindow=Date.now(),partnerChallenges=0,partnerApplies=0;
-  const partnerLimit=apply=>{if(Date.now()-partnerWindow>=60000){partnerWindow=Date.now();partnerChallenges=0;partnerApplies=0;}return apply?++partnerApplies>10:++partnerChallenges>60;};
-  const registryNetworks=()=>treasuryNetworks().map(n=>({key:n.key,name:n.name,explorer:n.explorer,factory:n.factory,provider:n.provider}));
-  let registryCache={at:0,key:'',value:null};
-  async function partnerRegistry(applications,fresh){const key=applications.filter(a=>a.approved).map(a=>`${a.id}:${a.status}`).join(',');if(!fresh&&registryCache.value&&registryCache.key===key&&Date.now()-registryCache.at<30000)return registryCache.value;const value=await registryStatus(applications,registryNetworks());registryCache={at:Date.now(),key,value};return value;}
   const analyticsSources=()=>{
     const sources=evmTestnets.map(net=>({key:net.key,name:net.name,status:publicIndex.status(net.key),tokens:publicIndex.listings(net.key),trades:publicIndex.tradeRows(net.key)}));
     if(solanaIndex)sources.push({key:solanaIndex.network.key,name:solanaIndex.network.name,status:{enabled:true,...solanaIndex.status(),scope:'Elpida curves and Raydium / PumpSwap swaps on migrated Elpida pools'},tokens:solanaIndex.listings(),trades:solanaIndex.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()});
@@ -405,22 +399,6 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           const label=(network,address)=>{if(!network||!address)return null;const t=network.startsWith('solana-')?(solanaIndex&&solanaIndex.network.key===network?solanaIndex.token(address):null):evmTestnets.some(n=>n.key===network)?publicIndex.detail(network,address):null;return t?(t.metadata?.symbol??t.symbol??null):null;};
           return send(200,{operator:s.address,...siteAnalytics.summary({days:Number(url.searchParams.get('days')??30),label})});
         }
-        if(url.pathname==='/api/admin/partners'){
-          const s=adminAuth.session(req.headers.cookie);if(!s)return send(401,{error:'Sign in as an operator to see this.'});
-          const applications=partnerApps.list();let registry={},registryError=null;
-          try{registry=await partnerRegistry(applications,url.searchParams.get('fresh')==='1');}catch(error){registryError=String(error.message).slice(0,160);}
-          let treasury=[];try{treasury=await treasuries();}catch{}
-          const networks=registryNetworks().map(n=>({key:n.key,name:n.name,explorer:n.explorer,factory:n.factory,treasury:treasury.find(t=>t.network===n.key)?.treasury??null,kind:'evm'}));
-          // Solana: the SOL pair's treasury signs set_partner; the browser builds it, so only the terms travel.
-          const solDeployment=solanaNet.deployment,solTreasury=solDeployment?.treasury??null;
-          let solana={supported:solanaIndex?false:'Solana indexing is off on this server.',records:{}};registry={...registry};
-          if(solanaIndex&&solDeployment?.programId&&solTreasury){try{solana=await solanaPartnerStatus(applications,{connection:solanaIndex.connection,web3:solanaWeb3,client:createElpidaSolana(solanaWeb3,solDeployment.programId),treasury:solTreasury});}catch(error){solana={supported:String(error.message).slice(0,120),records:{}};}}
-          networks.push({key:solanaNet.key,name:solanaNet.name,kind:'solana',programId:solDeployment?.programId??null,treasury:solTreasury,explorer:solanaNet.explorer,cluster:solanaNet.cluster,
-            supported:solana.supported===true,reason:solana.supported===true?'':solana.supported===false?'The deployed Solana program predates partner tiers; upgrade it first.':!solDeployment?'No Solana deployment configured.':`Solana status unavailable: ${solana.supported}`});
-          for(const [id,record] of Object.entries(solana.records))registry[id]={...(registry[id]??{}),[solanaNet.key]:record};
-          const calls=Object.fromEntries(applications.filter(a=>a.approved&&a.evm&&['approved','ended'].includes(a.status)).map(a=>[a.id,Object.fromEntries(networks.filter(n=>n.kind==='evm'&&n.factory&&a.approved.chains.includes(n.key)).map(n=>[n.key,a.status==='approved'?registrationCall(n.factory,a.evm,a.approved.buybackBps,a.approved.expiresAt):registrationCall(n.factory,a.evm,0,0)]))]));
-          return send(200,{operator:s.address,generatedAt:Date.now(),counts:partnerApps.counts(),applications,networks,registry,registryError,calls});
-        }
         if(url.pathname==='/api/operations/status'){const result=evaluateOperations(operationsInput());return send(result.status==='critical'?503:200,{...result,backup:backupRunner.status(),metadataStorage:metadataStore.status().storage});}
         if(url.pathname==='/api/metadata/challenge'){
           let client=String(req.headers.cookie??'').split(';').map(v=>v.trim()).find(v=>v.startsWith('elpida_upload='))?.slice(14);
@@ -479,12 +457,12 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           return send(200,{owner:owner.toLowerCase(),balances,networks});
         }
         const publicMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?)?$/);
-        if(publicMatch){const key=url.searchParams.get('network')??'base-sepolia';if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown public network.'});if(!publicMatch[1]){const activity=new Map();return send(200,publicIndex.listings(key,(e,t)=>{if(!activity.has(e))activity.set(e,indexedActivity(e.index.db));return {priceChange24h:indexedChange(e.index.db,t),...activityOf(activity.get(e),t.address)};}));}let data=null,failure=null;
+        if(publicMatch){const key=url.searchParams.get('network')??'base-sepolia';if(!evmTestnets.some(n=>n.key===key))return send(400,{error:'Unknown public network.'});if(!publicMatch[1]){const activity=new Map(),burns=flywheelBurns(key);return send(200,publicIndex.listings(key,(e,t)=>{if(!activity.has(e))activity.set(e,indexedActivity(e.index.db));return {priceChange24h:indexedChange(e.index.db,t),...activityOf(activity.get(e),t.address),...burnFields(burns,t.address)};}));}let data=null,failure=null;
             try{data=publicIndex.detail(key,publicMatch[1],publicMatch[2],Number(url.searchParams.get('interval')??60),listLimit(url,100));}
             catch(error){failure=publicErrorCode(error);}
             // A missing token and a failed lookup are different problems; say which one this was.
             if(data===null){if(failure)console.error(JSON.stringify({event:'public_token_lookup_failed',requestId,network:key,kind:publicMatch[2]??'token',code:failure}));return send(failure?503:404,{error:failure?'Indexer unavailable for this token. Retry shortly.':'Token not indexed yet. Check indexer status and retry.',...(failure?{code:failure}:{})});}
-            return send(200,data);}
+            return send(200,publicMatch[2]?data:{...data,...burnFields(flywheelBurns(key),data.address)});}
         // Bytecode for the labelled test DEX and relay feed, fetched only when the launchpad owner deploys them.
         if (url.pathname === '/api/test-dex-artifacts') return send(200, testDexArtifacts());
         if (url.pathname === '/api/v4-artifacts') return send(200, v4Artifacts());
@@ -560,14 +538,6 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         try{const r=await adminAuth.signIn(body,isAllowed);res.setHeader('Set-Cookie',sessionCookie(r.token,{secure:!!publicUrl}));return send(200,{signedIn:true,address:r.address,expires:r.expires});}
         catch(error){return send(error.status??400,{error:error.message});}
       }
-      if(action==='admin/partners/review'){
-        const s=adminAuth.session(req.headers.cookie);if(!s)return send(401,{error:'Sign in as an operator to do this.'});
-        try{return send(200,partnerApps.review(body.id,body,s.address));}catch(error){return send(error.status??400,{error:error.message});}
-      }
-      if(action==='partners/challenge'||action==='partners/apply'){
-        if(partnerLimit(action==='partners/apply'))return send(429,{error:'Applications are busy. Try again in a minute.'});
-        try{return send(200,action==='partners/challenge'?partnerApps.challenge(body):partnerApps.apply(body));}catch(error){return send(error.status??400,{error:error.message});}
-      }
       // A wallet just confirmed a trade, launch or migration: index that network now instead of at the next tick, so
       // the trade reaches every open page within a second or two. Coalesced per network and capped; nothing is signed.
       if(action==='index-now'){
@@ -627,7 +597,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
   bootPhase('listening');
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();await v2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();partnerApps.db.close();siteAnalytics.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();await v2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

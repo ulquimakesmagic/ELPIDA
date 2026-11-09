@@ -8,7 +8,7 @@ import { assetIcon, chainIcon } from './chain-ui.mjs';
 import { nowSeconds } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
 import { PAIR_LIMITS } from '/pairs.mjs';
-import { partnerChip } from './partner-labels.mjs';
+import { flywheelChip } from './burn-labels.mjs';
 import { exploreModel, pageOf, pageButtons, trendingTokens, exploreStateFromHash, exploreHash, PER_PAGE_WIDE, isKothContender, kingOfTheHill, curveProgress, KOTH_PROGRESS } from './discovery.mjs';
 
 const reducedMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
@@ -84,10 +84,10 @@ function kothBadge(token, king) {
   const crowned = king && keyOf(king) === keyOf(token);
   return h('span.koth-badge', { 'data-king': crowned ? 'true' : undefined, title: crowned ? 'King of the Hill: the token closest to graduating' : `King of the Hill contender: ${Math.round(KOTH_PROGRESS * 100)}% or more of its curve sold` }, icon('crown', 'icon-xs'), crowned ? 'King' : 'KOTH');
 }
-/** Partner tokens: the share of trading fees that buys back and burns the token, fixed at launch. */
+/** Flywheel tokens: the share of supply the flywheels have bought and burned. */
 function burnBadge(token) {
-  const chip = partnerChip(token);
-  return chip ? h('span.burn-badge', { 'data-tier': chip.tier.toLowerCase(), title: chip.title, 'aria-label': chip.title }, icon('flame', 'icon-xs'), chip.text) : null;
+  const chip = flywheelChip(token);
+  return chip ? h('span.burn-badge', { title: chip.title, 'aria-label': chip.title }, icon('flame', 'icon-xs'), chip.text) : null;
 }
 /** A scroller with prev/next buttons and edge fades that only show while there is more to scroll. */
 function scroller(track, prev, next) {
@@ -106,7 +106,7 @@ function scroller(track, prev, next) {
 /* ---------- Cards ---------- */
 // Values roll only between two figures in the same unit (dollars, or the same pair asset).
 const sameUnit = (a, b) => a.startsWith('$') === b.startsWith('$');
-function staticSignature(t) { return JSON.stringify([isKothContender(t), t._king === true, t.name, t.symbol, t.metadata?.image ?? t.image ?? '', t.network, t.pair, t.quoteSymbol, !!t.graduated, !!t.complete, t.devBoughtPct, t.devHoldingPct, t.created, t.creator, t.buybackBps, t.burned]); }
+function staticSignature(t) { return JSON.stringify([isKothContender(t), t._king === true, t.name, t.symbol, t.metadata?.image ?? t.image ?? '', t.network, t.pair, t.quoteSymbol, !!t.graduated, !!t.complete, t.devBoughtPct, t.devHoldingPct, t.created, t.creator, t.flywheelBurned]); }
 
 function listCard(token, ctx) {
   const f = figures(token), href = ctx.tokenHref(token), name = token.metadata?.name ?? token.name, symbol = token.metadata?.symbol ?? token.symbol;

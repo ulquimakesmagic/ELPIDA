@@ -21,7 +21,6 @@ import { renderToken } from './token-page.mjs';
 import { renderRewards } from './rewards-view.mjs';
 import { portfolioView } from './portfolio-view.mjs';
 import { renderAdmin } from './admin-view.mjs';
-import { partnersView } from './partners-view.mjs';
 import { initShell, renderLastSale, syncSearch } from './shell.mjs';
 import { startResilience } from './resilience.mjs';
 import { connectTradeStream, mergeTrades } from './live-trades.mjs';
@@ -223,7 +222,7 @@ function parseRoute() {
   if (doc) return { name: 'docs', section: doc[1] };
   const token = hash.match(/^\/token\/([A-Za-z0-9]{32,64})$/);
   if (token) return { name: 'token', address: token[1],network:new URLSearchParams(query).get('network') };
-  return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/docs': 'docs', '/monkey': 'admin', '/partners': 'partners', '/terms': 'terms' }[hash] ?? 'notfound' };
+  return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/docs': 'docs', '/monkey': 'admin', '/terms': 'terms' }[hash] ?? 'notfound' };
 }
 function route() {
   const next = parseRoute(); const changed = next.name !== currentRoute.name || next.address !== currentRoute.address;
@@ -232,14 +231,14 @@ function route() {
 
   if(next.network&&networkByKey(next.network)&&next.network!==currentChain()){chooseChain(next.network).catch(e=>toast(errorText(e),{kind:'error'}));return;}
   $$('[data-nav]').forEach(link => { if (link.dataset.nav === next.name) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
-  document.title = { explore: 'Explore tokens across chains | Elpida', portfolio: 'Portfolio | Elpida', rewards: 'Creator rewards | Elpida', launch: 'Create a token | Elpida', token: 'Token | Elpida', analytics: 'Analytics — Launches, volume & fees | Elpida', admin: 'Operations | Elpida', partners: 'Partner with Elpida | Elpida', docs: 'Docs | Elpida', terms: 'Terms of Use | Elpida', notfound: 'Page not found | Elpida' }[next.name];
+  document.title = { explore: 'Explore tokens across chains | Elpida', portfolio: 'Portfolio | Elpida', rewards: 'Creator rewards | Elpida', launch: 'Create a token | Elpida', token: 'Token | Elpida', analytics: 'Analytics — Launches, volume & fees | Elpida', admin: 'Operations | Elpida', docs: 'Docs | Elpida', terms: 'Terms of Use | Elpida', notfound: 'Page not found | Elpida' }[next.name];
   rerender('route');
   { const v = $('#view'); v.classList.remove('view-enter'); void v.offsetWidth; v.classList.add('view-enter'); }
   if(changed&&wallet?.address&&!['explore','analytics'].includes(next.name))refresh({preserveInput:true,walletRead:true}).catch(e=>toast(errorText(e),{kind:'error'}));
   if (changed) { window.scrollTo({ top: 0 }); if (next.name !== 'launch'&&!['top-search-input','sheet-search-input'].includes(document.activeElement?.id)) $('#main').focus({ preventScroll: true }); }
   if(next.name==='explore'&&pendingSearchReveal&&exploreView){pendingSearchReveal=false;exploreView.setQuery(exploreView.query,{reveal:true});}
 }
-let launchView = null, analyticsView = null, exploreView = null, partnerPage = null;
+let launchView = null, analyticsView = null, exploreView = null;
 const freshPrice = p => !!p && p.status === 'fresh' && Number.isFinite(p.usd) && nowSeconds() - p.updatedAt <= (p.maxAge ?? 180);
 /** What the Explore view reads from the app; it never touches wallets or routing directly. */
 const exploreSource = {
@@ -270,7 +269,6 @@ function rerender(reason) {
   if (r.name !== 'explore') closeExplore();
   if(r.name==='notfound'){view.setAttribute('aria-busy','false');view.replaceChildren(notFoundView());return;}
   // The operator panel loads its own data; a background refresh must not reset it mid-read.
-  if(r.name==='partners'){view.setAttribute('aria-busy','false');if(reason==='route'||!partnerPage||!view.contains(partnerPage.root)){partnerPage=partnersView(ctx,{connect:connectCurrent});view.replaceChildren(partnerPage.root);}else partnerPage.update();return;}
   if(r.name==='admin'){view.setAttribute('aria-busy','false');if(reason==='route'||!view.querySelector('.op')||view.querySelector('.op-signin'))view.replaceChildren(renderAdmin(ctx,{connect:connectCurrent}));return;}
   if (r.name === 'launch') {
     // The launch flow owns its own state; a data refresh only updates balances and connection status.

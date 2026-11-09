@@ -6,7 +6,7 @@ import { chainIcon } from './chain-ui.mjs';
 // declined, so the totals can be read as a lower bound.
 
 const PERIODS = [[1, 'Today'], [7, '7 days'], [30, '30 days'], [90, '90 days']];
-const PAGE_NAMES = { explore: 'Explore', launch: 'Create', portfolio: 'Portfolio', rewards: 'Rewards', analytics: 'Analytics', docs: 'Docs', partners: 'Partners', token: 'Token pages', terms: 'Terms of Use', notfound: 'Not found' };
+const PAGE_NAMES = { explore: 'Explore', launch: 'Create', portfolio: 'Portfolio', rewards: 'Rewards', analytics: 'Analytics', docs: 'Docs', token: 'Token pages', terms: 'Terms of Use', notfound: 'Not found' };
 const DEVICE_NAMES = { mobile: 'Phone', tablet: 'Tablet', desktop: 'Computer', unknown: 'Unknown' };
 let regionNames = null;
 try { regionNames = new Intl.DisplayNames(['en'], { type: 'region' }); } catch {}

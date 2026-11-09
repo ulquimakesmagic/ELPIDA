@@ -139,6 +139,13 @@ export class V2RewardsIndexer {
     };
   }
 
+  /** Tokens the flywheel vault bought and burned, per token (lowercase address → base units). */
+  burnedByToken() {
+    const out = new Map();
+    for (const b of this.burns) out.set(b.token, (out.get(b.token) ?? 0n) + b.burned);
+    return out;
+  }
+
   /** Payouts a wallet has received, newest first. */
   payoutsOf(wallet) {
     const w = lower(wallet);

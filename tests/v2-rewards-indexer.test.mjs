@@ -56,6 +56,7 @@ test('vault sizes by day, rounds, countdown and flywheel burns match the chain',
   assert.equal(s.flywheel.burns.length, 1); assert.equal(s.flywheel.cycles, 1);
   assert.equal(s.flywheel.burns[0].supplyAfter, await l.token.totalSupply());
   assert.equal(s.flywheel.burnedByToken[0].amount, await flywheel.burnedOf(l.token.target));
+  assert.equal(index.burnedByToken().get(l.token.target.toLowerCase()), await flywheel.burnedOf(l.token.target), 'per-token burns for the Explore tag');
   // A trader can look up what they received.
   assert.equal(index.payoutsOf(f.addresses[1]).length, 1);
   assert.equal(index.payoutsOf(f.addresses[3]).length, 0);

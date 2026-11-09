@@ -56,7 +56,7 @@ export function renderAnalytics({api}){
       live&&recent.length?h('div.table-scroll',h('table.market-table',h('thead',h('tr',...['Token','Chain','Spent','Burn'].map(l=>h('th',{scope:'col'},l)))),
         h('tbody',recent.map(r=>h('tr',h('td',h('a',{href:`#/token/${r.token}?network=${encodeURIComponent(r.chain)}`},r.symbol?`$${r.symbol}`:short(r.token))),h('td',nameOf(r.chain)),h('td',number(Number(r.spend)/1e18,6)),
           h('td',explorer(r.chain)?h('a.mono',{href:`${explorer(r.chain)}/tx/${r.burnTx}`,target:'_blank',rel:'noopener noreferrer'},short(r.burnTx)):h('span.mono',short(r.burnTx)))))))):null,
-      h('p.small.muted',live?'Native-pair tokens at least a day old. Each order is capped by depth (25% of what completes a curve, 0.5% of a pool) and a pool order waits while the price is away from its 10-minute average. Test networks only; test tokens have no monetary value.':'The keeper is not running on this server, so no spending or burns are shown. Creator fees, locked liquidity and partner buybacks are never used.'));
+      h('p.small.muted',live?'Native-pair tokens at least a day old. Each order is capped by depth (25% of what completes a curve, 0.5% of a pool) and a pool order waits while the price is away from its 10-minute average. Test networks only; test tokens have no monetary value.':'The keeper is not running on this server, so no spending or burns are shown. Creator fees and locked liquidity are never used.'));
   }
   async function load(){
     const id=++revision;refresh.disabled=true;body.setAttribute('aria-busy','true');status.textContent='Updating public analytics…';
