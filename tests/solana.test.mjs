@@ -19,7 +19,7 @@ import {
   DISCRIMINATORS, EVENTS, LEGACY_EVENTS, TOKEN_SUPPLY, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, lockedPoolVenue, tradeFeeBps, testConversionOut, decodeTestConversion, BPS, explainError, decodeEvents,
   harvestableLp, harvestNow, MPL_TOKEN_METADATA, MAX_LAUNCH_URI, GRADUATION_GRACE_SECS, validMetadataUri, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint, PYTH_RECEIVER, SOL_USD_FEED_ID, SOL_USD_PRICE_ACCOUNT, parsePriceUpdate, usdToQuote, virtualQuoteForFdv,
   RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, VENUE_RAYDIUM, raydiumCreationCost, raydiumQuote, raydiumBuybackAmount,
-  V2, v2FeeBps, v2Owed, validV2Symbol, POOL_SIZE_V2,
+  V2, v2FeeBps, v2Owed, validV2Symbol, POOL_SIZE_V2, V2_WITHDRAW_COMPUTE_UNITS,
 } from '../packages/solana/client.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
@@ -1505,7 +1505,7 @@ test('Solana V2 client: discriminators, fee schedule, ledger and tickers match t
 
 test('Solana V2: own fee, anti-snipe to liquidity, five-way ledger, permissionless withdrawal before and after migration', { skip }, async () => {
   const config = { address: f.client.configV2For(f.quoteMint), quoteMint: f.quoteMint, treasury: f.treasury };
-  const add = (payer, params = V2_PARAMS) => send(f.connection, payer, [f.client.addV2Config({ authority: payer.publicKey, quoteMint: f.quoteMint, treasury: f.treasury, params })], [], 1);
+  const add = (payer, params = V2_PARAMS) => send(f.connection, payer, [f.client.computeBudget(), f.client.addV2Config({ authority: payer.publicKey, quoteMint: f.quoteMint, treasury: f.treasury, params })], [], 1);
   await failsWith(add(f.outsider), /0x1770/);
   await failsWith(add(f.authority, { ...V2_PARAMS, maxCreatorBuyBps: 0 }), /0x1774/);
   await failsWith(add(f.authority, { ...V2_PARAMS, baseFeeBps: 150 }), /0x1774/);
@@ -1549,7 +1549,7 @@ test('Solana V2: own fee, anti-snipe to liquidity, five-way ledger, permissionle
   const dest = [f.client.ata(f.rewardWallet.publicKey, f.quoteMint), ...['airdrop', 'flywheel', 'holder'].map(k => f.client.ata(f.client.v2VaultPda(k), f.quoteMint)), f.client.ata(f.treasury, f.quoteMint)];
   const bal = () => Promise.all(dest.map(balance));
   const owed = v2Owed(p.v2), b0 = await bal();
-  const withdraw = () => send(f.connection, f.outsider, [f.client.withdrawV2Fees({ payer: f.outsider.publicKey, config, mint, reward: f.rewardWallet.publicKey })], [], 1);
+  const withdraw = () => send(f.connection, f.outsider, [f.client.computeBudget(V2_WITHDRAW_COMPUTE_UNITS), f.client.withdrawV2Fees({ payer: f.outsider.publicKey, config, mint, reward: f.rewardWallet.publicKey })], [], 1);
   const paidSig = await withdraw();
   const b1 = await bal();
   assert.deepEqual(b1.map((v, i) => v - b0[i]), owed, 'creator 30%, airdrop 30%, flywheel 10%, holders 10%, treasury 20%');
@@ -1559,10 +1559,21 @@ test('Solana V2: own fee, anti-snipe to liquidity, five-way ledger, permissionle
   assert.equal(await vault(), p.realQuote + p.liquidityBonus + owedSum(p));
   assert.ok(owedSum(p) <= 4n, 'only the split\'s rounding stays behind');
 
-  // Complete the curve and graduate; fees owed at graduation are still withdrawn from the curve vault afterwards.
+  // After the first minute the fee is the token's own: nothing more is locked as anti-snipe liquidity. That buy
+  // completes the curve (filled only up to the curve supply); fees owed at graduation stay withdrawable.
+  for (;;) {
+    const now = await f.connection.getBlockTime(await f.connection.getSlot('confirmed'));
+    if (BigInt(now ?? 0) >= p.createdAt + BigInt(V2.snipeWindowSecs) + 1n) break;
+    await sleep(500);
+  }
+  const pre = p, payer0 = await balance(f.client.ata(f.trader.publicKey, f.quoteMint));
   await send(f.connection, f.trader, [f.client.buy({ buyer: f.trader.publicKey, config, mint, grossIn: 50_000n * USDC, minTokensOut: 0n })], [], 1);
+  const spent = payer0 - await balance(f.client.ata(f.trader.publicKey, f.quoteMint));
   p = f.client.decodePool((await f.connection.getAccountInfo(f.client.poolPda(mint))).data);
   assert.equal(p.status, STATUS_GRADUATED); assert.equal(p.sold, p.curveSupply);
+  assert.ok(spent < 50_000n * USDC, 'the completing buy is filled only up to the curve supply');
+  assert.equal(p.v2.accrued - pre.v2.accrued, spent * 250n / BPS, 'own fee only');
+  assert.equal(p.liquidityBonus, pre.liquidityBonus, 'no anti-snipe surplus after the first minute');
   assert.equal(await vault(), p.realQuote + p.liquidityBonus + owedSum(p));
   if (pumpSkip) return;
   await send(f.connection, f.outsider, [f.client.computeBudget(MIGRATE_COMPUTE_UNITS), f.client.migrateToPumpswap({ payer: f.outsider.publicKey, config, mint })], [], 1);

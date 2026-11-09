@@ -25,6 +25,8 @@ export const POOL_SIZES = [POOL_SIZE, POOL_SIZE_PARTNER, POOL_SIZE_V2];
 export const V2_MODEL_VERSION = 4;
 export const V2 = Object.freeze({ maxFeeBps: 400, defaultFeeBps: 125, mainnetMinFeeBps: 100, firstBuyCapBps: 300, snipeStartBps: 9_000, snipeWindowSecs: 60,
   split: Object.freeze([3_000, 3_000, 1_000, 1_000, 2_000]), recipients: Object.freeze(['creator', 'traderAirdrop', 'flywheel', 'holderRewards', 'treasury']) });
+/** `withdraw_v2_fees` may create up to four associated accounts and makes five transfers. */
+export const V2_WITHDRAW_COMPUTE_UNITS = 400_000;
 export const V2_VAULTS = Object.freeze({ traderAirdrop: 'airdrop', flywheel: 'flywheel', holderRewards: 'holder' });
 /** The fee `elapsed` seconds after launch for a token whose own fee is `feeBps` (the program rounds the same way). */
 export function v2FeeBps(feeBps, elapsed) {
