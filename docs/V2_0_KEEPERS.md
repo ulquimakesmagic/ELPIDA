@@ -14,9 +14,16 @@
 - **Assumed, not yet confirmed by Malik:**
   - Holders share a payout by the same blend as the airdrop (20% equal, 40% square root, 40% pro-rata), over their
     time-weighted balance in the week, with the same 1% cap. Holdings shorter than a day in total don't count.
-  - Linked wallets: wallets first funded by the same wallet, and wallets that received a token directly from its
-    creator. The funder needs a block-explorer key (`ELPIDA_EXPLORER_API_KEY`, Etherscan's multichain API). Without
-    one, only creator transfers link wallets.
+  - Linked wallets: wallets that received a token directly from its creator, and wallets first funded by the same
+    **personal** wallet. Finding the funder needs a block-explorer key (`ELPIDA_EXPLORER_API_KEY`, Etherscan's
+    multichain API). Without one, only creator transfers link wallets.
+  - Funders that never link anyone (Malik, 9 November: exchange-funded users must not be joined):
+    - contracts: bridges, routers, exchange batchers;
+    - wallets with 5,000 or more transactions: exchange hot wallets, faucets, market makers;
+    - addresses in `ELPIDA_FUNDER_IGNORE`;
+    - any funder of more than 200 of the period's wallets.
+    
+    A funder's status is re-checked weekly.
 
 ## Contract change
 
@@ -52,6 +59,7 @@ operator when it is configured (`/api/config` → `v2Keeper.address`), and with 
   on each network. Deploy V2 after setting it, so the reward contracts take the keeper as operator.
 - `ELPIDA_EXPLORER_API_KEY` (optional): an Etherscan API key, for funder links.
 - `ELPIDA_PUBLIC_URL` (optional): the base URL of the published lists (default https://elpida.fun).
+- `ELPIDA_FUNDER_IGNORE` (optional): comma-separated exchange or service wallets that must never link the wallets they fund.
 
 ## Tests
 

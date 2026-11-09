@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { parseEther, ZeroAddress, Contract } from 'ethers';
 import { v2Fixture, launchV2, trade, mined, parse, v4Art } from './helpers/v2-fixture.mjs';
-import { timeWeightedBalances, airdropRound, holderRound, flywheelOrders } from '../packages/core/v2-keeper-plan.mjs';
+import { timeWeightedBalances, airdropRound, holderRound, flywheelOrders, personalFunder, boundedFunderLinks } from '../packages/core/v2-keeper-plan.mjs';
 import { verifyPayout } from '../packages/core/v2-rounds.mjs';
 import { V2Indexer } from '../packages/indexer/v2-indexer.mjs';
 import { V2Keeper } from '../apps/api/v2-keeper.mjs';
@@ -42,6 +42,20 @@ test('the airdrop plan: qualification, linked wallets as one, carry-forward unde
   // A pool so small every payout is under $1: all of it carries to next month.
   const small = airdropRound({ trades, start: 30 * DAY, end: 60 * DAY, usdPerUnit: () => 1, firstSeen: () => 0, pools: { [A(9)]: 1_000_000n }, links: [], minPayoutUsd: 1 }).byAsset[A(9).toLowerCase()];
   assert.equal(small.payouts.size, 0); assert.ok(small.carried.size > 0);
+});
+
+test('only personal funders link wallets: exchanges, faucets, bridges and big fan-outs never join strangers', async () => {
+  assert.equal(personalFunder({ code: '0x', nonce: 12 }), true, 'a person funding a few wallets');
+  assert.equal(personalFunder({ code: '0x', nonce: 2_500_000 }), false, 'an exchange hot wallet or faucet');
+  assert.equal(personalFunder({ code: '0x6080', nonce: 1 }), false, 'a contract: bridge, router, exchange batcher');
+  assert.equal(personalFunder({ code: '0x', nonce: 3, ignored: true }), false, 'on the operator’s ignore list');
+  const links = [...Array.from({ length: 250 }, (_, i) => [A(1), A(1000 + i)]), [A(2), A(3)], [A(2), A(4)]];
+  assert.deepEqual(boundedFunderLinks(links), [[A(2), A(3)], [A(2), A(4)]], 'a funder of 250 of the month’s wallets is a service');
+  // In the keeper: an exchange-like funder (many transactions) links nobody; a person links their wallets.
+  const keeper = new V2Keeper({ workers: [] }), nonces = { [A(1).toLowerCase()]: 900_000, [A(2).toLowerCase()]: 4 };
+  const w = { funderOf: async x => (x.endsWith('1000') || x.endsWith('1001') ? A(1) : A(2)), provider: { getCode: async () => '0x', getTransactionCount: async a => nonces[a] } };
+  const found = await keeper.links(w, [A(1000), A(1001), A(3), A(4)]);
+  assert.deepEqual(found, [[A(2), A(3)], [A(2), A(4)]].map(([a, b]) => [a.toLowerCase(), b.toLowerCase()]));
 });
 
 test('the flywheel plan: independent net buying ranks tokens; creator wallets and thin tokens are left out', () => {

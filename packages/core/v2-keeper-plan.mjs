@@ -8,8 +8,29 @@
 //    converted to native first (the distributor's convertToNative).
 //  - Flywheel: the top 10 V2 tokens by net buying from independent wallets over 7 days are bought and burned.
 //  - Linked wallets count as one and creator-linked wallets are excluded everywhere. The linking rule (assumed, Malik
-//    9 November): wallets first funded by the same wallet, and wallets that received a token directly from its creator.
+//    9 November): wallets first funded by the same personal wallet (never an exchange, faucet, bridge or other
+//    service: LINK_RULES), and wallets that received a token directly from its creator.
 import { AIRDROP_RULES, allocateAirdrop, linkWallets, qualifies, walletPayouts } from './v2-airdrop.mjs';
+
+/**
+ * Which first funders link wallets (Malik, 9 November: wallets funded by an exchange must not be joined). A funder
+ * links the wallets it funded only if it looks like a person: not a contract (bridges, routers, exchange batchers),
+ * fewer than `serviceNonce` transactions sent (exchange hot wallets, faucets and market makers send far more), not
+ * on the operator's ignore list, and funding at most `maxFanOut` of the period's wallets (a backstop for services
+ * that rotate fresh hot wallets).
+ */
+export const LINK_RULES = Object.freeze({ serviceNonce: 5_000, maxFanOut: 200 });
+
+export function personalFunder({ code, nonce, ignored = false }, rules = LINK_RULES) {
+  return !ignored && (!code || code === '0x') && Number(nonce) < rules.serviceNonce;
+}
+
+/** Drops links from funders that fund more than `maxFanOut` of these wallets. `links`: [[funder, wallet]]. */
+export function boundedFunderLinks(links, rules = LINK_RULES) {
+  const count = new Map();
+  for (const [funder] of links) count.set(funder, (count.get(funder) ?? 0) + 1);
+  return links.filter(([funder]) => count.get(funder) <= rules.maxFanOut);
+}
 
 export const HOLDER_RULES = Object.freeze({
   ...AIRDROP_RULES,

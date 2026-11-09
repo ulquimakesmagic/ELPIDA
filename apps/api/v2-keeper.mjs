@@ -9,7 +9,7 @@
 import { DatabaseSync } from 'node:sqlite';
 import { Contract, JsonRpcProvider, NonceManager, Wallet, ZeroAddress, getAddress } from 'ethers';
 import { buildRound } from '../../packages/core/v2-rounds.mjs';
-import { airdropRound, holderRound, flywheelOrders, HOLDER_RULES, FLYWHEEL_RULES } from '../../packages/core/v2-keeper-plan.mjs';
+import { airdropRound, holderRound, flywheelOrders, personalFunder, boundedFunderLinks, HOLDER_RULES, FLYWHEEL_RULES } from '../../packages/core/v2-keeper-plan.mjs';
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 
 const DAY = 86_400, BATCH = 80;
@@ -35,7 +35,8 @@ export class V2Keeper {
       CREATE TABLE IF NOT EXISTS v2k_state(key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS v2k_runs(id INTEGER PRIMARY KEY, chain TEXT NOT NULL, job TEXT NOT NULL, at INTEGER NOT NULL, status TEXT NOT NULL, detail TEXT);
       CREATE TABLE IF NOT EXISTS v2k_manifests(chain_id INTEGER NOT NULL, distributor TEXT NOT NULL, round INTEGER NOT NULL, asset TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(chain_id, distributor, round, asset));
-      CREATE TABLE IF NOT EXISTS v2k_funders(wallet TEXT PRIMARY KEY, funder TEXT);`);
+      CREATE TABLE IF NOT EXISTS v2k_funders(wallet TEXT PRIMARY KEY, funder TEXT);
+      CREATE TABLE IF NOT EXISTS v2k_sources(address TEXT PRIMARY KEY, personal INTEGER NOT NULL, checked INTEGER NOT NULL);`);
     this.busy = false;
   }
 
@@ -79,16 +80,33 @@ export class V2Keeper {
     return byToken;
   }
 
-  /** Funding links (same first funder), when a block-explorer key is configured; cached. */
+  /**
+   * Funding links (same first funder), when a block-explorer key is configured; cached. Only personal funders link:
+   * exchanges, faucets, bridges and other services never join the wallets they fund (LINK_RULES).
+   */
   async links(w, wallets) {
     if (!w.funderOf) return [];
     const out = [];
-    for (const wallet of new Set(wallets.map(lower))) {
+    for (const wallet of new Set(wallets.filter(Boolean).map(lower))) {
       let row = this.db.prepare('SELECT funder FROM v2k_funders WHERE wallet=?').get(wallet);
       if (!row) { let funder = null; try { funder = await w.funderOf(wallet); } catch { continue; } this.db.prepare('INSERT OR REPLACE INTO v2k_funders VALUES(?,?)').run(wallet, funder ? lower(funder) : null); row = { funder }; }
-      if (row.funder) out.push([row.funder, wallet]);
+      if (row.funder && await this.personal(w, row.funder)) out.push([row.funder, wallet]);
     }
-    return out;
+    return boundedFunderLinks(out);
+  }
+
+  /** Whether a funder is a person (re-checked weekly: a growing service crosses the transaction threshold). */
+  async personal(w, funder) {
+    const a = lower(funder);
+    if (w.ignoredFunders?.has(a)) return false;
+    const row = this.db.prepare('SELECT personal, checked FROM v2k_sources WHERE address=?').get(a);
+    if (row && (!row.personal || this.now() - row.checked < 7 * DAY)) return !!row.personal;
+    try {
+      const [code, nonce] = await Promise.all([w.provider.getCode(a), w.provider.getTransactionCount(a)]);
+      const personal = personalFunder({ code, nonce });
+      this.db.prepare('INSERT OR REPLACE INTO v2k_sources VALUES(?,?,?)').run(a, personal ? 1 : 0, this.now());
+      return personal;
+    } catch { return false; }
   }
 
   publish(w, distributor, m) {
@@ -232,10 +250,12 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
   const nets = networks.filter(n => !n.mainnet && n.v2?.shared?.hook && n.v2.shared.airdrop);
   if (!key || !/^(0x)?[0-9a-fA-F]{64}$/.test(key) || !nets.length) return { enabled: false, status: () => ({ enabled: false, state: key ? 'no_v2_deployment' : 'not_configured' }), manifest: () => null, start() { return this; }, close: async () => {} };
   const address = new Wallet(key).address, oracles = usdOracles(env);
+  // Extra exchange or service wallets that must never link the wallets they fund (comma-separated addresses).
+  const ignoredFunders = new Set(String(env.ELPIDA_FUNDER_IGNORE ?? '').split(',').map(x => x.trim().toLowerCase()).filter(x => /^0x[0-9a-f]{40}$/.test(x)));
   const workers = nets.map(net => {
     const provider = new JsonRpcProvider(net.rpcUrl, undefined, { cacheTimeout: -1, batchMaxCount: 1 }), d = net.v2.shared;
     return { chain: net.key, net, provider, signer: Object.assign(new NonceManager(new Wallet(key, provider)), { address }), deployment: { ...d, poolManager: net.v4?.poolManager },
-      index: () => indexFor(net.key), funderOf: env.ELPIDA_EXPLORER_API_KEY ? etherscanFunder(net.chainId, env.ELPIDA_EXPLORER_API_KEY) : null,
+      index: () => indexFor(net.key), funderOf: env.ELPIDA_EXPLORER_API_KEY ? etherscanFunder(net.chainId, env.ELPIDA_EXPLORER_API_KEY) : null, ignoredFunders,
       usdPerUnit: asset => { if (lower(asset) === lower(ZeroAddress)) { const p = prices()[net.key]; return p?.status === 'fresh' ? p.usd : null; } const usdc = oracles[net.key]?.usdc; return usdc && lower(asset) === lower(usdc) ? 1 : null; } };
   });
   const keeper = new V2Keeper({ workers, path, publicUrl, log });
