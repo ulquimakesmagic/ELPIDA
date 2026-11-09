@@ -137,3 +137,12 @@ test('V2 deploy: a lagging wallet’s reused nonce is asked again; a resumed dep
   assert.ok(await token.balanceOf(cw.address) > 0n);
   assert.equal((await hook.launchOf(launched.token)).quote.toLowerCase(), stock.target.toLowerCase());
 });
+
+test('a test stock listed twice (overlapping pair loads) shows once in the V2 and Model 11 lists', async t => {
+  browser(t);
+  const stock = { kind: 'xstock', test: true, address: '0x00000000000000000000000000000000000000aa', symbol: 'tAAPLon', virtualQuote: '1' };
+  const net = { key: 'base-sepolia', chainId: 999001, v4: { poolManager: '0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408' }, v2: { shared: { factory: '0x0000000000000000000000000000000000000f01', hook: '0x0000000000000000000000000000000000000f02', router: '0x0000000000000000000000000000000000000f03', block: 1 } } };
+  const provider = { call: async () => '0x' + '0'.repeat(64) };
+  const w = { net, provider, approvedQuotes: [stock, { ...stock, address: stock.address.toUpperCase().replace('0X', '0x') }] };
+  assert.equal((await v2StockPairs(w)).length, 1);
+});
