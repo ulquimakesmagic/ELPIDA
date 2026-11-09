@@ -25,6 +25,7 @@ import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { buildSolanaRound, verifySolanaProof } from '../packages/solana/v2-rounds.mjs';
 import { ensureV2, v2Genesis, v2SolParams } from '../packages/solana/v2-setup.mjs';
 import { SolanaV2Keeper, configuredSolanaV2Keeper, snapshotHolderRound } from '../apps/api/v2-keeper-solana.mjs';
+import { SolanaV2Rewards, decodeV2Round } from '../apps/api/v2-rewards-solana.mjs';
 import { airdropRound } from '../packages/core/v2-keeper-plan.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
 import { vaultUpgrade, vaultHandBack, closeProgram, readProgramData } from '../scripts/squads-devnet-trial.mjs';
@@ -1795,4 +1796,35 @@ test('Solana V2 rounds (step 4b-2): plans keep base58 addresses, holders need tw
   assert.ok(await keeper.solAvailable(V2_DIST.airdrop) <= avail - 2_200_000n, 'paid SOL left the pool');
   const again = await keeper.post(V2_DIST.airdrop, 15, new Map([[p1.toBase58(), 1_000_000n], [p2.toBase58(), 1_200_000n]]));
   assert.equal(again.failed, 0, 'a repeat finds every leaf already paid');
+});
+
+test('Solana V2 rewards analytics (step 4c): vault sizes, posted rounds and flywheel burns in the EVM chain shape', { skip: raySkip }, async () => {
+  const net = { key: 'solana-devnet', name: 'Solana Devnet', deployment: { programId: f.programId.toBase58(), v2: { config: f.client.configV2For(new PublicKey(WSOL_MINT)).toBase58() } } };
+  const rewards = new SolanaV2Rewards({ connection: f.connection, net });
+  assert.equal(rewards.summary(), null, 'nothing is shown before the first read');
+  await rewards.sync();
+  const s = rewards.summary({ 'solana-devnet': { status: 'fresh', usd: 150 } });
+  assert.equal(s.key, 'solana-devnet'); assert.equal(s.testnet, true);
+  assert.deepEqual(s.assets[WSOL_MINT], { symbol: 'SOL', decimals: 9, usd: 150 });
+  assert.ok(s.status.pools >= 1, 'V2 SOL pools are read');
+  for (const kind of ['airdrop', 'holder', 'flywheel']) {
+    const [v] = s[kind].assets;
+    assert.equal(v.asset, WSOL_MINT); assert.equal(typeof v.size, 'bigint'); assert.ok(v.size >= 0n);
+    assert.equal(v.series.length, 1, `${kind} gets a daily sample`);
+  }
+  for (const [name, kind] of [['airdrop', V2_DIST.airdrop], ['holder', V2_DIST.holder]]) {
+    const d = f.client.decodeV2Distributor((await f.connection.getAccountInfo(f.client.v2DistPda(kind))).data);
+    assert.deepEqual([s[name].schedule?.period, s[name].schedule?.genesis], [d.period, d.genesis], `the ${name} schedule is read from its distributor`);
+    assert.ok(s[name].countdown, `${name} has a countdown`);
+  }
+  if (f.v2Operator) {
+    const r15 = s.airdrop.rounds.find(r => r.round === 15);
+    assert.ok(r15, 'the posted airdrop round is listed');
+    assert.equal(r15.total, 2_200_000n); assert.equal(r15.claimed, 2_200_000n); assert.equal(r15.unclaimed, 0n);
+    assert.equal(r15.paidRecipients, 2, 'fully paid rounds count every recipient even without the list');
+  }
+  assert.ok(Array.isArray(s.flywheel.burnedByToken)); assert.equal(s.flywheel.spentByAsset[0].asset, WSOL_MINT);
+  const round = decodeV2Round(Uint8Array.from({ length: 120 }, (_, i) => (i === 8 ? 1 : i === 9 ? 7 : 0)));
+  assert.deepEqual([round.kind, round.round, round.expired, round.paid(0)], [1, 7, false, 0]);
+  rewards.stop();
 });

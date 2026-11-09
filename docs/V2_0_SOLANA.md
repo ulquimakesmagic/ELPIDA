@@ -17,7 +17,7 @@ Not audited. Test networks first; mainnet only with Malik's explicit approval.
 | S4a | Deploy script `--v2 --keeper` (V2 SOL pair with USD pricing, distributors), keeper key script, launch page and trading for Solana V2 | This PR |
 | S4b-1 | Server keeper on Solana: fee payouts, harvests, SOL sweeps, flywheel (`apps/api/v2-keeper-solana.mjs`) | This PR |
 | S4b-2 | Reward rounds on Solana (airdrop monthly, holders weekly) in the keeper; trade fees in the Solana index | This PR |
-| S4c | Solana in the analytics Rewards section (vaults, rounds, burns) | Next |
+| S4c | Solana in the analytics Rewards section (vaults, rounds, burns) and burn tags on Explore (`apps/api/v2-rewards-solana.mjs`) | This PR |
 | S5 | Malik upgrades devnet and runs the V2 setup (docs/HUMAN_ACTIONS.md); the flywheel is checked on devnet | After S4a |
 
 ## S1: what the program does
@@ -114,6 +114,22 @@ rate; Raydium 1%; PumpSwap 0.30%). Holder rewards per token once its holder shar
 threshold ($0.25 test, $25 mainnet), weighted by daily holder snapshots (a wallet must be in two). Lists are posted
 (`post_v2_root`), published at `/api/public/v2-rewards/solana-manifest/<kind>/<round>`, and every leaf is paid in plain
 SOL. Wallet funding links (exchange-safe, as on EVM) are not applied on Solana yet: each wallet counts on its own.
+
+## S4c: Solana in the Rewards analytics
+
+`apps/api/v2-rewards-solana.mjs` reads the program once a minute and gives `/api/public/v2-rewards` one more chain in the
+same shape as the EVM chains, so the unified pool, the per-chain breakdown and the pie chart include Solana with no
+special case. The "Not live yet" Solana row disappears as soon as that chain is present.
+
+- **Vault sizes.** Each vault's share of every V2 SOL pool's fee ledger (airdrop 30%, flywheel 10%, holder 10%) less
+  what it has paid: claimed round payouts for the two distributors, SOL spent on buy-and-burn orders for the flywheel.
+  A daily sample of each is kept by the server from the day it starts.
+- **Rounds.** Every posted `V2Round` account for SOL, with totals, claimed and unclaimed amounts and expiry; the
+  schedule and countdown come from each distributor account. Per-round payout statistics appear when this server's
+  keeper published the list (`/api/public/v2-rewards/solana-manifest/<kind>/<round>`).
+- **Flywheel.** Spending, order count and tokens burned per token from the `V2FlywheelOrder` accounts. Solana tokens
+  on Explore get the same "bought and burned" tag as EVM tokens.
+- Amounts are SOL; USD only with a fresh price. Nothing shows until V2 is set up on the served cluster.
 
 ## Errors added
 

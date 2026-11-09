@@ -51,6 +51,8 @@ import { isDexModel } from '../../packages/core/curve-model.mjs';
 import { V2RewardsService } from './v2-rewards-service.mjs';
 import { configuredV2Keeper } from './v2-keeper.mjs';
 import { configuredSolanaV2Keeper } from './v2-keeper-solana.mjs';
+import { SolanaV2Rewards } from './v2-rewards-solana.mjs';
+import { toJson } from '../../packages/indexer/v2-rewards.mjs';
 
 const webRoot = fileURLToPath(new URL('../web/', import.meta.url));
 const ethersFile = fileURLToPath(new URL('../../node_modules/ethers/dist/ethers.min.js', import.meta.url));
@@ -262,9 +264,14 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // Tokens the flywheels bought and burned on a network (V2 vault burns on chain, plus the Model 10 keeper's burns),
   // keyed by lowercase token address, in base units. Explore cards and token pages show it as a share of supply.
   const flywheelBurns=key=>{const total=new Map();for(const m of [v2Rewards.burnedByToken(key),flywheelKeeper.burnedByToken?.(key)])for(const [token,amount] of m??[])total.set(token,(total.get(token)??0n)+amount);return total;};
+  // Solana tokens have 6 decimals; the V2 flywheel's burns per mint come from its order accounts.
+  const solanaBurn=(burns,mint)=>{const n=burns.get(mint);return n>0n?{flywheelBurned:formatUnits(n,6)}:{};};
   const burnFields=(burns,address)=>{const n=burns.get(String(address).toLowerCase());return n>0n?{flywheelBurned:formatUnits(n,18)}:{};};
   // ELPIDA V2.0 keeper: daily fee payouts, monthly airdrop and weekly holder rounds, daily flywheel. Off until
   // ELPIDA_V2_KEEPER_KEY is set and a V2 deployment is pinned; test networks only.
+  // ELPIDA V2 rewards on Solana for Analytics (step 4c): read from the program's accounts once a minute, when V2 is set up.
+  let solanaRewards=null;
+  if(port!==0&&solanaRpc&&solanaNet.deployment?.v2?.config)try{solanaRewards=new SolanaV2Rewards({connection:new solanaWeb3.Connection(solanaRpc,'confirmed'),net:solanaNet,path:dataFile('v2-rewards-solana.sqlite'),manifest:(k,r)=>solanaV2Keeper.manifest?.(k,r)??null,log:e=>console.log(JSON.stringify(e))}).start();}catch(error){console.error(JSON.stringify({event:'solana_v2_rewards_unavailable',message:String(error.message).slice(0,200)}));}
   // ELPIDA V2 keeper on Solana (step 4b): fee payouts, harvests, SOL sweeps, flywheel. Off until ELPIDA_V2_KEEPER_SOLANA_KEY is
   // set and the deployment recorded `v2`.
   let solanaV2Keeper={enabled:false,status:()=>({enabled:false,state:'not_configured'}),close:async()=>{}};
@@ -427,7 +434,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/graduation/status')return send(200,graduationKeeper.status());
         if(url.pathname==='/api/buyback/status')return send(200,buybackKeeper.status());
         if(url.pathname==='/api/public/flywheel')return send(200,flywheelKeeper.summary());
-        if(url.pathname==='/api/public/v2-rewards')return send(200,{...v2Rewards.summary(priceSnapshot(),undefined,key=>publicIndex.listings(key).filter(t=>t.deploymentModel==='v2-hook')),keeper:{...v2Keeper.status(),solana:solanaV2Keeper.status()}});
+        if(url.pathname==='/api/public/v2-rewards'){const evm=v2Rewards.summary(priceSnapshot(),undefined,key=>publicIndex.listings(key).filter(t=>t.deploymentModel==='v2-hook')),sol=toJson(solanaRewards?.summary(priceSnapshot())??null);const chains=[...(evm.chains??[]),...(sol?[sol]:[])];return send(200,{...evm,deployed:chains.length>0,chains,keeper:{...v2Keeper.status(),solana:solanaV2Keeper.status()}});}
         {const m=url.pathname.match(/^\/api\/public\/v2-rewards\/solana-manifest\/([01])\/(\d{1,6})$/);if(m){const manifest=solanaV2Keeper.manifest?.(m[1],m[2]);return manifest?send(200,manifest):send(404,{error:'No such Solana round list.'});}}
         {const m=url.pathname.match(/^\/api\/public\/v2-rewards\/manifest\/(\d+)\/(0x[0-9a-fA-F]{40})\/(\d+)\/(0x[0-9a-fA-F]{40})$/);if(m){const manifest=v2Keeper.manifest(m[1],m[2],m[3],m[4]);return manifest?send(200,manifest):send(404,{error:'No published payout list for that round.'});}}
         if(url.pathname==='/api/public/v2-rewards/payouts'){try{return send(200,v2Rewards.payouts(url.searchParams.get('wallet')));}catch(error){return send(400,{error:error.message});}}
@@ -452,7 +459,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         const solanaMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/([1-9A-HJ-NP-Za-km-z]{32,44})(?:\/(trades|candles|holders))?)?$/);
         if(solanaMatch&&url.searchParams.get('network')?.startsWith('solana-')){
           if(!solanaIndex||url.searchParams.get('network')!==solanaIndex.network.key)return send(404,{error:'No public Solana index for this network.'});
-          if(!solanaMatch[1]){const activity=indexedActivity(solanaIndex.db);return send(200,solanaIndex.listings().map(t=>({...t,priceChange24h:indexedChange(solanaIndex.db,t),...activityOf(activity,t.address)})));}
+          if(!solanaMatch[1]){const activity=indexedActivity(solanaIndex.db),burns=solanaRewards?.burnedByToken()??new Map();return send(200,solanaIndex.listings().map(t=>({...t,priceChange24h:indexedChange(solanaIndex.db,t),...activityOf(activity,t.address),...solanaBurn(burns,t.address)})));}
           const token=solanaIndex.token(solanaMatch[1]);if(!token)return send(404,{error:'Token not indexed yet. Check indexer status and retry.'});
           return send(200,solanaMatch[2]==='trades'?solanaIndex.trades(token.address,listLimit(url,100)):solanaMatch[2]==='candles'?solanaIndex.candles(token.address,Number(url.searchParams.get('interval')??60),listLimit(url,100)):solanaMatch[2]==='holders'?await solanaIndex.holders(token.address):token);
         }
@@ -607,7 +614,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
   bootPhase('listening');
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();await v2Keeper.close();await solanaV2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();await v2Keeper.close();solanaRewards?.stop();await solanaV2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

@@ -154,7 +154,7 @@ export function rewardsSection({ api }) {
         h('td', h('strong', r.all.headline), r.all.detail ? h('p.small.muted', r.all.detail) : null),
         h('td', pct(r)),
         ...r.per.map(({ c }) => h('td', c.headline, c.detail ? h('p.small.muted', c.detail) : null)))),
-        h('tr.rw-pending', h('td', h('span.rw-chain-name', h('i', { class: 'rw-swatch rw-c-solana', 'aria-hidden': 'true' }), 'Solana')), h('td', { colspan: String(2 + VAULTS.length) }, h('span.small.muted', 'Not live yet. Solana joins the pool when Elpida V2 launches there.')))));
+        rows.some(r => /^solana/.test(r.chain.key)) ? null : h('tr.rw-pending', h('td', h('span.rw-chain-name', h('i', { class: 'rw-swatch rw-c-solana', 'aria-hidden': 'true' }), 'Solana')), h('td', { colspan: String(2 + VAULTS.length) }, h('span.small.muted', 'Not live yet. Solana joins the pool when Elpida V2 launches there.')))));
     return h('div.rw-breakdown', h('div.rw-donut-wrap', svg, centre), h('div.analytics-table-scroll', table));
   }
 
