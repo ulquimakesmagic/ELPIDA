@@ -5,7 +5,7 @@
 // checks that code exists there before using it and otherwise falls back to the previous behaviour.
 // Sells: the curve and the DEX routers only ever pull tokens from the seller (msg.sender), so a standing approval of
 // the launched token can be used by no one else. Approving it once removes the approval step from every later sell.
-// Valuable assets people pay with (USDC, xStocks, paired tokens) keep exact per-trade approvals.
+// Valuable assets people pay with (USDC, oStocks, paired tokens) keep exact per-trade approvals.
 export const MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11';
 export const MULTICALL3_ABI = ['function aggregate3((address target,bool allowFailure,bytes callData)[] calls) payable returns((bool success,bytes returnData)[] returnData)'];
 export const MAX_UINT256 = (1n << 256n) - 1n;

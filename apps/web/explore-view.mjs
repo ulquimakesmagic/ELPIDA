@@ -283,10 +283,10 @@ export function createExplore(source) {
     const nets = source.networks();
     const singleChain = state.chain !== 'all' && nets.length === 1 ? nets[0] : nets.find(n => n.key === state.chain);
     const limitFor = kind => singleChain && PAIR_LIMITS[singleChain.kind]?.[kind];
-    pairChips.replaceChildren(...[['all', 'All'], ['native', 'Native'], ['usdc', 'USDC'], ['xstock', 'xStocks'], ['token', 'Tokens']].map(([key, label]) => {
+    pairChips.replaceChildren(...[['all', 'All'], ['native', 'Native'], ['usdc', 'USDC'], ['xstock', 'oStocks'], ['token', 'Tokens']].map(([key, label]) => {
       const limit = key !== 'all' && limitFor(key), count = counts.pair[key] ?? 0, active = state.pair === key;
       const glyph = key === 'all' ? icon('layers', 'icon-sm') : key === 'native' ? icon('coins', 'icon-sm') : key === 'usdc' ? assetIcon('USDC') : key === 'xstock' ? icon('chart-candlestick', 'icon-sm') : icon('layers', 'icon-sm');
-      return h('button.filter-chip', { type: 'button', 'aria-pressed': String(active), disabled: !active && (!!limit || (key !== 'all' && count === 0)), title: limit || (key !== 'all' && count === 0 ? `No ${{ native: 'native-coin', usdc: 'USDC', xstock: 'xStock', token: 'token-paired' }[key]} launches here yet` : undefined), on: { click: () => set({ pair: key, page: 1 }) } },
+      return h('button.filter-chip', { type: 'button', 'aria-pressed': String(active), disabled: !active && (!!limit || (key !== 'all' && count === 0)), title: limit || (key !== 'all' && count === 0 ? `No ${{ native: 'native-coin', usdc: 'USDC', xstock: 'oStock', token: 'token-paired' }[key]} launches here yet` : undefined), on: { click: () => set({ pair: key, page: 1 }) } },
         key === 'all' ? null : glyph, h('span', label), h('span.chip-count', number(count, 0)));
     }));
     const showChains = source.mode() === 'testnet' && nets.length > 1;

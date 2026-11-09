@@ -232,7 +232,7 @@ export class TestnetWallet {
   /** The creation fee in whole native coins: the factory's live value once deployed, else the configured one. */
   feeText() { return this.launchFee !== undefined ? formatUnits(this.launchFee, 18).replace(/\.0$/, '') : this.pricing.launchFee; }
   /**
-   * Launchable trading assets by kind (packages/core/pairs.mjs). Native comes from the factory; xStock and
+   * Launchable trading assets by kind (packages/core/pairs.mjs). Native comes from the factory; oStock (Ondo) and
    * paired-token assets are the factory's approved quotes (DEX launchpads only). Native and USDC fee
    * payment remain independent of the trading pair.
    */
@@ -241,9 +241,9 @@ export class TestnetWallet {
     const fee = { feeAmount: this.feeText(), feeSymbol: native };
     const approved = kind => (this.approvedQuotes ?? []).filter(a => a.kind === kind).map(a => ({ ...a, ...fee }));
     const missing = kind => !this.dex
-      ? `${this.net.name} uses the basic launchpad, which supports ${native} pairs. xStock and paired-token launches need DEX graduation (Base Sepolia).`
+      ? `${this.net.name} uses the basic launchpad, which supports ${native} pairs. oStock and paired-token launches need DEX graduation (Base Sepolia).`
       : !this.deployment ? 'Set up the launchpad on this network first.'
-      : `No ${kind === 'xstock' ? 'xStock' : 'paired token'} is approved on ${this.net.name} yet. The launchpad operator can add the test assets.`;
+      : `No ${kind === 'xstock' ? 'oStock' : 'paired token'} is approved on ${this.net.name} yet. The launchpad operator can add the test assets.`;
     return {
       native: { assets: [{ id: 'native', symbol: native, name: this.net.nativeCurrency.name, decimals: 18, ...fee, curve: this.previewCurve() }] },
       usdc: approved('usdc').length ? { assets: approved('usdc') } : { assets: [], unavailable: !this.dex ? 'USDC trading pairs need a DEX graduation adapter on this network.' : 'USDC trading setup is incomplete on this deployment. The owner can finish it here once; it then becomes available to everyone.' },

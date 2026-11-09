@@ -28,7 +28,7 @@ export function renderTestFunds(ctx, { connect }) {
         card('Test pair assets',
           !w.address ? h('div.stack', h('p.small.muted', `Connect a wallet on ${net.name} to mint its test assets.`), h('button.btn.btn-secondary', { type: 'button', on: { click: connect } }, 'Connect wallet'))
             : faucets.length ? h('div.wallet-choices', faucets.map(mint)) : h('p.small.muted', 'No test pair asset with a faucet on this network.'),
-          faucets.length ? h('p.small.muted', 'TEST-STOCK and the Ondo-style stand-ins are simulated stocks, not issued xStocks.') : null)),
+          faucets.length ? h('p.small.muted', 'TEST-STOCK and the Ondo-style stand-ins are simulated stocks, not issued Ondo oStocks.') : null)),
       circleFundingPanel({ config: ctx.config.circle, csrf: ctx.config.csrf, connected: { address: w.address, network: net.key } }));
   }
   queueMicrotask(draw);
