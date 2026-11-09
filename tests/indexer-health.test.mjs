@@ -19,9 +19,26 @@ test('RPC failures get a safe, readable code and never the URL', () => {
 
 test('the server moves a failing Solana index to the next RPC and reports which host it uses', () => {
   const server = readFileSync(new URL('../apps/api/server.mjs', import.meta.url), 'utf8');
-  assert.match(server, /\+\+solanaFailures>=3&&solanaRpcs\.length>1/);
-  assert.match(server, /useConnection\(new solanaWeb3\.Connection\(solanaRpcs\[solanaRpcAt\]/);
+  assert.match(server, /rpcRotation\(solanaRpcs\.length\)/);
+  assert.match(server, /solanaRotation\.failed\(solanaIndex\.lastError\)/);
+  assert.match(server, /for\(const f of solanaFollowers\)f\.connection=next/, 'the V2 keeper and rewards reader follow the switch');
   assert.match(server, /public_indexer_rpc_switched/);
+});
+
+test('RPC rotation: three failures or one refusal move on, wraps around, returns to the preferred RPC after 30 minutes', async () => {
+  const { rpcRotation } = await import('../packages/solana/rpc-config.mjs');
+  let clock = 0;
+  const r = rpcRotation(3, { now: () => clock });
+  assert.equal(r.failed('RPC_UNREACHABLE'), null); assert.equal(r.failed('RPC_SERVER_ERROR'), null);
+  assert.equal(r.failed('RPC_UNREACHABLE'), 1, 'third failure in a row moves on');
+  assert.equal(r.failed('RPC_RATE_LIMITED'), 2, 'a rate limit moves on at once');
+  assert.equal(r.failed('RPC_UNAUTHORIZED'), 0, 'out of credits moves on at once, wrapping around');
+  assert.equal(r.failed('RPC_RATE_LIMITED'), 1);
+  clock += 10 * 60_000; assert.equal(r.succeeded(), null, 'stays on a working backup for now');
+  clock += 25 * 60_000; assert.equal(r.succeeded(), 0, 'then tries the preferred RPC again');
+  assert.equal(r.succeeded(), null);
+  const single = rpcRotation(1);
+  for (let i = 0; i < 5; i++) assert.equal(single.failed('RPC_RATE_LIMITED'), null, 'one RPC: nowhere to move');
 });
 
 test('switching connection re-checks the cluster before indexing', async () => {

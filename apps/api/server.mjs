@@ -18,7 +18,7 @@ import { createStaticAssets, contentVersion } from './static-assets.mjs';
 import { PublicIndexer, recentTrade, feedTrades } from './public-indexer.mjs';
 import { TradeFeed } from './trade-feed.mjs';
 import { SolanaIndexer } from '../../packages/indexer/solana-indexer.mjs';
-import { validateSolanaRpc, solanaRpcList, rpcHost } from '../../packages/solana/rpc-config.mjs';
+import { validateSolanaRpc, solanaRpcList, rpcHost, rpcRotation } from '../../packages/solana/rpc-config.mjs';
 import * as solanaWeb3 from '@solana/web3.js';
 import { createCircleFunding } from './circle-test-wallets.mjs';
 import { VanityMintPool, vanityKey, clientAddress } from './vanity-mints.mjs';
@@ -246,17 +246,15 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       // The configured RPC first, then the cluster's public RPC: three failed full passes in a row move the index to
       // the next one (3 Nov 2026: a failing devnet RPC stalled the Solana index for eight days).
       const solanaRpcs=[...new Set([...solanaKeys.urls,solanaRpc,...(/^https:\/\//.test(solanaNet.rpcUrl??'')?[solanaNet.rpcUrl]:[]),...(solanaNet.rpcFallbacks??[])])].map(u=>{try{return validateSolanaRpc(u);}catch{return null;}}).filter(Boolean);
-      const hostOf=u=>{try{return new URL(u).host;}catch{return null;}};
-      let solanaRpcAt=0,solanaFailures=0,solanaSwitchedAt=0;
-      // Move to the next RPC after 3 failed passes, or after 1 when the endpoint refuses us (rate limit, out of credits,
-      // bad key). After 30 minutes away, try the preferred one again; if it still fails, the rotation moves on.
-      const useSolanaRpc=(at,reason)=>{solanaRpcAt=at;solanaFailures=0;solanaSwitchedAt=Date.now();const next=new solanaWeb3.Connection(solanaRpcs[at],'confirmed');solanaIndex.useConnection(next,rpcHost(solanaRpcs[at]));for(const f of solanaFollowers)f.connection=next;console.log(JSON.stringify({event:'public_indexer_rpc_switched',network:solanaNet.key,rpc:solanaIndex.rpcHost,position:at+1,of:solanaRpcs.length,reason}));};
+      // Rotation (packages/solana/rpc-config.mjs): next RPC after 3 failed passes, or at once on a rate limit or rejected
+      // key; back to the preferred one after 30 minutes away. The V2 keeper and rewards reader follow every switch.
+      const solanaRotation=rpcRotation(solanaRpcs.length);
+      const useSolanaRpc=(at,reason)=>{if(at==null)return;const next=new solanaWeb3.Connection(solanaRpcs[at],'confirmed');solanaIndex.useConnection(next,rpcHost(solanaRpcs[at]));for(const f of solanaFollowers)f.connection=next;console.log(JSON.stringify({event:'public_indexer_rpc_switched',network:solanaNet.key,rpc:solanaIndex.rpcHost,position:at+1,of:solanaRpcs.length,reason}));};
       solanaIndex=new SolanaIndexer({web3:solanaWeb3,connection:new solanaWeb3.Connection(solanaRpcs[0],'confirmed'),deployment:solanaNet.deployment,network:solanaNet,metadataStore,path:dataFile(`public-solana-${solanaNet.cluster}-${solanaNet.deployment.programId}.sqlite`)});
-      solanaIndex.rpcHost=hostOf(solanaRpcs[0]);
-      const fullTick=()=>solanaIndex.sync().then(()=>{solanaFailures=0;if(solanaRpcAt!==0&&Date.now()-solanaSwitchedAt>30*60_000)useSolanaRpc(0,'retry_preferred');console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}));}).catch(()=>{
+      solanaIndex.rpcHost=rpcHost(solanaRpcs[0]);
+      const fullTick=()=>solanaIndex.sync().then(()=>{useSolanaRpc(solanaRotation.succeeded(),'retry_preferred');console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}));}).catch(()=>{
         console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,rpc:solanaIndex.rpcHost,message:'Indexing unavailable; retrying.'}));
-        const refused=['RPC_RATE_LIMITED','RPC_UNAUTHORIZED'].includes(solanaIndex.lastError);
-        if((++solanaFailures>=3||refused)&&solanaRpcs.length>1)useSolanaRpc((solanaRpcAt+1)%solanaRpcs.length,solanaIndex.lastError??'failing');
+        useSolanaRpc(solanaRotation.failed(solanaIndex.lastError),solanaIndex.lastError??'failing');
       });
       // Fast pass every few seconds (new transactions, then pools only if something traded), full pass every 30 s.
       // New trades go to the live feed; the first pass after a restart only records where history ends.
