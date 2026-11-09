@@ -8,7 +8,7 @@ import { v2Fixture, launchV2, trade, mined, parse, v4Art } from './helpers/v2-fi
 import { timeWeightedBalances, airdropRound, holderRound, flywheelOrders, personalFunder, boundedFunderLinks } from '../packages/core/v2-keeper-plan.mjs';
 import { verifyPayout } from '../packages/core/v2-rounds.mjs';
 import { V2Indexer } from '../packages/indexer/v2-indexer.mjs';
-import { V2Keeper } from '../apps/api/v2-keeper.mjs';
+import { V2Keeper, configuredV2Keeper } from '../apps/api/v2-keeper.mjs';
 
 const DAY = 86_400, A = n => '0x' + String(n).padStart(40, '0'), E = n => BigInt(Math.round(n * 1e6)) * 10n ** 12n;
 
@@ -132,4 +132,18 @@ test('the keeper runs fees, flywheel, holder rewards (USDC → native) and the m
   // Running again does nothing new.
   await keeper.airdrop(w); await keeper.holder(w);
   assert.equal(keeper.status().chains[0].airdropNext, ar + 1);
+});
+
+test('with the key set and no V2 pinned yet, the keeper is idle but its address is public (operator panel)', () => {
+  const key = '0x' + '11'.repeat(32), net = { key: 'base-sepolia', chainId: 84532, rpcUrl: 'http://127.0.0.1:1', v4: {} };
+  const idle = configuredV2Keeper({ env: { ELPIDA_V2_KEEPER_KEY: key }, networks: [net], indexFor: () => null, prices: () => ({}), path: ':memory:' });
+  assert.equal(idle.enabled, false); assert.match(idle.address, /^0x[0-9a-fA-F]{40}$/);
+  assert.equal(idle.status().state, 'waiting_for_v2_deployment');
+  const off = configuredV2Keeper({ env: {}, networks: [net], indexFor: () => null, prices: () => ({}), path: ':memory:' });
+  assert.equal(off.address, null); assert.equal(off.status().state, 'not_configured');
+  const bad = configuredV2Keeper({ env: { ELPIDA_V2_KEEPER_KEY: 'nope' }, networks: [net], indexFor: () => null, prices: () => ({}), path: ':memory:' });
+  assert.equal(bad.address, null);
+  const pinned = configuredV2Keeper({ env: { ELPIDA_V2_KEEPER_KEY: key }, networks: [{ ...net, v2: { shared: { hook: A(1), airdrop: A(2), holder: A(3), flywheel: A(4), router: A(5), factory: A(6) } } }], indexFor: () => null, prices: () => ({}), path: ':memory:' });
+  assert.equal(pinned.enabled, true); assert.equal(pinned.address, idle.address);
+  assert.equal(configuredV2Keeper({ env: { ELPIDA_V2_KEEPER_KEY: key }, networks: [{ ...net, mainnet: true, v2: { shared: { hook: A(1), airdrop: A(2) } } }], indexFor: () => null, prices: () => ({}), path: ':memory:' }).enabled, false, 'never on mainnet');
 });

@@ -248,7 +248,11 @@ export function etherscanFunder(chainId, apiKey, fetchImpl = fetch) {
 export function configuredV2Keeper({ env, networks, indexFor, prices, path, publicUrl, log }) {
   const key = env.ELPIDA_V2_KEEPER_KEY;
   const nets = networks.filter(n => !n.mainnet && n.v2?.shared?.hook && n.v2.shared.airdrop);
-  if (!key || !/^(0x)?[0-9a-fA-F]{64}$/.test(key) || !nets.length) return { enabled: false, status: () => ({ enabled: false, state: key ? 'no_v2_deployment' : 'not_configured' }), manifest: () => null, start() { return this; }, close: async () => {} };
+  const valid = !!key && /^(0x)?[0-9a-fA-F]{64}$/.test(key);
+  // With the key set but no V2 pinned yet, the keeper is idle but its address is public, so the operator panel deploys
+  // the reward contracts with the keeper as operator (not the operator's own wallet).
+  const idleAddress = valid ? getAddress(new Wallet(key).address) : null;
+  if (!valid || !nets.length) return { enabled: false, address: idleAddress, status: () => ({ enabled: false, state: valid ? 'waiting_for_v2_deployment' : 'not_configured', keeper: idleAddress }), manifest: () => null, start() { return this; }, close: async () => {} };
   const address = new Wallet(key).address, oracles = usdOracles(env);
   // Extra exchange or service wallets that must never link the wallets they fund (comma-separated addresses).
   const ignoredFunders = new Set(String(env.ELPIDA_FUNDER_IGNORE ?? '').split(',').map(x => x.trim().toLowerCase()).filter(x => /^0x[0-9a-f]{40}$/.test(x)));
