@@ -22,6 +22,8 @@ const pad = n => String(n).padStart(2, '0');
 const dateOf = t => new Date(t * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC' });
 const dateTimeOf = t => new Date(t * 1000).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short', timeZone: 'UTC' }) + ' UTC';
 const usdText = n => '$' + (n < 1 ? n.toFixed(n > 0 && n < 0.01 ? 4 : 2) : compact(n));
+/** Fixed colour per chain (identity, not rank). Mainnet keys share their testnet's colour. */
+const chainColor = key => /^base/.test(key) ? 'base' : /^bnb/.test(key) ? 'bnb' : /^ethereum/.test(key) ? 'ethereum' : /^solana/.test(key) ? 'solana' : 'other';
 const names = list => list.length < 3 ? list.join(' and ') : `${list.slice(0, -1).join(', ')} and ${list.at(-1)}`;
 
 const assetOf = (chain, address) => chain.assets?.[address] ?? chain.assets?.[String(address).toLowerCase()] ?? { symbol: short(address), decimals: 18, usd: null };
@@ -113,6 +115,47 @@ export function rewardsSection({ api }) {
         h('p.small.muted', `${v.share}${growth}`),
         now.extra.length ? h('p.small.muted', `Not priced: ${now.extra.join(' · ')}`) : null);
     }));
+  }
+
+  /**
+   * The pool by chain: a donut of each chain's share of the dollar total (all three vaults), beside a table of every
+   * chain's holdings. Chain colours follow the chain, never its rank. Solana is listed until its V2 rewards exist.
+   */
+  function breakdown() {
+    const rows = chains().map(chain => {
+      const per = VAULTS.map(v => ({ v, c: combine((chain[v.key]?.assets ?? []).map(a => holding(chain, a.asset, a.size))) }));
+      const all = combine(VAULTS.flatMap(v => (chain[v.key]?.assets ?? []).map(a => holding(chain, a.asset, a.size))));
+      return { chain, per, all, usd: all.usd ?? 0 };
+    });
+    const total = rows.reduce((n, r) => n + r.usd, 0);
+    const share = r => total > 0 ? r.usd / total : 0;
+    const pct = r => total > 0 ? `${number(share(r) * 100, share(r) < 0.1 ? 1 : 0)}%` : '—';
+    // Donut: one ring segment per chain with value, a 2px surface gap between segments.
+    const R = 52, C = 2 * Math.PI * R, GAP = 2;
+    const svg = document.createElementNS(SVG, 'svg');
+    svg.setAttribute('viewBox', '0 0 140 140'); svg.setAttribute('class', 'rw-donut'); svg.setAttribute('role', 'img');
+    svg.setAttribute('aria-label', total > 0 ? `Reward pool by chain: ${rows.filter(r => r.usd > 0).map(r => `${r.chain.name} ${pct(r)}`).join(', ')}` : 'Reward pool by chain: no fees yet');
+    const ring = document.createElementNS(SVG, 'circle');
+    for (const [k, v] of Object.entries({ cx: 70, cy: 70, r: R, class: 'rw-donut-track' })) ring.setAttribute(k, v);
+    svg.append(ring);
+    let offset = 0;
+    const live = rows.filter(r => r.usd > 0);
+    for (const r of live) {
+      const len = share(r) * C, seg = document.createElementNS(SVG, 'circle');
+      const visible = live.length > 1 ? Math.max(0.5, len - GAP) : len;
+      for (const [k, v] of Object.entries({ cx: 70, cy: 70, r: R, class: `rw-donut-seg rw-c-${chainColor(r.chain.key)}`, 'stroke-dasharray': `${visible} ${C - visible}`, 'stroke-dashoffset': String(-offset), transform: 'rotate(-90 70 70)' })) seg.setAttribute(k, v);
+      const tip = document.createElementNS(SVG, 'title'); tip.textContent = `${r.chain.name}: ${usdText(r.usd)} (${pct(r)})`; seg.append(tip);
+      svg.append(seg); offset += len;
+    }
+    const centre = h('div.rw-donut-centre', h('strong', usdText(total)), h('span', 'all chains'));
+    const table = h('table.analytics-table.rw-breakdown-table', h('thead', h('tr', ...['Chain', 'Pool', 'Share', ...VAULTS.map(v => v.label)].map(t => h('th', { scope: 'col' }, t)))),
+      h('tbody', ...rows.map(r => h('tr',
+        h('td', h('span.rw-chain-name', h('i', { class: `rw-swatch rw-c-${chainColor(r.chain.key)}`, 'aria-hidden': 'true' }), r.chain.name)),
+        h('td', h('strong', r.all.headline), r.all.detail ? h('p.small.muted', r.all.detail) : null),
+        h('td', pct(r)),
+        ...r.per.map(({ c }) => h('td', c.headline, c.detail ? h('p.small.muted', c.detail) : null)))),
+        h('tr.rw-pending', h('td', h('span.rw-chain-name', h('i', { class: 'rw-swatch rw-c-solana', 'aria-hidden': 'true' }), 'Solana')), h('td', { colspan: String(2 + VAULTS.length) }, h('span.small.muted', 'Not live yet. Solana joins the pool when Elpida V2 launches there.')))));
+    return h('div.rw-breakdown', h('div.rw-donut-wrap', svg, centre), h('div.analytics-table-scroll', table));
   }
 
   /** Daily vault sizes in dollars, every chain and priced asset added together; one line per vault. */
@@ -210,6 +253,7 @@ export function rewardsSection({ api }) {
       h('div.analytics-section-head', h('div', h('h2', { id: 'rw-title' }, 'Rewards'), h('p.small.muted', `Where every fee goes, on ${names(on)} together: 30% creator, 30% trader airdrop, 10% flywheel, 10% holder rewards, 20% treasury. Read from the contracts.`)), h('div.analytics-controls', h('span.badge', 'Test networks · no monetary value'))),
       h('div.rw-countdowns', ...countdownCards('airdrop', 'Trader airdrop'), ...countdownCards('holder', 'Holder rewards')),
       vaultTiles(),
+      h('div.rw-block', h('h3', 'Reward pool by chain'), h('p.small.muted', 'One pool across every chain. Each chain\'s share of what the trader airdrop, holder rewards and flywheel vaults hold now, in dollars at today\'s prices.'), breakdown()),
       h('div.rw-block', h('h3', 'Vault sizes by day'), h('p.small.muted', 'Earned from fees so far on every chain, less what has been paid out or burned, in dollars at today\'s prices. Updated as trades confirm.'), sizeChart()),
       h('div.rw-block', h('h3', 'How the last airdrop was shared'), h('p.small.muted', 'Each month: 20% of the pool equally among qualifying traders, 40% by the square root of fees paid, 40% in proportion to fees paid; no trader above 1% of the pool. Linked wallets count as one trader; creator-linked wallets are excluded.'), distribution()),
       h('div.rw-block', h('h3', 'Check your payouts'), lookup()),

@@ -258,4 +258,22 @@
 .rw-lookup-form .input { flex: 1 1 260px; min-width: 0; }
 .rw-empty { padding: 18px; border-radius: 16px; border: .67px dashed var(--line-soft); }
 .rw-empty p { margin: 0; }
+/* Reward pool by chain: chain colours follow the chain (validated categorical slots, dark and light). */
+.rw-c-base { --chain: #3987e5; } .rw-c-bnb { --chain: #c98500; } .rw-c-ethereum { --chain: #9085e9; } .rw-c-solana { --chain: #199e70; } .rw-c-other { --chain: var(--muted); }
+[data-theme="light"] .rw-c-base { --chain: #2a78d6; } [data-theme="light"] .rw-c-bnb { --chain: #eda100; } [data-theme="light"] .rw-c-ethereum { --chain: #6250d6; } [data-theme="light"] .rw-c-solana { --chain: #1baf7a; }
+.rw-swatch[class*="rw-c-"] { background: var(--chain); }
+.rw-breakdown { display: grid; grid-template-columns: 180px minmax(0, 1fr); gap: 24px; align-items: center; }
+.rw-donut-wrap { position: relative; width: 180px; height: 180px; }
+.rw-donut { width: 100%; height: 100%; display: block; }
+.rw-donut-track { fill: none; stroke: var(--line-faint); stroke-width: 16; }
+.rw-donut-seg { fill: none; stroke: var(--chain); stroke-width: 16; transition: stroke-width .15s ease; }
+.rw-donut-seg:hover { stroke-width: 20; }
+.rw-donut-centre { position: absolute; inset: 0; display: grid; place-content: center; text-align: center; gap: 2px; pointer-events: none; }
+.rw-donut-centre strong { font: 650 20px/1.1 var(--font-sans); letter-spacing: -.3px; }
+.rw-donut-centre span { font-size: 11px; color: var(--muted); }
+.rw-chain-name { display: inline-flex; align-items: center; gap: 8px; font-weight: 600; white-space: nowrap; }
+.rw-breakdown-table td p { margin: 2px 0 0; }
+.rw-pending td { color: var(--muted); }
+@media (prefers-reduced-motion: reduce) { .rw-donut-seg { transition: none; } }
+@media (max-width: 760px) { .rw-breakdown { grid-template-columns: 1fr; justify-items: center; } .rw-breakdown > .analytics-table-scroll { width: 100%; } }
 @media (max-width: 760px) { .rw-vaults { grid-template-columns: 1fr; } .rw-band { grid-template-columns: 96px 1fr 44px; } }
