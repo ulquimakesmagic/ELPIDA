@@ -1535,6 +1535,8 @@ test('Solana V2: own fee, anti-snipe to liquidity, five-way ledger, permissionle
 
   const vault = () => balance(f.client.ata(f.client.poolPda(mint), f.quoteMint));
   const owedSum = q => v2Owed(q.v2).reduce((a, b) => a + b, 0n);
+  // Everything the ledger has not paid out: the owed shares plus the split's rounding (at most 4 base units).
+  const unpaid = q => q.v2.accrued - q.v2.paid.reduce((a, b) => a + b, 0n);
   // Inside the anti-snipe window: the token's own fee joins the ledger, everything above it is locked as liquidity.
   const before = p, gross = 100n * USDC;
   await send(f.connection, f.trader, [f.client.buy({ buyer: f.trader.publicKey, config, mint, grossIn: gross, minTokensOut: 0n })], [], 1);
@@ -1543,7 +1545,7 @@ test('Solana V2: own fee, anti-snipe to liquidity, five-way ledger, permissionle
   assert.equal(p.v2.accrued - before.v2.accrued, own);
   assert.ok(bonus > 0n, 'a buy in the first minute pays the anti-snipe surplus');
   assert.ok(own + bonus <= gross * 9_000n / BPS && own + bonus > gross * 250n / BPS);
-  assert.equal(await vault(), p.realQuote + p.liquidityBonus + owedSum(p), 'vault = reserve + locked surplus + owed shares');
+  assert.equal(await vault(), p.realQuote + p.liquidityBonus + unpaid(p), 'vault = reserve + locked surplus + unpaid fees');
 
   // Withdrawal pays every owed share to its fixed destination, once.
   const dest = [f.client.ata(f.rewardWallet.publicKey, f.quoteMint), ...['airdrop', 'flywheel', 'holder'].map(k => f.client.ata(f.client.v2VaultPda(k), f.quoteMint)), f.client.ata(f.treasury, f.quoteMint)];
@@ -1556,7 +1558,7 @@ test('Solana V2: own fee, anti-snipe to liquidity, five-way ledger, permissionle
   assert.deepEqual((await eventsOf(paidSig)).filter(e => e.name === 'V2FeesPaid').map(e => [e.recipient, e.amount]), owed.map((v, i) => [i, v]).filter(([, v]) => v > 0n));
   await failsWith(withdraw(), /0x1797/);
   p = f.client.decodePool((await f.connection.getAccountInfo(f.client.poolPda(mint))).data);
-  assert.equal(await vault(), p.realQuote + p.liquidityBonus + owedSum(p));
+  assert.equal(await vault(), p.realQuote + p.liquidityBonus + unpaid(p));
   assert.ok(owedSum(p) <= 4n, 'only the split\'s rounding stays behind');
 
   // After the first minute the fee is the token's own: nothing more is locked as anti-snipe liquidity. That buy
@@ -1574,13 +1576,14 @@ test('Solana V2: own fee, anti-snipe to liquidity, five-way ledger, permissionle
   assert.ok(spent < 50_000n * USDC, 'the completing buy is filled only up to the curve supply');
   assert.equal(p.v2.accrued - pre.v2.accrued, spent * 250n / BPS, 'own fee only');
   assert.equal(p.liquidityBonus, pre.liquidityBonus, 'no anti-snipe surplus after the first minute');
-  assert.equal(await vault(), p.realQuote + p.liquidityBonus + owedSum(p));
+  assert.equal(await vault(), p.realQuote + p.liquidityBonus + unpaid(p));
   if (pumpSkip) return;
   await send(f.connection, f.outsider, [f.client.computeBudget(MIGRATE_COMPUTE_UNITS), f.client.migrateToPumpswap({ payer: f.outsider.publicKey, config, mint })], [], 1);
   p = f.client.decodePool((await f.connection.getAccountInfo(f.client.poolPda(mint))).data);
   assert.equal(p.status, STATUS_MIGRATED);
   const owedAfter = v2Owed(p.v2), c0 = await bal();
-  assert.equal(await vault(), owedAfter.reduce((a, b) => a + b, 0n), 'migration moved the liquidity and left exactly the owed shares');
+  assert.equal(await vault(), unpaid(p), 'migration moved the liquidity and left exactly the unpaid fees');
+  assert.ok(unpaid(p) - owedAfter.reduce((a, b) => a + b, 0n) <= 4n);
   await withdraw();
   const c1 = await bal();
   assert.deepEqual(c1.map((v, i) => v - c0[i]), owedAfter);
