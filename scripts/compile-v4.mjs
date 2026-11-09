@@ -20,7 +20,7 @@ export const V4_SETTINGS = {
 
 /** Contracts from today's build that Model 11 reuses unchanged, and (for tests) the shared mocks. */
 const SHARED = ['contracts/evm/src/ElpidaToken.sol', 'contracts/evm/src/ElpidaUsdPricing.sol'];
-const MOCKS = ['tests/fixtures/MockUsdFeed.sol', 'tests/fixtures/MockUSDC.sol', 'tests/fixtures/MockIssuerStock.sol', 'tests/fixtures/RejectingReceiver.sol'];
+const MOCKS = ['tests/fixtures/MockUsdFeed.sol', 'tests/fixtures/MockUSDC.sol', 'tests/fixtures/MockIssuerStock.sol', 'tests/fixtures/RejectingReceiver.sol', 'tests/fixtures/LocalWrappedETH.sol'];
 
 function sources(includeMocks) {
   const out = {};

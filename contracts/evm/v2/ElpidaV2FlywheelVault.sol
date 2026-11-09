@@ -35,6 +35,8 @@ contract ElpidaV2FlywheelVault {
     uint256 public constant TOKEN_COOLDOWN = 6 hours;
     uint256 public constant MIN_TOKEN_AGE = 1 days;
     address public immutable operator;
+    /// Whoever deployed the vault may also set the router once (the operator is usually a server keeper).
+    address public immutable deployer;
     IFlywheelFactory public immutable factory;
     /// Set once, after the hook and router exist (the hook needs this vault's address first).
     IFlywheelRouter public router;
@@ -58,12 +60,12 @@ contract ElpidaV2FlywheelVault {
 
     constructor(address operator_, IFlywheelFactory factory_) {
         if (operator_ == address(0) || address(factory_) == address(0)) revert BadTerms();
-        operator = operator_; factory = factory_;
+        operator = operator_; factory = factory_; deployer = msg.sender;
     }
 
     /// Once: the Elpida router of this launchpad's hook.
     function setRouter(IFlywheelRouter router_) external {
-        if (msg.sender != operator) revert OnlyOperator();
+        if (msg.sender != operator && msg.sender != deployer) revert OnlyOperator();
         address h = factory.hook();
         if (address(router) != address(0) || h == address(0) || router_.hook() != h) revert BadTerms();
         router = router_; hook = h;

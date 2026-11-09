@@ -15,21 +15,21 @@ test('round schedules: calendar months and fixed periods match the site’s coun
   const f = await v2Fixture(t);
   const D = (y, m) => Date.UTC(y, m - 1, 1) / 1000;
   for (const genesis of [D(2026, 11), D(2024, 1), D(2027, 12)]) {
-    const c = await f.deploy(v4Art('ElpidaV2Distributor'), f.addresses[4], 0, genesis, 'trader-airdrop'), s = schedule({ period: 0, genesis });
+    const c = await f.deploy(v4Art('ElpidaV2Distributor'), f.addresses[4], 0, genesis, 'trader-airdrop', ZeroAddress, ZeroAddress, ZeroAddress), s = schedule({ period: 0, genesis });
     for (let n = 0; n < 30; n++) assert.equal(Number(await c.roundStart(n)), s.start(n), `month ${n} from ${new Date(genesis * 1000).toISOString()}`);
     assert.equal(s.end(1) - s.start(1) > 27 * DAY, true);
   }
   // A leap February: 29 days.
   const leap = schedule({ period: 0, genesis: D(2028, 2) });
   assert.equal(leap.end(0) - leap.start(0), 29 * DAY);
-  const week = await f.deploy(v4Art('ElpidaV2Distributor'), f.addresses[4], 7 * DAY, D(2026, 11), 'holder-rewards');
+  const week = await f.deploy(v4Art('ElpidaV2Distributor'), f.addresses[4], 7 * DAY, D(2026, 11), 'holder-rewards', ZeroAddress, ZeroAddress, ZeroAddress);
   assert.equal(Number(await week.roundEnd(3)), D(2026, 11) + 28 * DAY);
   for (const [period, genesis] of [[0, D(2026, 11) + DAY], [0, D(2026, 11) + 3600], [3600, D(2026, 11)]]) {
-    await revertsWith(f.deploy(v4Art('ElpidaV2Distributor'), f.addresses[4], period, genesis, 'x'), errorSelector(week, 'BadTerms'));
+    await revertsWith(f.deploy(v4Art('ElpidaV2Distributor'), f.addresses[4], period, genesis, 'x', ZeroAddress, ZeroAddress, ZeroAddress), errorSelector(week, 'BadTerms'));
     assert.throws(() => schedule({ period, genesis }));
   }
   // The countdown the page shows is the contract's own round end.
-  const now = await chainNow(f), monthly = await f.deploy(v4Art('ElpidaV2Distributor'), f.addresses[4], 0, D(2026, 1), 'trader-airdrop');
+  const now = await chainNow(f), monthly = await f.deploy(v4Art('ElpidaV2Distributor'), f.addresses[4], 0, D(2026, 1), 'trader-airdrop', ZeroAddress, ZeroAddress, ZeroAddress);
   const cd = countdown(schedule({ period: 0, genesis: D(2026, 1) }), now);
   assert.equal(cd.round, Number(await monthly.currentRound()));
   assert.equal(cd.endsAt, Number(await monthly.roundEnd(cd.round)));
@@ -84,7 +84,8 @@ test('the trader airdrop is funded by the hook, posted after the round, and paid
   await revertsWith(mined(drop.claim(round, ZeroAddress, failed.account, failed.amount, failed.proof)), errorSelector(drop, 'RoundClosed'));
   // Only these functions change state: nothing can send funds outside a posted round.
   const writes = drop.interface.fragments.filter(x => x.type === 'function' && !['view', 'pure'].includes(x.stateMutability)).map(x => x.name).sort();
-  assert.deepEqual(writes, ['claim', 'claimMany', 'expire', 'postRoot']);
+  assert.deepEqual(writes, ['claim', 'claimMany', 'convertToNative', 'expire', 'postRoot']);
+  await revertsWith(mined(drop.connect(keeper).convertToNative(1n, 1n, 3000)), errorSelector(drop, 'BadTerms'), 'the airdrop distributor converts nothing');
   // The statistics the analytics page shows for the round.
   const stats = roundStats(m.entries.map(e => e.amount));
   assert.equal(stats.recipients, 5); assert.equal(stats.total, pool); assert.ok(stats.median > 0n && stats.top1Share > 0);

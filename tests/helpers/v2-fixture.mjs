@@ -5,6 +5,7 @@
 import { network } from 'hardhat';
 import { BrowserProvider, Contract, ContractFactory, concat, AbiCoder, ZeroAddress, Wallet, parseEther } from 'ethers';
 import { uniswapV4Artifact } from '../../scripts/compile-v4.mjs';
+import { deployLocalV3, v3Artifacts } from '../../packages/core/uniswap.mjs';
 import { v4Art, mined, mineHookSalt, parse } from './v4-fixture.mjs';
 
 export { v4Art, mined, parse };
@@ -25,7 +26,11 @@ const hex = s => (s.startsWith('0x') ? s : '0x' + s);
  * months from the start of the chain's current month), the holder-reward distributor (weekly from today) and the
  * flywheel vault; signer 4 is their keeper.
  */
-export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN_FEE_BPS, requireMetadata = false, vaults: realVaults = false } = {}) {
+/**
+ * `convert: true` (with vaults) also deploys a local Uniswap v3 with a USDC/WETH pool at $2,500 and gives the holder
+ * distributor its USDC → native conversion.
+ */
+export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN_FEE_BPS, requireMetadata = false, vaults: realVaults = false, convert = false } = {}) {
   const connection = await network.create('localCancun'), provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 });
   provider.pollingInterval = 10; t.after(async () => { provider.destroy(); await connection.close(); });
   const signers = await Promise.all([0, 1, 2, 3, 4].map(i => provider.getSigner(i))), addresses = await Promise.all(signers.map(s => s.getAddress()));
@@ -37,14 +42,17 @@ export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN
   const swapRouter = await deploy(uniswapV4Artifact('PoolSwapTest'), manager.target);
   const liquidityRouter = await deploy(uniswapV4Artifact('PoolModifyLiquidityTest'), manager.target);
   const factory = await deploy(v4Art('ElpidaV2Factory'), treasury, startMcapUsd, requireMetadata);
+  const usdc = await deploy(v4Art('MockUSDC'));
   if (realVaults) {
     const now = (await provider.getBlock('latest')).timestamp, today = now - now % 86_400, d = new Date(now * 1000);
-    contracts.airdrop = await deploy(v4Art('ElpidaV2Distributor'), addresses[4], 0, Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000, 'trader-airdrop');
-    contracts.holder = await deploy(v4Art('ElpidaV2Distributor'), addresses[4], 7 * 86_400, today, 'holder-rewards');
+    const Z = ZeroAddress;
+    if (convert) contracts.v3 = await localUsdcWethPool(signers[0], usdc, deploy);
+    contracts.airdrop = await deploy(v4Art('ElpidaV2Distributor'), addresses[4], 0, Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000, 'trader-airdrop', Z, Z, Z);
+    contracts.holder = await deploy(v4Art('ElpidaV2Distributor'), addresses[4], 7 * 86_400, today, 'holder-rewards', convert ? usdc.target : Z, convert ? contracts.v3.router.target : Z, convert ? contracts.v3.weth.target : Z);
     contracts.flywheel = await deploy(v4Art('ElpidaV2FlywheelVault'), addresses[4], factory.target);
     Object.assign(vaults, { traderAirdrop: contracts.airdrop.target, flywheel: contracts.flywheel.target, holderRewards: contracts.holder.target });
   }
-  const feed = await deploy(v4Art('MockUsdFeed'), ETH_USD * 10n ** 8n), usdc = await deploy(v4Art('MockUSDC'));
+  const feed = await deploy(v4Art('MockUsdFeed'), ETH_USD * 10n ** 8n);
   const stock = await deploy(v4Art('MockIssuerStock'));
   await mined(factory.connect(owner).configureUsdPricing(feed.target, 86400, usdc.target));
   await mined(factory.connect(owner).approveQuote(usdc.target, USDC_VIRTUAL_QUOTE * BigInt(startMcapUsd) / 20_000n));
@@ -106,3 +114,21 @@ export async function revertsWith(promise, needle) {
   if (!seen.toLowerCase().includes(String(needle).replace(/^0x/, '').toLowerCase())) throw new Error(`expected a revert with ${needle}, got: ${seen.slice(0, 400)}`);
 }
 export const errorSelector = (contract, name) => contract.interface.getError(name).selector;
+
+/** A local Uniswap v3 (SwapRouter02) with a USDC/WETH 0.3% pool at $2,500 per ETH and full-range liquidity. */
+async function localUsdcWethPool(signer, usdc, deploy) {
+  const v3 = await deployLocalV3(signer, v4Art('LocalWrappedETH')), me = await signer.getAddress();
+  await mined(usdc.mint(me, 250_000n * 10n ** 6n));
+  await mined(v3.weth.connect(signer).deposit({ value: parseEther('100') }));
+  const [t0, t1] = BigInt(usdc.target) < BigInt(v3.weth.target) ? [usdc, v3.weth] : [v3.weth, usdc];
+  // price = token1 per token0 in raw units: USDC per WETH = 2500e6 / 1e18, or the inverse.
+  const [num, den] = t0 === usdc ? [10n ** 18n, 2_500n * 10n ** 6n] : [2_500n * 10n ** 6n, 10n ** 18n];
+  const sqrt = n => { let x = BigInt(Math.floor(Math.sqrt(Number(n)))); while (x * x > n) x--; while ((x + 1n) * (x + 1n) <= n) x++; return x; };
+  const sqrtPrice = sqrt((num << 192n) / den);
+  const manager = new Contract(v3.manager.target, v3Artifacts.manager.abi, signer);
+  await mined(manager.createAndInitializePoolIfNecessary(t0.target, t1.target, 3000, sqrtPrice));
+  for (const t of [usdc, v3.weth]) await mined(t.connect(signer).approve(manager.target, 2n ** 255n));
+  const amounts = t0 === usdc ? [250_000n * 10n ** 6n, parseEther('100')] : [parseEther('100'), 250_000n * 10n ** 6n];
+  await mined(manager.mint([t0.target, t1.target, 3000, -887220, 887220, amounts[0], amounts[1], 0, 0, me, 2n ** 40n]));
+  return v3;
+}

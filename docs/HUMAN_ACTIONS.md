@@ -501,6 +501,19 @@ Robinhood's testnet has no Uniswap v3 and no Chainlink feed, so the site deploys
    testnets. Completing a curve takes about $130 of test ETH in total (about 4 to 5 days of faucet); launching and
    trading need far less.
 
+## 3e. ELPIDA V2 on a test network (keeper, deploy, pin) — open
+
+1. In Railway, set `ELPIDA_V2_KEEPER_KEY` to a **new** test-network key used for nothing else. Do not reuse the treasury
+   or relay key, and never paste it into chat. Optionally set `ELPIDA_EXPLORER_API_KEY` (an Etherscan API key) so
+   linked wallets are found by their funder. Redeploy.
+2. Send test gas to the keeper address. The operator panel shows it in the V2 card once step 1 is done.
+3. Operator panel → Launchpads → the network → **Deploy V2 test launchpad**. Keep the minimum fee at 1.00% unless you
+   decide otherwise.
+4. Send the JSON the card shows (factory, hook, router, airdrop, holder, flywheel, keeper, block, minFeeBps). It is
+   pinned in `networks.mjs` as `v2.shared`. V2 then lists, trades and shows Rewards for everyone, and the keeper starts.
+5. Still to decide: the holder payout threshold ($0.25 on test networks for now), the mainnet minimum fee, and
+   confirming the assumed holder blend and linking rule (docs/V2_0_KEEPERS.md).
+
 ## 4. Turn on `hope` mint addresses (optional)
 
 Add a Railway variable `ELPIDA_VANITY_KEY` with 32 random bytes as 64 hex characters (in PowerShell: `node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"`). Keep a copy only if you want existing pre-ground keys to survive a key change; losing it just means they are ground again. After the redeploy the server grinds about one `hope` address every 9 minutes per CPU core in the background (three are kept ready; `ELPIDA_VANITY_TARGET` and `ELPIDA_VANITY_WORKERS` change that). Until one is ready, launches use a random address and say so.

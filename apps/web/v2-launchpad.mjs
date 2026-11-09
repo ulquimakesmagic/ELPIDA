@@ -69,9 +69,14 @@ export async function deployV2(w, body = {}) {
     const d = await deploy(a.factory, [w.address, TEST_START_USD, true], `Step 2 of 10: confirm the V2 factory ($${TEST_START_USD} test starting market cap, graduation at ×5, token details required)…`);
     progress.factory = d.address; progress.block = d.receipt.blockNumber; progress.hook = null; save();
   }
-  if (!await fresh('airdrop')) { progress.airdrop = (await deploy(a.distributor, [w.address, 0, starts.month, 'trader-airdrop'], 'Step 3 of 10: confirm the trader-airdrop distributor (monthly rounds, from the 1st of this month UTC)…')).address; progress.hook = null; save(); }
-  if (!await fresh('holder')) { progress.holder = (await deploy(a.distributor, [w.address, 7 * 86400, starts.today, 'holder-rewards'], 'Step 4 of 10: confirm the holder-reward distributor (weekly rounds)…')).address; progress.hook = null; save(); }
-  if (!await fresh('flywheel')) { progress.flywheel = (await deploy(a.flywheel, [w.address, progress.factory], 'Step 5 of 10: confirm the flywheel vault (it can only buy V2 tokens and burn them)…')).address; progress.hook = null; save(); }
+  const Z = ZeroAddress, keeper = body.keeper && isAddress(body.keeper) ? getAddress(body.keeper) : w.address;
+  // Holder rewards of USDC-paired tokens are paid in the native coin: the holder distributor may convert USDC through
+  // the network's Uniswap v3 router (SwapRouter02) when it has one.
+  const dex = w.dex, usdcAsset = w.oracle.usdc && w.oracle.usdc !== Z ? getAddress(w.oracle.usdc) : null;
+  const conversion = dex?.router && dex?.weth && usdcAsset && (dex.routerVersion ?? 2) === 2 ? [usdcAsset, getAddress(dex.router), getAddress(dex.weth)] : [Z, Z, Z];
+  if (!await fresh('airdrop')) { progress.airdrop = (await deploy(a.distributor, [keeper, 0, starts.month, 'trader-airdrop', Z, Z, Z], 'Step 3 of 10: confirm the trader-airdrop distributor (monthly rounds, from the 1st of this month UTC)…')).address; progress.hook = null; save(); }
+  if (!await fresh('holder')) { progress.holder = (await deploy(a.distributor, [keeper, 7 * 86400, starts.today, 'holder-rewards', ...conversion], `Step 4 of 10: confirm the holder-reward distributor (weekly rounds${conversion[0] === Z ? '' : ', USDC paid as the native coin'})…`)).address; progress.hook = null; save(); }
+  if (!await fresh('flywheel')) { progress.flywheel = (await deploy(a.flywheel, [keeper, progress.factory], 'Step 5 of 10: confirm the flywheel vault (it can only buy V2 tokens and burn them)…')).address; progress.hook = null; save(); }
   const factory = new Contract(progress.factory, V2_FACTORY_ABI, w.signer);
   if (!progress.hook || !await hasCode(w.provider, progress.hook, { wait: true })) {
     const args = AbiCoder.defaultAbiCoder().encode(['address', 'address', 'address', 'address', 'address', 'address', 'uint256'], [poolManager, progress.factory, w.address, progress.airdrop, progress.flywheel, progress.holder, minFeeBps]);
@@ -98,7 +103,7 @@ export async function deployV2(w, body = {}) {
   if (!await fresh('router', async r => (await new Contract(r, V4_ROUTER_ABI, w.provider).hook()).toLowerCase() === progress.hook.toLowerCase())) { progress.router = (await deploy(all.router, [poolManager, progress.hook], 'Step 9 of 10: confirm the V2 router (buys and sells)…')).address; save(); }
   const flywheel = new Contract(progress.flywheel, ['function router() view returns(address)', 'function setRouter(address)'], w.signer);
   if ((await settled(() => flywheel.router())) === ZeroAddress) await step(flywheel.setRouter(progress.router), 'Step 10 of 10: confirm the flywheel vault\'s router…');
-  const record = { factory: progress.factory, hook: progress.hook, router: progress.router, airdrop: progress.airdrop, holder: progress.holder, flywheel: progress.flywheel, create2: progress.create2, block: progress.block, poolManager, treasury: w.address, minFeeBps: progress.minFeeBps ?? minFeeBps, model: V2_MODEL, deployedAt: Date.now() };
+  const record = { factory: progress.factory, hook: progress.hook, router: progress.router, airdrop: progress.airdrop, holder: progress.holder, flywheel: progress.flywheel, keeper, create2: progress.create2, block: progress.block, poolManager, treasury: w.address, minFeeBps: progress.minFeeBps ?? minFeeBps, model: V2_MODEL, deployedAt: Date.now() };
   if (!saveV2Deployment(net, record)) throw new Error(`Deployed, but this browser blocks storage. Save these addresses: ${JSON.stringify(record)}.`);
   try { localStorage.removeItem(progressKey(net.chainId)); } catch { /* kept for a retry */ }
   return { record, message: `The ${net.name} V2 test launchpad is deployed with its reward contracts, from block ${record.block}. Send the addresses to be pinned in networks.mjs (v2.shared) so the site lists its tokens and shows its Rewards analytics.` };

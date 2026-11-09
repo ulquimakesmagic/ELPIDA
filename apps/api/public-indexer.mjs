@@ -120,6 +120,8 @@ export class PublicIndexer {
   }
   static FAILOVER_AFTER=3;
   start(){this.job=this.tick();this.timer=setInterval(()=>{this.job=this.tick();},TICK_MS);this.timer.unref();return this;}
+  /** The V2 trading index of a network, for the V2 keeper (null until V2 is pinned and validated there). */
+  v2Index(key){const e=(this.legacy.get(key)??[]).find(x=>x.v2&&x.validated);return e?.index??null;}
   status(key){const e=this.entries.get(key);return e?{...e.index.status(),error:e.error,errorCode:e.errorCode??null,rpc:rpcHost(this.rpcs?.get(key)),lastSuccess:e.lastSuccess,enabled:true,
     // Earlier launchpads on the same network have their own index; a stuck one must be visible too.
     legacy:(this.legacy?.get(key)??[]).map(l=>{const s=l.index.status();return {factory:deploymentOf(l).factory,model:deploymentOf(l).model??null,indexedBlock:s.indexedBlock,lag:s.lag,error:l.error??null,errorCode:l.errorCode??null,lastSuccess:l.lastSuccess??null};})}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}

@@ -312,6 +312,27 @@ export class EvmIndexer {
   /** Trades above a height, oldest first: what a live feed needs to publish exactly the new ones. */
   tradesSince(height,limit=200){return this.db.prepare('SELECT data FROM trades WHERE height>? ORDER BY height,idx LIMIT ?').all(Number(height)||0,Math.max(1,Math.min(500,limit))).map(r=>decode(r.data));}
   trades(address,limit=100){return this.db.prepare('SELECT data FROM trades WHERE address=? ORDER BY height DESC,idx DESC LIMIT ?').all(address.toLowerCase(),Math.max(1,Math.min(500,limit))).map(r=>decode(r.data));}
+  /** Every trade in [from, to) (seconds) across listed tokens, oldest first, with its token and quote asset (keepers). */
+  tradesBetween(from,to){
+    const records=new Map(this.tokens().map(t=>[t.address,t]));
+    return this.db.prepare('SELECT address,timestamp,data FROM trades WHERE timestamp>=? AND timestamp<? ORDER BY height,idx').all(Math.floor(from),Math.floor(to)).map(r=>{const t=decode(r.data),k=records.get(r.address);return {...t,token:r.address,timestamp:r.timestamp,asset:(k?.quoteAddress??k?.quote??ZeroAddress).toLowerCase(),quoteDecimals:k?.quoteDecimals??18,creator:k?.creator?.toLowerCase()??null,pair:k?.pair};});
+  }
+  /**
+   * Time-weighted average spot price (quote per token, display units) over the `seconds` before `now`, from the stored
+   * snapshots: each price holds until the next one. Null without a snapshot.
+   */
+  twap(address,now,seconds=3600){
+    const rows=this.db.prepare('SELECT s.data,b.timestamp FROM snapshots s JOIN blocks b ON b.height=s.height WHERE s.address=? ORDER BY s.height').all(String(address).toLowerCase()).map(r=>({p:Number(decode(r.data).spotPrice),t:r.timestamp})).filter(x=>Number.isFinite(x.p)&&x.p>0&&x.t<=now);
+    if(!rows.length)return null;
+    const from=now-seconds;let total=0,weight=0;
+    for(let i=0;i<rows.length;i++){const a=Math.max(rows[i].t,from),b=i+1<rows.length?Math.min(rows[i+1].t,now):now;if(b>a){total+=rows[i].p*(b-a);weight+=b-a;}}
+    return weight?total/weight:rows.at(-1).p;
+  }
+  /** A token's Transfer events with block times, oldest first (keepers: holder balances over time, creator transfers). */
+  transfersOf(address){
+    const token=this.tokenAt(address);if(!token)return [];
+    return this.db.prepare('SELECT e.data,b.timestamp FROM events e LEFT JOIN blocks b ON b.height=e.height WHERE e.address=? ORDER BY e.height,e.idx').all(token.address).map(r=>({e:decode(r.data),timestamp:r.timestamp})).filter(x=>x.e.kind==='token'&&x.e.name==='Transfer').map(x=>({from:String(x.e.args[0]).toLowerCase(),to:String(x.e.args[1]).toLowerCase(),amount:BigInt(x.e.args[2]),timestamp:x.timestamp}));
+  }
   holders(address,limit=50){return this.cached(`holders:${String(address).toLowerCase()}:${limit}`,()=>this.computeHolders(address,limit));}
   computeHolders(address,limit=50){
     const balances=new Map(),token=this.tokenAt(address);if(!token)return [];
