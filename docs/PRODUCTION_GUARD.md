@@ -16,7 +16,8 @@ Exit code 0 means the server would start; 1 lists what is missing.
 |---|---|---|
 | `solana_deployment_missing` | No Solana mainnet deployment record | Run the mainnet deploy in `MAINNET_BETA.md` |
 | `solana_test_build` | The record is not the `mainnet` build (or has no build) | Deploy `elpida_launchpad-mainnet.so`; the deploy script verifies it on-chain |
-| `solana_rpc_missing` / `solana_rpc_local` | `SOLANA_RPC_URL` is missing, a list, not HTTPS, or a local validator | One hosted HTTPS mainnet RPC (for example Helius) |
+| `solana_rpc_missing` / `solana_rpc_local` | No Solana RPC in `SOLANA_RPC_URL` or `SOLANA_RPC_URLS`, or one is a local validator | Hosted HTTPS mainnet RPCs (for example Helius); several, comma-separated, for failover |
+| `solana_rpc_invalid` | An entry in `SOLANA_RPC_URL(S)` is not a single HTTPS URL (the entry is never printed) | Fix or remove that entry |
 | `public_url_missing` / `public_url_invalid` | No valid `ELPIDA_PUBLIC_URL` (or `RAILWAY_PUBLIC_DOMAIN`) | `https://elpida.fun` |
 | `pinning_missing` | `PINATA_JWT` is not set | Token details must be pinned to public IPFS |
 | `storage_ephemeral` | Neither `RAILWAY_VOLUME_MOUNT_PATH` nor `ELPIDA_DATA_DIR` | Attach the persistent volume |

@@ -147,3 +147,13 @@ test('with the key set and no V2 pinned yet, the keeper is idle but its address 
   assert.equal(pinned.enabled, true); assert.equal(pinned.address, idle.address);
   assert.equal(configuredV2Keeper({ env: { ELPIDA_V2_KEEPER_KEY: key }, networks: [{ ...net, mainnet: true, v2: { shared: { hook: A(1), airdrop: A(2) } } }], indexFor: () => null, prices: () => ({}), path: ':memory:' }).enabled, false, 'never on mainnet');
 });
+
+test('keeper status: each job\'s latest run, with the error text when it failed', async () => {
+  const { latestJobs } = await import('../packages/core/v2-keeper-plan.mjs');
+  const jobs = latestJobs([
+    { job: 'fees', at: 10, status: 'ok', detail: null },
+    { job: 'holder', at: 20, status: 'failed', detail: JSON.stringify({ error: '429 Too Many Requests: max usage reached' }) },
+    { job: 'snapshot', at: 30, status: 'ok', detail: 'not json' },
+  ]);
+  assert.deepEqual(jobs.map(j => [j.job, j.status, j.error]), [['fees', 'ok', null], ['holder', 'failed', '429 Too Many Requests: max usage reached'], ['snapshot', 'ok', null]]);
+});

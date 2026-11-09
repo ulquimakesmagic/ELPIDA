@@ -18,7 +18,7 @@ import { createStaticAssets, contentVersion } from './static-assets.mjs';
 import { PublicIndexer, recentTrade, feedTrades } from './public-indexer.mjs';
 import { TradeFeed } from './trade-feed.mjs';
 import { SolanaIndexer } from '../../packages/indexer/solana-indexer.mjs';
-import { validateSolanaRpc } from '../../packages/solana/rpc-config.mjs';
+import { validateSolanaRpc, solanaRpcList, rpcHost, rpcRotation } from '../../packages/solana/rpc-config.mjs';
 import * as solanaWeb3 from '@solana/web3.js';
 import { createCircleFunding } from './circle-test-wallets.mjs';
 import { VanityMintPool, vanityKey, clientAddress } from './vanity-mints.mjs';
@@ -179,10 +179,12 @@ export function solanaConfig() {
  * allowed, one call per request, with a per-address rate limit.
  */
 export const RPC_METHODS = new Set(['getAccountInfo', 'getMultipleAccounts', 'getProgramAccounts', 'getBalance', 'getLatestBlockhash', 'getBlockHeight', 'getSlot', 'getBlockTime', 'getSignatureStatuses', 'simulateTransaction', 'sendTransaction', 'getMinimumBalanceForRentExemption', 'getTransaction', 'getEpochInfo', 'getVersion', 'getGenesisHash', 'getFeeForMessage', 'isBlockhashValid', 'getTokenAccountBalance']);
-export function createRpcProxy(target, { perSecond = 15, burst = 60 } = {}) {
-  // https only, except a local validator used to rehearse a mainnet deployment.
-  try { target = validateSolanaRpc(target); }
-  catch { console.warn('Solana needs one valid HTTPS SOLANA_RPC_URL for the RPC proxy.'); return null; }
+export function createRpcProxy(targets, { perSecond = 15, burst = 60 } = {}) {
+  // https only, except a local validator used to rehearse a mainnet deployment. Several endpoints (SOLANA_RPC_URL then
+  // SOLANA_RPC_URLS): a request that one refuses (429, 401/403, 5xx) or cannot reach is tried on the next.
+  const list = []; for (const t of Array.isArray(targets) ? targets : [targets]) { try { const u = validateSolanaRpc(t); if (!list.includes(u)) list.push(u); } catch {} }
+  if (!list.length) { console.warn('Solana needs at least one valid HTTPS SOLANA_RPC_URL (or SOLANA_RPC_URLS) for the RPC proxy.'); return null; }
+  let preferred = 0;
   const buckets = new Map();
   return async (req, res, send) => {
     const ip = req.socket.remoteAddress ?? 'unknown', now = Date.now();
@@ -195,10 +197,17 @@ export function createRpcProxy(target, { perSecond = 15, burst = 60 } = {}) {
     for await (const chunk of req) { size += chunk.length; if (size > 65_536) return send(413, { jsonrpc: '2.0', error: { code: 413, message: 'Request too large.' }, id: null }); chunks.push(chunk); }
     let body; try { body = JSON.parse(Buffer.concat(chunks).toString()); } catch { return send(400, { jsonrpc: '2.0', error: { code: -32700, message: 'Parse error' }, id: null }); }
     if (!body || Array.isArray(body) || !RPC_METHODS.has(body.method)) return send(400, { jsonrpc: '2.0', error: { code: -32601, message: 'Method not allowed' }, id: body?.id ?? null });
-    try {
-      const upstream = await fetch(target, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: body.id ?? 1, method: body.method, params: body.params ?? [] }), signal: AbortSignal.timeout(20_000) });
-      res.writeHead(upstream.status, { 'Content-Type': 'application/json' }); return res.end(await upstream.text());
-    } catch { return send(502, { jsonrpc: '2.0', error: { code: 502, message: 'Solana RPC unavailable' }, id: body.id ?? null }); }
+    const payload = JSON.stringify({ jsonrpc: '2.0', id: body.id ?? 1, method: body.method, params: body.params ?? [] });
+    for (let i = 0; i < list.length; i++) {
+      const at = (preferred + i) % list.length;
+      try {
+        const upstream = await fetch(list[at], { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: payload, signal: AbortSignal.timeout(20_000) });
+        if ([401, 403, 429].includes(upstream.status) || upstream.status >= 500) { if (i < list.length - 1) { await upstream.body?.cancel(); continue; } }
+        if (at !== preferred && upstream.ok) preferred = at; // stay on the endpoint that answered
+        res.writeHead(upstream.status, { 'Content-Type': 'application/json' }); return res.end(await upstream.text());
+      } catch { /* unreachable or timed out: try the next endpoint */ }
+    }
+    return send(502, { jsonrpc: '2.0', error: { code: 502, message: 'Solana RPC unavailable' }, id: body.id ?? null });
   };
 }
 
@@ -223,7 +232,11 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const feedRelay=soft('feedRelay',()=>new FeedRelay({networks:port===0?[]:evmTestnets,env:port===0?{}:process.env}).start(),()=>new FeedRelay({networks:[],env:{}}).start());
   const graduationKeeper=soft('graduationKeeper',()=>configuredGraduationKeeper({env:port===0?{}:process.env,publicIndex,path:port===0?null:dataFile('graduation-keeper.sqlite')}),()=>configuredGraduationKeeper({env:{},publicIndex,path:null}));
   // Solana public indexer: the deployed program's pools and trades, read-only, stored on the data volume.
-  const solanaNet=solanaConfig(),solanaRpc=process.env.SOLANA_RPC_URL??(/^https?:\/\//.test(solanaNet.rpcUrl)?solanaNet.rpcUrl:null);
+  // Solana RPCs: SOLANA_RPC_URL, then every endpoint in SOLANA_RPC_URLS (the rotator), then the network's public ones.
+  const solanaNet=solanaConfig(),solanaKeys=solanaRpcList(process.env),solanaRpc=solanaKeys.urls[0]??(/^https?:\/\//.test(solanaNet.rpcUrl)?solanaNet.rpcUrl:null);
+  if(solanaKeys.invalid)console.log(JSON.stringify({event:'solana_rpc_config',invalid:solanaKeys.invalid,message:'Some SOLANA_RPC_URL(S) entries are not single HTTPS URLs and were skipped.'}));
+  // The Solana V2 keeper, rewards reader and admin balance use the indexer's RPC and follow it when it fails over to a backup.
+  const solanaFollowers=new Set(),solanaConnection=()=>solanaIndex?.connection??(solanaRpc?new solanaWeb3.Connection(solanaRpc,'confirmed'):null);
   // D9: pre-ground Solana mint addresses ending in "hope" (encrypted at rest; random mint fallback).
   const vanity=soft('vanity',()=>new VanityMintPool({path:port===0?null:dataFile('solana-vanity-mints.json'),key:vanityKey(process.env.ELPIDA_VANITY_KEY),programId:solanaNet.deployment?.programId,suffix:process.env.ELPIDA_VANITY_SUFFIX||'hope',target:Number(process.env.ELPIDA_VANITY_TARGET??3),workers:Number(process.env.ELPIDA_VANITY_WORKERS??1)}),()=>new VanityMintPool({path:null,key:null,programId:solanaNet.deployment?.programId,suffix:'hope',target:0,workers:0}));
   if(process.env.ELPIDA_VANITY_KEY&&!vanity.enabled)console.log(JSON.stringify({event:'vanity_mints_disabled',reason:'ELPIDA_VANITY_KEY must be 32 bytes (64 hex characters or base64), with a Solana deployment configured.'}));
@@ -232,14 +245,16 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     try{
       // The configured RPC first, then the cluster's public RPC: three failed full passes in a row move the index to
       // the next one (3 Nov 2026: a failing devnet RPC stalled the Solana index for eight days).
-      const solanaRpcs=[...new Set([solanaRpc,...(/^https:\/\//.test(solanaNet.rpcUrl??'')?[solanaNet.rpcUrl]:[]),...(solanaNet.rpcFallbacks??[])])].map(u=>{try{return validateSolanaRpc(u);}catch{return null;}}).filter(Boolean);
-      const hostOf=u=>{try{return new URL(u).host;}catch{return null;}};
-      let solanaRpcAt=0,solanaFailures=0;
+      const solanaRpcs=[...new Set([...solanaKeys.urls,solanaRpc,...(/^https:\/\//.test(solanaNet.rpcUrl??'')?[solanaNet.rpcUrl]:[]),...(solanaNet.rpcFallbacks??[])])].map(u=>{try{return validateSolanaRpc(u);}catch{return null;}}).filter(Boolean);
+      // Rotation (packages/solana/rpc-config.mjs): next RPC after 3 failed passes, or at once on a rate limit or rejected
+      // key; back to the preferred one after 30 minutes away. The V2 keeper and rewards reader follow every switch.
+      const solanaRotation=rpcRotation(solanaRpcs.length);
+      const useSolanaRpc=(at,reason)=>{if(at==null)return;const next=new solanaWeb3.Connection(solanaRpcs[at],'confirmed');solanaIndex.useConnection(next,rpcHost(solanaRpcs[at]));for(const f of solanaFollowers)f.connection=next;console.log(JSON.stringify({event:'public_indexer_rpc_switched',network:solanaNet.key,rpc:solanaIndex.rpcHost,position:at+1,of:solanaRpcs.length,reason}));};
       solanaIndex=new SolanaIndexer({web3:solanaWeb3,connection:new solanaWeb3.Connection(solanaRpcs[0],'confirmed'),deployment:solanaNet.deployment,network:solanaNet,metadataStore,path:dataFile(`public-solana-${solanaNet.cluster}-${solanaNet.deployment.programId}.sqlite`)});
-      solanaIndex.rpcHost=hostOf(solanaRpcs[0]);
-      const fullTick=()=>solanaIndex.sync().then(()=>{solanaFailures=0;console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}));}).catch(()=>{
+      solanaIndex.rpcHost=rpcHost(solanaRpcs[0]);
+      const fullTick=()=>solanaIndex.sync().then(()=>{useSolanaRpc(solanaRotation.succeeded(),'retry_preferred');console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}));}).catch(()=>{
         console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,rpc:solanaIndex.rpcHost,message:'Indexing unavailable; retrying.'}));
-        if(++solanaFailures>=3&&solanaRpcs.length>1){solanaFailures=0;solanaRpcAt=(solanaRpcAt+1)%solanaRpcs.length;solanaIndex.useConnection(new solanaWeb3.Connection(solanaRpcs[solanaRpcAt],'confirmed'),hostOf(solanaRpcs[solanaRpcAt]));console.log(JSON.stringify({event:'public_indexer_rpc_switched',network:solanaNet.key,rpc:solanaIndex.rpcHost}));}
+        useSolanaRpc(solanaRotation.failed(solanaIndex.lastError),solanaIndex.lastError??'failing');
       });
       // Fast pass every few seconds (new transactions, then pools only if something traded), full pass every 30 s.
       // New trades go to the live feed; the first pass after a restart only records where history ends.
@@ -271,17 +286,17 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // ELPIDA_V2_KEEPER_KEY is set and a V2 deployment is pinned; test networks only.
   // ELPIDA V2 rewards on Solana for Analytics (step 4c): read from the program's accounts once a minute, when V2 is set up.
   let solanaRewards=null;
-  if(port!==0&&solanaRpc&&solanaNet.deployment?.v2?.config)try{solanaRewards=new SolanaV2Rewards({connection:new solanaWeb3.Connection(solanaRpc,'confirmed'),net:solanaNet,path:dataFile('v2-rewards-solana.sqlite'),manifest:(k,r)=>solanaV2Keeper.manifest?.(k,r)??null,log:e=>console.log(JSON.stringify(e))}).start();}catch(error){console.error(JSON.stringify({event:'solana_v2_rewards_unavailable',message:String(error.message).slice(0,200)}));}
+  if(port!==0&&solanaRpc&&solanaNet.deployment?.v2?.config)try{solanaRewards=new SolanaV2Rewards({connection:solanaConnection(),net:solanaNet,path:dataFile('v2-rewards-solana.sqlite'),manifest:(k,r)=>solanaV2Keeper.manifest?.(k,r)??null,log:e=>console.log(JSON.stringify(e))}).start();solanaFollowers.add(solanaRewards);}catch(error){console.error(JSON.stringify({event:'solana_v2_rewards_unavailable',message:String(error.message).slice(0,200)}));}
   // ELPIDA V2 keeper on Solana (step 4b): fee payouts, harvests, SOL sweeps, flywheel. Off until ELPIDA_V2_KEEPER_SOLANA_KEY is
   // set and the deployment recorded `v2`.
   let solanaV2Keeper={enabled:false,status:()=>({enabled:false,state:'not_configured'}),close:async()=>{}};
-  if(port!==0&&solanaRpc)try{solanaV2Keeper=configuredSolanaV2Keeper({env:process.env,net:solanaNet,connection:new solanaWeb3.Connection(solanaRpc,'confirmed'),path:dataFile('v2-keeper-solana.sqlite'),log:e=>console.log(JSON.stringify(e)),index:()=>solanaIndex,solUsd:()=>{const p=priceSnapshot()[solanaNet.key];return p?.status==='fresh'&&p.usd>0?p.usd:null;},publicUrl:publicUrl||undefined}).start();}catch(error){console.error(JSON.stringify({event:'solana_v2_keeper_unavailable',message:String(error.message).slice(0,200)}));}
+  if(port!==0&&solanaRpc)try{solanaV2Keeper=configuredSolanaV2Keeper({env:process.env,net:solanaNet,connection:solanaConnection(),path:dataFile('v2-keeper-solana.sqlite'),log:e=>console.log(JSON.stringify(e)),index:()=>solanaIndex,solUsd:()=>{const p=priceSnapshot()[solanaNet.key];return p?.status==='fresh'&&p.usd>0?p.usd:null;},publicUrl:publicUrl||undefined}).start();solanaFollowers.add(solanaV2Keeper);}catch(error){console.error(JSON.stringify({event:'solana_v2_keeper_unavailable',message:String(error.message).slice(0,200)}));}
   // Admin Operations: what the V2 keepers are doing (state, address, the Solana keeper's SOL for fees, recent jobs).
   const keeperStatus=async()=>{
     const sol=solanaV2Keeper.status(),address=solanaV2Keeper.address??sol.keeper??null;let balance=null;
-    if(address&&solanaRpc)try{balance=await Promise.race([new solanaWeb3.Connection(solanaRpc,'confirmed').getBalance(new solanaWeb3.PublicKey(address)),new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),5000))])/1e9;}catch{balance=null;}
+    const conn=solanaConnection();if(address&&conn)try{balance=await Promise.race([conn.getBalance(new solanaWeb3.PublicKey(address)),new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),5000))])/1e9;}catch{balance=null;}
     let evm;try{evm=v2Keeper.status();}catch(error){evm={enabled:false,state:'error',error:String(error.message).slice(0,160)};}
-    return {evm,solana:{network:solanaNet.key,name:solanaNet.name,state:solanaV2Keeper.enabled?'running':sol.state,address,balance,runs:solanaV2Keeper.enabled?sol.runs:[],airdropNext:sol.airdropNext??null,holderNext:sol.holderNext??null}};
+    return {evm,solana:{network:solanaNet.key,name:solanaNet.name,state:solanaV2Keeper.enabled?'running':sol.state,address,balance,runs:solanaV2Keeper.enabled?sol.runs:[],jobs:solanaV2Keeper.enabled?sol.jobs??[]:[],airdropNext:sol.airdropNext??null,holderNext:sol.holderNext??null}};
   };
   let v2Keeper={enabled:false,status:()=>({enabled:false,state:'not_configured'}),manifest:()=>null,close:async()=>{}};
   queueMicrotask(()=>{if(port===0)return;try{v2Keeper=configuredV2Keeper({env:process.env,networks:evmTestnets,indexFor:key=>publicIndex.v2Index(key),prices:()=>priceSnapshot(),path:dataFile('v2-keeper.sqlite'),publicUrl:process.env.ELPIDA_PUBLIC_URL||'https://elpida.fun',log:e=>console.log(JSON.stringify(e))});if(v2Keeper.enabled){v2Keeper.start();console.log(JSON.stringify({event:'v2_keeper_started',keeper:v2Keeper.address}));}}catch(error){console.log(JSON.stringify({event:'subsystem_unavailable',subsystem:'v2Keeper',degraded:true,message:String(error.message).slice(0,120)}));}});
@@ -333,7 +348,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   let metadataWindow=Date.now(),metadataCount=0;
   const solana = solanaConfig();
   const connectSources = [...evmTestnets.flatMap(net => [net.rpcUrl,...(net.rpcFallbacks??[])]), solana.rpcUrl, solana.wsUrl].filter(url => /^(https?|wss?):/.test(url ?? '')).join(' ');
-  const rpcProxy = solana.mainnet ? createRpcProxy(process.env.SOLANA_RPC_URL) : null;
+  const rpcProxy = solana.mainnet ? createRpcProxy(solanaRpcList(process.env).urls) : null;
   const operationsStartedAt=Date.now();
   const backupRunner=configuredBackup({env:port===0?{}:process.env,dataDir,statePath:port===0?null:dataFile('ops-backup-state.json'),workDir:process.env.ELPIDA_BACKUP_WORK_DIR??resolve(tmpdir(),'elpida-backups-'+dataPrefix.replace(/[^a-z0-9-]/gi,'')),log:console.log});
   const operationsInput=()=>({relay:feedRelay.status(),graduation:graduationKeeper.status(),startedAt:operationsStartedAt,durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),storage:metadataStore.status().storage,networks:Object.fromEntries([...publicIndex.entries.keys()].map(key=>[key,publicIndex.status(key)])),prices:priceSnapshot(),backup:backupRunner.status()});

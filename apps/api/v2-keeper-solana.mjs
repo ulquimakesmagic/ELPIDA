@@ -18,7 +18,7 @@ import * as web3 from '@solana/web3.js';
 import { createElpidaSolana, v2Owed, parseAmount, TOKEN_DECIMALS, quoteBuy, raydiumQuote, ownFeeBps, tradeFeeBps, POOL_SIZE_V2, STATUS_TRADING, STATUS_MIGRATED, WSOL_MINT, V2_DIST, V2_WITHDRAW_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, RAYDIUM_SWAP_COMPUTE_UNITS, explainError } from '../../packages/solana/client.mjs';
 import { send } from '../../packages/solana/deploy.mjs';
 import { buildSolanaRound, solanaRoundStart, solanaCurrentRound } from '../../packages/solana/v2-rounds.mjs';
-import { airdropRound, HOLDER_RULES, linkGroups } from '../../packages/core/v2-keeper-plan.mjs';
+import { airdropRound, HOLDER_RULES, linkGroups, latestJobs } from '../../packages/core/v2-keeper-plan.mjs';
 import { allocateAirdrop, walletPayouts } from '../../packages/core/v2-airdrop.mjs';
 
 const DAY = 86_400;
@@ -280,7 +280,7 @@ export class SolanaV2Keeper {
   }
 
   status() {
-    return { chain: this.deployment.cluster ?? 'solana', keeper: this.payer.publicKey.toBase58(), airdropNext: this.get('airdrop:next', 0), holderNext: this.get('holder:next', 0), runs: this.db.prepare('SELECT job,at,status FROM sv2_runs ORDER BY id DESC LIMIT 8').all() };
+    return { chain: this.deployment.cluster ?? 'solana', keeper: this.payer.publicKey.toBase58(), airdropNext: this.get('airdrop:next', 0), holderNext: this.get('holder:next', 0), runs: this.db.prepare('SELECT job,at,status FROM sv2_runs ORDER BY id DESC LIMIT 8').all(), jobs: latestJobs(this.db.prepare('SELECT job,at,status,detail FROM sv2_runs WHERE id IN (SELECT MAX(id) FROM sv2_runs GROUP BY job) ORDER BY job').all()) };
   }
 }
 
