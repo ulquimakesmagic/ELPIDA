@@ -1,5 +1,22 @@
 # Actions that need Malik
 
+## ELPIDA V2 on Robinhood Chain testnet, 9 November 2026
+
+Robinhood Chain testnet has no Uniswap v4, so V2 there runs on a labelled test copy of Uniswap's own PoolManager (the
+published v4-core 1.0.2 contract, unchanged), exactly as on BNB Chain testnet. USD pricing comes from the relay feed
+the server already keeps (Chainlink ETH/USD copied from Base Sepolia). Tokens on it trade through Elpida's router only;
+Uniswap's site and aggregators do not route to a test copy. Mainnet needs Uniswap's own v4 deployment on that chain.
+
+After this PR is merged and Railway has redeployed:
+
+1. Operator panel (`elpida.fun/#/monkey`), **Launchpads** tab, switch to Robinhood Chain Testnet and connect the
+   deployer wallet (it needs some test ETH; the faucet is in the **Test funds** tab).
+2. Press **Deploy test PoolManager (1 confirmation)**.
+3. Then **Deploy ELPIDA V2 test launchpad** (10 steps, resumable), as on the other chains.
+4. Optional: **Approve test stocks as V2 pairs**.
+5. Send Claude the test PoolManager address and the V2 deployment JSON the page shows, to be pinned.
+6. Send the keeper wallet (`0x95d3…5124`) a little Robinhood testnet ETH for gas.
+
 ## Model 11 retired for new launches, 9 November 2026 — nothing to do
 
 Malik decided Model 11 is no longer needed: ELPIDA V2 is built on the same Uniswap v4 design (one pool, liquidity locked

@@ -90,6 +90,9 @@ export const testnets = [
     chainId: 46630, rpcUrl: 'https://rpc.testnet.chain.robinhood.com', explorer: 'https://explorer.testnet.chain.robinhood.com',
     nativeCurrency: { name: 'Ether', symbol: 'ETH', decimals: 18 },
     gasFaucet: 'https://faucet.testnet.chain.robinhood.com',
+    // No Uniswap v4 on this testnet either (9 Nov 2026): as on BNB testnet, the operator deploys a labelled test copy of
+    // Uniswap's own PoolManager from the operator panel, then the ELPIDA V2 launchpad on it. Pin both once deployed.
+    v4: { poolManager: null, testPoolManager: true, shared: null },
     // This testnet has neither Uniswap v3 nor a Chainlink feed (24 Oct 2026). The launchpad owner deploys a labelled
     // Elpida test deployment of Uniswap v3 and an ElpidaRelayFeed from the site; the server relay (apps/api/feed-relay.mjs)
     // copies Chainlink ETH / USD from Base Sepolia into it, keeping Chainlink's timestamps. Mainnet uses the real ones.
