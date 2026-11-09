@@ -11,9 +11,11 @@
   - USDC pairs converted to the native coin first.
   
   The threshold is $25 on mainnet and $0.25 on test networks, until Malik sets it.
+- **Confirmed by Malik (9 November):** holder rewards are checked weekly, and holders share a payout by the same
+  blend as the airdrop (20% equal, 40% square root, 40% pro-rata), over their time-weighted balance in the week,
+  with the same 1% cap, "so both the big traders and the small traders and the whales win". Holding longer earns
+  more; holdings shorter than a day in total don't count.
 - **Assumed, not yet confirmed by Malik:**
-  - Holders share a payout by the same blend as the airdrop (20% equal, 40% square root, 40% pro-rata), over their
-    time-weighted balance in the week, with the same 1% cap. Holdings shorter than a day in total don't count.
   - Linked wallets: wallets that received a token directly from its creator, and wallets first funded by the same
     **personal** wallet. Finding the funder needs a block-explorer key (`ELPIDA_EXPLORER_API_KEY`, Etherscan's
     multichain API). Without one, only creator transfers link wallets.

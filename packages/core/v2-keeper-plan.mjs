@@ -3,8 +3,9 @@
 //
 //  - Trader airdrop (monthly, per chain): each pool asset's airdrop funds go to qualifying traders by fees paid (in
 //    dollars), with the 20% equal / 40% square root / 40% pro-rata blend and the 1% cap (v2-airdrop.mjs).
-//  - Holder rewards: each token's 10% builds up and, once it reaches the threshold, goes to that token's holders by the
-//    same blend over their time-weighted balance. Native pairs pay native, stock pairs pay the stock, USDC pairs are
+//  - Holder rewards (weekly): each token's 10% builds up and, once it reaches the threshold, goes to that token's holders
+//    by the same blend over their time-weighted balance (confirmed by Malik, 9 November: small holders, big holders
+//    and whales all win, and holding longer earns more). Native pairs pay native, stock pairs pay the stock, USDC pairs are
 //    converted to native first (the distributor's convertToNative).
 //  - Flywheel: the top 10 V2 tokens by net buying from independent wallets over 7 days are bought and burned.
 //  - Linked wallets count as one and creator-linked wallets are excluded everywhere. The linking rule (assumed, Malik
