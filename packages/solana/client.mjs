@@ -996,6 +996,13 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
       const pool = this.decodePumpPool(poolRaw);
       return { lpSupply: pool.lpSupply, base: this.tokenAmount(baseVaultRaw), quote: this.tokenAmount(quoteVaultRaw) - pool.protocolFees - pool.creatorFees };
     },
+    /** S3 per-asset ledger of a distributor: what posted rounds still owe. Missing account: nothing reserved. */
+    decodeV2Ledger(raw) {
+      if (!raw) return { reserved: 0n };
+      const bytes = new Uint8Array(raw);
+      if (bytes.length < 16 || !sameBytes(bytes, DISCRIMINATORS.V2AssetLedger)) throw new Error('Not an ELPIDA V2 ledger account.');
+      return { reserved: readU64(bytes, 8) };
+    },
     /** S3 distributor state: kind, operator, period (0 = calendar months), genesis (unix seconds). */
     decodeV2Distributor(raw) {
       const bytes = new Uint8Array(raw);

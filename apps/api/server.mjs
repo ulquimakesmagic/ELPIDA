@@ -50,6 +50,7 @@ import { evmTestnets, solanaDevnet, solanaLocalnet, solanaMainnet } from '../../
 import { isDexModel } from '../../packages/core/curve-model.mjs';
 import { V2RewardsService } from './v2-rewards-service.mjs';
 import { configuredV2Keeper } from './v2-keeper.mjs';
+import { configuredSolanaV2Keeper } from './v2-keeper-solana.mjs';
 
 const webRoot = fileURLToPath(new URL('../web/', import.meta.url));
 const ethersFile = fileURLToPath(new URL('../../node_modules/ethers/dist/ethers.min.js', import.meta.url));
@@ -264,6 +265,10 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const burnFields=(burns,address)=>{const n=burns.get(String(address).toLowerCase());return n>0n?{flywheelBurned:formatUnits(n,18)}:{};};
   // ELPIDA V2.0 keeper: daily fee payouts, monthly airdrop and weekly holder rounds, daily flywheel. Off until
   // ELPIDA_V2_KEEPER_KEY is set and a V2 deployment is pinned; test networks only.
+  // ELPIDA V2 keeper on Solana (step 4b): fee payouts, harvests, SOL sweeps, flywheel. Off until ELPIDA_V2_KEEPER_SOLANA_KEY is
+  // set and the deployment recorded `v2`.
+  let solanaV2Keeper={enabled:false,status:()=>({enabled:false,state:'not_configured'}),close:async()=>{}};
+  if(port!==0&&solanaRpc)try{solanaV2Keeper=configuredSolanaV2Keeper({env:process.env,net:solanaNet,connection:new solanaWeb3.Connection(solanaRpc,'confirmed'),path:dataFile('v2-keeper-solana.sqlite'),log:e=>console.log(JSON.stringify(e)),index:()=>solanaIndex,solUsd:()=>{const p=priceSnapshot()[solanaNet.key];return p?.status==='fresh'&&p.usd>0?p.usd:null;},publicUrl:publicUrl||undefined}).start();}catch(error){console.error(JSON.stringify({event:'solana_v2_keeper_unavailable',message:String(error.message).slice(0,200)}));}
   let v2Keeper={enabled:false,status:()=>({enabled:false,state:'not_configured'}),manifest:()=>null,close:async()=>{}};
   queueMicrotask(()=>{if(port===0)return;try{v2Keeper=configuredV2Keeper({env:process.env,networks:evmTestnets,indexFor:key=>publicIndex.v2Index(key),prices:()=>priceSnapshot(),path:dataFile('v2-keeper.sqlite'),publicUrl:process.env.ELPIDA_PUBLIC_URL||'https://elpida.fun',log:e=>console.log(JSON.stringify(e))});if(v2Keeper.enabled){v2Keeper.start();console.log(JSON.stringify({event:'v2_keeper_started',keeper:v2Keeper.address}));}}catch(error){console.log(JSON.stringify({event:'subsystem_unavailable',subsystem:'v2Keeper',degraded:true,message:String(error.message).slice(0,120)}));}});
   const flywheelKeeper=port===0?{summary:()=>({enabled:false,state:'not_configured'}),close:async()=>{}}:soft('flywheelKeeper',()=>configuredFlywheelKeeper({env:process.env,publicIndex,dexes:testnetDexes,path:dataFile('flywheel-keeper.sqlite'),log:e=>console.log(JSON.stringify(e))}),()=>({summary:()=>({enabled:false,state:'unavailable'}),close:async()=>{}}));
@@ -422,7 +427,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/graduation/status')return send(200,graduationKeeper.status());
         if(url.pathname==='/api/buyback/status')return send(200,buybackKeeper.status());
         if(url.pathname==='/api/public/flywheel')return send(200,flywheelKeeper.summary());
-        if(url.pathname==='/api/public/v2-rewards')return send(200,{...v2Rewards.summary(priceSnapshot(),undefined,key=>publicIndex.listings(key).filter(t=>t.deploymentModel==='v2-hook')),keeper:v2Keeper.status()});
+        if(url.pathname==='/api/public/v2-rewards')return send(200,{...v2Rewards.summary(priceSnapshot(),undefined,key=>publicIndex.listings(key).filter(t=>t.deploymentModel==='v2-hook')),keeper:{...v2Keeper.status(),solana:solanaV2Keeper.status()}});
+        {const m=url.pathname.match(/^\/api\/public\/v2-rewards\/solana-manifest\/([01])\/(\d{1,6})$/);if(m){const manifest=solanaV2Keeper.manifest?.(m[1],m[2]);return manifest?send(200,manifest):send(404,{error:'No such Solana round list.'});}}
         {const m=url.pathname.match(/^\/api\/public\/v2-rewards\/manifest\/(\d+)\/(0x[0-9a-fA-F]{40})\/(\d+)\/(0x[0-9a-fA-F]{40})$/);if(m){const manifest=v2Keeper.manifest(m[1],m[2],m[3],m[4]);return manifest?send(200,manifest):send(404,{error:'No published payout list for that round.'});}}
         if(url.pathname==='/api/public/v2-rewards/payouts'){try{return send(200,v2Rewards.payouts(url.searchParams.get('wallet')));}catch(error){return send(400,{error:error.message});}}
         if(url.pathname==='/api/public/stock-catalog'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,stockCatalog.summary());}
@@ -601,7 +607,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
   bootPhase('listening');
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();await v2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();await v2Keeper.close();await solanaV2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

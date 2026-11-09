@@ -62,3 +62,17 @@ export function buildSolanaRound({ programId, kind, round, asset }, payouts) {
     rows: rows.map(r => ({ ...r, proof: proofOf(r.index) })),
   };
 }
+
+/** When `round` of a distributor ({ period, genesis }) starts: calendar months for period 0 (UTC), else fixed periods. */
+export function solanaRoundStart({ period, genesis }, round) {
+  if (period) return genesis + round * period;
+  const g = new Date(genesis * 1000);
+  return Date.UTC(g.getUTCFullYear(), g.getUTCMonth() + round, 1) / 1000;
+}
+/** The round in progress at `now` (-1 before genesis). */
+export function solanaCurrentRound({ period, genesis }, now) {
+  if (now < genesis) return -1;
+  if (period) return Math.floor((now - genesis) / period);
+  const g = new Date(genesis * 1000), n = new Date(now * 1000);
+  return (n.getUTCFullYear() * 12 + n.getUTCMonth()) - (g.getUTCFullYear() * 12 + g.getUTCMonth());
+}

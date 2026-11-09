@@ -21,4 +21,4 @@ else {
 }
 console.log(`ELPIDA V2 keeper (Solana): ${keypair.publicKey.toBase58()}`);
 console.log(`Secret key file: ${path} (never share it; paste its content into Railway as ELPIDA_V2_KEEPER_SOLANA_KEY).`);
-console.log(`Next: npm run solana:deploy -- --v2 --keeper ${keypair.publicKey.toBase58()} --keypair <deployer key path>`);
+console.log(`Next: npm run solana:deploy -- --upgrade --v2 --keeper ${keypair.publicKey.toBase58()} --keypair <deployer key path>`);

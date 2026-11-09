@@ -300,6 +300,8 @@ export class SolanaIndexer {
             added += Number(insert.run(sig.signature, 0, token.address, sig.slot, timestamp, json({
               hash: sig.signature, token: token.address, side: trade.side, account: trade.account, venue: raydium ? 'Raydium' : 'PumpSwap',
               quoteRaw: trade.quoteRaw, tokenRaw: trade.tokenRaw, quoteAmount: formatAmount(trade.quoteRaw, d), tokenAmount: formatAmount(trade.tokenRaw, TOKEN_DECIMALS),
+              // The DEX's trade fee on the quote side (Raydium's 1% tier; PumpSwap 0.30%).
+              feeRaw: (trade.quoteRaw < 0n ? -trade.quoteRaw : trade.quoteRaw) * (raydium ? 100n : 30n) / 10_000n,
               priceQuote: Number(trade.quoteRaw) / 10 ** d / (Number(trade.tokenRaw) / 10 ** TOKEN_DECIMALS), launch: false, timestamp, slot: sig.slot,
             })).changes);
           }
@@ -370,6 +372,8 @@ export class SolanaIndexer {
           const result = insert.run(sig.signature, idx, token.address, sig.slot, tx?.blockTime ?? sig.blockTime ?? 0, json({
             hash: sig.signature, token: token.address, side: buy ? 'buy' : 'sell', account: buy ? (e.buyer ?? e.creator) : e.seller,
             quoteRaw, tokenRaw, quoteAmount: formatAmount(quoteRaw, d), tokenAmount: formatAmount(tokenRaw, TOKEN_DECIMALS),
+            // The fee at the pool's own rate (the anti-snipe surplus is liquidity, not a fee): V2 airdrops weigh it.
+            feeRaw: (e.fee ?? 0n) - (e.antiSnipeFee ?? 0n),
             priceQuote: tokenRaw > 0n ? Number(quoteRaw) / 10 ** d / (Number(tokenRaw) / 10 ** TOKEN_DECIMALS) : null,
             launch: e.name === 'CurveLaunched', timestamp: tx?.blockTime ?? sig.blockTime ?? 0, slot: sig.slot,
           }));
@@ -416,6 +420,10 @@ export class SolanaIndexer {
     return { trades: rows.map(r => ({ ...JSON.parse(r.data), timestamp: r.timestamp, idx: r.idx })), last: rows.length ? rows.at(-1).rowid : Number(rowid) || 0 };
   }
   /** The newest stored trade row, so a restarted server does not replay history to open streams. */
+  /** Trades with `start <= timestamp < end`, oldest first (V2 rounds and the flywheel). */
+  tradesBetween(start, end) { return this.db.prepare('SELECT data FROM trades WHERE timestamp >= ? AND timestamp < ? ORDER BY timestamp, slot, idx').all(start, end).map(r => JSON.parse(r.data)); }
+  /** The first time a wallet traded an Elpida token here (unix seconds), or null. */
+  firstSeen(account) { return this.db.prepare("SELECT MIN(timestamp) AS t FROM trades WHERE json_extract(data, '$.account') = ?").get(account)?.t ?? null; }
   lastTradeRow() { return this.db.prepare('SELECT MAX(rowid) AS id FROM trades').get()?.id ?? 0; }
 
   async sync() {
