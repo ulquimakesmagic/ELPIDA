@@ -27,6 +27,9 @@ export const testnets = [
     // launchpad in `shared` once Malik deploys it from the site (docs/HUMAN_ACTIONS.md, Model 11); until then it is off.
     // Deployed by Malik from the operator panel, 6 Nov 2026 (factory created in block 55188766; treasury 0xf5B0…639D).
     v4: { poolManager: '0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408', shared: { factory: '0x70e5E07a4EBBCcE5144DEd022a1ADE2019538Da3', hook: '0x8D4342B2fB2E52822CD6c4ceECb4628b1B90e8cC', router: '0x1136B6D2410b1B32Ec6039aD92a0B110A934aCE9', block: 55188766 } },
+    // ELPIDA V2 test launchpad, deployed by Malik from the operator panel, 9 Nov 2026 (factory from block 56522761;
+    // treasury 0xf5B0…639D; reward contracts run by the server keeper 0x95d3…5124). The public index checks the wiring.
+    v2: { shared: { factory: '0xb70Db4E38C5668713967187dDe88a187c6afA3Bc', hook: '0xC8C7Af0D152F548a26D90EAa2181229dA12D68cc', router: '0x5221007e755fA8231cAb135500C6B715ec7c0916', airdrop: '0xFcE86b3A8F1245a2B8343b50B10ad23360C97A8B', holder: '0x72dB6F7985c815941fACA4D0dE9377e2BC792327', flywheel: '0xf3FAb645403542A933949eAD9C053247913C694f', keeper: '0x95d3fAea73006C4557b02aC81593d8312ff25124', block: 56522761, minFeeBps: 100 } },
     legacy: [{ factory: '0xb5dAE15BCCe080a49e8b776E59B3d982269aC74C', block: 50624512, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0x98a0E75dbBe9EdA5D228319C72D496b814bA7145', block: 48289973, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }, { factory: '0x8194285faC2aFa04867a1C421EFee9f28ab0290f', block: 48272244, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1 }, { factory: '0xD64119914DDA7b206d01Fb2B334A630Ca94fD6d2', block: 48209837, model: 'curve-dex-v10', metadataVersion: 1 }, { factory: '0xe605787F7260F5Dae2768d2F9E93E7F18EE14f91', block: 47994800, model: 'curve-dex-v9', metadataVersion: 1 }],
   },
   {
@@ -75,6 +78,10 @@ export const testnets = [
     // Deployed by Malik from the operator panel, 6 Nov 2026: the test PoolManager (Uniswap v4-core 1.0.2, unchanged; block
     // 141138906), then the Model 11 launchpad on it (factory created in block 141139092; treasury 0xf5B0…639D).
     v4: { poolManager: '0x251E30304241c21d76219e56f3611d8b53F03a13', testPoolManager: true, shared: { factory: '0xA05eEe6f4443707EF6a88D4aE478c297342C0fd2', hook: '0x11C491F546491259f6B017E95fd918bBA7dC28CC', router: '0xA2DC3f5Ae12811404a4667C147c60D46748865fB', block: 141139092 } },
+    // ELPIDA V2 test launchpad on the labelled test PoolManager, deployed by Malik from the operator panel, 9 Nov 2026
+    // (factory from block 141724857; treasury 0xf5B0…639D; reward contracts run by the server keeper 0x95d3…5124).
+    // PancakeSwap's router is not SwapRouter02, so holder rewards of USDC pairs are paid in USDC here.
+    v2: { shared: { factory: '0x1798C56A217A37f13D4a36001608Ae9773E9f37A', hook: '0x88D6b95377cAF59A641241e7c305AC3ad06728cC', router: '0xE8280f27F785c13cC18268a8823DBD7C69F95659', airdrop: '0xD4342b5C791621453ed83938E4a4f2908372B85f', holder: '0xc46031762364E5dC2b1Cdd36dB6AD2aeb5793F24', flywheel: '0x888eD56692e9B8Acded9Cf8F84B60019fd667E0D', keeper: '0x95d3fAea73006C4557b02aC81593d8312ff25124', block: 141724857, minFeeBps: 100 } },
     shared: { factory: '0x4CabA05067171DbA4B840aDae1e652B8279dE499', block: 140398704, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1, reviewFixesVersion: 1 },
     legacy: [{ factory: '0x5795b25C7fA37638eEacd29848522f8Cd48a1156', block: 139102664, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE', block: 138485798, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },
