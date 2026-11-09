@@ -98,10 +98,11 @@ one is an unused test token. For step 3, in PowerShell type the price itself, wi
 (440 is only an example: use Tesla's share price now), and the same without `--dry-run`.
 
 **Solana V2 (docs/V2_0_SOLANA.md): do not upgrade devnet yet.** The program in `contracts/solana/build` now carries
-ELPIDA V2 steps 1 and 2 (V2 pairs, `launch_v2`, the five-way fee ledger, the graduated-pool harvest). The devnet
-upgrade waits until step 3 (airdrop, holder rewards and flywheel) is merged; the note will then give the final
-hashes and the steps. This build: test `7d8d70424ebda86e2f599904dbc006746c17b960e3915cac2086762013226907`, mainnet
-`e222c4e90514ec3a44842b045ea58250c4705824d9fcddfeadb44aa1913d60b8`.
+ELPIDA V2 steps 1 to 3 (V2 pairs, `launch_v2`, the five-way fee ledger, the graduated-pool harvest, reward rounds and
+the flywheel). The devnet upgrade waits for step 4 (the deploy script for V2 pairs and distributors, the keeper and the
+site); the note will then give the final
+hashes and the steps. This build: test `54b53d5411cbf3373d6dcadf25855317ef256e37a6597d62233cf2fd3238e8ce`, mainnet
+`3e0977f6ccaccdbc9a2f2a40e754fb157d10f355f2c2dc1c7884f78445473838`.
 
 No devnet DEX accepts Ondo-shaped mints, and Jupiter does not run on devnet, so the program's test build now has its
 own small SOL/stock conversion pool. The mainnet build refuses it; on mainnet the same payments will go through
