@@ -11,8 +11,8 @@ Not audited. Test networks first; mainnet only with Malik's explicit approval.
 
 | Phase | What | Status |
 |---|---|---|
-| S1 | V2 pairs, `launch_v2`, the token's own fee, anti-snipe to liquidity, the five-way fee ledger, `withdraw_v2_fees` | This PR |
-| S2 | Five-way harvest of graduated-pool (Raydium / PumpSwap) fees for V2 pools | Next |
+| S1 | V2 pairs, `launch_v2`, the token's own fee, anti-snipe to liquidity, the five-way fee ledger, `withdraw_v2_fees` | Done |
+| S2 | Five-way harvest of graduated-pool (Raydium / PumpSwap) fees for V2 pools | Done |
 | S3 | Trader airdrop and holder reward rounds (Merkle claims) and the flywheel buy-and-burn, from the vault PDAs | Later |
 | S4 | Server keeper (Solana key), indexers, launch flow, token pages, unified rewards on the analytics page | Later |
 | S5 | Malik upgrades devnet; the site pins the V2 pairs | Later |
@@ -42,8 +42,17 @@ Not audited. Test networks first; mainnet only with Malik's explicit approval.
   asset) and the pair's treasury. Works before and after migration; liquidity is never touched.
 - **Migration.** Unchanged: `migrate_to_raydium` (SOL pair) or `migrate_to_pumpswap` moves the reserve and the locked
   surplus; owed shares stay in the curve vault for `withdraw_v2_fees`.
-- **Harvests.** Until S2, `harvest_raydium_fees` and `harvest_lp_fees` refuse V2 pools (error 6040). Fees keep
-  accumulating in the locked position, so nothing is lost; S2 harvests them five ways.
+- **Harvests (S2).** `harvest_raydium_fees` (SOL pair) and `harvest_lp_fees` (PumpSwap) stay permissionless and
+  still withdraw only the LP growth earned from fees; the principal liquidity never falls. For V2 pools, instead of the
+  older 50/50 payout:
+  - the **token side** of the harvest is **burned** (supply falls);
+  - the **quote side** returns to the curve's quote vault and joins the pool's ledger, so the next `withdraw_v2_fees`
+    splits it 30 / 30 / 10 / 10 / 20 like every curve fee.
+  The caller passes the pool writable and the curve's quote vault as the first remaining account (`v2: true` in the
+  client). Event `V2Harvested { pool, base_burned, quote_accrued, accrued }`.
+- **Fee after graduation.** On Raydium the pool's own 1% tier applies (84% of it to the locked position); the token's
+  chosen fee applies on the curve. Matching Raydium tiers to the chosen fee, and Raydium's separate creator fee, are
+  open questions for later.
 
 ## Errors added
 
@@ -52,7 +61,7 @@ Not audited. Test networks first; mainnet only with Malik's explicit approval.
 | 6037 | `NotV2` | The instruction needs a V2 pool or pair |
 | 6038 | `V2FeeRange` | Fee below the pair's minimum or above 4% |
 | 6039 | `NothingToWithdraw` | Nothing owed yet |
-| 6040 | `V2HarvestPending` | Five-way harvest arrives in S2 |
+| 6040 | `V2HarvestPending` | Unused since S2 (kept so codes do not shift) |
 
 ## Tests
 

@@ -197,6 +197,7 @@ export const EVENTS = {
   // ELPIDA V2. V2FeesPaid.recipient: 0 creator, 1 trader airdrop, 2 flywheel, 3 holder rewards, 4 treasury.
   V2ConfigAdded: { discriminator: [239, 9, 113, 171, 54, 108, 17, 148], fields: [['config', 'key'], ['quoteMint', 'key'], ['minFeeBps', 'u16']] },
   V2PoolLaunched: { discriminator: [238, 243, 215, 187, 98, 226, 224, 169], fields: [['pool', 'key'], ['mint', 'key'], ['creator', 'key'], ['feeBps', 'u16']] },
+  V2Harvested: { discriminator: [149, 220, 160, 141, 51, 79, 197, 193], fields: [['pool', 'key'], ['baseBurned', 'u64'], ['quoteAccrued', 'u64'], ['accrued', 'u64']] },
   V2FeesPaid: { discriminator: [225, 206, 2, 3, 203, 216, 255, 104], fields: [['pool', 'key'], ['recipient', 'u8'], ['to', 'key'], ['amount', 'u64']] },
 };
 
@@ -287,7 +288,7 @@ export const PROGRAM_ERRORS = [
   'This needs an ELPIDA V2 pool or trading pair.',
   'The token\'s fee must be between the pair\'s minimum and 4%.',
   'Nothing is owed yet.',
-  'V2 graduated-pool fees are harvested by the next program version.',
+  'Unused.',
 ];
 
 /** Turns a Solana/Anchor error into a readable message. */
@@ -792,17 +793,18 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
       ], DISCRIMINATORS.migrateToPumpswap);
     },
     /** Instructions to harvest LP trading fees: idempotent ATA creation for the four destinations, then the harvest. */
-    harvestLpFees({ payer, config, mint, reward }) {
+    /** `v2: true` for ELPIDA V2 pools: the token side is burned and the quote side joins the pool's five-way ledger. */
+    harvestLpFees({ payer, config, mint, reward, v2 = false }) {
       const pool = poolPda(mint);
       const p = pumpAccounts(mint, config.quoteMint, qp(config));
       return [
         this.createAtaIdempotent(payer, config.treasury, mint), this.createAtaIdempotent(payer, reward, mint), this.createAtaIdempotent(payer, reward, config.quoteMint, qp(config)),
         ix([
-          meta(payer, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(mint, true), meta(pool), meta(migrationPda(mint), true), meta(p.lpAuthority),
+          meta(payer, true, true), meta(config.address ?? configPda), meta(config.quoteMint), meta(mint, true), meta(pool, v2), meta(migrationPda(mint), true), meta(p.lpAuthority),
           meta(p.authorityBase, true), meta(p.authorityQuote, true), meta(p.authorityLp, true), meta(p.pool, true), meta(PUMP_GLOBAL_CONFIG), meta(p.lpMint, true),
           meta(p.poolBase, true), meta(p.poolQuote, true), meta(config.treasury), meta(reward),
           meta(ata(config.treasury, mint), true), meta(qata(config.treasury, config), true), meta(ata(reward, mint), true), meta(qata(reward, config), true),
-          ...pumpFixed, meta(tokenProgram), meta(token2022),
+          ...pumpFixed, meta(tokenProgram), meta(token2022), ...(v2 ? [meta(qata(pool, config), true)] : []),
         ], DISCRIMINATORS.harvestLpFees),
       ];
     },
@@ -820,17 +822,18 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
       ], DISCRIMINATORS.migrateToRaydium);
     },
     /** Raydium harvest: idempotent ATAs (destinations and the LP authority's wrapped-SOL account), then the harvest. */
-    harvestRaydiumFees({ payer, config, mint, reward }) {
+    /** `v2: true` for ELPIDA V2 pools (as `harvestLpFees`). */
+    harvestRaydiumFees({ payer, config, mint, reward, v2 = false }) {
       const pool = poolPda(mint), r = raydiumAccounts(mint), treasury = config.treasury;
       return [
         this.createAtaIdempotent(payer, treasury, mint), this.createAtaIdempotent(payer, reward, mint), this.createAtaIdempotent(payer, reward, wsol),
         this.createAtaIdempotent(payer, treasury, wsol), this.createAtaIdempotent(payer, r.lpAuthority, wsol),
         ix([
-          meta(payer, true, true), meta(config.address ?? configFor(wsol)), meta(wsol), meta(mint, true), meta(pool), meta(migrationPda(mint), true), meta(r.lpAuthority),
+          meta(payer, true, true), meta(config.address ?? configFor(wsol)), meta(wsol), meta(mint, true), meta(pool, v2), meta(migrationPda(mint), true), meta(r.lpAuthority),
           meta(r.authorityBase, true), meta(r.authorityQuote, true), meta(r.authorityLp, true), meta(r.pool, true), meta(r.authority), meta(r.lpMint, true),
           meta(r.vault0, true), meta(r.vault1, true), meta(treasury), meta(reward),
           meta(ata(treasury, mint), true), meta(ata(treasury, wsol), true), meta(ata(reward, mint), true), meta(ata(reward, wsol), true),
-          meta(r.program), meta(MEMO_PROGRAM), meta(tokenProgram), meta(token2022),
+          meta(r.program), meta(MEMO_PROGRAM), meta(tokenProgram), meta(token2022), ...(v2 ? [meta(ata(pool, wsol), true)] : []),
         ], DISCRIMINATORS.harvestRaydiumFees),
       ];
     },

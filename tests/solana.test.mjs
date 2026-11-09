@@ -1587,6 +1587,65 @@ test('Solana V2: own fee, anti-snipe to liquidity, five-way ledger, permissionle
   await withdraw();
   const c1 = await bal();
   assert.deepEqual(c1.map((v, i) => v - c0[i]), owedAfter);
-  // Graduated-pool fees of V2 pools wait for the five-way harvest of the next program version.
-  await failsWith(send(f.connection, f.outsider, [f.client.computeBudget(HARVEST_COMPUTE_UNITS), ...f.client.harvestLpFees({ payer: f.outsider.publicKey, config, mint, reward: f.rewardWallet.publicKey })], [], 1), /0x1798/);
+  // Graduated-pool fees (S2): the token side of a harvest is burned, the quote side returns to the curve vault and joins
+  // the ledger, so the next withdrawal splits it five ways. Fee growth is simulated by sending quote to the pool.
+  const pa = f.client.pumpAccounts(mint, f.quoteMint);
+  const transferIx = (from, to, amount) => new web3.TransactionInstruction({ programId: f.client.tokenProgram, keys: [{ pubkey: from, isSigner: false, isWritable: true }, { pubkey: to, isSigner: false, isWritable: true }, { pubkey: f.trader.publicKey, isSigner: true, isWritable: false }], data: Buffer.from([3, ...new Uint8Array(new BigUint64Array([amount]).buffer)]) });
+  await send(f.connection, f.trader, [transferIx(f.client.ata(f.trader.publicKey, f.quoteMint), pa.poolQuote, 1_200n * USDC)]);
+  const harvestV2 = v2 => send(f.connection, f.outsider, [f.client.computeBudget(HARVEST_COMPUTE_UNITS), ...f.client.harvestLpFees({ payer: f.outsider.publicKey, config, mint, reward: f.rewardWallet.publicKey, v2 })], [], 1);
+  await failsWith(harvestV2(false), /0x1795/);
+  const m0 = await migration(mint), supply0 = BigInt((await f.connection.getTokenSupply(mint)).value.amount), v0 = await vault(), accrued0 = p.v2.accrued;
+  const hSig = await harvestV2(true);
+  const h = (await eventsOf(hSig)).find(e => e.name === 'V2Harvested');
+  assert.ok(h.quoteAccrued > 0n && h.baseBurned > 0n);
+  p = f.client.decodePool((await f.connection.getAccountInfo(f.client.poolPda(mint))).data);
+  assert.equal(p.v2.accrued - accrued0, h.quoteAccrued, 'the quote side joins the ledger');
+  assert.equal(await vault() - v0, h.quoteAccrued, 'and the curve vault');
+  assert.equal(supply0 - BigInt((await f.connection.getTokenSupply(mint)).value.amount), h.baseBurned, 'the token side is burned');
+  const m1 = await migration(mint);
+  assert.ok(liquidityUnits(m1.lpLocked, await pumpState(mint)) >= m0.principal, 'principal liquidity stays locked');
+  const owedH = v2Owed(p.v2), d0 = await bal();
+  await withdraw();
+  const d1 = await bal();
+  assert.deepEqual(d1.map((v, i) => v - d0[i]), owedH, 'graduated-pool fees split five ways');
 });
+
+test('Solana V2 SOL pair: graduates into Raydium; Raydium fees are burned (token side) and split five ways (SOL side)', { skip: raySkip }, async () => {
+  const wsol = new PublicKey(WSOL_MINT), user = Keypair.generate();
+  await airdrop(f.connection, user.publicKey, 20 * web3.LAMPORTS_PER_SOL);
+  const params = curveParams({ startFdv: 1, endFdv: 5, quoteDecimals: 9, launchFee: '0.01', baseFeeBps: 100, snipeStartBps: 9_000, snipeWindowSecs: 60, maxCreatorBuyBps: 300 });
+  await send(f.connection, f.authority, [f.client.computeBudget(), f.client.addV2Config({ authority: f.authority.publicKey, quoteMint: wsol, treasury: f.treasury, params })], [], 1);
+  const config = { address: f.client.configV2For(wsol), quoteMint: wsol, treasury: f.treasury }, mint = Keypair.generate();
+  await send(f.connection, user, [f.client.computeBudget(), ...f.client.wrapSol(user.publicKey, SOL / 100n), f.client.launchV2({ uri: TEST_URI, creator: user.publicKey, config, mint: mint.publicKey, name: 'Ray V2', symbol: 'rayv2', feeBps: 200, firstBuy: SOL / 100n, reward: user.publicKey }), f.client.unwrapSol(user.publicKey)], [mint], 1);
+  await afterV2Window(mint.publicKey);
+  await send(f.connection, user, [f.client.computeBudget(), ...f.client.wrapSol(user.publicKey, 3n * SOL), f.client.buy({ buyer: user.publicKey, config, mint: mint.publicKey, grossIn: 3n * SOL, minTokensOut: 1n }), f.client.unwrapSol(user.publicKey)], [], 1);
+  assert.equal((await pool(mint.publicKey)).status, STATUS_GRADUATED);
+  await send(f.connection, f.outsider, [f.client.computeBudget(RAYDIUM_MIGRATE_COMPUTE_UNITS), f.client.migrateToRaydium({ payer: f.outsider.publicKey, config, mint: mint.publicKey })], [], 1);
+  assert.equal((await pool(mint.publicKey)).status, STATUS_MIGRATED);
+  await waitOpen(mint.publicKey);
+  // Trades on Raydium earn the locked position fees in both tokens.
+  for (let i = 0; i < 6; i++) { const got = await raySwap(user, mint.publicKey, 'buy', SOL / 2n); await raySwap(user, mint.publicKey, 'sell', got); }
+  const harvestV2 = v2 => send(f.connection, f.outsider, [f.client.computeBudget(HARVEST_COMPUTE_UNITS), ...f.client.harvestRaydiumFees({ payer: f.outsider.publicKey, config, mint: mint.publicKey, reward: user.publicKey, v2 })], [], 1);
+  await failsWith(harvestV2(false), /0x1795/);
+  const before = await pool(mint.publicKey), v0 = await wsolOf(f.client.poolPda(mint.publicKey)), supply0 = BigInt((await f.connection.getTokenSupply(mint.publicKey)).value.amount);
+  const h = (await eventsOf(await harvestV2(true))).find(e => e.name === 'V2Harvested');
+  assert.ok(h.quoteAccrued > 0n && h.baseBurned > 0n, 'fees on both sides');
+  const after = await pool(mint.publicKey);
+  assert.equal(after.v2.accrued - before.v2.accrued, h.quoteAccrued);
+  assert.equal(await wsolOf(f.client.poolPda(mint.publicKey)) - v0, h.quoteAccrued);
+  assert.equal(supply0 - BigInt((await f.connection.getTokenSupply(mint.publicKey)).value.amount), h.baseBurned);
+  const dest = [f.client.ata(user.publicKey, wsol), ...['airdrop', 'flywheel', 'holder'].map(k => f.client.ata(f.client.v2VaultPda(k), wsol)), f.client.ata(f.treasury, wsol)];
+  const b0 = await Promise.all(dest.map(balance)), owed = v2Owed(after.v2);
+  await send(f.connection, f.outsider, [f.client.computeBudget(V2_WITHDRAW_COMPUTE_UNITS), f.client.withdrawV2Fees({ payer: f.outsider.publicKey, config, mint: mint.publicKey, reward: user.publicKey })], [], 1);
+  const b1 = await Promise.all(dest.map(balance));
+  assert.deepEqual(b1.map((v, i) => v - b0[i]), owed, 'SOL split 30 / 30 / 10 / 10 / 20');
+});
+
+async function afterV2Window(mint) {
+  const { createdAt } = await pool(mint);
+  for (;;) {
+    const now = await f.connection.getBlockTime(await f.connection.getSlot('confirmed'));
+    if (BigInt(now ?? 0) >= createdAt + BigInt(V2.snipeWindowSecs) + 1n) return;
+    await sleep(500);
+  }
+}
