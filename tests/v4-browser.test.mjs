@@ -53,7 +53,7 @@ test('the page mines the same hook salt as the test fixture and only on networks
   assert.equal(isV4Token({ deploymentModel: V4_MODEL }), true); assert.equal(isV4Token({ deploymentModel: 'curve-dex-v10' }), false);
   const { testnets } = await import('../packages/core/networks.mjs');
   for (const key of ['base-sepolia', 'ethereum-sepolia']) assert.match(testnets.find(n => n.key === key).v4.poolManager, /^0x[0-9a-fA-F]{40}$/);
-  assert.deepEqual(testnets.find(n => n.key === 'robinhood-testnet').v4, { poolManager: null, testPoolManager: true, shared: null }, 'Robinhood testnet waits for its test PoolManager');
+  { const rh = testnets.find(n => n.key === 'robinhood-testnet'); assert.equal(rh.v4.testPoolManager, true); assert.match(rh.v4.poolManager, /^0x[0-9a-fA-F]{40}$/, 'the test PoolManager Malik deployed is pinned'); assert.equal(rh.v4.shared, null, 'no Model 11 there'); }
 });
 
 test('owner deploys the Model 11 test launchpad from the browser, then a creator launches, buys and sells through it', async t => {
