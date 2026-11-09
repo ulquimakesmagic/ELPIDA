@@ -224,6 +224,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const graduationKeeper=soft('graduationKeeper',()=>configuredGraduationKeeper({env:port===0?{}:process.env,publicIndex,path:port===0?null:dataFile('graduation-keeper.sqlite')}),()=>configuredGraduationKeeper({env:{},publicIndex,path:null}));
   // Solana public indexer: the deployed program's pools and trades, read-only, stored on the data volume.
   const solanaNet=solanaConfig(),solanaRpc=process.env.SOLANA_RPC_URL??(/^https?:\/\//.test(solanaNet.rpcUrl)?solanaNet.rpcUrl:null);
+  // The Solana V2 keeper, rewards reader and admin balance use the indexer's RPC and follow it when it fails over to a backup.
+  const solanaFollowers=new Set(),solanaConnection=()=>solanaIndex?.connection??(solanaRpc?new solanaWeb3.Connection(solanaRpc,'confirmed'):null);
   // D9: pre-ground Solana mint addresses ending in "hope" (encrypted at rest; random mint fallback).
   const vanity=soft('vanity',()=>new VanityMintPool({path:port===0?null:dataFile('solana-vanity-mints.json'),key:vanityKey(process.env.ELPIDA_VANITY_KEY),programId:solanaNet.deployment?.programId,suffix:process.env.ELPIDA_VANITY_SUFFIX||'hope',target:Number(process.env.ELPIDA_VANITY_TARGET??3),workers:Number(process.env.ELPIDA_VANITY_WORKERS??1)}),()=>new VanityMintPool({path:null,key:null,programId:solanaNet.deployment?.programId,suffix:'hope',target:0,workers:0}));
   if(process.env.ELPIDA_VANITY_KEY&&!vanity.enabled)console.log(JSON.stringify({event:'vanity_mints_disabled',reason:'ELPIDA_VANITY_KEY must be 32 bytes (64 hex characters or base64), with a Solana deployment configured.'}));
@@ -239,7 +241,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       solanaIndex.rpcHost=hostOf(solanaRpcs[0]);
       const fullTick=()=>solanaIndex.sync().then(()=>{solanaFailures=0;console.log(JSON.stringify({event:'public_indexer_synced',...solanaIndex.status()}));}).catch(()=>{
         console.log(JSON.stringify({event:'public_indexer_error',network:solanaNet.key,code:solanaIndex.lastError,phase:solanaIndex.lastErrorPhase,rpc:solanaIndex.rpcHost,message:'Indexing unavailable; retrying.'}));
-        if(++solanaFailures>=3&&solanaRpcs.length>1){solanaFailures=0;solanaRpcAt=(solanaRpcAt+1)%solanaRpcs.length;solanaIndex.useConnection(new solanaWeb3.Connection(solanaRpcs[solanaRpcAt],'confirmed'),hostOf(solanaRpcs[solanaRpcAt]));console.log(JSON.stringify({event:'public_indexer_rpc_switched',network:solanaNet.key,rpc:solanaIndex.rpcHost}));}
+        if(++solanaFailures>=3&&solanaRpcs.length>1){solanaFailures=0;solanaRpcAt=(solanaRpcAt+1)%solanaRpcs.length;{const next=new solanaWeb3.Connection(solanaRpcs[solanaRpcAt],'confirmed');solanaIndex.useConnection(next,hostOf(solanaRpcs[solanaRpcAt]));for(const f of solanaFollowers)f.connection=next;}console.log(JSON.stringify({event:'public_indexer_rpc_switched',network:solanaNet.key,rpc:solanaIndex.rpcHost}));}
       });
       // Fast pass every few seconds (new transactions, then pools only if something traded), full pass every 30 s.
       // New trades go to the live feed; the first pass after a restart only records where history ends.
@@ -271,17 +273,17 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // ELPIDA_V2_KEEPER_KEY is set and a V2 deployment is pinned; test networks only.
   // ELPIDA V2 rewards on Solana for Analytics (step 4c): read from the program's accounts once a minute, when V2 is set up.
   let solanaRewards=null;
-  if(port!==0&&solanaRpc&&solanaNet.deployment?.v2?.config)try{solanaRewards=new SolanaV2Rewards({connection:new solanaWeb3.Connection(solanaRpc,'confirmed'),net:solanaNet,path:dataFile('v2-rewards-solana.sqlite'),manifest:(k,r)=>solanaV2Keeper.manifest?.(k,r)??null,log:e=>console.log(JSON.stringify(e))}).start();}catch(error){console.error(JSON.stringify({event:'solana_v2_rewards_unavailable',message:String(error.message).slice(0,200)}));}
+  if(port!==0&&solanaRpc&&solanaNet.deployment?.v2?.config)try{solanaRewards=new SolanaV2Rewards({connection:solanaConnection(),net:solanaNet,path:dataFile('v2-rewards-solana.sqlite'),manifest:(k,r)=>solanaV2Keeper.manifest?.(k,r)??null,log:e=>console.log(JSON.stringify(e))}).start();solanaFollowers.add(solanaRewards);}catch(error){console.error(JSON.stringify({event:'solana_v2_rewards_unavailable',message:String(error.message).slice(0,200)}));}
   // ELPIDA V2 keeper on Solana (step 4b): fee payouts, harvests, SOL sweeps, flywheel. Off until ELPIDA_V2_KEEPER_SOLANA_KEY is
   // set and the deployment recorded `v2`.
   let solanaV2Keeper={enabled:false,status:()=>({enabled:false,state:'not_configured'}),close:async()=>{}};
-  if(port!==0&&solanaRpc)try{solanaV2Keeper=configuredSolanaV2Keeper({env:process.env,net:solanaNet,connection:new solanaWeb3.Connection(solanaRpc,'confirmed'),path:dataFile('v2-keeper-solana.sqlite'),log:e=>console.log(JSON.stringify(e)),index:()=>solanaIndex,solUsd:()=>{const p=priceSnapshot()[solanaNet.key];return p?.status==='fresh'&&p.usd>0?p.usd:null;},publicUrl:publicUrl||undefined}).start();}catch(error){console.error(JSON.stringify({event:'solana_v2_keeper_unavailable',message:String(error.message).slice(0,200)}));}
+  if(port!==0&&solanaRpc)try{solanaV2Keeper=configuredSolanaV2Keeper({env:process.env,net:solanaNet,connection:solanaConnection(),path:dataFile('v2-keeper-solana.sqlite'),log:e=>console.log(JSON.stringify(e)),index:()=>solanaIndex,solUsd:()=>{const p=priceSnapshot()[solanaNet.key];return p?.status==='fresh'&&p.usd>0?p.usd:null;},publicUrl:publicUrl||undefined}).start();solanaFollowers.add(solanaV2Keeper);}catch(error){console.error(JSON.stringify({event:'solana_v2_keeper_unavailable',message:String(error.message).slice(0,200)}));}
   // Admin Operations: what the V2 keepers are doing (state, address, the Solana keeper's SOL for fees, recent jobs).
   const keeperStatus=async()=>{
     const sol=solanaV2Keeper.status(),address=solanaV2Keeper.address??sol.keeper??null;let balance=null;
-    if(address&&solanaRpc)try{balance=await Promise.race([new solanaWeb3.Connection(solanaRpc,'confirmed').getBalance(new solanaWeb3.PublicKey(address)),new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),5000))])/1e9;}catch{balance=null;}
+    const conn=solanaConnection();if(address&&conn)try{balance=await Promise.race([conn.getBalance(new solanaWeb3.PublicKey(address)),new Promise((_,reject)=>setTimeout(()=>reject(new Error('timeout')),5000))])/1e9;}catch{balance=null;}
     let evm;try{evm=v2Keeper.status();}catch(error){evm={enabled:false,state:'error',error:String(error.message).slice(0,160)};}
-    return {evm,solana:{network:solanaNet.key,name:solanaNet.name,state:solanaV2Keeper.enabled?'running':sol.state,address,balance,runs:solanaV2Keeper.enabled?sol.runs:[],airdropNext:sol.airdropNext??null,holderNext:sol.holderNext??null}};
+    return {evm,solana:{network:solanaNet.key,name:solanaNet.name,state:solanaV2Keeper.enabled?'running':sol.state,address,balance,runs:solanaV2Keeper.enabled?sol.runs:[],jobs:solanaV2Keeper.enabled?sol.jobs??[]:[],airdropNext:sol.airdropNext??null,holderNext:sol.holderNext??null}};
   };
   let v2Keeper={enabled:false,status:()=>({enabled:false,state:'not_configured'}),manifest:()=>null,close:async()=>{}};
   queueMicrotask(()=>{if(port===0)return;try{v2Keeper=configuredV2Keeper({env:process.env,networks:evmTestnets,indexFor:key=>publicIndex.v2Index(key),prices:()=>priceSnapshot(),path:dataFile('v2-keeper.sqlite'),publicUrl:process.env.ELPIDA_PUBLIC_URL||'https://elpida.fun',log:e=>console.log(JSON.stringify(e))});if(v2Keeper.enabled){v2Keeper.start();console.log(JSON.stringify({event:'v2_keeper_started',keeper:v2Keeper.address}));}}catch(error){console.log(JSON.stringify({event:'subsystem_unavailable',subsystem:'v2Keeper',degraded:true,message:String(error.message).slice(0,120)}));}});
