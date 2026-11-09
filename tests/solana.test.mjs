@@ -23,6 +23,7 @@ import {
 } from '../packages/solana/client.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { buildSolanaRound, verifySolanaProof } from '../packages/solana/v2-rounds.mjs';
+import { ensureV2, v2Genesis, v2SolParams } from '../packages/solana/v2-setup.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
 import { vaultUpgrade, vaultHandBack, closeProgram, readProgramData } from '../scripts/squads-devnet-trial.mjs';
 import { deployProgram, upgradeProgram, ensurePairConfigs, pricingUpdates, ensurePricing, ensureBetaGate, rejectsTestInstructions, prepareUpgradeBuffer, transferUpgradeAuthority, send, airdrop } from '../packages/solana/deploy.mjs';
@@ -1706,4 +1707,24 @@ test('Solana V2 rewards (S3): Merkle rounds paid once per leaf, funded rounds on
   await failsWith(fly(flyBal / 20n), /0x179f/);
   await failsWith(fly(flyBal), /0x179f/);
   await failsWith(send(f.connection, f.outsider, [f.client.v2FlywheelCurve({ operator: f.outsider.publicKey, config: v2cfg, mint: mint.publicKey, amountIn: 1n, minOut: 0n })], [], 1), /0x1770/);
+});
+
+test('Solana V2 setup (step 4a): the SOL pair and the distributors are created once and read back', { skip: raySkip }, async () => {
+  assert.deepEqual(v2Genesis(Date.UTC(2026, 10, 9, 17, 30) / 1000), { month: Date.UTC(2026, 10, 1) / 1000, today: Date.UTC(2026, 10, 9) / 1000 });
+  const p = v2SolParams({ startFdvSol: '0.5', launchFeeSol: '0.01' });
+  assert.equal(p.baseFeeBps, 100); assert.equal(p.maxCreatorBuyBps, 300); assert.equal(p.virtualToken, TOKEN_SUPPLY * 5n / 4n);
+  await assert.rejects(ensureV2({ connection: f.connection, payer: f.authority, programId: f.programId, treasury: f.treasury, cluster: 'localnet', keeper: null, oracle: null, pricing: solanaPricing('localnet') }), /keeper/);
+  const keeper = Keypair.generate().publicKey, notes = [];
+  const run = () => ensureV2({ connection: f.connection, payer: f.authority, programId: f.programId, treasury: f.treasury.toBase58(), cluster: 'localnet', keeper: keeper.toBase58(), oracle: null, pricing: solanaPricing('localnet'), onProgress: m => notes.push(m) });
+  const record = await run();
+  // Earlier tests created the V2 SOL pair and the airdrop distributor; the holder distributor is new here.
+  assert.equal(record.config, f.client.configV2For(new PublicKey(WSOL_MINT)).toBase58());
+  assert.equal(record.minFeeBps, 100); assert.equal(record.maxFeeBps, 400);
+  assert.equal(record.distributors.holder.operator, keeper.toBase58());
+  assert.equal(record.distributors.holder.period, 7 * 86_400);
+  assert.equal(record.distributors.holder.genesis % 86_400, 0);
+  assert.ok(notes.some(n => /airdrop distributor is run by/.test(n)), 'an existing distributor with another operator is reported, not replaced');
+  assert.equal(record.flywheelVault, f.client.v2VaultPda('flywheel').toBase58());
+  const again = await run();
+  assert.deepEqual(again.distributors, record.distributors, 'a second run changes nothing');
 });

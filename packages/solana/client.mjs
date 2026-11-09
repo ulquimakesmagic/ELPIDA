@@ -992,6 +992,13 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
       const pool = this.decodePumpPool(poolRaw);
       return { lpSupply: pool.lpSupply, base: this.tokenAmount(baseVaultRaw), quote: this.tokenAmount(quoteVaultRaw) - pool.protocolFees - pool.creatorFees };
     },
+    /** S3 distributor state: kind, operator, period (0 = calendar months), genesis (unix seconds). */
+    decodeV2Distributor(raw) {
+      const bytes = new Uint8Array(raw);
+      if (bytes.length < 58 || !sameBytes(bytes, DISCRIMINATORS.V2Distributor)) throw new Error('Not an ELPIDA V2 distributor account.');
+      const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+      return { kind: bytes[8], operator: new PublicKey(bytes.subarray(9, 41)), period: view.getUint32(41, true), genesis: Number(view.getBigInt64(45, true)) };
+    },
     decodeConfig(raw) {
       const bytes = new Uint8Array(raw);
       if (bytes.length < CONFIG_SIZE || !sameBytes(bytes, DISCRIMINATORS.CurveConfig)) throw new Error('Not an Elpida curve config account.');
