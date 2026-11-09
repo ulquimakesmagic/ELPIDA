@@ -102,8 +102,8 @@ export function renderLaunch(ctx) {
   // Creator purchase paid in the native coin on a non-native pair: swapped into the pair asset before the launch
   // (apps/web/launch-conversion.mjs). Public EVM testnets with a DEX only; the quote shows what the swap delivers.
   // Solana: stock pairs only, converted in the program's devnet SOL/stock pool (Jupiter on mainnet later).
-  // Model 11 pays its first buy in the pair asset itself (no conversion step in its launch).
-  const canPayNative = () => !(draft.launchModel === 'v11' && v4Offered()) && !(draft.launchModel === 'v20' && v2Offered()) && (!solana() || !!selectedAsset()?.lockedPool) && isPublic() && draft.pair !== 'native' && connected() && !net()?.mainnet && typeof ctx.wallet.firstBuyConversionQuote === 'function' && !!selectedAsset();
+  // ELPIDA V2 converts right before its launch (v2-launchpad.mjs), on the network's conversion pool.
+  const canPayNative = () => !(draft.launchModel === 'v11' && v4Offered()) && (!solana() || !!selectedAsset()?.lockedPool) && isPublic() && draft.pair !== 'native' && connected() && !net()?.mainnet && typeof ctx.wallet.firstBuyConversionQuote === 'function' && !!selectedAsset();
   const payNative = () => draft.buyWith === 'native' && canPayNative();
   let conversion = { key: '', state: 'idle' };
   const conversionFor = () => `${draft.chain}:${selectedAsset()?.id}:${draft.nativeBuy}`;
@@ -115,7 +115,7 @@ export function renderLaunch(ctx) {
     if (!(Number(draft.nativeBuy) > 0)) { conversion = { key, state: 'idle' }; conversionDrawn(); return; }
     conversion = { key, state: 'loading' }; conversionDrawn();
     conversionTimer = setTimeout(async () => {
-      try { const q = await ctx.wallet.firstBuyConversionQuote({ quoteAsset: selectedAsset().id, nativeAmount: draft.nativeBuy }); if (conversionFor() === key) conversion = { key, state: 'ok', ...q }; }
+      try { const q = await ctx.wallet.firstBuyConversionQuote({ quoteAsset: selectedAsset().address ?? selectedAsset().id, nativeAmount: draft.nativeBuy, v2: v2Chosen() }); if (conversionFor() === key) conversion = { key, state: 'ok', ...q }; }
       catch (error) { if (conversionFor() === key) conversion = { key, state: 'error', error: errorText(error) }; }
       if (conversionFor() === key) conversionDrawn();
     }, 400);
@@ -137,10 +137,16 @@ export function renderLaunch(ctx) {
   const solanaV2 = () => (solana() ? ctx.wallet?.deployment?.v2 ?? null : null);
   const v2Offered = () => !!draft.chain && draft.chain !== 'local' && (solana() ? !!solanaV2() : !!v2Deployment(net()));
   const v2Pairs = () => (solana() ? ['native'] : V2_PAIRS);
-  const v2Chosen = () => draft.launchModel === 'v20' && v2Offered();
+  // Model 10 is retired from the launch page (Malik, 9 November 2026): ELPIDA V2 is the only model wherever its
+  // launchpad exists. Model 10 tokens keep trading. The local simulation keeps its own test curve.
+  const v2Chosen = () => v2Offered();
+  const v2Missing = () => !!draft.chain && draft.chain !== 'local' && !v2Offered();
   const modelsOffered = () => v4Offered() || v2Offered();
+  // Where a native-coin first buy is swapped into the pair asset: V2 trades on its own v4 pool but converts on the
+  // network's conversion DEX.
+  const swapDex = () => v2Chosen() ? ctx.config.publicDexes?.[draft.chain]?.name ?? 'the conversion pool' : dexName();
   const feePercent = () => (Number(draft.feeBps ?? V2.defaultFeeBps) / 100).toFixed(2);
-  const modelName = () => v2Chosen() ? `ELPIDA V2 test · ${feePercent()}% fee` : v4Chosen() ? 'Model 11 test · Uniswap v4' : 'Model 10 · bonding curve';
+  const modelName = () => v2Chosen() ? `ELPIDA V2 test · ${feePercent()}% fee` : v4Chosen() ? 'Model 11 test · Uniswap v4' : 'Bonding curve (local simulation)';
   const dexName = () => v2Chosen() && solana() ? 'Raydium' : v4Chosen() || v2Chosen() ? 'Uniswap v4' : !draft.chain ? 'DEX' : solana() ? 'Raydium' : draft.chain === 'local' ? (ctx.config.dex ? 'Uniswap v3' : 'test') : draft.chain === 'base-sepolia' ? 'Uniswap v3' : ctx.config.publicDexes?.[draft.chain]?.name ?? 'test';
 
   async function loadRewards() {
@@ -317,7 +323,7 @@ export function renderLaunch(ctx) {
     if (!stockCatalog() && pairs?.xstock?.assets?.length) loadStockCatalog().then(c => { if (c) draw(); });
     const pairGrid = h('div.choice-grid', { class: 'pair-grid', role: 'radiogroup', 'aria-label': 'Trading pair' }, PAIR_KINDS.map(kind => {
       const info = PAIR_INFO[kind], group = pairs?.[kind];
-      const reason = !draft.chain ? 'Choose a network first.' : v2Chosen() && !v2Pairs().includes(kind) ? (solana() ? 'V2 test launches on Solana pair with SOL. Choose Model 10 above for this pair.' : 'V2 test launches pair with the native coin, USDC or a test stock approved for V2. Choose Model 10 above for this pair.') : v4Chosen() && !V4_PAIRS.includes(kind) ? 'Model 11 test launches pair with the native coin, USDC or a test stock. Choose Model 10 above for this pair.' : !pairs ? 'Connect your wallet to see the assets on this network.' : group?.unavailable ?? (group?.assets.length ? null : 'Not available on this network.');
+      const reason = !draft.chain ? 'Choose a network first.' : v2Chosen() && !v2Pairs().includes(kind) ? (solana() ? 'V2 test launches on Solana pair with SOL.' : 'V2 test launches pair with the native coin, USDC or a test stock approved for V2.') : v4Chosen() && !V4_PAIRS.includes(kind) ? 'Model 11 test launches pair with the native coin, USDC or a test stock. Choose Model 10 above for this pair.' : !pairs ? 'Connect your wallet to see the assets on this network.' : group?.unavailable ?? (group?.assets.length ? null : 'Not available on this network.');
       const symbols = group?.assets.map(a => a.symbol).join(', ');
       const ownerSetup=kind==='usdc'&&!!reason&&draft.chain!=='local'&&!solana()&&connected()&&ctx.state?.pricing?.owner&&ctx.wallet.dex&&ctx.wallet.feeUsdc;
       const finish=ownerSetup?h('a.btn.btn-secondary.btn-sm',{href:'#/monkey?tab=pairs'},'Approve in the operator panel'):null;
@@ -342,18 +348,16 @@ export function renderLaunch(ctx) {
       asset.wsol ? callout('', 'info', 'You pay and receive plain SOL. Elpida wraps it for each trade and unwraps what is left in the same transaction.') : null) : null;
     return { body: [
       networkPicker(), connection,
-      modelsOffered() ? h('div.stack', h('h3', 'Launch model'), h('div.choice-grid', { role: 'radiogroup', 'aria-label': 'Launch model' },
-        [['v10', 'Model 10 · bonding curve', `The curve sells the supply, then the buy that completes it moves the liquidity into a locked ${ctx.config.publicDexes?.[draft.chain]?.name ?? 'Uniswap v3'} pool.`],
-          ...(v4Offered() ? [['v11', 'Model 11 test · Uniswap v4', 'The same curve inside one Uniswap v4 pool, with the liquidity locked from the first trade: no graduation step. Native, USDC or test-stock pairs (stocks once the operator approves them for Model 11), no token tax. Not audited; test networks only.']] : []),
-          ...(v2Offered() ? [['v20', 'ELPIDA V2 test · your fee', (solana() ? 'A bonding curve that graduates at ×5 into a Raydium pool whose liquidity is locked for good; the pool\'s fees are shared the same way. You choose' : 'Liquidity locked from the first trade in one Uniswap v4 pool. You choose')+' the trading fee (up to 4%), fixed for good. Every fee is shared: 30% to you, 30% to traders as a monthly airdrop, 10% buys and burns top tokens, 10% to holders, 20% to Elpida. First buy capped at 3% of supply. '+(solana() ? 'SOL pair. ' : 'Native, USDC or test-stock pairs (stocks once the operator approves them for V2). ')+'Not audited; test networks only.']] : [])].map(([key, title, text]) =>
-          h('label.choice', h('input', { type: 'radio', name: 'launch-model', value: key, checked: (draft.launchModel ?? 'v10') === key, on: { change: () => { draft.launchModel = key; fitPairToModel(); save(); draw(); } } }),
-            h('span.choice-title', icon(key === 'v20' ? 'sparkles' : key === 'v11' ? 'flask-conical' : 'chart-line'), title), h('p', text), key !== 'v10' ? h('span.chip', 'Test') : null)))) : null,
+      v2Offered() ? h('div.stack', h('h3', 'Launch model'), h('div.choice', h('span.choice-title', icon('sparkles'), 'ELPIDA V2 test · your fee'),
+        h('p', (solana() ? 'A bonding curve that graduates at ×5 into a Raydium pool whose liquidity is locked for good; the pool\'s fees are shared the same way. You choose' : 'Liquidity locked from the first trade in one Uniswap v4 pool. You choose')+' the trading fee (up to 4%), fixed for good. Every fee is shared: 30% to you, 30% to traders as a monthly airdrop, 10% buys and burns top tokens, 10% to holders, 20% to Elpida. First buy capped at 3% of supply. '+(solana() ? 'SOL pair. ' : 'Native, USDC or test-stock pairs (stocks once the operator approves them for V2). ')+'Not audited; test networks only.'), h('span.chip', 'Test'))) : null,
+      v2Missing() ? callout('warn', 'info', `ELPIDA V2 is not on ${net()?.name ?? 'this network'} yet, so new tokens cannot launch here. Choose another network.`) : null,
       v2Chosen() ? feeSelector() : null,
       h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'Choose native currency, USDC, an oStock (Ondo tokenized stock) or another approved token. Buyers pay in this asset, and the graduated pool keeps the same pair. Pay the $10 launch fee separately in native currency or USDC. Network gas is always paid in the native coin.'), pairGrid, assetBox),
       draft.chain!=='local'&&(solana()?!solanaPriced():!ctx.config.oracles?.[draft.chain]?.available)?callout('warn','info',solana()?'USD pricing is not active on this Solana cluster yet. It turns on when the team upgrades the program and runs the deploy (solana-upgrade.cmd). Existing tokens can still be browsed and traded.':'Verified launch pricing is pending configuration on this network. Use simulation to test creation.') : null,
       error,
     ], validate: () => {
       if (!draft.chain) { error.textContent = 'Choose a network.'; return false; }
+      if (v2Missing()) { error.textContent = `ELPIDA V2 is not on ${net()?.name ?? 'this network'} yet. Choose another network.`; return false; }
       if (!connected()) { error.textContent = draft.chain === 'local' ? 'The local simulation is not running.' : 'Connect your wallet to continue.'; return false; }
       if (!ready()) { error.textContent = solana()?(!solanaPriced()?'USD pricing is not active on this Solana cluster yet. Use simulation, or ask the team to run the Solana upgrade.':'The on-chain SOL/USD price is stale right now. Wait a moment, then refresh.'):!ctx.config.oracles?.[draft.chain]?.available?'A verified USD feed has not been configured for this network.':!ctx.wallet.deployment?'This network is not set up for launches yet. Choose another network.':'Launch pricing is not active on this network yet. Choose another network, or try again later.'; return false; }
       if (ctx.wallet.beta?.enabled && !ctx.wallet.beta.allowed) { error.textContent = 'This wallet is not on the beta launch list yet.'; return false; }
@@ -433,7 +437,7 @@ export function renderLaunch(ctx) {
     const nativeAmount = input('nativeBuy', { type: 'number', min: '0', step: 'any', inputmode: 'decimal', onInput: e => { draft.nativeBuy = e.target.value; quoteConversion(); drawEstimate(); } });
     const amountField = h('div');
     const drawAmount = () => amountField.replaceChildren(payNative()
-      ? field({ label: 'Purchase amount', control: h('div.input-affix', nativeAmount, h('span.affix', nativeSymbol())), hint: `Optional. Swapped into ${pairSymbol()} on ${dexName()} at the live pool price, at most 1% below the quote, in a separate confirmation before the launch. If the launch then stops, the ${pairSymbol()} stays in your wallet and your next attempt uses it.` })
+      ? field({ label: 'Purchase amount', control: h('div.input-affix', nativeAmount, h('span.affix', nativeSymbol())), hint: `Optional. Swapped into ${pairSymbol()} on ${swapDex()} at the live pool price, at most 1% below the quote, in a separate confirmation before the launch. If the launch then stops, the ${pairSymbol()} stays in your wallet and your next attempt uses it.` })
       : field({ label: 'Purchase amount', control: h('div.input-affix', amount, h('span.affix', pairSymbol())), hint: v2Chosen() ? 'Optional. Your first buy can receive at most 3% of the supply (30,000,000 tokens); a larger amount is refused before anything is sent. Enter 0 to launch without buying.' : 'Optional. Enter 0 to launch without buying. Launch fees and network gas still apply.' }));
     const buyWith = canPayNative() ? h('select.select', { on: { change: e => { draft.buyWith = e.target.value; save(); drawAmount(); quoteConversion(); drawEstimate(); } } },
       h('option', { value: 'pair', selected: !payNative() }, `${pairSymbol()} from your wallet`),
@@ -443,7 +447,7 @@ export function renderLaunch(ctx) {
       const c = conversion.key === conversionFor() ? conversion : { state: 'idle' };
       if (c.state === 'ok' && c.pending) return [callout('', 'info', `You already converted ${number(c.pending, 6)} ${pairSymbol()} for an earlier launch attempt. This launch uses it as the first purchase; no new conversion is sent.`)];
       if (c.state === 'ok') return [h('dl.kv', h('dt', 'You convert'), h('dd', `${number(draft.nativeBuy, 6)} ${nativeSymbol()}`), h('dt', 'You receive about'), h('dd', `${number(c.output, 6)} ${pairSymbol()} (at least ${number(c.minimum, 6)})`))];
-      if (c.state === 'loading') return [h('p.hint', `Quoting ${nativeSymbol()} → ${pairSymbol()} on ${dexName()}…`)];
+      if (c.state === 'loading') return [h('p.hint', `Quoting ${nativeSymbol()} → ${pairSymbol()} on ${swapDex()}…`)];
       if (c.state === 'error') return [callout('warn', 'triangle-alert', /No funded/.test(c.error) ? `There is no funded ${nativeSymbol()}/${pairSymbol()} market on ${net()?.name} yet, so the purchase cannot be paid in ${nativeSymbol()}. Pay with ${pairSymbol()} instead.` : c.error)];
       return [];
     };
@@ -526,7 +530,7 @@ export function renderLaunch(ctx) {
     if (payNative() && Number(draft.nativeBuy) > 0) { body.firstBuyPayment = 'native'; body.nativeBuy = String(draft.nativeBuy); }
     if(!solana())body.tax=taxPolicy({buy:draft.taxBuy,sell:draft.taxSell,recipients:draft.recipients,owner:ctx.state?.wallet});
     if (v4Chosen()) { body.model = V4_MODEL; delete body.tax; delete body.firstBuyPayment; delete body.nativeBuy; }
-    if (v2Chosen()) { body.model = V2_MODEL; body.feeBps = draft.feeBps ?? V2.defaultFeeBps; delete body.tax; delete body.firstBuyPayment; delete body.nativeBuy; }
+    if (v2Chosen()) { body.model = V2_MODEL; body.feeBps = draft.feeBps ?? V2.defaultFeeBps; delete body.tax; }
     if (draft.chain === 'local' && (draft.pair === 'token' || draft.pair === 'xstock')) body.quoteToken = body.quoteAsset;
     if (draft.chain === 'local') body.rewardPolicy = policy;
     else body.reward = policy.recipients[0].target || ctx.wallet.address;

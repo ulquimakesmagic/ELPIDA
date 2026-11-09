@@ -2,7 +2,9 @@
 // creators launch with their own fee. Trading uses the Model 11 path (v4-launchpad.mjs: same pool design and router).
 // NOT AUDITED: test networks with Uniswap v4 (or the labelled test PoolManager) only. Every function takes the connected
 // TestnetWallet `w`.
-import { Contract, ContractFactory, AbiCoder, concat, getAddress, parseUnits, formatUnits, isAddress, ZeroAddress } from '/vendor/ethers.js';
+import { Contract, ContractFactory, AbiCoder, Interface, concat, getAddress, parseUnits, formatUnits, isAddress, ZeroAddress } from '/vendor/ethers.js';
+import { swapCalldata } from '/dex-router.mjs';
+import { quoteNativePairConversion } from './usdc-conversion.mjs';
 import { V2, V2_MODEL, V2_FEE_SPLIT, V2_PROPOSED_MIN_FEE_BPS, V2_TESTNET_START_FDV_USD_E6, maxFirstBuyGross, firstBuyCapTokens, virtualToken, splitFee, feeOn } from '/v2-economics.mjs';
 import { v4Available, v4PoolManager, v2Deployment, saveV2Deployment, mineHookSalt, hasCode, walletCaughtUp, V4_ROUTER_ABI } from './v4-launchpad.mjs';
 import { normalizeMetadata } from './metadata.mjs';
@@ -212,18 +214,31 @@ export async function launchV2(w, body) {
   const asset = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? getAddress(testStock(w, body.quoteAsset)?.address ?? ZeroAddress) : ZeroAddress;
   if (pair === 'xstock') {
     if (asset === ZeroAddress) throw new Error('Choose a test stock that is approved on this network.');
-    if ((await factory.approvedQuotes(asset)) === 0n) throw new Error(`${testStock(w, asset)?.symbol ?? 'This stock'} is not a V2 pair yet: the operator approves it in the operator panel (Launchpads, V2 card). Pair with the native coin or USDC, or use Model 10.`);
+    if ((await factory.approvedQuotes(asset)) === 0n) throw new Error(`${testStock(w, asset)?.symbol ?? 'This stock'} is not a V2 pair yet: the operator approves it in the operator panel (Launchpads, V2 card). Pair with the native coin or USDC instead.`);
     await w.stockPreflight?.({ pair: 'xstock', quoteAddress: asset }, 'launch');
   }
   const quote = asset === ZeroAddress ? null : new Contract(asset, ERC20, w.signer), decimals = quote ? Number(await quote.decimals()) : 18;
   const vQ = quote ? await factory.approvedQuotes(asset) : await factory.nativeVirtualQuote();
   if (vQ === 0n) throw new Error('This pair is not approved on this V2 launchpad. Launch with the native coin.');
-  const firstBuy = parseUnits(String(body.firstBuy || '0'), decimals), cap = maxFirstBuyGross({ feeBps, vQ });
+  // First buy paid in the native coin on a pair-asset launch: a separate swap into the pair asset just before the launch
+  // (at most 1% below the quote); the launch then buys with the swap's guaranteed minimum. Any extra stays in the wallet.
+  const coin = w.net.nativeCurrency.symbol, payNative = body.firstBuyPayment === 'native' && !!quote;
+  if (body.firstBuyPayment === 'native' && !quote) throw new Error('This pair already uses the native coin. Enter the first buy directly. Nothing was submitted.');
+  if (payNative && w.net.mainnet) throw new Error('Paying the first buy in the native coin is testnet-only for now. Nothing was submitted.');
+  if (payNative && !w.dex?.router) throw new Error(`There is no ${coin} conversion route on ${w.net.name}. Pay the first buy in the pair asset. Nothing was submitted.`);
+  const nativeIn = payNative && Number(body.nativeBuy) > 0 ? parseUnits(w.nativeAmount(body.nativeBuy), 18) : 0n;
+  const conversion = nativeIn > 0n ? await quoteNativePairConversion({ Contract, provider: w.provider, dex: w.dex, asset, amountIn: nativeIn }) : null;
+  const firstBuy = payNative ? conversion?.minimum ?? 0n : parseUnits(String(body.firstBuy || '0'), decimals), cap = maxFirstBuyGross({ feeBps, vQ });
   if (firstBuy > cap) throw new Error(`The first buy can take at most 3% of the supply: up to ${formatUnits(cap, decimals)} ${quote ? await quote.symbol() : w.net.nativeCurrency.symbol} at a ${(feeBps / 100).toFixed(2)}% fee. Nothing was submitted.`);
   const slippage = BigInt(Math.round(Math.min(5, Math.max(0.1, Number(body.slippage ?? 1))) * 100));
   const minOut = v2FirstBuyTokens(vQ, firstBuy, feeBps) * (10000n - slippage) / 10000n;
   const fee = await factory.launchFee(), value = (fee * 101n + 99n) / 100n + (quote ? 0n : firstBuy);
-  if (await w.provider.getBalance(w.address) < value) throw new Error(`You need ${formatUnits(value, 18)} ${w.net.nativeCurrency.symbol} for the $10 launch fee${quote ? '' : ' and your first buy'}, plus gas.`);
+  if (await w.provider.getBalance(w.address) < value + nativeIn) throw new Error(`You need ${formatUnits(value + nativeIn, 18)} ${coin} for the $10 launch fee${quote && !nativeIn ? '' : ' and your first buy'}, plus gas.`);
+  if (conversion) {
+    const deadline = BigInt((await w.provider.getBlock('latest')).timestamp + 300);
+    const data = swapCalldata(Interface, w.dex.routerVersion ?? 2, w.dex.router, { tokenIn: conversion.tokenIn, tokenOut: conversion.tokenOut, fee: conversion.fee, recipient: w.address, amountIn: nativeIn, amountOutMinimum: conversion.minimum }, { deadline, refundETH: true });
+    await step(w, w.signer.sendTransaction({ to: w.dex.router, data, value: nativeIn }), `Convert ${formatUnits(nativeIn, 18)} ${coin} to ${await quote.symbol()} for your first buy. This is a separate swap: if the launch then stops, the ${await quote.symbol()} stays in your wallet…`);
+  }
   if (quote && firstBuy > 0n) {
     const sym = await quote.symbol();
     if (await quote.balanceOf(w.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, decimals)} ${sym} for the first buy.`);

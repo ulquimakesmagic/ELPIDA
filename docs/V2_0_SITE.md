@@ -82,3 +82,17 @@ V2 replaces Model 11.
 - **Kept:** pinned Model 11 launchpads stay indexed, and their tokens keep their quotes, trades and fee payouts
   through the Model 11 router.
 - **Kept on BNB testnet:** the test PoolManager card, because V2 deploys on top of it.
+
+## Model 10 off the launch page; native coin for V2 pair-asset tokens (Malik, 9 November)
+
+- **Launch page.** ELPIDA V2 is the only launch model wherever its launchpad exists; the model choice is gone. A network
+  without V2 shows that it cannot launch yet. Model 10 (and Model 11) tokens keep trading. The local simulation keeps
+  its own test curve.
+- **First buy in the native coin.** On a V2 launch paired with USDC or a test stock, the first buy can be paid in the
+  pair asset or in the native coin. The coin is swapped into the pair asset on the network's conversion pool (a separate
+  confirmation, at most 1% below the quote) just before the launch, which buys with the swap's guaranteed minimum. If
+  the launch then stops, the pair asset stays in the wallet. The 3% first-buy cap applies to the converted amount.
+- **Trading with the native coin.** The token page's "Native coin" option now works for V2 (and Model 11) tokens paired
+  with an ERC-20: a buy converts the coin into the pair asset on the conversion pool and then buys on the v4 pool; a
+  sell does the reverse. Each hop keeps a 1% margin. One confirmation when the wallet batches calls, otherwise separate
+  steps; extra pair asset stays in the wallet. It needs a funded conversion pool for that pair on the network.

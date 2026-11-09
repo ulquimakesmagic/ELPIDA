@@ -2,7 +2,7 @@ import {prepareTestLiquidity,testLiquidityCalls,TEST_MANAGER_ABI} from './test-s
 import {verifyNativeRouter,findCurveNonce} from './native-trade-router.mjs';
 import { nowSeconds } from './clock.mjs';
 import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
-import { isV4Token, v4Available, v4Deployment, deployTestPoolManager, v4Quote, v4Trade, v4WithdrawFees, v4TokenState } from './v4-launchpad.mjs';
+import { isV4Token, v4Available, v4Deployment, deployTestPoolManager, v4Quote, v4Trade, v4WithdrawFees, v4TokenState, v4RouterFor } from './v4-launchpad.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
 import { V2_MODEL } from '/v2-economics.mjs';
 import { deployV2, launchV2, approveV2Stock } from './v2-launchpad.mjs';
@@ -348,9 +348,16 @@ export class TestnetWallet {
    * Launch form: what a creator purchase paid in the native coin converts into on this pair, before anything is signed.
    * { output, minimum, symbol, pending } as decimal strings; `pending` is an earlier conversion the next launch reuses.
    */
-  async firstBuyConversionQuote({ quoteAsset, nativeAmount }) {
+  async firstBuyConversionQuote({ quoteAsset, nativeAmount, v2 = false }) {
     await this.checkNetwork();
     if (this.net.mainnet) throw new Error('Paying the first purchase in the native coin is testnet-only for now.');
+    // ELPIDA V2 launches: any pair asset its launchpad accepts; the swap runs right before the launch (v2-launchpad.mjs).
+    if (v2) {
+      if (!isAddress(quoteAsset) || !this.dex) throw new Error(`There is no ${this.net.nativeCurrency.symbol} conversion route on ${this.net.name}.`);
+      const coin = new Contract(quoteAsset, ['function decimals() view returns(uint8)', 'function symbol() view returns(string)'], this.provider), [decimals, symbol] = await Promise.all([coin.decimals(), coin.symbol()]);
+      const q = await quoteNativePairConversion({ Contract, provider: this.provider, dex: this.dex, asset: quoteAsset, amountIn: parseUnits(this.nativeAmount(nativeAmount), 18) });
+      return { output: formatUnits(q.amountOut, decimals), minimum: formatUnits(q.minimum, decimals), symbol, pending: null };
+    }
     const asset = (this.approvedQuotes ?? []).find(a => a.address.toLowerCase() === String(quoteAsset ?? '').toLowerCase());
     if (!asset || !this.dex) throw new Error('Choose an approved pair asset on a launchpad with DEX graduation.');
     const pending = pendingConversion(localStorage, conversionKey({ chainId: this.net.chainId, factory: this.deployment.factory, account: this.address, asset: asset.address }));
@@ -396,7 +403,9 @@ export class TestnetWallet {
     return {hash:record.hash,message:`Native router verified at ${router.target}. Native trades can now use an ordinary wallet.`};
   }
   async getNativePairTradeQuote(body) {
-    await this.checkNetwork();await this.verifyFactory();
+    await this.checkNetwork();
+    {const v4item=this.launches.get(String(body?.token).toLowerCase());if(v4item&&isV4Token(v4item))return this.v4NativeQuote(v4item,body);}
+    await this.verifyFactory();
     const nativeRouter=await this.nativeTradeRouter();
     if(!nativeRouter&&!await this.canBatch())throw new Error(this.net.chainId===11155111?'Native-coin trading here needs a wallet with batched transactions until the operator sets up the native router. Direct pair-asset trading remains available.':'Native trading on this network currently requires an atomic-capable wallet. Direct pair-asset trading remains available.');
     const item=this.launches.get(String(body.token).toLowerCase());
@@ -421,6 +430,7 @@ export class TestnetWallet {
   }
   async tradeNativePair(body) {
     if(!Number.isFinite(body.quotedAt)||Date.now()-body.quotedAt>60000||body.quotedAt>Date.now())throw new Error('Native trade quote expired.');
+    {const v4item=this.launches.get(String(body?.token).toLowerCase());if(v4item&&isV4Token(v4item))return this.v4NativeTrade(v4item,body);}
     const q=await this.getNativePairTradeQuote(body),minimum=BigInt(body.minimum);
     if(minimum<=0n||BigInt(q.minimum)<minimum)throw new Error('Native trade price moved. Get a fresh quote.');
     const item=this.launches.get(String(body.token).toLowerCase()),buy=body.side==='buy',asset=this.qaddr(item),input=parseUnits(body.amount,18),pairAmount=BigInt(q.pairAmount);
@@ -450,6 +460,44 @@ export class TestnetWallet {
     if(!buy){calls.push(approval(asset,this.dex.router,pairAmount),conversion,approval(asset,this.dex.router,0n));}
     const result=await this.sendCalls(calls,'Confirm the atomic native trade.',{atomicRequired:true});
     return {hash:result.tx.hash,message:'Atomic native trade confirmed. Any excess pair asset remains in your wallet.'};
+  }
+  /**
+   * ELPIDA V2 and Model 11 tokens paired with an ERC-20 (a test stock, USDC): pay or receive the native coin. A buy
+   * converts the coin into the pair asset through the network's conversion pool, then buys on the token's v4 pool; a
+   * sell does the reverse. Each hop keeps a 1% margin. One confirmation when the wallet batches calls; otherwise
+   * separate steps, and the pair asset stays in the wallet if a later step fails.
+   */
+  async v4NativeQuote(item,body){
+    if(item.pair==='native')throw new Error('This token already trades in the native coin.');
+    if(!['buy','sell'].includes(body?.side))throw new Error('Invalid native trade side.');
+    if(!this.dex?.router)throw new Error(`There is no native conversion route on ${this.net.name}. Pay with ${item.quoteSymbol}.`);
+    const {router}=v4RouterFor(this,item,this.provider),asset=item.quoteAddress,buy=body.side==='buy',input=parseUnits(this.nativeAmount(body.amount),18);
+    let route,pairAmount,output;
+    if(buy){
+      route=await quoteNativePairConversion({Contract,provider:this.provider,dex:this.dex,asset,amountIn:input});
+      pairAmount=route.minimum;[,output]=await router.quote.staticCall(item.address,true,pairAmount);
+    }else{
+      const [,pairOut]=await router.quote.staticCall(item.address,false,input);pairAmount=pairOut*9900n/10000n;
+      route=await quoteNativePairConversion({Contract,provider:this.provider,dex:this.dex,asset,amountIn:pairAmount,toNative:true});output=route.amountOut;
+    }
+    const minimum=output*9900n/10000n;
+    if(minimum<=0n||pairAmount<=0n)throw new Error('Trade amount is too small.');
+    return {token:body.token,side:body.side,amount:body.amount,minimum:minimum.toString(),output:formatUnits(output,18),quotedAt:Date.now(),pairAmount:pairAmount.toString(),route,via:'the conversion pool',execution:'v4'};
+  }
+  async v4NativeTrade(item,body){
+    const q=await this.v4NativeQuote(item,body),minimum=BigInt(body.minimum);
+    if(minimum<=0n||BigInt(q.minimum)<minimum)throw new Error('Native trade price moved. Get a fresh quote.');
+    if(item.pair==='xstock')await this.stockPreflight?.(item,body.side);
+    const {router}=v4RouterFor(this,item,this.signer),buy=body.side==='buy',coin=this.net.nativeCurrency.symbol,input=parseUnits(body.amount,18),pairAmount=BigInt(q.pairAmount);
+    const deadline=BigInt((await this.provider.getBlock('latest')).timestamp+300),erc20=new Interface(['function approve(address,uint256) returns(bool)']);
+    const approve=(token,spender,amount,label)=>({to:token,data:erc20.encodeFunctionData('approve',[spender,amount]),label});
+    const convert=(amountIn,amountOutMinimum)=>({to:this.dex.router,value:buy?amountIn:0n,label:buy?`Convert ${coin} to ${item.quoteSymbol}…`:`Convert ${item.quoteSymbol} to ${coin}…`,
+      data:swapCalldata(Interface,this.dex.routerVersion??2,this.dex.router,{tokenIn:q.route.tokenIn,tokenOut:q.route.tokenOut,fee:q.route.fee,recipient:this.address,amountIn,amountOutMinimum},{deadline,unwrapTo:buy?null:this.address,refundETH:buy})});
+    const trade=(amount,min)=>({to:router.target,data:router.interface.encodeFunctionData(buy?'buy':'sell',[item.address,amount,min,this.address,deadline]),label:`${buy?'Buy':'Sell'} ${item.symbol}…`});
+    const calls=buy?[convert(input,pairAmount),approve(item.quoteAddress,router.target,pairAmount,`Approve ${item.quoteSymbol} for this buy…`),trade(pairAmount,minimum)]
+      :[approve(item.address,router.target,input,`Approve ${item.symbol} for this sale…`),trade(input,pairAmount),approve(item.quoteAddress,this.dex.router,pairAmount,`Approve ${item.quoteSymbol} for the conversion…`),convert(pairAmount,minimum)];
+    const result=await this.sendCalls(calls,'Confirm the native trade.');
+    return {hash:result.tx.hash,message:`Trade confirmed on ${this.net.name}: ${buy?`${coin} converted to ${item.quoteSymbol}, then ${item.symbol} bought`:`${item.symbol} sold, then ${item.quoteSymbol} converted to ${coin}`}. Any extra ${item.quoteSymbol} stays in your wallet.`};
   }
   async getUsdcConversionQuote(body) {
     await this.checkNetwork();await this.verifyFactory();

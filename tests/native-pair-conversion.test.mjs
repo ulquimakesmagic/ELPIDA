@@ -75,3 +75,62 @@ test('real V3 liquidity converts native to a pair asset and cashes it back out w
  await assert.rejects(unsupported.sendCalls([{to:owner,data:'0x'},{to:owner,data:'0x'}],'test',{atomicRequired:true}),/no transactions were submitted/);
 
 });
+
+// ELPIDA V2 tokens paired with an ERC-20: paying and receiving the native coin goes through the network's conversion
+// pool (real Uniswap v3 here), then the token's V2 router. The router below is a stand-in with the V2 router's exact
+// functions (quote, buy, sell), so the test checks the browser's composition: amounts, approvals and minimums.
+test('V2 pair-asset token: buy with the native coin and sell back to it through the conversion pool and the V2 router', async t => {
+  const { ContractFactory, parseEther, formatEther } = await import('ethers');
+  const { dexFixture, mined } = await import('./helpers/dex-fixture.mjs');
+  await import('./helpers/browser-modules.mjs');
+  const { TestnetWallet } = await import('../apps/web/wallet.mjs');
+  const solc = (await import('solc')).default;
+  const f = await dexFixture(t), signer = f.signers[0], owner = f.addresses[0], d = f.dex;
+  const amount = parseEther('2'); await mined(d.weth.connect(signer).deposit({ value: amount })); await mined(f.usdc.mint(owner, amount));
+  for (const coin of [d.weth, f.usdc]) await mined(coin.connect(signer).approve(d.manager.target, amount));
+  const [token0, token1] = [d.weth.target, f.usdc.target].sort((a, b) => (BigInt(a) < BigInt(b) ? -1 : 1));
+  await mined(d.manager.createAndInitializePoolIfNecessary(token0, token1, 10000, 2n ** 96n));
+  await mined(d.manager.mint({ token0, token1, fee: 10000, tickLower: -887200, tickUpper: 887200, amount0Desired: amount, amount1Desired: amount, amount0Min: 0, amount1Min: 0, recipient: owner, deadline: BigInt(await f.now() + 300) }));
+  const source = `pragma solidity ^0.8.24;
+    contract Coin { mapping(address=>uint256) public balanceOf; mapping(address=>mapping(address=>uint256)) public allowance;
+      function mint(address to,uint256 v) external { balanceOf[to]+=v; }
+      function approve(address s,uint256 v) external returns(bool){ allowance[msg.sender][s]=v; return true; }
+      function transfer(address to,uint256 v) external returns(bool){ balanceOf[msg.sender]-=v; balanceOf[to]+=v; return true; }
+      function transferFrom(address a,address to,uint256 v) external returns(bool){ allowance[a][msg.sender]-=v; balanceOf[a]-=v; balanceOf[to]+=v; return true; } }
+    interface IERC20 { function transferFrom(address,address,uint256) external returns(bool); function transfer(address,uint256) external returns(bool); }
+    contract Router { address immutable quoteAsset; address immutable launched; constructor(address q,address l){ quoteAsset=q; launched=l; }
+      function quote(address,bool isBuy,uint256 amountIn) external pure returns(uint256,uint256){ return (amountIn, isBuy ? amountIn*1000 : amountIn/1000); }
+      function buy(address,uint256 quoteIn,uint256 minOut,address to,uint256) external payable returns(uint256 out){ IERC20(quoteAsset).transferFrom(msg.sender,address(this),quoteIn); out=quoteIn*1000; require(out>=minOut,"min"); IERC20(launched).transfer(to,out); }
+      function sell(address,uint256 tokensIn,uint256 minOut,address to,uint256) external returns(uint256 out){ IERC20(launched).transferFrom(msg.sender,address(this),tokensIn); out=tokensIn/1000; require(out>=minOut,"min"); IERC20(quoteAsset).transfer(to,out); } }`;
+  const out = JSON.parse(solc.compile(JSON.stringify({ language: 'Solidity', sources: { 'R.sol': { content: source } }, settings: { outputSelection: { '*': { '*': ['abi', 'evm.bytecode.object'] } } } }))).contracts['R.sol'];
+  const coin = await new ContractFactory(out.Coin.abi, out.Coin.evm.bytecode.object, signer).deploy(); await coin.waitForDeployment();
+  const router = await new ContractFactory(out.Router.abi, out.Router.evm.bytecode.object, signer).deploy(f.usdc.target, coin.target); await router.waitForDeployment();
+  await mined(coin.mint(router.target, parseEther('1000000000'))); await mined(f.usdc.mint(router.target, parseEther('1')));
+  const item = { address: coin.target, pair: 'usdc', quoteAddress: f.usdc.target, quoteDecimals: 6, quoteSymbol: 'USDC', symbol: 'HOPE', deploymentModel: 'v2-hook' };
+  const net = { key: 'base-sepolia', name: 'Local', chainId: 31337, nativeCurrency: { symbol: 'ETH' }, v4: { poolManager: f.addresses[3] }, v2: { shared: { factory: f.addresses[3], hook: f.addresses[3], router: router.target } } };
+  const wallet = Object.create(TestnetWallet.prototype), steps = [];
+  Object.assign(wallet, { provider: f.provider, signer, address: owner, net, launches: new Map([[item.address.toLowerCase(), item]]), checkNetwork: async () => {}, stockPreflight: async () => {}, onProgress: () => {},
+    verifyFactory: async () => { throw new Error('the Model 10 factory is not used for V2'); },
+    sendCalls: async calls => { let last; for (const c of calls) { steps.push(c.label); const tx = await signer.sendTransaction({ to: c.to, data: c.data, value: c.value ?? 0n }); last = { tx, receipt: await tx.wait() }; } return last; } });
+  Object.defineProperty(wallet, 'dex', { value: d.config });
+
+  const buyQuote = await wallet.getNativePairTradeQuote({ token: coin.target, side: 'buy', amount: '0.01' });
+  assert.equal(buyQuote.execution, 'v4');
+  assert.ok(BigInt(buyQuote.pairAmount) > 0n && BigInt(buyQuote.minimum) === BigInt(buyQuote.pairAmount) * 1000n * 9900n / 10000n);
+  const usdcBefore = await f.usdc.balanceOf(owner);
+  await wallet.tradeNativePair(buyQuote);
+  assert.deepEqual(steps, ['Convert ETH to USDC…', 'Approve USDC for this buy…', 'Buy HOPE…']);
+  const bought = await coin.balanceOf(owner);
+  assert.equal(bought, BigInt(buyQuote.pairAmount) * 1000n, 'buys with the conversion\'s guaranteed USDC');
+  assert.ok(await f.usdc.balanceOf(owner) >= usdcBefore, 'any extra USDC from the conversion stays in the wallet');
+  assert.equal(await f.usdc.allowance(owner, router.target), 0n, 'the exact approval is used up');
+
+  steps.length = 0;
+  const sellQuote = await wallet.getNativePairTradeQuote({ token: coin.target, side: 'sell', amount: formatEther(bought) });
+  const ethBefore = await f.provider.getBalance(owner);
+  await wallet.tradeNativePair(sellQuote);
+  assert.deepEqual(steps, ['Approve HOPE for this sale…', 'Sell HOPE…', 'Approve USDC for the conversion…', 'Convert USDC to ETH…']);
+  assert.equal(await coin.balanceOf(owner), 0n);
+  assert.ok(await f.provider.getBalance(owner) > ethBefore - parseEther('0.005'), 'ETH came back (less gas)');
+  await assert.rejects(wallet.tradeNativePair({ ...buyQuote, quotedAt: Date.now() - 120_000 }), /expired/);
+});
