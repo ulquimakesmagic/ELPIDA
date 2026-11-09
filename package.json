@@ -41,7 +41,7 @@
     "test:solana-host": "cargo test --release --manifest-path contracts/solana/host-tests/Cargo.toml",
     "compile:v4": "node scripts/compile-v4.mjs",
     "test:v4": "node --test tests/v4-locked-launch.test.mjs tests/v4-factory.test.mjs tests/v4-router.test.mjs tests/v4-indexer.test.mjs tests/v4-browser.test.mjs",
-    "test:v2": "node --test tests/v2-economics.test.mjs tests/v2-airdrop.test.mjs tests/v2-hook.test.mjs tests/v2-vaults.test.mjs tests/v2-rewards-indexer.test.mjs tests/v2-indexer.test.mjs tests/v2-browser.test.mjs"
+    "test:v2": "node --test tests/v2-economics.test.mjs tests/v2-airdrop.test.mjs tests/v2-hook.test.mjs tests/v2-vaults.test.mjs tests/v2-rewards-indexer.test.mjs tests/v2-indexer.test.mjs tests/v2-browser.test.mjs tests/v2-keeper.test.mjs"
   },
   "overrides": {
     "solc": {

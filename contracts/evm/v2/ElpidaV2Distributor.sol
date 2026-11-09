@@ -3,6 +3,13 @@ pragma solidity 0.8.26;
 
 import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProof.sol";
 
+interface IConvertRouter {
+    struct ExactInputSingleParams { address tokenIn; address tokenOut; uint24 fee; address recipient; uint256 amountIn; uint256 amountOutMinimum; uint160 sqrtPriceLimitX96; }
+    function exactInputSingle(ExactInputSingleParams calldata) external payable returns (uint256);
+}
+
+interface IWrappedNative { function withdraw(uint256) external; }
+
 /// @notice ELPIDA V2.0 reward distributor (NOT AUDITED; local chains and test networks only). One per chain and purpose:
 /// the trader airdrop (calendar-month rounds) and holder rewards (fixed rounds, e.g. weekly). The V2 hook pays the
 /// fee share straight in; nothing else funds it, and its money can only go to the wallets in a published round.
@@ -12,7 +19,9 @@ import {MerkleProof} from "@openzeppelin/contracts/utils/cryptography/MerkleProo
 /// to an earlier round. Then anyone may pay any listed wallet with its proof (the keeper pushes them; a wallet can
 /// also claim itself). A payment that fails (a paused stock, a wallet that refuses) stays claimable. What a round
 /// leaves unclaimed for CLAIM_WINDOW_ROUNDS rounds goes back to the pool for later rounds, never to anyone else.
-/// The operator cannot move funds: it can only post a root once per round and asset.
+/// The operator cannot move funds: it can only post a root once per round and asset, and (holder rewards only) convert
+/// unpromised USDC into the native coin through the chain's Uniswap v3 router, the proceeds staying here (Malik,
+/// 9 November: holders of USDC-paired tokens are paid in the native coin).
 contract ElpidaV2Distributor {
     uint256 public constant VERSION = 1;
     uint256 public constant CLAIM_WINDOW_ROUNDS = 12;
@@ -24,6 +33,11 @@ contract ElpidaV2Distributor {
     uint256 private immutable genesisMonth;
     /// What this distributor pays, for people reading it on an explorer: "trader-airdrop" or "holder-rewards".
     string public purpose;
+    /// Holder rewards only: the one asset that may be converted (USDC), the Uniswap v3 router and the wrapped native
+    /// coin. Zero when conversion is off.
+    address public immutable convertible;
+    address public immutable swapRouter;
+    address public immutable wrappedNative;
 
     struct Round {
         bytes32 root;
@@ -45,6 +59,7 @@ contract ElpidaV2Distributor {
     event ClaimFailed(uint256 indexed round, address indexed asset, address indexed account, uint256 amount);
     event Expired(uint256 indexed round, address indexed asset, uint256 returnedToPool);
     event Received(address indexed from, uint256 amount);
+    event Converted(address indexed asset, uint256 amountIn, uint256 nativeOut);
 
     error OnlyOperator();
     error RoundNotOver();
@@ -59,8 +74,10 @@ contract ElpidaV2Distributor {
 
     modifier nonReentrant() { if (entered) revert Reentrancy(); entered = true; _; entered = false; }
 
-    constructor(address operator_, uint256 period_, uint256 genesis_, string memory purpose_) {
+    constructor(address operator_, uint256 period_, uint256 genesis_, string memory purpose_, address convertible_, address swapRouter_, address wrappedNative_) {
         if (operator_ == address(0) || genesis_ % 1 days != 0 || bytes(purpose_).length == 0) revert BadTerms();
+        if ((convertible_ == address(0)) != (swapRouter_ == address(0)) || (swapRouter_ == address(0)) != (wrappedNative_ == address(0))) revert BadTerms();
+        convertible = convertible_; swapRouter = swapRouter_; wrappedNative = wrappedNative_;
         if (period_ == 0) {
             (uint256 y, uint256 m, uint256 d) = _civil(genesis_ / 1 days);
             if (d != 1) revert BadTerms();
@@ -125,6 +142,21 @@ contract ElpidaV2Distributor {
         for (uint256 i = 0; i < payouts.length; i++) if (_claim(round, asset, payouts[i].account, payouts[i].amount, payouts[i].proof)) ok++;
     }
 
+    /// Converts `amountIn` of unpromised USDC into the native coin (Uniswap v3, pool fee `poolFee`), at least `minOut`.
+    /// Operator only; the proceeds stay in this distributor for later rounds.
+    function convertToNative(uint256 amountIn, uint256 minOut, uint24 poolFee) external nonReentrant returns (uint256 out) {
+        if (msg.sender != operator) revert OnlyOperator();
+        if (swapRouter == address(0) || minOut == 0) revert BadTerms();
+        if (amountIn == 0 || amountIn > available(convertible)) revert NotFunded();
+        if (!_approve(convertible, swapRouter, amountIn)) revert BadTerms();
+        uint256 before = address(this).balance;
+        out = IConvertRouter(swapRouter).exactInputSingle(IConvertRouter.ExactInputSingleParams(convertible, wrappedNative, poolFee, address(this), amountIn, minOut, 0));
+        _approve(convertible, swapRouter, 0);
+        IWrappedNative(wrappedNative).withdraw(out);
+        if (address(this).balance - before != out) revert BadTerms();
+        emit Converted(convertible, amountIn, out);
+    }
+
     /// After CLAIM_WINDOW_ROUNDS more rounds, what a round left unclaimed returns to the pool for later rounds.
     function expire(uint256 round, address asset) external {
         Round storage r = rounds[round][asset];
@@ -162,6 +194,12 @@ contract ElpidaV2Distributor {
         if (asset.code.length == 0) return false;
         bytes memory ret;
         (ok, ret) = asset.call(abi.encodeWithSelector(0xa9059cbb, to, amount));
+        return ok && (ret.length == 0 || (ret.length >= 32 && abi.decode(ret, (bool))));
+    }
+
+    function _approve(address asset, address spender, uint256 amount) private returns (bool ok) {
+        bytes memory ret;
+        (ok, ret) = asset.call(abi.encodeWithSelector(0x095ea7b3, spender, amount));
         return ok && (ret.length == 0 || (ret.length >= 32 && abi.decode(ret, (bool))));
     }
 
