@@ -2,7 +2,7 @@ import {prepareTestLiquidity,testLiquidityCalls,TEST_MANAGER_ABI} from './test-s
 import {verifyNativeRouter,findCurveNonce} from './native-trade-router.mjs';
 import { nowSeconds } from './clock.mjs';
 import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
-import { isV4Token, v4Available, v4Deployment, deployV4, deployTestPoolManager, approveV4Stock, launchV4, v4Quote, v4Trade, v4WithdrawFees, v4TokenState } from './v4-launchpad.mjs';
+import { isV4Token, v4Available, v4Deployment, deployTestPoolManager, v4Quote, v4Trade, v4WithdrawFees, v4TokenState } from './v4-launchpad.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
 import { V2_MODEL } from '/v2-economics.mjs';
 import { deployV2, launchV2, approveV2Stock } from './v2-launchpad.mjs';
@@ -990,10 +990,9 @@ export class TestnetWallet {
     await this.checkNetwork();
     if(action==='launch'&&body.tax)return launchPublicTax(this,body);
     // Model 11 (Uniswap v4 hook): its own factory, hook and router; never the curve launchpad below.
-    if(action==='deploy-v4')return deployV4(this,body??{});
     if(action==='deploy-v4-pool-manager')return deployTestPoolManager(this);
-    if(action==='approve-v4-stock')return approveV4Stock(this,body??{});
-    if(action==='launch'&&body?.model===V4_MODEL)return launchV4(this,body);
+    // Model 11 is retired for new launches (9 November 2026); its tokens still trade below.
+    if(action==='launch'&&body?.model===V4_MODEL)throw new Error('Model 11 no longer takes new launches. Choose ELPIDA V2 (same locked Uniswap v4 pool, your own fee).');
     // ELPIDA V2.0: its own factory, hook, reward contracts and router; trades use the Model 11 path below.
     if(action==='deploy-v2')return deployV2(this,body??{});
     if(action==='approve-v2-stock')return approveV2Stock(this,body??{});

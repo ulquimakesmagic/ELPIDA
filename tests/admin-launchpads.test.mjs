@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
 const read = path => readFileSync(new URL(`../apps/web/${path}`, import.meta.url), 'utf8');
-const SETUP = ['deploy', 'deploy-test-dex', 'deploy-v4', 'apply-pricing'];
+const SETUP = ['deploy', 'deploy-test-dex', 'deploy-v2', 'apply-pricing'];
 
 test('launchpad deployments and the price feed activation are only in the operator panel', () => {
   const app = read('app.mjs'), flow = read('launch-flow.mjs'), admin = read('admin-launchpads.mjs'), panel = read('admin-view.mjs');
@@ -15,7 +15,10 @@ test('launchpad deployments and the price feed activation are only in the operat
     assert.ok(!new RegExp(`run\\('${action}'`).test(flow) && !flow.includes(`'${action}'`), `${action} is not in the launch flow`);
     assert.ok(admin.includes(`'${action}'`), `${action} is in the Launchpads tab`);
   }
-  for (const label of ['Set up launchpad', 'Deploy Model 11 test launchpad', 'Activate price feed', 'Set up test DEX']) {
+  // Model 11 is retired for new launches (9 November 2026): nothing deploys, approves or launches on it any more.
+  for (const file of ['app.mjs', 'launch-flow.mjs', 'admin-launchpads.mjs', 'wallet.mjs']) for (const gone of ["'deploy-v4'", "'approve-v4-stock'", 'Deploy Model 11 test launchpad']) assert.ok(!read(file).includes(gone), `${gone} is gone from ${file}`);
+  assert.match(read('launch-flow.mjs'), /const v4Offered = \(\) => false;/);
+  for (const label of ['Set up launchpad', 'Deploy V2 test launchpad', 'Activate price feed', 'Set up test DEX']) {
     assert.ok(!app.includes(label) && !flow.includes(label), `"${label}" is not shown to visitors`);
   }
   assert.match(panel, /tab=launchpads/); assert.match(panel, /renderLaunchpads\(ctx/);

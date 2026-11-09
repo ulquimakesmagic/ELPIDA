@@ -1,5 +1,13 @@
 # Actions that need Malik
 
+## Model 11 retired for new launches, 9 November 2026 — nothing to do
+
+Malik decided Model 11 is no longer needed: ELPIDA V2 is built on the same Uniswap v4 design (one pool, liquidity locked
+from the first trade) and replaces it. The operator panel no longer offers the Model 11 card (deploy, test-stock
+approvals), and the launch form no longer offers Model 11. Its pinned launchpads on Base Sepolia, Ethereum Sepolia
+and BNB testnet stay indexed, so tokens already launched on them keep trading, charting and paying fees. The
+sections below about Model 11 are history. The BNB testnet test PoolManager stays: V2 needs it there.
+
 ## Model 11 stock pairs on BNB Chain testnet, 6 November 2026
 
 After this PR is merged and Railway has redeployed:
