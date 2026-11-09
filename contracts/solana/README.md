@@ -94,12 +94,12 @@ cp /tmp/sbf-main/elpida_launchpad.so build/elpida_launchpad-mainnet.so
 
 `Cargo.lock` pins dependencies compatible with the Solana toolchain's Rust 1.84 (for example `blake3` 1.5.5). The program ID is fixed by `declare_id!` and `keys/elpida_launchpad-keypair.json` (private, git-ignored).
 
-Release builds (9 November 2026, **ELPIDA V2 S1**: `add_v2_config`, `launch_v2`, the five-way fee ledger and `withdraw_v2_fees`; see `docs/V2_0_SOLANA.md`. The program grows by about 100 KB, so the upgrade extends the program account first, which `upgradeProgram` does; Agave / Solana CLI **2.3.13**):
+Release builds (9 November 2026, **ELPIDA V2 S1 + S2**: `add_v2_config`, `launch_v2`, the five-way fee ledger, `withdraw_v2_fees`, and V2 harvests (token side burned, quote side split five ways); see `docs/V2_0_SOLANA.md`. The program grows by about 100 KB, so the upgrade extends the program account first, which `upgradeProgram` does; Agave / Solana CLI **2.3.13**):
 
 | File | Build | sha256 |
 |---|---|---|
-| `build/elpida_launchpad.so` | `--features testnet` (devnet, localnet) | `4e3cda7778c26ba47aa29cf798a639d85a973e6277a66c53fbe4121c6d6037ae` |
-| `build/elpida_launchpad-mainnet.so` | mainnet (test instructions refused) | `202992db1700711a370bfc87109e7d6f120b81edf5aa548cfe839117e513b7e5` |
+| `build/elpida_launchpad.so` | `--features testnet` (devnet, localnet) | `7d8d70424ebda86e2f599904dbc006746c17b960e3915cac2086762013226907` |
+| `build/elpida_launchpad-mainnet.so` | mainnet (test instructions refused) | `e222c4e90514ec3a44842b045ea58250c4705824d9fcddfeadb44aa1913d60b8` |
 
 Previous release (5 November 2026, devnet SOL/stock conversion pool: `seed_test_conversion` and `test_conversion_swap`, test build only, so SOL can pay for stock-pair trades on devnet where Jupiter does not run; Agave / Solana CLI **2.3.13**):
 
