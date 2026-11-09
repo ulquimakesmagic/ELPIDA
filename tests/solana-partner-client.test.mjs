@@ -88,3 +88,12 @@ test('CLI terms match the program: 10% or 20%, future expiry within 180 days, or
   assert.deepEqual(partnerTerms({ bps: '0', expires: '0' }, now), { buybackBps: 0, expiresAt: 0 });
   for (const bad of [{ bps: '1500', days: '10' }, { bps: '2000', days: '181' }, { bps: '2000', expires: String(now) }, { bps: '0', expires: '5' }]) assert.throws(() => partnerTerms(bad, now), /bps|expiry|Ending/, JSON.stringify(bad));
 });
+
+test('ELPIDA V2 pools quote at their own fee: 90% at launch down to it over 60 s, whatever the pair\'s minimum', async () => {
+  const { tradeFeeBps, ownFeeBps } = await import('../packages/solana/client.mjs');
+  const config = { baseFeeBps: 100, snipeStartBps: 9000, snipeWindowSecs: 60 }, pool = { createdAt: 1000n, status: 0, v2: { feeBps: 250 } };
+  assert.deepEqual([0, 30, 60, 600].map(t => tradeFeeBps(config, pool, 1000n + BigInt(t))), [9000n, 4625n, 250n, 250n]);
+  assert.equal(ownFeeBps(config, pool), 250);
+  assert.equal(ownFeeBps(config, { ...pool, v2: null }), 100, 'older pools keep the pair fee');
+  assert.equal(tradeFeeBps({ baseFeeBps: 125, snipeStartBps: 9000, snipeWindowSecs: 60 }, { createdAt: 0n, status: 0, v2: null }, 600n), 125n);
+});

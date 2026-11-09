@@ -1,5 +1,28 @@
 # Actions that need Malik
 
+## ELPIDA V2 on Solana devnet: upgrade and set up, after step 4a is merged
+
+The program in `contracts/solana/build` carries ELPIDA V2 steps 1 to 3 (V2 pairs, `launch_v2`, the five-way fee ledger,
+graduated-pool harvests, reward rounds and the flywheel; docs/V2_0_SOLANA.md). Existing Solana tokens keep trading as
+before. The deployer wallet `FeUWFps7CYtrXNXosirwJCfFQM5Na6PamEV6hpFcKaH8` already holds the 10 devnet SOL it needs
+(most of it comes back after the upgrade; about 2 SOL stays as rent for the larger program). In your ELPIDA folder
+(PowerShell), after `git pull`:
+
+1. Check the build: `certutil -hashfile contracts\solana\build\elpida_launchpad.so SHA256` must print
+   `54b53d5411cbf3373d6dcadf25855317ef256e37a6597d62233cf2fd3238e8ce`. (Mainnet build, not deployed:
+   `3e0977f6ccaccdbc9a2f2a40e754fb157d10f355f2c2dc1c7884f78445473838`.)
+2. Create the keeper's Solana key: `node scripts/solana-keeper-key.mjs`. It prints the keeper address and where the key
+   file is (`local-data\solana-v2-keeper.json`). Never send the file to anyone.
+3. Send that keeper address about 1 devnet SOL (it pays network fees and round accounts; reward funds never pass
+   through it).
+4. Upgrade and set up V2 in one run:
+   `npm.cmd run solana:deploy -- --upgrade --v2 --keeper <keeper address> --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`
+   It upgrades the program, creates the V2 SOL pair (1.00% minimum fee, $50 → $250 test curve) with USD pricing, and
+   the monthly airdrop and weekly holder distributors run by the keeper. It writes `deployments/solana-devnet.json`.
+5. Commit and push `deployments/solana-devnet.json` (or send it to Claude to commit), so the site offers V2 on Solana.
+6. In Railway, add `ELPIDA_V2_KEEPER_SOLANA_KEY`: open `local-data\solana-v2-keeper.json` and paste its whole content
+   (a list of numbers) as the value. Step 4b's keeper uses it for payouts, rounds and the flywheel.
+
 ## ELPIDA V2 on Robinhood Chain testnet, 9 November 2026
 
 Robinhood Chain testnet has no Uniswap v4, so V2 there runs on a labelled test copy of Uniswap's own PoolManager (the
@@ -97,12 +120,6 @@ one is an unused test token. For step 3, in PowerShell type the price itself, wi
 `node scripts/seed-solana-conversion.mjs --stock-usd 440 --mint HE4LBuPDgFQCHT88Z4UMh62xKoJaTAQuzNHjAvCkHjYd --dry-run --keypair <deploy key path>`
 (440 is only an example: use Tesla's share price now), and the same without `--dry-run`.
 
-**Solana V2 (docs/V2_0_SOLANA.md): do not upgrade devnet yet.** The program in `contracts/solana/build` now carries
-ELPIDA V2 steps 1 to 3 (V2 pairs, `launch_v2`, the five-way fee ledger, the graduated-pool harvest, reward rounds and
-the flywheel). The devnet upgrade waits for step 4 (the deploy script for V2 pairs and distributors, the keeper and the
-site); the note will then give the final
-hashes and the steps. This build: test `54b53d5411cbf3373d6dcadf25855317ef256e37a6597d62233cf2fd3238e8ce`, mainnet
-`3e0977f6ccaccdbc9a2f2a40e754fb157d10f355f2c2dc1c7884f78445473838`.
 
 No devnet DEX accepts Ondo-shaped mints, and Jupiter does not run on devnet, so the program's test build now has its
 own small SOL/stock conversion pool. The mainnet build refuses it; on mainnet the same payments will go through
