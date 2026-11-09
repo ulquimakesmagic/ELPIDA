@@ -118,3 +118,47 @@ proptest! {
 fn first_buy_cap_is_three_percent() {
     assert_eq!(TOKEN_SUPPLY as u128 * 300 / 10_000, 30_000_000_000_000);
 }
+
+// ---- S3: distributor schedule and Merkle proofs ----
+use ::elpida_launchpad::{civil, current_round, days_from_civil, round_start, v2_leaf, verify_proof, V2Distributor};
+
+#[test]
+fn calendar_months_match_evm() {
+    // 1 Nov 2026 00:00 UTC.
+    let nov = days_from_civil(2026, 11, 1) * 86_400;
+    assert_eq!(nov, 1_793_491_200);
+    assert_eq!(civil(nov / 86_400), (2026, 11, 1));
+    let d = V2Distributor { kind: 0, operator: Default::default(), period: 0, genesis: nov, genesis_month: (2026 * 12 + 11 - 1) as u32, bump: 0 };
+    assert_eq!(round_start(&d, 0), nov);
+    assert_eq!(round_start(&d, 1), days_from_civil(2026, 12, 1) * 86_400);
+    assert_eq!(round_start(&d, 2), days_from_civil(2027, 1, 1) * 86_400, "rolls over the year");
+    assert_eq!(round_start(&d, 4) - round_start(&d, 3), 28 * 86_400, "February 2027");
+    assert_eq!(current_round(&d, nov - 1), None);
+    assert_eq!(current_round(&d, days_from_civil(2026, 12, 31) * 86_400 + 86_399), Some(1));
+    let weekly = V2Distributor { period: 7 * 86_400, genesis: nov, genesis_month: 0, ..d };
+    assert_eq!(round_start(&weekly, 3), nov + 21 * 86_400);
+    assert_eq!(current_round(&weekly, nov + 7 * 86_400), Some(1));
+}
+
+proptest! {
+    #[test]
+    fn civil_round_trips(days in -100_000i64..200_000) {
+        let (y, m, d) = civil(days);
+        prop_assert_eq!(days_from_civil(y, m, d), days);
+    }
+}
+
+#[test]
+fn merkle_proofs_bind_every_field() {
+    use anchor_lang::prelude::Pubkey;
+    let (asset, a, b, c) = (Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique(), Pubkey::new_unique());
+    let leaves = [v2_leaf(0, 3, &asset, 0, &a, 10), v2_leaf(0, 3, &asset, 1, &b, 20), v2_leaf(0, 3, &asset, 2, &c, 30)];
+    let h = |x: &[u8; 32], y: &[u8; 32]| if x <= y { anchor_lang::solana_program::keccak::hashv(&[x, y]).0 } else { anchor_lang::solana_program::keccak::hashv(&[y, x]).0 };
+    let ab = h(&leaves[0], &leaves[1]);
+    let root = h(&ab, &leaves[2]);
+    assert!(verify_proof(&[leaves[1], leaves[2]], root, leaves[0]));
+    assert!(verify_proof(&[ab], root, leaves[2]));
+    for wrong in [v2_leaf(0, 3, &asset, 0, &a, 11), v2_leaf(1, 3, &asset, 0, &a, 10), v2_leaf(0, 4, &asset, 0, &a, 10), v2_leaf(0, 3, &asset, 1, &a, 10), v2_leaf(0, 3, &Pubkey::new_unique(), 0, &a, 10)] {
+        assert!(!verify_proof(&[leaves[1], leaves[2]], root, wrong));
+    }
+}

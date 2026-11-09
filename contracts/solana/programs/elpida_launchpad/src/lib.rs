@@ -38,6 +38,7 @@
 //!   for buyback (quote side). Tier changes never affect pools already launched.
 use anchor_lang::prelude::*;
 use anchor_lang::solana_program::instruction::{AccountMeta, Instruction};
+use anchor_lang::solana_program::keccak::hashv;
 use anchor_lang::solana_program::program::invoke_signed;
 use anchor_lang::solana_program::pubkey;
 use anchor_lang::system_program;
@@ -180,6 +181,21 @@ pub const V2_VAULT_HOLDER: &[u8] = b"holder";
 /// is reserved.
 pub const V2_EXT_LEN: usize = 64;
 const V2_EXT_VERSION: u8 = 1;
+/// Reward distributors (S3): 0 trader airdrop (calendar months), 1 holder rewards (weekly). The vault PDAs
+/// ["v2-vault", kind] hold the funds; state lives at ["v2-dist", kind].
+pub const V2_DIST_AIRDROP: u8 = 0;
+pub const V2_DIST_HOLDER: u8 = 1;
+/// Unclaimed payouts return to the pool after this many further rounds (as on EVM).
+pub const V2_CLAIM_WINDOW_ROUNDS: u32 = 12;
+/// Most recipients one round can list (its claim bitmap must fit one account creation).
+pub const V2_MAX_RECIPIENTS: u32 = 80_000;
+/// The flywheel: one order per token at most every 6 hours, at most 10% of the vault, tokens at least a day old.
+pub const V2_FLYWHEEL_COOLDOWN_SECS: i64 = 6 * 3_600;
+pub const V2_FLYWHEEL_MIN_AGE_SECS: i64 = 86_400;
+pub const V2_FLYWHEEL_MAX_SHARE_BPS: u128 = 1_000;
+/// A data-less account keeps this many lamports to stay alive (rent-exempt minimum for 0 bytes).
+pub const EMPTY_ACCOUNT_RENT: u64 = 890_880;
+pub fn v2_vault_seed(kind: u8) -> &'static [u8] { if kind == V2_DIST_AIRDROP { V2_VAULT_AIRDROP } else { V2_VAULT_HOLDER } }
 // PumpSwap `Pool` layout offsets (8-byte discriminator included).
 const PUMP_POOL_LP_SUPPLY: usize = 203;
 const PUMP_POOL_PROTOCOL_FEES: usize = 271;
@@ -726,6 +742,175 @@ pub mod elpida_launchpad {
             quote_transfer(&a.quote_token_program, &a.quote_mint, a.quote_vault.to_account_info(), to[i].clone(), a.pool.to_account_info(), amount, a.quote_mint.decimals, &[seeds])?;
             emit!(V2FeesPaid { pool: pool_key, recipient: i as u8, to: to[i].key(), amount });
         }
+        Ok(())
+    }
+
+    /// ELPIDA V2 rewards, upgrade authority, once per kind: the distributor's operator (the server keeper) and schedule.
+    /// `period` 0 means calendar months from `genesis` (the first of a month, 00:00 UTC); otherwise rounds of `period`
+    /// seconds (at least a day) from `genesis` (a UTC midnight). Immutable afterwards, as on EVM.
+    pub fn init_v2_distributor(ctx: Context<InitV2Distributor>, kind: u8, operator: Pubkey, period: u32, genesis: i64) -> Result<()> {
+        require!(kind <= V2_DIST_HOLDER && operator != Pubkey::default() && genesis > 0 && genesis % 86_400 == 0, ElpidaError::V2Terms);
+        let genesis_month = if period == 0 {
+            let (y, m, d) = civil(genesis / 86_400);
+            require!(d == 1, ElpidaError::V2Terms);
+            (y * 12 + m - 1) as u32
+        } else { require!(period >= 86_400, ElpidaError::V2Terms); 0 };
+        let d = &mut ctx.accounts.distributor;
+        d.kind = kind; d.operator = operator; d.period = period; d.genesis = genesis; d.genesis_month = genesis_month; d.bump = ctx.bumps.distributor;
+        emit!(V2DistributorSet { kind, operator, period, genesis });
+        Ok(())
+    }
+
+    /// Operator, after `round` has ended: commits a Merkle root of payouts in `asset` (wrapped SOL means native SOL).
+    /// The vault must hold `total` beyond what earlier posted rounds still owe. Leaves are
+    /// keccak(keccak("elpida-v2" | program | kind | round | asset | index | account | amount)); pairs hash sorted.
+    #[allow(clippy::too_many_arguments)]
+    pub fn post_v2_root(ctx: Context<PostV2Root>, kind: u8, round: u32, root: [u8; 32], total: u64, recipients: u32, manifest_uri: String) -> Result<()> {
+        let d = &ctx.accounts.distributor;
+        require!(d.kind == kind, ElpidaError::V2Terms);
+        let now = Clock::get()?.unix_timestamp;
+        require!(now >= round_start(d, round.checked_add(1).ok_or(ElpidaError::MathOverflow)?), ElpidaError::RoundNotOver);
+        require!(root != [0u8; 32] && total > 0 && recipients > 0 && recipients <= V2_MAX_RECIPIENTS && manifest_uri.len() <= MAX_URI, ElpidaError::V2Terms);
+        let asset = ctx.accounts.asset_mint.key();
+        let held = vault_holding(&asset, &ctx.accounts.vault.to_account_info(), &ctx.accounts.vault_token.to_account_info())?;
+        let ledger = &mut ctx.accounts.ledger;
+        if ledger.bump == 0 { ledger.bump = ctx.bumps.ledger; }
+        require!(held.saturating_sub(ledger.reserved) >= total, ElpidaError::NotFunded);
+        ledger.reserved = ledger.reserved.checked_add(total).ok_or(ElpidaError::MathOverflow)?;
+        let r = &mut ctx.accounts.round;
+        r.kind = kind; r.round = round; r.asset = asset; r.root = root; r.total = total; r.claimed = 0; r.recipients = recipients;
+        r.posted_at = now; r.expired = false; r.bump = ctx.bumps.round;
+        emit!(V2RootPosted { kind, round, asset, root, total, recipients, manifest_uri });
+        Ok(())
+    }
+
+    /// Anyone: pays leaf `index` of a posted round to `account` (native SOL for wrapped SOL, otherwise the asset to the
+    /// account's associated token account, created by the payer when missing). Each leaf pays once.
+    pub fn claim_v2(ctx: Context<ClaimV2>, kind: u8, round: u32, index: u32, amount: u64, proof: Vec<[u8; 32]>) -> Result<()> {
+        let r_info = ctx.accounts.round.to_account_info();
+        let (asset, root, recipients, expired) = (ctx.accounts.round.asset, ctx.accounts.round.root, ctx.accounts.round.recipients, ctx.accounts.round.expired);
+        require!(!expired, ElpidaError::RoundClosed);
+        require!(index < recipients, ElpidaError::BadProof);
+        let account = ctx.accounts.recipient.key();
+        require!(verify_proof(&proof, root, v2_leaf(kind, round, &asset, index, &account, amount)), ElpidaError::BadProof);
+        {
+            let mut data = r_info.try_borrow_mut_data()?;
+            let (byte, bit) = (8 + V2Round::INIT_SPACE + (index / 8) as usize, 1u8 << (index % 8));
+            require!(data.len() > byte, ElpidaError::BadProof);
+            require!(data[byte] & bit == 0, ElpidaError::AlreadyPaid);
+            data[byte] |= bit;
+        }
+        let r = &mut ctx.accounts.round;
+        r.claimed = r.claimed.checked_add(amount).ok_or(ElpidaError::MathOverflow)?;
+        require!(r.claimed <= r.total, ElpidaError::BadProof);
+        let ledger = &mut ctx.accounts.ledger;
+        ledger.reserved = ledger.reserved.checked_sub(amount).ok_or(ElpidaError::MathOverflow)?;
+        let a = &ctx.accounts;
+        let seed = v2_vault_seed(kind);
+        let vault_seeds: &[&[u8]] = &[b"v2-vault", seed, &[ctx.bumps.vault]];
+        if asset == WSOL_MINT {
+            invoke_signed(&anchor_lang::solana_program::system_instruction::transfer(&a.vault.key(), &account, amount), &[a.vault.to_account_info(), a.recipient.to_account_info(), a.system_program.to_account_info()], &[vault_seeds])?;
+        } else {
+            let to = a.recipient_token.as_ref().ok_or(ElpidaError::V2Terms)?;
+            ti::transfer_checked(CpiContext::new_with_signer(a.token_program.to_account_info(), ti::TransferChecked { from: a.vault_token.to_account_info(), mint: a.asset_mint.to_account_info(), to: to.to_account_info(), authority: a.vault.to_account_info() }, &[vault_seeds]), amount, a.asset_mint.decimals)?;
+        }
+        emit!(V2Claimed { kind, round, asset, index, account, amount });
+        Ok(())
+    }
+
+    /// Anyone, once `V2_CLAIM_WINDOW_ROUNDS` further rounds have started: what a round left unclaimed returns to the
+    /// pool for later rounds (it stays in the vault, no longer reserved).
+    pub fn expire_v2(ctx: Context<ExpireV2>, kind: u8, round: u32) -> Result<()> {
+        let d = &ctx.accounts.distributor;
+        let now = Clock::get()?.unix_timestamp;
+        require!(now >= round_start(d, round.checked_add(V2_CLAIM_WINDOW_ROUNDS + 1).ok_or(ElpidaError::MathOverflow)?), ElpidaError::RoundNotOver);
+        let r = &mut ctx.accounts.round;
+        require!(!r.expired, ElpidaError::RoundClosed);
+        r.expired = true;
+        let left = r.total - r.claimed;
+        let ledger = &mut ctx.accounts.ledger;
+        ledger.reserved = ledger.reserved.checked_sub(left).ok_or(ElpidaError::MathOverflow)?;
+        emit!(V2Expired { kind, round, asset: r.asset, returned_to_pool: left });
+        Ok(())
+    }
+
+    /// Anyone: turns a distributor's wrapped SOL into native SOL held by its vault PDA (closes the vault's wrapped-SOL
+    /// account into it), so SOL rounds pay plain SOL. `withdraw_v2_fees` recreates the account when needed.
+    pub fn sweep_v2_sol(ctx: Context<SweepV2Sol>, kind: u8) -> Result<()> {
+        let seeds: &[&[u8]] = &[b"v2-vault", v2_vault_seed(kind), &[ctx.bumps.vault]];
+        let before = ctx.accounts.vault.lamports();
+        token::close_account(CpiContext::new_with_signer(ctx.accounts.token_program.to_account_info(), token::CloseAccount { account: ctx.accounts.vault_wsol.to_account_info(), destination: ctx.accounts.vault.to_account_info(), authority: ctx.accounts.vault.to_account_info() }, &[seeds]))?;
+        emit!(V2SolSwept { kind, lamports: ctx.accounts.vault.lamports() - before });
+        Ok(())
+    }
+
+    /// Flywheel, operator: buys a V2 token on its curve with the flywheel vault's `amount_in` of quote and burns what it
+    /// buys. The token must be at least a day old, an order at most 10% of the vault, one order per token every 6 hours,
+    /// and the order may not complete the curve (graduation stays with traders). It pays the token's fee like any buy.
+    pub fn v2_flywheel_curve(ctx: Context<V2FlywheelCurve>, amount_in: u64, min_out: u64) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        let cfg: CurveConfig = **ctx.accounts.curve_config;
+        let mut v2 = v2_of(&cfg, &ctx.accounts.pool.to_account_info())?.ok_or(ElpidaError::NotV2)?;
+        let (created_at, vault_balance) = (ctx.accounts.pool.created_at, token_amount(&ctx.accounts.vault_quote.to_account_info())?);
+        flywheel_checks(&mut ctx.accounts.order, ctx.bumps.order, created_at, now, amount_in, vault_balance)?;
+        let pool = &mut ctx.accounts.pool;
+        require!(pool.status == STATUS_TRADING, ElpidaError::CurveClosed);
+        let trade = quote_buy(pool, amount_in, v2_fee_bps(v2.fee_bps, pool.created_at, now), v2.fee_bps as u64)?;
+        require!(!trade.graduates, ElpidaError::FlywheelWouldComplete);
+        require!(trade.tokens >= min_out, ElpidaError::Slippage);
+        v2_apply_buy(pool, &mut v2, &trade, now)?;
+        let (mint_key, bump, pool_key) = (pool.mint, pool.bump, pool.key());
+        v2.write(&mut ctx.accounts.pool.to_account_info().try_borrow_mut_data()?)?;
+        let a = &ctx.accounts;
+        let vault_seeds: &[&[u8]] = &[b"v2-vault", V2_VAULT_FLYWHEEL, &[ctx.bumps.vault]];
+        quote_transfer(&a.quote_token_program, &a.quote_mint, a.vault_quote.to_account_info(), a.quote_vault.to_account_info(), a.vault.to_account_info(), trade.gross, a.quote_mint.decimals, &[vault_seeds])?;
+        // The bought tokens never leave the curve vault: they are burned there (the curve PDA signs).
+        let curve_seeds: &[&[u8]] = &[b"curve", mint_key.as_ref(), &[bump]];
+        burn_from_vault(&a.token_program, &a.mint.to_account_info(), &a.token_vault.to_account_info(), &a.pool.to_account_info(), curve_seeds, trade.tokens)?;
+        // `mint.supply` is the value before this burn (the account is not reloaded).
+        let (asset, supply_after) = (a.quote_mint.key(), a.mint.supply.checked_sub(trade.tokens).ok_or(ElpidaError::MathOverflow)?);
+        let order = &mut ctx.accounts.order;
+        order.spent = order.spent.checked_add(trade.gross).ok_or(ElpidaError::MathOverflow)?;
+        order.burned = order.burned.checked_add(trade.tokens).ok_or(ElpidaError::MathOverflow)?;
+        emit!(V2BoughtAndBurned { pool: pool_key, mint: mint_key, asset, spent: trade.gross, burned: trade.tokens, supply_after, venue: 0 });
+        Ok(())
+    }
+
+    /// Flywheel after graduation to Raydium (SOL pairs), operator: swaps the flywheel vault's wrapped SOL for the token
+    /// through the locked pool and burns everything it buys. Same limits as `v2_flywheel_curve`; `min_out` guards price.
+    pub fn v2_flywheel_raydium(ctx: Context<V2FlywheelRaydium>, amount_in: u64, min_out: u64) -> Result<()> {
+        let now = Clock::get()?.unix_timestamp;
+        require!(ctx.accounts.curve_config.model_version == V2_MODEL_VERSION, ElpidaError::NotV2);
+        let (created_at, vault_balance) = (ctx.accounts.pool.created_at, token_amount(&ctx.accounts.vault_quote.to_account_info())?);
+        flywheel_checks(&mut ctx.accounts.order, ctx.bumps.order, created_at, now, amount_in, vault_balance)?;
+        let a = &ctx.accounts;
+        let mint_key = a.mint.key();
+        let (_, base_is_0) = read_raydium(&a.ray_pool.to_account_info(), &a.ray_vault_0.to_account_info(), &a.ray_vault_1.to_account_info(), &mint_key)?;
+        let vault_seeds: &[&[u8]] = &[b"v2-vault", V2_VAULT_FLYWHEEL, &[ctx.bumps.vault]];
+        let before = token_amount(&a.vault_base.to_account_info())?;
+        let mut data = Vec::with_capacity(24);
+        data.extend_from_slice(&RAY_SWAP_BASE_INPUT);
+        data.extend_from_slice(&amount_in.to_le_bytes());
+        data.extend_from_slice(&min_out.max(1).to_le_bytes());
+        let (input_vault, output_vault) = if base_is_0 { (a.ray_vault_1.to_account_info(), a.ray_vault_0.to_account_info()) } else { (a.ray_vault_0.to_account_info(), a.ray_vault_1.to_account_info()) };
+        let infos = [
+            a.vault.to_account_info(), a.ray_authority.to_account_info(), a.amm_config.to_account_info(), a.ray_pool.to_account_info(),
+            a.vault_quote.to_account_info(), a.vault_base.to_account_info(), input_vault, output_vault,
+            a.token_program.to_account_info(), a.token_program.to_account_info(), a.quote_mint.to_account_info(), a.mint.to_account_info(), a.observation.to_account_info(),
+        ];
+        const WRITABLE: [bool; 13] = [false, false, false, true, true, true, true, true, false, false, false, false, true];
+        let accounts = infos.iter().enumerate().map(|(i, info)| AccountMeta { pubkey: *info.key, is_signer: i == 0, is_writable: WRITABLE[i] }).collect();
+        invoke_signed(&Instruction { program_id: raydium::PROGRAM, accounts, data }, &infos, &[vault_seeds])?;
+        let bought = token_amount(&a.vault_base.to_account_info())?.checked_sub(before).ok_or(ElpidaError::MathOverflow)?;
+        require!(bought >= min_out, ElpidaError::Slippage);
+        token::burn(CpiContext::new_with_signer(a.token_program.to_account_info(), Burn { mint: a.mint.to_account_info(), from: a.vault_base.to_account_info(), authority: a.vault.to_account_info() }, &[vault_seeds]), bought)?;
+        // SPL mint layout: supply is the u64 at bytes 36..44.
+        let supply = { let data = a.mint.try_borrow_data()?; u64::from_le_bytes(data[36..44].try_into().map_err(|_| ElpidaError::MathOverflow)?) };
+        let pool_key = a.pool.key();
+        let order = &mut ctx.accounts.order;
+        order.spent = order.spent.checked_add(amount_in).ok_or(ElpidaError::MathOverflow)?;
+        order.burned = order.burned.checked_add(bought).ok_or(ElpidaError::MathOverflow)?;
+        emit!(V2BoughtAndBurned { pool: pool_key, mint: mint_key, asset: WSOL_MINT, spent: amount_in, burned: bought, supply_after: supply, venue: 1 });
         Ok(())
     }
 
@@ -1882,6 +2067,76 @@ pub fn check_v2_config(params: &CurveParams) -> Result<()> {
     Ok(())
 }
 
+// ---------- V2 rewards helpers (S3) ----------
+
+/// Days since 1970-01-01 to (year, month, day), UTC (Howard Hinnant's algorithm), as the EVM distributor.
+pub fn civil(days: i64) -> (i64, i64, i64) {
+    let z = days + 719_468;
+    let era = z.div_euclid(146_097);
+    let doe = z - era * 146_097;
+    let yoe = (doe - doe / 1_460 + doe / 36_524 - doe / 146_096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    (yoe + era * 400 + if m <= 2 { 1 } else { 0 }, m, d)
+}
+
+/// (year, month, day) to days since 1970-01-01, UTC.
+pub fn days_from_civil(y: i64, m: i64, d: i64) -> i64 {
+    let y = if m <= 2 { y - 1 } else { y };
+    let era = y.div_euclid(400);
+    let yoe = y - era * 400;
+    let doy = (153 * (if m > 2 { m - 3 } else { m + 9 }) + 2) / 5 + d - 1;
+    era * 146_097 + yoe * 365 + yoe / 4 - yoe / 100 + doy - 719_468
+}
+
+/// When `round` starts (unix seconds).
+pub fn round_start(d: &V2Distributor, round: u32) -> i64 {
+    if d.period != 0 { return d.genesis + round as i64 * d.period as i64; }
+    let index = d.genesis_month as i64 + round as i64;
+    days_from_civil(index / 12, index % 12 + 1, 1) * 86_400
+}
+
+/// The round in progress at `now` (None before genesis).
+pub fn current_round(d: &V2Distributor, now: i64) -> Option<u32> {
+    if now < d.genesis { return None; }
+    if d.period != 0 { return Some(((now - d.genesis) / d.period as i64) as u32); }
+    let (y, m, _) = civil(now.div_euclid(86_400));
+    Some((y * 12 + m - 1 - d.genesis_month as i64) as u32)
+}
+
+/// One payout's leaf, bound to this program, the distributor kind, the round, the asset and the position in the list.
+pub fn v2_leaf(kind: u8, round: u32, asset: &Pubkey, index: u32, account: &Pubkey, amount: u64) -> [u8; 32] {
+    let inner = hashv(&[b"elpida-v2", crate::ID.as_ref(), &[kind], &round.to_le_bytes(), asset.as_ref(), &index.to_le_bytes(), account.as_ref(), &amount.to_le_bytes()]).0;
+    hashv(&[&inner]).0
+}
+
+/// Sorted-pair Merkle proof check (the order of each pair is by byte value, as OpenZeppelin's MerkleProof).
+pub fn verify_proof(proof: &[[u8; 32]], root: [u8; 32], leaf: [u8; 32]) -> bool {
+    let mut node = leaf;
+    for p in proof { node = if node <= *p { hashv(&[&node, p]).0 } else { hashv(&[p, &node]).0 }; }
+    node == root
+}
+
+/// What a vault holds of `asset`: native lamports above the account's own rent for wrapped SOL (after
+/// `sweep_v2_sol`), otherwise its associated token account's balance.
+fn vault_holding(asset: &Pubkey, vault: &AccountInfo, vault_token: &AccountInfo) -> Result<u64> {
+    if *asset == WSOL_MINT { return Ok(vault.lamports().saturating_sub(EMPTY_ACCOUNT_RENT)); }
+    token_amount(vault_token)
+}
+
+/// The flywheel's limits for one order, and the per-token cooldown record.
+fn flywheel_checks(order: &mut V2FlywheelOrder, bump: u8, created_at: i64, now: i64, amount_in: u64, vault_balance: u64) -> Result<()> {
+    require!(amount_in > 0 && amount_in as u128 * BPS <= vault_balance as u128 * V2_FLYWHEEL_MAX_SHARE_BPS, ElpidaError::FlywheelLimit);
+    require!(now >= created_at.saturating_add(V2_FLYWHEEL_MIN_AGE_SECS), ElpidaError::FlywheelLimit);
+    require!(order.last_at == 0 || now >= order.last_at.saturating_add(V2_FLYWHEEL_COOLDOWN_SECS), ElpidaError::FlywheelLimit);
+    order.last_at = now;
+    order.orders = order.orders.saturating_add(1);
+    if order.bump == 0 { order.bump = bump; }
+    Ok(())
+}
+
 struct Snapshot { real_quote: u64, virtual_quote_total: u64, token_reserve: u64, sold: u64, liquidity_bonus: u64, graduated: bool }
 impl Snapshot {
     fn of(pool: &CurvePool) -> Self {
@@ -2171,6 +2426,195 @@ pub struct WithdrawV2Fees<'info> {
     pub quote_vault: Box<InterfaceAccount<'info, QuoteAccount>>,
     pub quote_token_program: Interface<'info, TokenInterface>,
     pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[account]
+#[derive(InitSpace)]
+pub struct V2Distributor { pub kind: u8, pub operator: Pubkey, pub period: u32, pub genesis: i64, pub genesis_month: u32, pub bump: u8 }
+
+/// Per distributor and asset: what posted rounds still owe (PDA ["v2-reserved", kind, asset]).
+#[account]
+#[derive(InitSpace)]
+pub struct V2AssetLedger { pub reserved: u64, pub bump: u8 }
+
+/// One posted round for one asset (PDA ["v2-round", kind, asset, round]); a claim bitmap of `recipients` bits follows.
+#[account]
+#[derive(InitSpace)]
+pub struct V2Round { pub kind: u8, pub round: u32, pub asset: Pubkey, pub root: [u8; 32], pub total: u64, pub claimed: u64, pub recipients: u32, pub posted_at: i64, pub expired: bool, pub bump: u8 }
+
+/// The flywheel's record for one token (PDA ["v2-fly", mint]): last order, orders, quote spent, tokens burned.
+#[account]
+#[derive(InitSpace)]
+pub struct V2FlywheelOrder { pub last_at: i64, pub orders: u32, pub spent: u64, pub burned: u64, pub bump: u8 }
+
+#[derive(Accounts)]
+#[instruction(kind: u8)]
+pub struct InitV2Distributor<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(init, payer = authority, space = 8 + V2Distributor::INIT_SPACE, seeds = [b"v2-dist", &[kind][..]], bump)]
+    pub distributor: Box<Account<'info, V2Distributor>>,
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ ElpidaError::Unauthorized)]
+    pub program: Program<'info, crate::program::ElpidaLaunchpad>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ ElpidaError::Unauthorized)]
+    pub program_data: Box<Account<'info, ProgramData>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(kind: u8, round_no: u32, root: [u8; 32], total: u64, recipients: u32)]
+pub struct PostV2Root<'info> {
+    #[account(mut)]
+    pub operator: Signer<'info>,
+    #[account(seeds = [b"v2-dist", &[kind][..]], bump = distributor.bump, constraint = distributor.operator == operator.key() @ ElpidaError::Unauthorized)]
+    pub distributor: Box<Account<'info, V2Distributor>>,
+    /// CHECK: data-less vault PDA ["v2-vault", kind]; its lamports are the SOL pool.
+    #[account(seeds = [b"v2-vault", v2_vault_seed(kind)], bump)]
+    pub vault: UncheckedAccount<'info>,
+    /// CHECK: ATA(vault, asset); read for non-SOL assets (may not exist for SOL).
+    pub vault_token: UncheckedAccount<'info>,
+    pub asset_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(init_if_needed, payer = operator, space = 8 + V2AssetLedger::INIT_SPACE, seeds = [b"v2-reserved", &[kind][..], asset_mint.key().as_ref()], bump)]
+    pub ledger: Box<Account<'info, V2AssetLedger>>,
+    #[account(init, payer = operator, space = 8 + V2Round::INIT_SPACE + (recipients as usize).div_ceil(8), seeds = [b"v2-round", &[kind][..], asset_mint.key().as_ref(), &round_no.to_le_bytes()], bump)]
+    pub round: Box<Account<'info, V2Round>>,
+    pub system_program: Program<'info, System>,
+}
+#[derive(Accounts)]
+#[instruction(kind: u8, round_no: u32)]
+pub struct ClaimV2<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    /// CHECK: data-less vault PDA ["v2-vault", kind].
+    #[account(mut, seeds = [b"v2-vault", v2_vault_seed(kind)], bump)]
+    pub vault: UncheckedAccount<'info>,
+    #[account(mut, seeds = [b"v2-round", &[kind][..], asset_mint.key().as_ref(), &round_no.to_le_bytes()], bump = round.bump)]
+    pub round: Box<Account<'info, V2Round>>,
+    #[account(mut, seeds = [b"v2-reserved", &[kind][..], asset_mint.key().as_ref()], bump = ledger.bump)]
+    pub ledger: Box<Account<'info, V2AssetLedger>>,
+    #[account(mint::token_program = token_program)]
+    pub asset_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    /// CHECK: the payee wallet named in the leaf; receives native SOL for SOL rounds.
+    #[account(mut)]
+    pub recipient: UncheckedAccount<'info>,
+    /// CHECK: ATA(vault, asset) for non-SOL rounds (the client marks it writable then); checked by the token program as
+    /// the transfer source. Unused for SOL rounds.
+    pub vault_token: UncheckedAccount<'info>,
+    /// The payee's associated token account for non-SOL rounds (created by the payer when missing).
+    #[account(init_if_needed, payer = payer, associated_token::mint = asset_mint, associated_token::authority = recipient, associated_token::token_program = token_program)]
+    pub recipient_token: Option<Box<InterfaceAccount<'info, QuoteAccount>>>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(kind: u8, round_no: u32)]
+pub struct ExpireV2<'info> {
+    #[account(seeds = [b"v2-dist", &[kind][..]], bump = distributor.bump)]
+    pub distributor: Box<Account<'info, V2Distributor>>,
+    /// CHECK: the round's asset mint (seed only).
+    pub asset_mint: UncheckedAccount<'info>,
+    #[account(mut, seeds = [b"v2-round", &[kind][..], asset_mint.key().as_ref(), &round_no.to_le_bytes()], bump = round.bump)]
+    pub round: Box<Account<'info, V2Round>>,
+    #[account(mut, seeds = [b"v2-reserved", &[kind][..], asset_mint.key().as_ref()], bump = ledger.bump)]
+    pub ledger: Box<Account<'info, V2AssetLedger>>,
+}
+
+#[derive(Accounts)]
+#[instruction(kind: u8)]
+pub struct SweepV2Sol<'info> {
+    /// CHECK: data-less vault PDA ["v2-vault", kind].
+    #[account(mut, seeds = [b"v2-vault", v2_vault_seed(kind)], bump)]
+    pub vault: UncheckedAccount<'info>,
+    /// CHECK: ATA(vault, wrapped SOL), closed into the vault.
+    #[account(mut, address = get_associated_token_address_with_program_id(&vault.key(), &WSOL_MINT, &token_program.key()) @ ElpidaError::V2Terms)]
+    pub vault_wsol: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+}
+
+#[derive(Accounts)]
+pub struct V2FlywheelCurve<'info> {
+    #[account(mut)]
+    pub operator: Signer<'info>,
+    #[account(seeds = [b"v2-dist", &[V2_DIST_AIRDROP][..]], bump = distributor.bump, constraint = distributor.operator == operator.key() @ ElpidaError::Unauthorized)]
+    pub distributor: Box<Account<'info, V2Distributor>>,
+    #[account(has_one = quote_mint, constraint = curve_config.model_version == V2_MODEL_VERSION @ ElpidaError::NotV2)]
+    pub curve_config: Box<Account<'info, CurveConfig>>,
+    #[account(mint::token_program = quote_token_program)]
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(mut)]
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(mut, seeds = [b"curve", mint.key().as_ref()], bump = pool.bump, has_one = mint, constraint = pool.config == curve_config.key() @ ElpidaError::WrongConfig)]
+    pub pool: Box<Account<'info, CurvePool>>,
+    #[account(mut, associated_token::mint = mint, associated_token::authority = pool)]
+    pub token_vault: Box<Account<'info, TokenAccount>>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = pool, associated_token::token_program = quote_token_program)]
+    pub quote_vault: Box<InterfaceAccount<'info, QuoteAccount>>,
+    /// CHECK: data-less flywheel vault PDA.
+    #[account(seeds = [b"v2-vault", V2_VAULT_FLYWHEEL], bump)]
+    pub vault: UncheckedAccount<'info>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = vault, associated_token::token_program = quote_token_program)]
+    pub vault_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(init_if_needed, payer = operator, space = 8 + V2FlywheelOrder::INIT_SPACE, seeds = [b"v2-fly", mint.key().as_ref()], bump)]
+    pub order: Box<Account<'info, V2FlywheelOrder>>,
+    pub token_program: Program<'info, Token>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct V2FlywheelRaydium<'info> {
+    #[account(mut)]
+    pub operator: Signer<'info>,
+    #[account(seeds = [b"v2-dist", &[V2_DIST_AIRDROP][..]], bump = distributor.bump, constraint = distributor.operator == operator.key() @ ElpidaError::Unauthorized)]
+    pub distributor: Box<Account<'info, V2Distributor>>,
+    #[account(address = pool.config @ ElpidaError::WrongConfig)]
+    pub curve_config: Box<Account<'info, CurveConfig>>,
+    /// CHECK: matched against pool.mint; burned from, so writable.
+    #[account(mut)]
+    pub mint: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = WSOL_MINT @ ElpidaError::WrongVenue)]
+    pub quote_mint: UncheckedAccount<'info>,
+    #[account(seeds = [b"curve", mint.key().as_ref()], bump = pool.bump, has_one = mint, constraint = pool.status == STATUS_MIGRATED @ ElpidaError::NotMigrated)]
+    pub pool: Box<Account<'info, CurvePool>>,
+    #[account(seeds = [b"pump-migration", mint.key().as_ref()], bump = migration.bump, constraint = migration.pump_pool == ray_pool.key() @ ElpidaError::RaydiumAccount)]
+    pub migration: Box<Account<'info, PumpMigration>>,
+    /// CHECK: data-less flywheel vault PDA; signs the swap.
+    #[account(seeds = [b"v2-vault", V2_VAULT_FLYWHEEL], bump)]
+    pub vault: UncheckedAccount<'info>,
+    /// CHECK: ATA(vault, wrapped SOL): pays the swap.
+    #[account(mut, address = get_associated_token_address_with_program_id(&vault.key(), &WSOL_MINT, &token_program.key()) @ ElpidaError::RaydiumAccount)]
+    pub vault_quote: UncheckedAccount<'info>,
+    /// CHECK: ATA(vault, mint): receives the bought tokens, which are burned (must exist; the client creates it).
+    #[account(mut, address = get_associated_token_address_with_program_id(&vault.key(), &mint.key(), &token_program.key()) @ ElpidaError::RaydiumAccount)]
+    pub vault_base: UncheckedAccount<'info>,
+    /// CHECK: matched against the migration record; owner checked when read.
+    #[account(mut)]
+    pub ray_pool: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = raydium::AUTHORITY @ ElpidaError::RaydiumAccount)]
+    pub ray_authority: UncheckedAccount<'info>,
+    /// CHECK: fixed address; Raydium checks it is the pool's config.
+    #[account(address = raydium::AMM_CONFIG @ ElpidaError::RaydiumAccount)]
+    pub amm_config: UncheckedAccount<'info>,
+    /// CHECK: matched against the Raydium pool's stored vault.
+    #[account(mut)]
+    pub ray_vault_0: UncheckedAccount<'info>,
+    /// CHECK: matched against the Raydium pool's stored vault.
+    #[account(mut)]
+    pub ray_vault_1: UncheckedAccount<'info>,
+    /// CHECK: Raydium checks it is the pool's observation account.
+    #[account(mut)]
+    pub observation: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = raydium::PROGRAM @ ElpidaError::RaydiumAccount)]
+    pub raydium_program: UncheckedAccount<'info>,
+    #[account(init_if_needed, payer = operator, space = 8 + V2FlywheelOrder::INIT_SPACE, seeds = [b"v2-fly", mint.key().as_ref()], bump)]
+    pub order: Box<Account<'info, V2FlywheelOrder>>,
+    pub token_program: Program<'info, Token>,
     pub system_program: Program<'info, System>,
 }
 
@@ -2806,6 +3250,19 @@ pub struct V2PoolLaunched { pub pool: Pubkey, pub mint: Pubkey, pub creator: Pub
 #[event]
 pub struct V2Harvested { pub pool: Pubkey, pub base_burned: u64, pub quote_accrued: u64, pub accrued: u64 }
 #[event]
+pub struct V2DistributorSet { pub kind: u8, pub operator: Pubkey, pub period: u32, pub genesis: i64 }
+#[event]
+pub struct V2RootPosted { pub kind: u8, pub round: u32, pub asset: Pubkey, pub root: [u8; 32], pub total: u64, pub recipients: u32, pub manifest_uri: String }
+#[event]
+pub struct V2Claimed { pub kind: u8, pub round: u32, pub asset: Pubkey, pub index: u32, pub account: Pubkey, pub amount: u64 }
+#[event]
+pub struct V2Expired { pub kind: u8, pub round: u32, pub asset: Pubkey, pub returned_to_pool: u64 }
+#[event]
+pub struct V2SolSwept { pub kind: u8, pub lamports: u64 }
+/// `venue`: 0 the curve, 1 Raydium.
+#[event]
+pub struct V2BoughtAndBurned { pub pool: Pubkey, pub mint: Pubkey, pub asset: Pubkey, pub spent: u64, pub burned: u64, pub supply_after: u64, pub venue: u8 }
+#[event]
 pub struct V2FeesPaid { pub pool: Pubkey, pub recipient: u8, pub to: Pubkey, pub amount: u64 }
 
 #[error_code]
@@ -2851,4 +3308,12 @@ pub enum ElpidaError {
     #[msg("The token's fee must be between the pair's minimum and 4%")] V2FeeRange,
     #[msg("Nothing owed yet")] NothingToWithdraw,
     #[msg("Unused (kept so later error codes do not shift)")] V2HarvestPending,
+    #[msg("Invalid distributor or round terms")] V2Terms,
+    #[msg("This round has not ended yet")] RoundNotOver,
+    #[msg("The vault does not hold enough beyond what earlier rounds still owe")] NotFunded,
+    #[msg("Invalid payout proof")] BadProof,
+    #[msg("This payout was already claimed")] AlreadyPaid,
+    #[msg("This round is closed")] RoundClosed,
+    #[msg("Flywheel limits: tokens a day old, at most 10% of the vault per order, one order per token every 6 hours")] FlywheelLimit,
+    #[msg("The flywheel never completes a curve")] FlywheelWouldComplete,
 }
