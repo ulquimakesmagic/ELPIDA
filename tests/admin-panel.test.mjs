@@ -105,7 +105,9 @@ test('HTTP: challenge, signed session cookie, overview behind it, CSRF and sign-
   assert.equal(overview.status, 200);
   const data = await overview.json();
   assert.equal(data.operator, operator.address.toLowerCase());
-  for (const key of ['health', 'backup', 'relay', 'graduation', 'storage', 'prices', 'networks', 'treasury', 'activity']) assert.ok(key in data, key);
+  for (const key of ['health', 'backup', 'relay', 'graduation', 'storage', 'prices', 'networks', 'treasury', 'activity', 'keepers']) assert.ok(key in data, key);
+  assert.equal(data.keepers.evm.state, 'not_configured', 'keepers that are off say why');
+  assert.ok(data.keepers.solana.state, 'the Solana keeper reports a state');
   assert.ok(data.activity['24h'] && data.activity.all);
   assert.equal((await post('admin/logout', {}, { Cookie: jar })).status, 200);
   assert.equal((await fetch(app.url + '/api/admin/overview', { headers: { Cookie: jar } })).status, 401, 'signed out');
