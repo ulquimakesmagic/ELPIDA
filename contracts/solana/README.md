@@ -94,12 +94,12 @@ cp /tmp/sbf-main/elpida_launchpad.so build/elpida_launchpad-mainnet.so
 
 `Cargo.lock` pins dependencies compatible with the Solana toolchain's Rust 1.84 (for example `blake3` 1.5.5). The program ID is fixed by `declare_id!` and `keys/elpida_launchpad-keypair.json` (private, git-ignored).
 
-Release builds (9 November 2026, **ELPIDA V2 S1 + S2**: `add_v2_config`, `launch_v2`, the five-way fee ledger, `withdraw_v2_fees`, and V2 harvests (token side burned, quote side split five ways); see `docs/V2_0_SOLANA.md`. The program grows by about 100 KB, so the upgrade extends the program account first, which `upgradeProgram` does; Agave / Solana CLI **2.3.13**):
+Release builds (9 November 2026, **ELPIDA V2 S1–S3**: `add_v2_config`, `launch_v2`, the five-way fee ledger, `withdraw_v2_fees`, V2 harvests (token side burned, quote side split five ways), reward rounds (`init_v2_distributor`, `post_v2_root`, `claim_v2`, `expire_v2`, `sweep_v2_sol`) and the flywheel (`v2_flywheel_curve`, `v2_flywheel_raydium`); see `docs/V2_0_SOLANA.md`. The program grows by about 290 KB, so the upgrade extends the program account first, which `upgradeProgram` does; Agave / Solana CLI **2.3.13**):
 
 | File | Build | sha256 |
 |---|---|---|
-| `build/elpida_launchpad.so` | `--features testnet` (devnet, localnet) | `7d8d70424ebda86e2f599904dbc006746c17b960e3915cac2086762013226907` |
-| `build/elpida_launchpad-mainnet.so` | mainnet (test instructions refused) | `e222c4e90514ec3a44842b045ea58250c4705824d9fcddfeadb44aa1913d60b8` |
+| `build/elpida_launchpad.so` | `--features testnet` (devnet, localnet) | `54b53d5411cbf3373d6dcadf25855317ef256e37a6597d62233cf2fd3238e8ce` |
+| `build/elpida_launchpad-mainnet.so` | mainnet (test instructions refused) | `3e0977f6ccaccdbc9a2f2a40e754fb157d10f355f2c2dc1c7884f78445473838` |
 
 Previous release (5 November 2026, devnet SOL/stock conversion pool: `seed_test_conversion` and `test_conversion_swap`, test build only, so SOL can pay for stock-pair trades on devnet where Jupiter does not run; Agave / Solana CLI **2.3.13**):
 

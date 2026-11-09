@@ -313,6 +313,14 @@ export const PROGRAM_ERRORS = [
   'The token\'s fee must be between the pair\'s minimum and 4%.',
   'Nothing is owed yet.',
   'Unused.',
+  'Invalid distributor or round terms.',
+  'This round has not ended yet (or its claim window is still open).',
+  'The vault does not hold enough beyond what earlier rounds still owe.',
+  'Invalid payout proof.',
+  'This payout was already claimed.',
+  'This round is closed.',
+  'Flywheel limits: tokens a day old, at most 10% of the vault per order, one order per token every 6 hours.',
+  'The flywheel never completes a curve.',
 ];
 
 /** Turns a Solana/Anchor error into a readable message. */
