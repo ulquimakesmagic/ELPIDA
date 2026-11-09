@@ -541,14 +541,6 @@ export class SolanaWallet {
     this._partnerSupport ??= await this.client.supportsPartnerTiers(this.connection, this.publicKey);
     return this._partnerSupport;
   }
-  /** The connected wallet's early-partner registration on this cluster ({ buybackBps, expiresAt }), or null. */
-  async partnerTier() {
-    if (!this.deployment || !this.publicKey) return null;
-    const info = await this.connection.getAccountInfo(this.client.partnerPda(this.publicKey));
-    if (!info?.owner.equals(this.client.programId)) return null;
-    const p = this.client.decodePartner(info.data);
-    return p && p.buybackBps ? { buybackBps: p.buybackBps, expiresAt: p.expiresAt } : null;
-  }
   async supportsMetadata() {
     this._metadataSupport ??= await this.client.supportsMetadata(this.connection, this.publicKey);
     return this._metadataSupport;

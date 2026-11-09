@@ -180,6 +180,14 @@ export class FlywheelKeeper {
     } catch (error) { s.state = 'unavailable'; s.error = errorCode(error); this.log({ event: 'flywheel_cycle_error', chain: worker.chain, code: s.error }); }
   }
   /** Public, read-only: totals per chain and the most recent orders. Addresses and transaction hashes only. */
+  /** Tokens this keeper bought and sent to the dead address on `chain` (lowercase token → base units). */
+  burnedByToken(chain) {
+    const out = new Map();
+    for (const r of this.db.prepare("SELECT token, bought FROM flywheel_orders WHERE chain=? AND status='burned' AND bought IS NOT NULL").all(chain)) {
+      const t = String(r.token).toLowerCase(); out.set(t, (out.get(t) ?? 0n) + BigInt(r.bought));
+    }
+    return out;
+  }
   summary({ limit = 30 } = {}) {
     const chains = this.workers.map(w => {
       const burned = this.db.prepare("SELECT spend, bought FROM flywheel_orders WHERE chain=? AND status='burned'").all(w.chain);

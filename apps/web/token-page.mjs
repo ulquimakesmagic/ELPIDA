@@ -17,7 +17,7 @@ import {holderChat} from './holder-chat.mjs';
 import {filterTrades} from './trade-filter.mjs';
 import {odometer} from './odometer.mjs';
 import {filterByWho,topTraders,safetyChecks,quickAmounts,walletHolders} from './token-insights.mjs';
-import {partnerChip} from './partner-labels.mjs';
+import {flywheelChip} from './burn-labels.mjs';
 export { exceedsRemaining };
 
 const metadataRequests = new Map();
@@ -126,7 +126,7 @@ export function renderToken(ctx, address) {
           isV2Token(token) ? h('span.tk-tag.tk-tag-test', { title: `ELPIDA V2: ${((token.feeBps ?? 125) / 100).toFixed(2)}% fee for good, shared 30% creator / 30% trader airdrop / 10% flywheel / 10% holders / 20% treasury; liquidity locked from launch in one Uniswap v4 pool. Not audited; test networks only.` }, icon('flask-conical', 'icon-xs'), `V2 test · ${((token.feeBps ?? 125) / 100).toFixed(2)}% fee`) : isV4Token(token) ? h('span.tk-tag.tk-tag-test', { title: 'Model 11: the curve runs inside one Uniswap v4 pool, liquidity locked from launch. Not audited; test networks only.' }, icon('flask-conical', 'icon-xs'), token.graduated ? 'Model 11 test · past the milestone' : 'Model 11 test · Uniswap v4') : token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null,
           (stock => stock ? h('span.tk-tag.tk-tag-stock', { 'data-ok': String(stock.usable), title: stock.reason ?? 'Stock price is fresh; the curve can graduate.' }, icon('chart-candlestick', 'icon-xs'), `${q} · ${STOCK_LABELS[stock.status] ?? stock.status}`) : null)(testStockStatus(token.stock)),
           kothTag(ctx, token),
-          (chip => chip ? h('span.tk-tag.tk-tag-burn', { 'data-tier': chip.tier.toLowerCase(), title: chip.title }, icon('flame', 'icon-xs'), `${chip.tier} · ${chip.text}`) : null)(partnerChip(token)))),
+          (chip => chip ? h('span.tk-tag.tk-tag-burn', { title: chip.title }, icon('flame', 'icon-xs'), chip.text) : null)(flywheelChip(token)))),
         h('div.tk-sub', h('div.tk-about', descText, descMore),
           h('div.tk-links', ...linkPills, explorerHref ? h('a.tk-pill.tk-pill-end', { href: explorerHref, target: '_blank', rel: 'noopener noreferrer', title: 'Open in explorer' }, 'Explorer', icon('arrow-up-right', 'icon-sm')) : null, txUrl(launchHash) ? h('a.tk-pill', { href: txUrl(launchHash), target: '_blank', rel: 'noopener noreferrer', title: 'The transaction that created this token' }, 'Launch transaction', icon('arrow-up-right', 'icon-sm')) : null)))));
   const chart = terminalChart(ctx, token, q);

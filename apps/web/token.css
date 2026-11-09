@@ -20,12 +20,10 @@
 .tk-tag-burn { color: #ff9a6b; gap: 4px; }
 .tk-tag-stock { gap: 4px; color: var(--up); }
 .tk-tag-stock[data-ok="false"] { color: var(--down); }
-.tk-tag-burn[data-tier="elite"] { color: #ff8080; }
 [data-theme="light"] .tk-tag-burn { color: #a8410f; }
 .tk-tag-koth { color: #f5c542; gap: 4px; border-color: rgba(245, 197, 66, .35); }
 .tk-tag-koth[data-king="true"] { background: linear-gradient(#ffe08a, #f5c542 70%); color: #2a1d00; border-color: transparent; font-weight: 650; }
 [data-theme="light"] .tk-tag-koth:not([data-king="true"]) { color: #8a6100; }
-[data-theme="light"] .tk-tag-burn[data-tier="elite"] { color: #a61b1b; }
 .tk-addr .copy-btn, .tk-addr button { margin-left: 2px; }
 .tk-pill { display: inline-flex; align-items: center; gap: 6px; padding: 7px 12px; border-radius: var(--r-pill); border: .67px solid var(--line); color: var(--ink-2);
   font: 500 12px/1 var(--font-sans); text-decoration: none; background: transparent; }

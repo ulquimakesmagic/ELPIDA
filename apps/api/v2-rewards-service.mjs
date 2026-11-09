@@ -11,7 +11,7 @@ export class V2RewardsService {
     this.log = log; this.entries = [];
     for (const net of networks.filter(n => !n.mainnet && n.v2?.shared?.hook)) {
       const d = net.v2.shared;
-      this.entries.push({ net, index: new V2RewardsIndexer({ provider: providerFactory(net.rpcUrl), contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel }, fromBlock: d.block, batchSize: 2000 }), busy: false });
+      this.entries.push({ net, index: new V2RewardsIndexer({ provider: providerFactory(net.rpcUrl), contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel }, fromBlock: d.block, batchSize: 100 }), busy: false });
     }
   }
   get deployed() { return this.entries.length > 0; }
@@ -23,15 +23,22 @@ export class V2RewardsService {
   }
   stop() { clearInterval(this.timer); }
 
-  /** `prices`: the server's price snapshot (native USD per network); USD figures are only given with a fresh price. */
-  summary(prices = {}, now = Math.floor(Date.now() / 1000)) {
+  /**
+   * `prices`: the server's price snapshot (native USD per network); USD figures are only given with a fresh price.
+   * `quotes(key)`: the network's V2 token records, for the symbol and decimals of ERC-20 pair assets (USDC at $1).
+   */
+  summary(prices = {}, now = Math.floor(Date.now() / 1000), quotes = () => []) {
     if (!this.deployed) return { deployed: false, chains: [] };
     return { deployed: true, updatedAt: now, chains: this.entries.map(({ net, index }) => {
       const p = prices[net.key], fresh = p?.status === 'fresh' && Number.isFinite(p.usd) && p.usd > 0;
       const assets = { [ZeroAddress]: { symbol: net.nativeCurrency.symbol, decimals: 18, usd: fresh ? p.usd : null } };
+      for (const t of quotes(net.key) ?? []) if (t?.quoteAddress && t.pair !== 'native' && !assets[t.quoteAddress.toLowerCase()]) assets[t.quoteAddress.toLowerCase()] = { symbol: t.quoteSymbol ?? 'token', decimals: Number(t.quoteDecimals ?? 18), usd: t.pair === 'usdc' ? 1 : null };
       return { key: net.key, name: net.name, explorer: net.explorer ?? null, testnet: true, assets, ...toJson(index.summary(now)) };
     }) };
   }
+
+  /** The V2 flywheel's burns on one network (lowercase token → base units); empty where V2 is not deployed. */
+  burnedByToken(key) { return this.entries.find(e => e.net.key === key)?.index.burnedByToken() ?? new Map(); }
 
   payouts(wallet) {
     if (!/^0x[0-9a-fA-F]{40}$/.test(String(wallet ?? ''))) throw new Error('Enter a wallet address.');

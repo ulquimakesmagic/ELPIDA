@@ -210,7 +210,6 @@ Still open on the new launchpads:
   - The ordinary-wallet native router is bound to one factory, so the 1 November router (`0xDDCc…fd41`) serves only the now-legacy factory and is no longer pinned.
   - Until a new one is deployed, native-coin trades of USDC- or stock-paired tokens on the new launchpad need a wallet that can batch.
   - To fix it, after **Add test pairs**, open **Network and test funds → Deploy ordinary-wallet native router**. Then send Claude its address and creation hash to pin.
-- **Partner tiers:** re-register active partners, your own Elite tier included, from the Partners tab.
 
 The steps below are kept for reference:
 
@@ -219,8 +218,7 @@ The steps below are kept for reference:
    pricing. Test gas only, no deposit.
 3. If you use test pairs there, press **Add test pairs** again: the new launchpad gets its own tNVDAon and adapters.
 4. Send Claude the factory address and its deployment block for each network, so they can be pinned for every
-   visitor. Partner tiers are per launchpad: re-register active partners (your own Elite tier included) on the new
-   one from the Partners tab.
+   visitor.
 
 **Solana devnet program upgrade: done, 2 November 2026.**
 - Malik ran the upgrade; the program data was extended by 10,240 bytes.
@@ -273,18 +271,17 @@ Details and what is stored: [SITE_ANALYTICS.md](SITE_ANALYTICS.md). Nothing to s
 - Changing the Terms in a way that matters: raise `TERMS_VERSION` and `TERMS_UPDATED` in `apps/web/terms.mjs` so every
   visitor accepts them again.
 
-### Partners tab (`#/monkey?tab=partners`)
+### Partner programme: retired, 9 November 2026
 
-Devs apply from the footer link "Partner with Elpida" (`#/partners`). Each application proves its launching wallets
-with a free signature and is stored privately on the server (`partner-applications.sqlite` in the data volume).
+Malik retired the partner programme. The "Partner with Elpida" form, its page (`#/partners`), the admin Partners tab
+and the partner tags on Explore and token pages are gone, along with the application endpoints. Tokens launched with a
+tier keep it on chain (their contracts are immutable) and the buyback keeper still burns their share; the site no longer
+labels them. `partner-applications.sqlite` stays in the data volume untouched; delete it there if no longer wanted.
 
-- **Review:** approve with a tier (Partner or Elite), a window (30 to 90 days; 60 by default) and the chains to
-  register, or reject. Notes are visible to other operators. Every action records who did it.
-- **Register (you sign):** approval does not touch the chain. For each chain the tab shows the factory's
-  `setPartner` call. Connect the treasury wallet on that chain and press "Register with treasury", or paste the call
-  into the treasury Safe on mainnet. The tab then reads the factory back and shows "registered".
-- **Ending early:** "End partnership", then "Clear with treasury" on each chain. Tokens already launched keep their tier.
-- Partner-tier launchpads deployed by Malik on 26 October 2026 and pinned for every visitor; the earlier ones stay
+In their place, Explore cards and token pages tag any token the flywheels have bought and burned with the share of its
+1B supply burned so far (V2 flywheel vault burns plus the Model 10 flywheel keeper's).
+
+- Launchpads deployed by Malik on 26 October 2026 and pinned for every visitor; the earlier ones stay
   indexed, so their tokens (VEGETA, MIDORIYA and the rest) stay listed and tradable:
 
   | Network | Factory | Block | Graduation adapter |

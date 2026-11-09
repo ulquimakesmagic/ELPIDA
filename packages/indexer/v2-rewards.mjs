@@ -22,6 +22,9 @@ export const V2_REWARD_ABIS = Object.freeze({
 });
 
 const DAY = 86_400;
+/** RPC refusals that mean "ask for fewer blocks": range caps, oversized responses, too many results. */
+export const RANGE_LIMIT = /range|too large|413|too many|limit exceeded|query returned more than|block range|exceed/i;
+const rpcMessage = e => [e?.message, e?.info?.responseBody, e?.error?.message, e?.shortMessage].filter(Boolean).join(' ');
 const SHARE = { airdrop: 'traderAirdrop', holder: 'holderRewards', flywheel: 'flywheel' };
 const lower = a => String(a).toLowerCase();
 
@@ -53,9 +56,15 @@ export class V2RewardsIndexer {
         this.schedules[kind] = { period: Number(period), genesis: Number(genesis), claimWindowRounds: Number(window) };
       }
       const head = Number(await this.provider.send('eth_blockNumber', [])) - this.confirmations;
-      for (let from = this.next; from <= head; from += this.batchSize) {
-        const to = Math.min(head, from + this.batchSize - 1);
-        const logs = await this.provider.getLogs({ address: [...this.kinds.keys()], fromBlock: from, toBlock: to });
+      while (this.next <= head) {
+        const from = this.next, to = Math.min(head, from + this.batchSize - 1);
+        let logs;
+        try { logs = await this.provider.getLogs({ address: [...this.kinds.keys()], fromBlock: from, toBlock: to }); }
+        catch (e) {
+          // Public RPCs cap eth_getLogs ranges (Base Sepolia: 200 blocks, sometimes less). Halve and retry the range.
+          if (this.batchSize > 1 && RANGE_LIMIT.test(rpcMessage(e))) { this.batchSize = Math.max(1, Math.floor(this.batchSize / 2)); continue; }
+          throw e;
+        }
         logs.sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index);
         for (const log of logs) await this.apply(log);
         this.next = to + 1;
@@ -137,6 +146,13 @@ export class V2RewardsIndexer {
       flywheel: this.addresses.flywheel ? { ...vault('flywheel'), burns: [...this.burns].reverse().slice(0, 50), burnedByToken: [...burned].map(([token, amount]) => ({ token, amount })), spentByAsset: [...spent].map(([asset, amount]) => ({ asset, amount })), cycles: new Set(this.burns.map(b => b.cycle)).size } : null,
       status: this.status(),
     };
+  }
+
+  /** Tokens the flywheel vault bought and burned, per token (lowercase address → base units). */
+  burnedByToken() {
+    const out = new Map();
+    for (const b of this.burns) out.set(b.token, (out.get(b.token) ?? 0n) + b.burned);
+    return out;
   }
 
   /** Payouts a wallet has received, newest first. */

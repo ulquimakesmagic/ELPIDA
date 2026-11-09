@@ -62,7 +62,7 @@ export function termsDocument({ mainnet = false, restricted = [] } = {}) {
       'You allow Elpida to display, copy and process your Submission, without payment, to run, show and improve the Services.',
     ]],
     ['Fees', [
-      'Launching a token costs a launch fee, and trades on a bonding curve pay a trading fee, at the rates shown on the Services when you act. Creators may also set a token tax at launch where a network supports it. Part of these fees goes to Elpida and part to the wallets the creator chose; partner tokens may direct part of their fees to buy back and burn the token. The split for each token is fixed in its contracts at launch.',
+      'Launching a token costs a launch fee, and trades on a bonding curve pay a trading fee, at the rates shown on the Services when you act. Creators may also set a token tax at launch where a network supports it. Part of these fees goes to Elpida and part to the wallets the creator chose. The split for each token is fixed in its contracts at launch.',
       'Creator fees, holder rewards and buybacks are automatic results of how the contracts are written. They are not promises, not a return on any investment and not an obligation Elpida owes you, and they may produce nothing. An amount is yours only once it reaches your wallet on chain.',
       'Network fees (gas) go to the blockchain, not to Elpida. Fees are not refundable once a transaction is submitted, even if it fails. You are responsible for any taxes on your activity.',
     ]],

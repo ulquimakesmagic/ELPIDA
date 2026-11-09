@@ -12,7 +12,7 @@ import { mkdirSync } from 'node:fs';
 // how many visitors declined. Rows older than RETAIN_DAYS are deleted.
 
 export const RETAIN_DAYS = 90;
-export const PAGES = ['explore', 'launch', 'portfolio', 'rewards', 'analytics', 'docs', 'partners', 'terms', 'token', 'notfound'];
+export const PAGES = ['explore', 'launch', 'portfolio', 'rewards', 'analytics', 'docs', 'terms', 'token', 'notfound'];
 export const DEVICES = ['mobile', 'tablet', 'desktop', 'bot', 'unknown'];
 export const PERIODS = [1, 7, 30, 90];
 const MAX_VIEWS_PER_DAY = 200_000;

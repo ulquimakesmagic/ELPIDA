@@ -27,12 +27,12 @@ export function renderLaunchpads(ctx, { connect }) {
 
   function curveCard(w, net) {
     const deployed = !!w.deployment, state = ctx.state;
-    const upgrade = w.launchUpgradeAvailable ? 'Deploy automatic-graduation launchpad' : w.partnerUpgradeAvailable ? 'Deploy partner-tier launchpad' : w.reviewUpgradeAvailable ? 'Deploy reviewed launchpad'
+    const upgrade = w.launchUpgradeAvailable ? 'Deploy automatic-graduation launchpad' : w.partnerUpgradeAvailable ? 'Deploy buyback-burn launchpad' : w.reviewUpgradeAvailable ? 'Deploy reviewed launchpad'
       : w.feeFixUpgradeAvailable ? 'Deploy corrected Base Sepolia launchpad' : w.modelUpgradeAvailable || w.needsMetadataUpgrade ? 'Set up the newer launchpad' : deployed ? null : 'Set up launchpad';
     // The treasury is immutable: on mainnet it must be a Safe; on testnet it defaults to this wallet.
     const treasury = !deployed && w.dex ? h('input.input', { placeholder: net.mainnet ? '0x… Safe address (required)' : '0x… Safe address (optional; empty = this wallet)', spellcheck: false, autocomplete: 'off', 'aria-label': 'Treasury Safe address' }) : null;
-    const why = w.reviewUpgradeAvailable ? 'This launchpad predates the 1 November security fixes: partner buybacks that cannot be sandwiched, and graduation leftovers paid to the fee splitter.'
-      : w.partnerUpgradeAvailable ? 'This launchpad predates partner tiers (10% or 20% of fees buy back and burn).'
+    const why = w.reviewUpgradeAvailable ? 'This launchpad predates the 1 November security fixes: buybacks that cannot be sandwiched, and graduation leftovers paid to the fee splitter.'
+      : w.partnerUpgradeAvailable ? 'This launchpad predates the buyback-and-burn update.'
       : w.feeFixUpgradeAvailable ? 'The current Model 10 factory predates the shared-recipient fee fix.'
       : w.modelUpgradeAvailable ? 'This is the older model 9 launchpad. Model 10 adds launch protection, the 10x curve and the graduation escape hatch.'
       : w.needsMetadataUpgrade ? 'A newer version with shared token metadata is available.' : null;
