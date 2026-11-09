@@ -2,7 +2,7 @@
 // the safety checklist and quick buy amounts. No DOM, no network: everything here is derived from rows the
 // page already fetched (indexed trades and holders) and from the token record, so it can be tested directly.
 
-import { partnerCheck } from './partner-labels.mjs';
+import { flywheelCheck } from './burn-labels.mjs';
 import { testStockStatus, TEST_STOCK_PROVIDERS } from './test-stock.mjs';
 
 const lower = value => String(value ?? '').toLowerCase();
@@ -114,8 +114,8 @@ export function safetyChecks(token, { holders, dex } = {}) {
     : { ok: true, text: `Liquidity is locked permanently when it graduates to ${venue}.` });
   if (token.tax) checks.push({ ok: false, text: `Buy tax ${pct(token.tax.buyBps / 100)}, sell tax ${pct(token.tax.sellBps / 100)}, fixed at launch.` });
   else checks.push({ ok: true, text: token.graduated ? 'No buy or sell tax.' : 'No buy or sell tax. The curve fee is 1.25% per trade.' });
-  const partner = partnerCheck(token);
-  if (partner) checks.push(partner);
+  const burn = flywheelCheck(token);
+  if (burn) checks.push(burn);
   const stock = stockCheck(token);
   if (stock) checks.push(stock);
   if (token.metadataURI) checks.push({ ok: true, text: 'Details were published at launch and cannot be edited.' });

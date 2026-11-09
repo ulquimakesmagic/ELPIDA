@@ -46,7 +46,7 @@ export const termsAccepted = saved => !!saved && saved.v === TERMS_VERSION && Nu
 /** The saved cookie choice for the current version, or null when the visitor has not chosen yet. */
 export const consentChoice = saved => saved && saved.v === CONSENT_VERSION && typeof saved.analytics === 'boolean' ? { analytics: saved.analytics } : null;
 
-const ROUTES = { '/': 'explore', '': 'explore', '/launch': 'launch', '/portfolio': 'portfolio', '/rewards': 'rewards', '/analytics': 'analytics', '/docs': 'docs', '/partners': 'partners', '/terms': 'terms' };
+const ROUTES = { '/': 'explore', '': 'explore', '/launch': 'launch', '/portfolio': 'portfolio', '/rewards': 'rewards', '/analytics': 'analytics', '/docs': 'docs', '/terms': 'terms' };
 /**
  * The page a hash route counts as, or null for pages that are never counted (the operator panel). Only the page name,
  * a token address and its network leave the browser; query text such as a search never does.

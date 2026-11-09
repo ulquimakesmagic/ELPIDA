@@ -78,6 +78,10 @@ test('a cycle buys each eligible token on its curve or pool and sends exactly wh
   assert.equal(cycle.status, 'done'); assert.equal(cycle.budget, String(parseEther('1')));
   const s = k.summary();
   assert.equal(s.chains[0].orders, 3); assert.equal(s.recent.length, 3); assert.match(s.recent[0].burnTx, /^0x[0-9a-f]{64}$/);
+  // Explore and token pages show these burns: per token, in base units, keyed by lowercase address.
+  const burned = k.burnedByToken(worker.chain);
+  for (const o of orders) assert.equal(burned.get(o.token.toLowerCase()), BigInt(o.bought), `${o.symbol}: tagged with what it burned`);
+  assert.equal(k.burnedByToken('elsewhere').size, 0);
   // The next tick within the cadence does nothing.
   await k.tick(); assert.equal(k.db.prepare('SELECT COUNT(*) AS n FROM flywheel_cycles').get().n, 1);
 });
