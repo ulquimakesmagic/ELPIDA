@@ -70,6 +70,11 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   await assert.rejects(launchV2(cw, { name: 'Hope', symbol: 'hope', feeBps: 250, firstBuy: formatUnits(tooMuch, 18) }), /at most 3% of the supply/);
   await assert.rejects(launchV2(cw, { name: 'Hope', symbol: 'HOPE!', feeBps: 250 }), /1 to 10 letters or digits/);
   await assert.rejects(launchV2(cw, { name: 'Hope', symbol: 'HOPE', feeBps: 401 }), /from 1\.00% to 4\.00%/);
+  // A first buy paid in the native coin: only on a pair-asset launch, only where a conversion route exists, before any send.
+  const sentBefore = await f.provider.getTransactionCount(cw.address);
+  await assert.rejects(launchV2(cw, { name: 'Hope', symbol: 'HOPE', feeBps: 250, firstBuyPayment: 'native', nativeBuy: '0.01' }), /already uses the native coin/);
+  await assert.rejects(launchV2(cw, { name: 'Hope', symbol: 'HOPE', feeBps: 250, pair: 'usdc', firstBuyPayment: 'native', nativeBuy: '0.01' }), /no ETH conversion route/);
+  assert.equal(await f.provider.getTransactionCount(cw.address), sentBefore, 'nothing was sent');
   const launched = await launchV2(cw, { name: 'Hope', symbol: 'hope', feeBps: 250, firstBuy: terms.maxFirstBuy, description: 'test', image: '' });
   assert.equal(launched.feeBps, 250);
   const token = new Contract(launched.token, v4Art('ElpidaV2Token').abi, f.provider);

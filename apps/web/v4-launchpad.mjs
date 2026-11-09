@@ -308,6 +308,8 @@ function routerFor(w, item, runner) {
   if (item.factory && item.factory.toLowerCase() !== d.factory.toLowerCase()) throw new Error(`This token belongs to another ${name} launchpad.`);
   return { router: new Contract(d.router, V4_ROUTER_ABI, runner), hook: new Contract(d.hook, HOOK_ABI, runner), d };
 }
+/** The router and hook a V2 or Model 11 token trades through (checked against the network's deployment). */
+export const v4RouterFor = (w, item, runner) => routerFor(w, item, runner);
 const quoteDecimals = item => item.pair === 'native' ? 18 : Number(item.quoteDecimals ?? 18);
 
 /** The exact result of a buy or sell now, fees included (the router runs the swap and undoes it). */
