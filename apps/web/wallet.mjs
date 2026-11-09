@@ -473,12 +473,14 @@ export class TestnetWallet {
     if(!this.dex?.router)throw new Error(`There is no native conversion route on ${this.net.name}. Pay with ${item.quoteSymbol}.`);
     const {router}=v4RouterFor(this,item,this.provider),asset=item.quoteAddress,buy=body.side==='buy',input=parseUnits(this.nativeAmount(body.amount),18);
     let route,pairAmount,output;
+    // Two test assets can share a symbol (tNVDAon on Model 10 and on V2), so a missing pool names the exact asset.
+    const convert=async args=>{try{return await quoteNativePairConversion(args);}catch(e){if(/No funded/.test(e.message))throw new Error(`There is no funded ${this.net.nativeCurrency.symbol}/${item.quoteSymbol} conversion pool for this ${item.quoteSymbol} (${asset.slice(0,6)}…${asset.slice(-4)}) on ${this.net.name} yet. The operator can fund one in the operator panel (Pairs, conversion liquidity). Until then, pay with ${item.quoteSymbol}.`);throw e;}};
     if(buy){
-      route=await quoteNativePairConversion({Contract,provider:this.provider,dex:this.dex,asset,amountIn:input});
+      route=await convert({Contract,provider:this.provider,dex:this.dex,asset,amountIn:input});
       pairAmount=route.minimum;[,output]=await router.quote.staticCall(item.address,true,pairAmount);
     }else{
       const [,pairOut]=await router.quote.staticCall(item.address,false,input);pairAmount=pairOut*9900n/10000n;
-      route=await quoteNativePairConversion({Contract,provider:this.provider,dex:this.dex,asset,amountIn:pairAmount,toNative:true});output=route.amountOut;
+      route=await convert({Contract,provider:this.provider,dex:this.dex,asset,amountIn:pairAmount,toNative:true});output=route.amountOut;
     }
     const minimum=output*9900n/10000n;
     if(minimum<=0n||pairAmount<=0n)throw new Error('Trade amount is too small.');

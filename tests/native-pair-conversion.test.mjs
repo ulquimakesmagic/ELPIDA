@@ -133,4 +133,8 @@ test('V2 pair-asset token: buy with the native coin and sell back to it through 
   assert.equal(await coin.balanceOf(owner), 0n);
   assert.ok(await f.provider.getBalance(owner) > ethBefore - parseEther('0.005'), 'ETH came back (less gas)');
   await assert.rejects(wallet.tradeNativePair({ ...buyQuote, quotedAt: Date.now() - 120_000 }), /expired/);
+  // A pair asset without a conversion pool (here: the launched token itself as a stand-in asset) names the exact asset.
+  const other = { ...item, address: f.usdc.target, quoteAddress: coin.target, quoteSymbol: 'tNVDAon' };
+  wallet.launches.set(other.address.toLowerCase(), other);
+  await assert.rejects(wallet.getNativePairTradeQuote({ token: other.address, side: 'buy', amount: '0.01' }), new RegExp(`no funded ETH/tNVDAon conversion pool for this tNVDAon \\(${coin.target.slice(0, 6)}…${coin.target.slice(-4)}\\)`));
 });

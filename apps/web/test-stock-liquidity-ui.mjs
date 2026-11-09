@@ -3,7 +3,7 @@ export function testLiquidityTools(wallet,run) {
   if(wallet.net.chainId!==11155111||!wallet.address)return null;
   const stocks=(wallet.approvedQuotes??[]).filter(a=>a.test&&a.stock?.provider==='ondo-test');if(!stocks.length)return null;
   let quoted=null,busy=false;
-  const asset=h('select.select',{'aria-label':'Test conversion stock'},stocks.map(a=>h('option',{value:a.address},a.symbol))),amount=h('input.input',{type:'number',min:'0.001',max:'0.1',step:'0.01',value:'0.05','aria-label':'Test ETH liquidity budget'}),message=h('p.hint',{role:'status'}),error=h('p.error-text',{role:'alert'});
+  const asset=h('select.select',{'aria-label':'Test conversion stock'},stocks.map(a=>h('option',{value:a.address},`${a.symbol} · ${a.address.slice(0,6)}…${a.address.slice(-4)}`))),amount=h('input.input',{type:'number',min:'0.001',max:'0.1',step:'0.01',value:'0.05','aria-label':'Test ETH liquidity budget'}),message=h('p.hint',{role:'status'}),error=h('p.error-text',{role:'alert'});
   const clear=()=>{quoted=null;confirm.hidden=true;message.textContent='';};asset.addEventListener('change',clear);amount.addEventListener('input',clear);
   const confirm=h('button.btn.btn-secondary',{type:'button',hidden:true,on:{click:async()=>{
     if(busy||!quoted)return;if(quoted.asset!==asset.value||quoted.nativeAmount!==amount.value){clear();return;}
