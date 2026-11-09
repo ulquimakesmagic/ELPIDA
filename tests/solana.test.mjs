@@ -110,6 +110,8 @@ test.before(async () => {
     catch { if (i > 120) throw new Error('solana-test-validator did not start'); await sleep(500); }
   }
   for (const kp of [f.authority, f.creator, f.trader, f.outsider]) await airdrop(f.connection, kp.publicKey, 20 * web3.LAMPORTS_PER_SOL);
+  // The authority deploys and upgrades the 1.2 MB program several times (rehearsals, compatibility, upgrade tests).
+  await airdrop(f.connection, f.authority.publicKey, 80 * web3.LAMPORTS_PER_SOL);
   if (preload) f.programId = new PublicKey(PROGRAM_ID);
   else {
     const programKeypair = Keypair.fromSecretKey(Uint8Array.from(JSON.parse(readFileSync(keyPath, 'utf8'))));
