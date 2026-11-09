@@ -72,3 +72,13 @@ The launch form was checked in Chromium: the model choice, the fee presets at 3%
 - **Test stock pairs on V2.** The V2 card lists the network's test stocks (from the Pairs tab) with **Approve for V2**.
   The pair is approved at the same starting market cap as on Model 10: V2's virtual quote is 9/8 of Model 10's. The
   launch form offers stock pairs on V2, and holders of a stock-paired token are paid in that stock.
+
+## Model 11 retired for new launches (Malik, 9 November)
+
+V2 replaces Model 11.
+- **Removed:** the operator panel's Model 11 card (deploy, test-stock approvals), the `deploy-v4` and
+  `approve-v4-stock` wallet actions, and the Model 11 option in the launch form. A saved draft that chose Model 11
+  falls back to Model 10.
+- **Kept:** pinned Model 11 launchpads stay indexed, and their tokens keep their quotes, trades and fee payouts
+  through the Model 11 router.
+- **Kept on BNB testnet:** the test PoolManager card, because V2 deploys on top of it.

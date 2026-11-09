@@ -60,36 +60,14 @@ export function renderLaunchpads(ctx, { connect }) {
     if (!v4Available(net) || net.v4.poolManager) return null;
     const saved = savedTestPoolManager(net);
     return card('Test Uniswap v4 PoolManager',
-      h('p.small.muted', `${net.name} has no Uniswap v4 (Uniswap deployed it on BNB Chain mainnet only). Model 11 here runs on a test copy of Uniswap's own PoolManager: the published v4-core 1.0.2 contract, unchanged, owned by this wallet (which can only set protocol fees; they stay 0). Testnet only.`),
+      h('p.small.muted', `${net.name} has no Uniswap v4 (Uniswap deployed it on BNB Chain mainnet only). ELPIDA V2 here runs on a test copy of Uniswap's own PoolManager: the published v4-core 1.0.2 contract, unchanged, owned by this wallet (which can only set protocol fees; they stay 0). Testnet only.`),
       saved?.address ? h('div.stack', h('p.small', 'Deployed from this browser. Send it to be pinned with the launchpad below:'), h('pre.small.selectable', JSON.stringify({ poolManager: saved.address, block: saved.block }, null, 2)))
         : button('Deploy test PoolManager (1 confirmation)', 'deploy-v4-pool-manager', {}));
   }
 
-  // Test stocks as Model 11 pairs (6 November 2026): each is approved once, at its Model 10 starting price. While the
-  // issuer pauses a stock its pools stop trading, the fees stay held and the liquidity stays locked; both resume after.
-  function stockPairs(net) {
-    const box = h('div.stack', h('h3.small', 'Test stock pairs'), h('p.small.muted', 'Loading the test stocks on this network…'));
-    v4StockPairs(ctx.wallet).then(list => {
-      if (!list.length) { box.replaceChildren(h('h3.small', 'Test stock pairs'), h('p.small.muted', 'No test stock is approved on this network\u2019s Model 10 launchpad yet (Pairs tab).')); return; }
-      box.replaceChildren(h('h3.small', 'Test stock pairs'),
-        h('p.small.muted', 'A stock pair starts at the same price as on Model 10. If the issuer pauses the stock, its pools stop trading, fees stay held for their recipients and the liquidity stays locked; everything resumes when the stock moves again.'),
-        h('ul.plain', list.map(s => h('li', h('strong', s.symbol), ' ', h('span.mono.small.muted', short(s.address)), ' · ', s.approved ? h('span.small', 'Model 11 pair') : button(`Approve ${s.symbol} for Model 11`, 'approve-v4-stock', { asset: s.address })))));
-    }).catch(e => { box.replaceChildren(h('h3.small', 'Test stock pairs'), h('p.small.muted', errorText(e))); });
-    return box;
-  }
-
-  function v4Card(net) {
-    if (!v4Available(net)) return null;
-    if (!v4PoolManager(net)) return card('Model 11 test launchpad (Uniswap v4)', h('p.small.muted', 'Deploy the test PoolManager first; the launchpad is deployed on top of it.'));
-    const v4 = v4Deployment(net);
-    return card('Model 11 test launchpad (Uniswap v4)',
-      h('p.small.muted', 'Model 11 keeps the launch curve inside one Uniswap v4 pool, with its liquidity locked from the first trade. Trades go through the Elpida v4 router. Not audited: test networks only, and every Model 11 token says so.'),
-      v4?.pinned ? h('p.small.muted', 'Shared team launchpad: factory ', h('span.mono', short(v4.factory)), ', router ', h('span.mono', short(v4.router)), '.') : null,
-      v4 && !v4.pinned ? h('div.stack', h('p.small', 'Deployed from this browser. Send these addresses to be pinned in networks.mjs so the site lists its tokens for every visitor:'), h('pre.small.selectable', JSON.stringify({ factory: v4.factory, hook: v4.hook, router: v4.router, block: v4.block, ...(net.v4.poolManager ? {} : { poolManager: v4.poolManager }) }, null, 2))) : null,
-      !v4 ? button('Deploy Model 11 test launchpad (about 7 confirmations)', 'deploy-v4', {}) : null,
-      v4 ? stockPairs(net) : null,
-      !v4 ? h('p.small.muted', 'This wallet becomes its treasury. The hook address is found in this browser first (a few seconds): its last bits are its Uniswap v4 permissions. A step that fails or is rejected resumes where it stopped.') : null);
-  }
+  // Model 11 is retired for new launches (Malik, 9 November 2026): ELPIDA V2 is built on the same Uniswap v4 design and
+  // replaces it. Its pinned launchpads stay indexed, so tokens already launched on them keep trading and stay listed;
+  // nothing here deploys or approves anything for Model 11 any more.
 
   /** V2 test stock pairs: each test stock (Pairs tab) is approved once for V2, at its Model 10 starting market cap. */
   function v2StockList() {
@@ -129,7 +107,7 @@ export function renderLaunchpads(ctx, { connect }) {
     if (ctx.mode !== 'testnet' || !net) { root.replaceChildren(card('Launchpads', h('p.small.muted', 'Launchpads are per network. Switch to Base, Ethereum, BNB Chain or Robinhood Chain in Network and funds, then come back here.'))); return; }
     if (!w.address) { root.replaceChildren(card('Launchpads', h('p.small.muted', `Connect the operator wallet on ${net.name} to set up its launchpads.`), h('button.btn.btn-secondary', { type: 'button', on: { click: connect } }, 'Connect wallet'))); return; }
     const head = h('header.op-head', h('div', h('h1', h('span.op-net', chainIcon(net.key), `Launchpads · ${net.name}`)), h('p.small.muted', 'Deployments send from the connected wallet. Each one is pinned in networks.mjs before visitors use it.')));
-    root.replaceChildren(head, status, error, h('div.op-grid', ...[testDexCard(w, net), curveCard(w, net), poolManagerCard(net), v4Card(net), v2Card(net)].filter(Boolean)));
+    root.replaceChildren(head, status, error, h('div.op-grid', ...[testDexCard(w, net), curveCard(w, net), poolManagerCard(net), v2Card(net)].filter(Boolean)));
   }
   queueMicrotask(draw);
   return { root, update: draw };

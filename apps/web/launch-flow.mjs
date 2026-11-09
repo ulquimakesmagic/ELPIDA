@@ -13,7 +13,7 @@ import { PAIR_KINDS, PAIR_INFO, EQUITY_PROVIDERS, issuerNotice } from '/pairs.mj
 import { stockPicker, loadStockCatalog, stockCatalog } from './stock-picker.mjs';
 import { curveShape, DEX_MODEL, BETA_MODEL, BASE_FEE_BPS, LOCAL_START_FDV_USD } from '/curve-model.mjs';
 import { launchTierNotice } from './partner-labels.mjs';
-import { v4Deployment, v2Deployment } from './v4-launchpad.mjs';
+import { v2Deployment } from './v4-launchpad.mjs';
 import { splitPreview } from './v2-launchpad.mjs';
 import { V2, V2_MODEL } from '/v2-economics.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
@@ -39,6 +39,7 @@ const blankDraft = () => ({ name: '', symbol: '', description: '', image: '', im
 export function renderLaunch(ctx) {
   const draft = { ...blankDraft(), ...(storage.get(DRAFT_KEY) ?? {}) };
   if (draft.quoteToken && !draft.quoteAsset) draft.quoteAsset = draft.quoteToken; // drafts saved before pair kinds
+  if (draft.launchModel === 'v11') draft.launchModel = 'v10'; // Model 11 drafts, from before it was retired (9 Nov 2026)
   if (!PAIR_KINDS.includes(draft.pair)) { draft.pair = 'native'; draft.quoteAsset = ''; draft.firstBuy = '0.01'; } // drafts from the USDC era
   delete draft.quoteToken;
   draft.chain = ctx.currentChain();
@@ -129,7 +130,8 @@ export function renderLaunch(ctx) {
     return c?.pending ? `${number(c.pending, 6)} ${pairSymbol()} (converted earlier)` : `${number(draft.nativeBuy, 6)} ${nativeSymbol()} → ${c ? `about ${number(c.output, 6)}` : '…'} ${pairSymbol()}`;
   };
   // Model 11 (Uniswap v4 hook) is offered where its test launchpad exists; it pairs with the native coin or USDC.
-  const v4Offered = () => !!draft.chain && draft.chain !== 'local' && !solana() && !!v4Deployment(net());
+  // Model 11 is retired for new launches (Malik, 9 November 2026): ELPIDA V2 replaces it. Its tokens keep trading.
+  const v4Offered = () => false;
   const v4Chosen = () => draft.launchModel === 'v11' && v4Offered();
   // ELPIDA V2 is offered where its test launchpad exists: the creator's own fee, the five-way split, native or USDC pairs.
   const v2Offered = () => !!draft.chain && draft.chain !== 'local' && !solana() && !!v2Deployment(net());
