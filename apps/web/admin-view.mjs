@@ -120,6 +120,20 @@ export function renderAdmin(ctx, { connect }) {
       b.lastError ? ['Last error', h('small.muted', String(b.lastError))] : null,
     ]));
 
+    // ELPIDA V2 keepers: EVM chains and Solana. A keeper that is off says why (no key, waiting for setup, mainnet).
+    const k = d.keepers ?? {}, ks = k.solana ?? {};
+    const keeperState = state => pill(state === 'running' ? 'ok' : state === 'error' || state === 'invalid_key' ? 'bad' : 'warn',
+      ({ running: 'running', not_configured: 'no key set', invalid_key: 'key unreadable', waiting_for_v2_setup: 'waiting for V2 setup', waiting_for_v2_deployment: 'waiting for V2 deployment', mainnet_needs_approval: 'mainnet needs approval' })[state] ?? (state || 'unknown'));
+    const lastRun = runs => (runs?.length ? h('small.muted', ` last ${runs[0].job} ${runs[0].status} ${ago(runs[0].at * 1000)}`) : h('small.muted', ' no jobs yet'));
+    const evmChains = k.evm?.chains ?? [];
+    const keepers = k.evm || k.solana ? card('V2 keepers', kv([
+      ks.network ? [h('span.op-net', chainIcon(ks.network), ks.name ?? ks.network), h('span', keeperState(ks.state),
+        ks.address ? h('span.mono', ` ${short(ks.address)}`) : null, ks.balance != null ? ` · ${number(ks.balance, 3)} SOL` : '',
+        ks.state === 'running' ? lastRun(ks.runs) : null)] : null,
+      ...(evmChains.length ? evmChains.map(c => [h('span.op-net', chainIcon(c.chain), c.chain), h('span', keeperState('running'), c.keeper ? h('span.mono', ` ${short(c.keeper)}`) : null, lastRun(c.runs))])
+        : [['EVM chains', h('span', keeperState(k.evm?.state ?? 'not_configured'))]]),
+    ])) : null;
+
     const priceRows = Object.entries(d.prices ?? {}).filter(([, p]) => p && typeof p === 'object' && p.symbol);
     const prices = priceRows.length ? card('Price references', kv(priceRows.map(([key, p]) => [h('span.op-net', chainIcon(key), `${key} · ${p.symbol}`),
       h('span', pill(p.status === 'fresh' ? 'ok' : p.status === 'stale' ? 'warn' : 'bad', p.status ?? 'unknown'), p.usd != null ? ` ${usd(p.usd)}` : '', h('small.muted', ` ${p.source ?? ''}${p.updatedAt ? ` · ${ago(p.updatedAt * 1000)}` : ''}`))]))) : null;
@@ -132,7 +146,7 @@ export function renderAdmin(ctx, { connect }) {
       banner, strip,
       h('div.op-grid', treasury, nets),
       h('div.op-grid.op-grid-3', relay, graduation, backup),
-      prices);
+      keepers, prices);
   }
 
   async function load() {
