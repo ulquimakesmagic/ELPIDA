@@ -41,7 +41,12 @@ test('each missing safety setting is its own error', () => {
     assert.deepEqual(codes(productionGuard({ env, solana: mainnet() })), [code], name);
   }
   assert.deepEqual(codes(productionGuard({ env: { ...goodEnv(), SOLANA_RPC_URL: 'http://127.0.0.1:8899' }, solana: mainnet() })), ['solana_rpc_local']);
-  assert.deepEqual(codes(productionGuard({ env: { ...goodEnv(), SOLANA_RPC_URL: 'https://a.example, https://b.example' }, solana: mainnet() })), ['solana_rpc_missing']);
+  // The rotator: several endpoints are fine (in SOLANA_RPC_URL or SOLANA_RPC_URLS); an entry that is not one HTTPS URL is not.
+  assert.deepEqual(codes(productionGuard({ env: { ...goodEnv(), SOLANA_RPC_URL: 'https://a.example, https://b.example' }, solana: mainnet() })), []);
+  assert.deepEqual(codes(productionGuard({ env: { ...goodEnv(), SOLANA_RPC_URL: undefined, SOLANA_RPC_URLS: 'https://a.example/?api-key=1\nhttps://b.example/?api-key=2' }, solana: mainnet() })), []);
+  const bad = productionGuard({ env: { ...goodEnv(), SOLANA_RPC_URLS: 'http://plain.example/?api-key=LEAK' }, solana: mainnet() });
+  assert.deepEqual(codes(bad), ['solana_rpc_invalid']);
+  assert.doesNotMatch(JSON.stringify(bad), /LEAK/, 'a rejected entry is never echoed');
   assert.deepEqual(codes(productionGuard({ env: { ...goodEnv(), ELPIDA_PUBLIC_URL: 'http://elpida.fun' }, solana: mainnet() })), ['public_url_invalid']);
   const dataDir = goodEnv(); delete dataDir.RAILWAY_VOLUME_MOUNT_PATH; dataDir.ELPIDA_DATA_DIR = '/srv/elpida';
   assert.equal(productionGuard({ env: dataDir, solana: mainnet() }).ok, true, 'an explicit data directory counts as durable');
