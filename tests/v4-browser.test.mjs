@@ -45,12 +45,15 @@ test('the page mines the same hook salt as the test fixture and only on networks
   const v4 = { poolManager: '0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408', shared: null };
   assert.equal(v4Available({ key: 'base-sepolia', v4 }), true);
   assert.equal(v4Available({ key: 'base-sepolia', v4, mainnet: true }), false, 'never on mainnet');
-  assert.equal(v4Available({ key: 'robinhood-testnet', v4 }), false, 'no Model 11 on Robinhood testnet');
+  assert.equal(v4Available({ key: 'robinhood-testnet', v4: { poolManager: null, testPoolManager: true, shared: null } }), true, 'Robinhood testnet, on a test PoolManager (V2)');
+  assert.equal(v4Available({ key: 'robinhood-testnet', v4: undefined }), false, 'not without the v4 entry');
+  assert.equal(v4Available({ key: 'unknown-testnet', v4 }), false, 'only listed networks');
   assert.equal(v4Available({ key: 'bnb-testnet', v4: { poolManager: null, testPoolManager: true, shared: null } }), true, 'BNB testnet, on a test PoolManager');
   assert.equal(v4Deployment({ key: 'base-sepolia', chainId: 1, v4: { ...v4, shared: { factory: '0x1', hook: '0x2', router: '0x3', block: 9 } } }).pinned, true);
   assert.equal(isV4Token({ deploymentModel: V4_MODEL }), true); assert.equal(isV4Token({ deploymentModel: 'curve-dex-v10' }), false);
   const { testnets } = await import('../packages/core/networks.mjs');
   for (const key of ['base-sepolia', 'ethereum-sepolia']) assert.match(testnets.find(n => n.key === key).v4.poolManager, /^0x[0-9a-fA-F]{40}$/);
+  { const rh = testnets.find(n => n.key === 'robinhood-testnet'); assert.equal(rh.v4.testPoolManager, true); assert.match(rh.v4.poolManager, /^0x[0-9a-fA-F]{40}$/, 'the test PoolManager Malik deployed is pinned'); assert.equal(rh.v4.shared, null, 'no Model 11 there'); }
 });
 
 test('owner deploys the Model 11 test launchpad from the browser, then a creator launches, buys and sells through it', async t => {

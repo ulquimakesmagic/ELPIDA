@@ -55,12 +55,13 @@ export function renderLaunchpads(ctx, { connect }) {
       !done ? (relay?.address ? button(saved ? 'Finish the test DEX setup' : 'Set up test DEX and price feed (6 confirmations)', 'deploy-test-dex', {}) : h('p.small.muted', 'The server price relay is not configured yet, so the price feed cannot be deployed.')) : null);
   }
 
-  // BNB Chain testnet has no Uniswap v4: a labelled test copy of Uniswap's own PoolManager comes first.
+  // Test networks without Uniswap v4 (BNB Chain and Robinhood Chain testnets): a labelled test copy of Uniswap's own
+  // PoolManager comes first.
   function poolManagerCard(net) {
     if (!v4Available(net) || net.v4.poolManager) return null;
     const saved = savedTestPoolManager(net);
     return card('Test Uniswap v4 PoolManager',
-      h('p.small.muted', `${net.name} has no Uniswap v4 (Uniswap deployed it on BNB Chain mainnet only). ELPIDA V2 here runs on a test copy of Uniswap's own PoolManager: the published v4-core 1.0.2 contract, unchanged, owned by this wallet (which can only set protocol fees; they stay 0). Testnet only.`),
+      h('p.small.muted', `${net.name} has no Uniswap v4. ELPIDA V2 here runs on a test copy of Uniswap's own PoolManager: the published v4-core 1.0.2 contract, unchanged, owned by this wallet (which can only set protocol fees; they stay 0). Testnet only.`),
       saved?.address ? h('div.stack', h('p.small', 'Deployed from this browser. Send it to be pinned with the launchpad below:'), h('pre.small.selectable', JSON.stringify({ poolManager: saved.address, block: saved.block }, null, 2)))
         : button('Deploy test PoolManager (1 confirmation)', 'deploy-v4-pool-manager', {}));
   }
