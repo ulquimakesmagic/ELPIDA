@@ -1,5 +1,5 @@
 import { nowSeconds } from './clock.mjs';
-import { createElpidaSolana, quoteBuy, quoteSell, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, tradeFeeBps, lockedPoolVenue, mintControls, testConversionOut, decodeTestConversion, STATUS_TRADING, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut, VENUE_RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, raydiumQuote, raydiumCreationCost, raydiumBuybackAmount } from '/elpida-solana.mjs';
+import { createElpidaSolana, ownFeeBps, validV2Symbol, V2, quoteBuy, quoteSell, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, tradeFeeBps, lockedPoolVenue, mintControls, testConversionOut, decodeTestConversion, STATUS_TRADING, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut, VENUE_RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, raydiumQuote, raydiumCreationCost, raydiumBuybackAmount } from '/elpida-solana.mjs';
 import {normalizeMetadata,withSavedMetadata} from './metadata.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 import { PAIR_LIMITS, SOLANA_LAUNCH_KINDS, usdReferenceFor } from '/pairs.mjs';
@@ -110,13 +110,17 @@ export class SolanaWallet {
     const listed = (Array.isArray(this.deployment.pairs) && this.deployment.pairs.length ? this.deployment.pairs : [
       { kind: 'native', key: 'sol', symbol: 'SOL', name: 'SOL (wrapped automatically)', config: c.configFor(new web3.PublicKey(WSOL_MINT)).toBase58() },
     ]);
-    const infos = await this.connection.getMultipleAccountsInfo(listed.map(p => new web3.PublicKey(p.config)));
+    // ELPIDA V2 SOL pair (docs/V2_0_SOLANA.md), when the deploy set it up: launched with `launch_v2`, never a Model 10 pick.
+    const v2 = this.deployment.v2?.config ? [{ kind: 'native', key: 'sol-v2', symbol: 'SOL', name: 'SOL (wrapped automatically)', config: this.deployment.v2.config, v2: true }] : [];
+    const listedAll = [...listed, ...v2];
+    const infos = await this.connection.getMultipleAccountsInfo(listedAll.map(p => new web3.PublicKey(p.config)));
     this.configs = new Map();
-    listed.forEach((p, i) => {
+    listedAll.forEach((p, i) => {
       const info = infos[i];
       if (!info?.owner.equals(c.programId)) return;
       const config = { address: new web3.PublicKey(p.config), ...c.decodeConfig(info.data), symbol: p.symbol, name: p.name ?? p.symbol, kind: p.kind, key: p.key, test: !!p.test, faucet: p.faucet ?? null };
-      if (config.modelVersion !== 3) return;
+      if (config.modelVersion !== (p.v2 ? V2.modelVersion : 3)) return;
+      config.v2 = !!p.v2;
       config.wsol = config.quoteMint.toBase58() === WSOL_MINT;
       this.configs.set(p.config, config);
     });
@@ -125,7 +129,7 @@ export class SolanaWallet {
     // Issuer-controlled quotes (Ondo stocks) complete into the program's own locked pool, in the completing buy.
     [...this.configs.values()].forEach((cfg, i) => { cfg.quoteTokenProgram = mints[i]?.owner ?? c.tokenProgram; cfg.lockedPool = lockedPoolVenue(mints[i]?.data, mints[i]?.owner?.toBase58()); cfg.controls = mintControls(mints[i]?.data, mints[i]?.owner?.toBase58(), b => new web3.PublicKey(b).toBase58()); });
     const all = [...this.configs.values()];
-    const launch = all.find(cfg => cfg.kind === 'native') ?? all[0];
+    const launch = all.find(cfg => cfg.kind === 'native' && !cfg.v2) ?? all[0];
     this.programConfig = launch; this.decimals = launch.quoteDecimals;
     return launch;
   }
@@ -190,7 +194,7 @@ export class SolanaWallet {
   }
   /** Launchable trading assets by kind, the same structure as every other network (packages/core/pairs.mjs). */
   pairOptions() {
-    const all = [...(this.configs?.values() ?? [])];
+    const all = [...(this.configs?.values() ?? [])].filter(cfg => !cfg.v2);
     const asset = cfg => {
       const d = cfg.quoteDecimals, id = cfg.address.toBase58();
       // The creation fee is always lamports (SOL), whatever the pair.
@@ -287,7 +291,7 @@ export class SolanaWallet {
       const complete = pool.status === STATUS_GRADUATED || pool.status === STATUS_MIGRATED || pool.status === STATUS_LOCKED;
       const feeBps = tradeFeeBps(config, pool, now);
       // Cost to finish the curve at the base fee (what it costs once the anti-snipe minute is over).
-      const remainingBuy = complete ? 0n : quoteBuy(pool, MAX_U64, config.baseFeeBps, config.baseFeeBps).gross;
+      const remainingBuy = complete ? 0n : quoteBuy(pool, MAX_U64, ownFeeBps(config, pool), ownFeeBps(config, pool)).gross;
       const token = {
         address, pool: pool.pubkey.toBase58(), name: pool.name, symbol: pool.symbol, creator: pool.creator.toBase58(), reward: pool.reward.toBase58(),
         created: Number(pool.createdAt)*1000, metadata:await readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair: config.kind ?? 'native', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: this.venueOf(config), usdReference: config.wsol ? this.price : config.usdReference ?? usdReferenceFor({ pair: config.kind ?? 'native' }, null),
@@ -295,9 +299,9 @@ export class SolanaWallet {
         sold: formatAmount(pool.sold, TOKEN_DECIMALS), circulatingSupply: formatAmount(pool.sold, TOKEN_DECIMALS), saleCap: formatAmount(pool.curveSupply, TOKEN_DECIMALS),
         supply: formatAmount(TOKEN_SUPPLY, TOKEN_DECIMALS), balance: formatAmount(this.client.tokenAmount(holdings[index]?.data), TOKEN_DECIMALS),
         spotPrice: stats.price, marketCap: stats.marketCap, progress: stats.progress, remainingBuy: formatAmount(remainingBuy, d),
-        feeBps: Number(feeBps), antiSnipeActive: !complete && feeBps > BigInt(config.baseFeeBps),
+        feeBps: Number(feeBps), antiSnipeActive: !complete && feeBps > BigInt(ownFeeBps(config, pool)),
         // Live anti-snipe schedule for the trade panel's fee window countdown.
-        launchedAt: Number(pool.createdAt), feeSchedule: { base: Number(config.baseFeeBps), start: Number(config.snipeStartBps), window: Number(config.snipeWindowSecs) },
+        launchedAt: Number(pool.createdAt), feeSchedule: { base: Number(ownFeeBps(config, pool)), start: Number(config.snipeStartBps), window: Number(config.snipeWindowSecs) },
         // `complete`: the curve sold out; `graduated`: its liquidity is now in the locked PumpSwap pool.
         complete, graduated: pool.status === STATUS_MIGRATED || pool.status === STATUS_LOCKED, lockedPool: pool.status === STATUS_LOCKED, completedAt: Number(pool.graduatedAt),
         protocolFees: formatAmount(pool.protocolFees, d), creatorFees: formatAmount(pool.creatorFees, d), liquidityLocked: true,
@@ -430,12 +434,12 @@ export class SolanaWallet {
       const converted = testConversionOut(conv.solReserve, conv.quoteReserve, lamports);
       if (!converted) throw new Error('Amount too small or too large for the conversion pool.');
       // 1% below the quoted conversion: the trade spends exactly this much stock; any extra stays in the wallet.
-      const pairAmount = converted * 99n / 100n, q = quoteBuy(pool, pairAmount, feeBps, config.baseFeeBps);
+      const pairAmount = converted * 99n / 100n, q = quoteBuy(pool, pairAmount, feeBps, ownFeeBps(config, pool));
       if (q.graduates && !config.lockedPool) throw new Error('This buy would complete the curve. Pay in the stock to complete it.');
       if (q.tokens <= 0n) throw new Error('Trade amount is too small.');
       return { token, side, amount, lamports: String(lamports), pairAmount: String(q.gross), minimum: String(q.tokens * 99n / 100n), output: formatAmount(q.tokens, TOKEN_DECIMALS), quotedAt: Date.now(), via: `${config.symbol} conversion pool` };
     }
-    const tokensIn = parseAmount(amount, TOKEN_DECIMALS), q = quoteSell(pool, tokensIn, feeBps, config.baseFeeBps);
+    const tokensIn = parseAmount(amount, TOKEN_DECIMALS), q = quoteSell(pool, tokensIn, feeBps, ownFeeBps(config, pool));
     const pairAmount = q.net * 99n / 100n, solOut = testConversionOut(conv.quoteReserve, conv.solReserve, pairAmount);
     if (!solOut) throw new Error('Amount too small or too large for the conversion pool.');
     return { token, side, amount, pairAmount: String(pairAmount), minimum: String(solOut * 99n / 100n), output: formatAmount(solOut, 9), quotedAt: Date.now(), via: `${config.symbol} conversion pool`, pairDecimals: d };
@@ -522,12 +526,12 @@ export class SolanaWallet {
         : { out: formatAmount(q.out, d), fee: formatAmount(q.fee, d), venue: 'PumpSwap' };
     }
     const feeBps = tradeFeeBps(config, pool, chainNow());
-    const extra = { feeBps: Number(feeBps), antiSnipeActive: feeBps > BigInt(config.baseFeeBps) };
+    const extra = { feeBps: Number(feeBps), antiSnipeActive: feeBps > BigInt(ownFeeBps(config, pool)) };
     if (side === 'buy') {
-      const q = quoteBuy(pool, parseAmount(amount, d), feeBps, config.baseFeeBps);
+      const q = quoteBuy(pool, parseAmount(amount, d), feeBps, ownFeeBps(config, pool));
       return { ...extra, out: formatAmount(q.tokens, TOKEN_DECIMALS), fee: formatAmount(q.fee, d), antiSnipeFee: formatAmount(q.antiSnipeFee, d), spend: formatAmount(q.gross, d), completesCurve: q.graduates };
     }
-    const q = quoteSell(pool, parseAmount(amount, TOKEN_DECIMALS), feeBps, config.baseFeeBps);
+    const q = quoteSell(pool, parseAmount(amount, TOKEN_DECIMALS), feeBps, ownFeeBps(config, pool));
     return { ...extra, out: formatAmount(q.net, d), fee: formatAmount(q.fee, d), antiSnipeFee: formatAmount(q.antiSnipeFee, d) };
   }
   // Wallet signs first, then any extra signer (the new mint keypair), as Phantom recommends.
@@ -620,17 +624,22 @@ export class SolanaWallet {
       const options = this.pairOptions()[kind];
       if (!options) throw new Error('Choose a trading pair.');
       if (!options.assets.length) throw new Error(options.unavailable);
-      config = this.configs.get(String(body.quoteAsset ?? '')) ?? this.configs.get(options.assets[0].id);
+      // ELPIDA V2 (SOL pair only on Solana): the creator's own fee, a 3% first-buy cap, any-case tickers.
+      const v2Launch = body.model === 'v2-hook';
+      config = v2Launch ? [...this.configs.values()].find(cfg => cfg.v2) : this.configs.get(String(body.quoteAsset ?? '')) ?? this.configs.get(options.assets[0].id);
+      if (v2Launch && (!config || kind !== 'native')) throw new Error(config ? 'ELPIDA V2 on Solana pairs with SOL.' : `ELPIDA V2 is not set up on ${this.net.name} yet.`);
       if (config.kind !== kind) throw new Error('Choose an asset for this trading pair.');
+      const v2Fee = v2Launch ? Number(body.feeBps ?? V2.defaultFeeBps) : null;
+      if (v2Launch && !(Number.isInteger(v2Fee) && v2Fee >= config.baseFeeBps && v2Fee <= V2.maxFeeBps)) throw new Error(`Choose a trading fee from ${(config.baseFeeBps / 100).toFixed(2)}% to 4.00%.`);
       d = config.quoteDecimals; refs = this.refsOf(config);
       const metadata=normalizeMetadata(body);
-      const name = String(body.name ?? '').trim(), symbol = String(body.symbol ?? '').trim().toUpperCase();
-      if (!name || new TextEncoder().encode(name).length > 32 || !/^[A-Z0-9]{1,10}$/.test(symbol)) throw new Error('Use a name up to 32 characters and a symbol of 1–10 letters or numbers.');
+      const name = String(body.name ?? '').trim(), symbol = v2Launch ? String(body.symbol ?? '').trim() : String(body.symbol ?? '').trim().toUpperCase();
+      if (!name || new TextEncoder().encode(name).length > 32 || !(v2Launch ? validV2Symbol(symbol) : /^[A-Z0-9]{1,10}$/.test(symbol))) throw new Error('Use a name up to 32 characters and a symbol of 1–10 letters or numbers.');
       // First purchase paid in SOL (stock pairs, test networks): SOL is converted into the stock in its own
       // transaction first, then the launch spends exactly what arrived. A conversion whose launch then failed is
       // remembered in this browser and reused, so SOL is never converted twice.
       const payNative = body.firstBuyPayment === 'native' && Number(body.nativeBuy) > 0;
-      if (payNative && (config.kind !== 'xstock' || this.net.mainnet)) throw new Error(this.net.mainnet ? this.conversionUnavailable(config) : 'Paying the first purchase in SOL is for stock pairs.');
+      if (payNative && (v2Launch || config.kind !== 'xstock' || this.net.mainnet)) throw new Error(this.net.mainnet ? this.conversionUnavailable(config) : 'Paying the first purchase in SOL is for stock pairs.');
       const ckey = `elpida:launch-conversion:v1:${this.net.key}:${this.deployment.programId}:${this.address}:${config.quoteMint.toBase58()}`;
       const pending = payNative ? pendingConversion(localStorage, ckey) : null, nativeLamports = payNative && pending === null ? parseAmount(String(body.nativeBuy), 9) : 0n;
       let conv = null;
@@ -651,7 +660,9 @@ export class SolanaWallet {
       const maxFee = inUsdc ? 0n : terms.fee * 101n / 100n + 1n;
       const fresh = { virtualQuote: terms.virtualQuote, virtualToken: config.virtualToken, curveSupply: config.curveSupply, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 };
       // The creator's first buy pays only the base fee (no anti-snipe tax); a buy beyond the curve is capped.
-      let q = firstBuy===0n ? {tokens:0n,gross:0n,fee:0n} : quoteBuy(fresh, firstBuy, config.baseFeeBps, config.baseFeeBps);
+      const launchFee = v2Launch ? v2Fee : config.baseFeeBps;
+      let q = firstBuy===0n ? {tokens:0n,gross:0n,fee:0n} : quoteBuy(fresh, firstBuy, launchFee, launchFee);
+      if (v2Launch && q.tokens * 10_000n > TOKEN_SUPPLY * BigInt(V2.firstBuyCapBps)) throw new Error('A first buy can receive at most 3% of the supply (30,000,000 tokens). Reduce your first purchase. Nothing was submitted.');
       // The buy that completes a curve also opens its PumpSwap pool in the same transaction, so a curve is never left
       // closed. That does not fit inside a launch transaction, so a creator buy cannot take the whole curve.
       // Stock pairs open their locked pool inside the launch itself, so a creator buy may complete their curve.
@@ -703,7 +714,9 @@ export class SolanaWallet {
       const signature = await this.sendInstructions([
         this.client.computeBudget(),
         ...await this.wrapFor(config, q.gross),
-        this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, legacy: !withMetadata, partnerTiers, priceUpdate: terms.priceFeed, maxFee, usdc }),
+        v2Launch
+          ? this.client.launchV2({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, feeBps: v2Fee, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, priceUpdate: terms.priceFeed, maxFee, usdc })
+          : this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, legacy: !withMetadata, partnerTiers, priceUpdate: terms.priceFeed, maxFee, usdc }),
         ...(config.wsol ? [this.client.unwrapSol(this.publicKey)] : []),
       ], remote ? [] : [mint], `Confirm your token launch in your wallet ($10 fee: ${inUsdc ? `${formatAmount(terms.usdcFee, 6)} USDC` : `${formatAmount(terms.fee, 9)} SOL, at most ${formatAmount(maxFee, 9)} SOL`})…`, remote ? [remote] : []);
       if (payNative) try { localStorage.removeItem(ckey); } catch {}
@@ -770,7 +783,7 @@ export class SolanaWallet {
     const feeBps = tradeFeeBps(config, pool, chainNow());
     if (action === 'buy') {
       const grossIn = parseAmount(body.amount, d);
-      const q = quoteBuy(pool, grossIn, feeBps, config.baseFeeBps);
+      const q = quoteBuy(pool, grossIn, feeBps, ownFeeBps(config, pool));
       const held = await this.quoteBalance(this.publicKey, config);
       if (held < q.gross + (config.wsol ? 5_000_000n : 0n)) throw new Error(`Not enough ${config.symbol} on ${this.net.name}.${config.test ? ' It is a test asset with no value; pay in SOL instead from the currency menu where offered.' : config.wsol ? ' Get devnet SOL at faucet.solana.com.' : ''}`);
       // Only what the trade actually charges is wrapped; a partial final fill leaves the rest unspent.
@@ -780,7 +793,7 @@ export class SolanaWallet {
       instruction = [...wrap, buyIx];
     } else if (action === 'sell') {
       const tokensIn = parseAmount(body.amount, TOKEN_DECIMALS);
-      const q = quoteSell(pool, tokensIn, feeBps, config.baseFeeBps);
+      const q = quoteSell(pool, tokensIn, feeBps, ownFeeBps(config, pool));
       instruction = [this.client.sell({ seller: this.publicKey, config: refs, mint, tokensIn, minQuoteOut: q.net * (10000n - bps) / 10000n })];
     } else throw new Error('Unknown action.');
     // SOL pairs: close the wrapped-SOL account afterwards so proceeds and change arrive as plain SOL.

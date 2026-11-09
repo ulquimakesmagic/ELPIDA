@@ -23,7 +23,7 @@ export const POOL_SIZE_V2 = POOL_SIZE_PARTNER + V2_EXT_LEN;
 export const POOL_SIZES = [POOL_SIZE, POOL_SIZE_PARTNER, POOL_SIZE_V2];
 /** ELPIDA V2 on Solana (contracts/solana, `launch_v2`): the same split, fee range, anti-snipe and cap as on EVM. */
 export const V2_MODEL_VERSION = 4;
-export const V2 = Object.freeze({ maxFeeBps: 400, defaultFeeBps: 125, mainnetMinFeeBps: 100, firstBuyCapBps: 300, snipeStartBps: 9_000, snipeWindowSecs: 60,
+export const V2 = Object.freeze({ modelVersion: 4, maxFeeBps: 400, defaultFeeBps: 125, mainnetMinFeeBps: 100, firstBuyCapBps: 300, snipeStartBps: 9_000, snipeWindowSecs: 60,
   split: Object.freeze([3_000, 3_000, 1_000, 1_000, 2_000]), recipients: Object.freeze(['creator', 'traderAirdrop', 'flywheel', 'holderRewards', 'treasury']) });
 /** `withdraw_v2_fees` may create up to four associated accounts and makes five transfers. */
 export const V2_WITHDRAW_COMPUTE_UNITS = 400_000;
@@ -396,8 +396,12 @@ export function virtualQuoteForFdv(startFdvUsdE6, oracle, virtualToken) {
 
 /** Mirrors `trade_fee_bps`: the anti-snipe schedule on the curve, the flat base fee in a locked pool. */
 export function tradeFeeBps(config, pool, now) {
+  // ELPIDA V2 pools: 90% at launch down to the token's own fee over 60 s (`v2_fee_bps`).
+  if (pool.v2) return BigInt(v2FeeBps(pool.v2.feeBps, Number(BigInt(now) - BigInt(pool.createdAt))));
   return pool.status === STATUS_LOCKED ? BigInt(config.baseFeeBps) : currentFeeBps(config, pool.createdAt, now);
 }
+/** The fee a pool charges once the anti-snipe window is over: the token's own fee for V2 pools, else the pair's base fee. */
+export const ownFeeBps = (config, pool) => (pool?.v2 ? pool.v2.feeBps : config.baseFeeBps);
 
 /** Mirrors `current_fee_bps`: linear decay from the snipe fee at launch to the base fee. Times in seconds. */
 export function currentFeeBps(config, createdAt, now) {

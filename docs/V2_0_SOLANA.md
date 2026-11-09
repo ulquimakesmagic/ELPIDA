@@ -14,8 +14,9 @@ Not audited. Test networks first; mainnet only with Malik's explicit approval.
 | S1 | V2 pairs, `launch_v2`, the token's own fee, anti-snipe to liquidity, the five-way fee ledger, `withdraw_v2_fees` | Done |
 | S2 | Five-way harvest of graduated-pool (Raydium / PumpSwap) fees for V2 pools | Done |
 | S3 | Trader airdrop and holder reward rounds (Merkle claims) and the flywheel buy-and-burn, from the vault PDAs | Done |
-| S4 | Server keeper (Solana key), indexers, launch flow, token pages, unified rewards on the analytics page | Later |
-| S5 | Malik upgrades devnet; the site pins the V2 pairs | Later |
+| S4a | Deploy script `--v2 --keeper` (V2 SOL pair with USD pricing, distributors), keeper key script, launch page and trading for Solana V2 | This PR |
+| S4b | Server keeper on Solana (fee payouts, harvests, sweeps, rounds, flywheel), indexer and analytics | Next |
+| S5 | Malik upgrades devnet and runs the V2 setup (docs/HUMAN_ACTIONS.md); the flywheel is checked on devnet | After S4a |
 
 ## S1: what the program does
 
@@ -79,6 +80,18 @@ Not audited. Test networks first; mainnet only with Malik's explicit approval.
   the vault, one order per token every 6 hours (`["v2-fly", mint]`), and a curve order may not complete the curve. Curve
   orders pay the token's fee like any buy; Raydium orders swap through the locked pool with `min_out`. Event
   `V2BoughtAndBurned`. PumpSwap pairs (non-SOL) have no flywheel route yet.
+
+## S4a: setting it up, and launching from the site
+
+- `npm run solana:deploy -- --v2 --keeper <address>` (with `--upgrade` for the upgrade itself) runs
+  `packages/solana/v2-setup.mjs`: the V2 SOL pair (`add_v2_config`; 1.00% minimum, ×5 curve, 3% cap, 90% over 60 s),
+  USD pricing on it (the $10 fee; starting market cap $50 on test clusters, $20,000 on mainnet), and the two
+  distributors (airdrop: calendar months from the first of the current month; holders: weekly from today, UTC), run by
+  the keeper. Idempotent; recorded as `v2` in `deployments/solana-<cluster>.json`, which the server serves to the site.
+- `node scripts/solana-keeper-key.mjs` creates the keeper key in `local-data` (git-ignored) and prints only its address.
+- The launch page offers "ELPIDA V2 test · your fee" on Solana when the deployment has `v2`: SOL pair, the fee selector
+  (pair minimum to 4%), the 3% first-buy cap, any-case tickers, and Raydium graduation in the copy. Trading quotes on V2
+  pools use the token's own fee (`tradeFeeBps`, `ownFeeBps`).
 
 ## Errors added
 
