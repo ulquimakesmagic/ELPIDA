@@ -24,7 +24,8 @@ import {
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { buildSolanaRound, verifySolanaProof } from '../packages/solana/v2-rounds.mjs';
 import { ensureV2, v2Genesis, v2SolParams } from '../packages/solana/v2-setup.mjs';
-import { SolanaV2Keeper, configuredSolanaV2Keeper } from '../apps/api/v2-keeper-solana.mjs';
+import { SolanaV2Keeper, configuredSolanaV2Keeper, snapshotHolderRound } from '../apps/api/v2-keeper-solana.mjs';
+import { airdropRound } from '../packages/core/v2-keeper-plan.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
 import { vaultUpgrade, vaultHandBack, closeProgram, readProgramData } from '../scripts/squads-devnet-trial.mjs';
 import { deployProgram, upgradeProgram, ensurePairConfigs, pricingUpdates, ensurePricing, ensureBetaGate, rejectsTestInstructions, prepareUpgradeBuffer, transferUpgradeAuthority, send, airdrop } from '../packages/solana/deploy.mjs';
@@ -1659,6 +1660,7 @@ async function afterV2Window(mint) {
 
 test('Solana V2 rewards (S3): Merkle rounds paid once per leaf, funded rounds only, expiry back to the pool, SOL paid natively; flywheel guards', { skip: raySkip }, async () => {
   const kind = V2_DIST.airdrop, wsol = new PublicKey(WSOL_MINT), keeper = Keypair.generate();
+  f.v2Operator = keeper;
   await airdrop(f.connection, keeper.publicKey, 5 * web3.LAMPORTS_PER_SOL);
   const today = Math.floor((await f.connection.getBlockTime(await f.connection.getSlot('confirmed'))) / 86_400) * 86_400;
   // Daily rounds that started 20 days ago: round 0 ended long ago and is already past its 12-round claim window.
@@ -1761,4 +1763,36 @@ test('Solana V2 keeper (step 4b): pays owed fees, harvests quietly, sweeps vault
   assert.equal(configuredSolanaV2Keeper({ env: { ELPIDA_V2_KEEPER_SOLANA_KEY: key }, net: { deployment: { programId: deployment.programId } }, connection: f.connection }).status().state, 'waiting_for_v2_setup');
   assert.equal(configuredSolanaV2Keeper({ env: { ELPIDA_V2_KEEPER_SOLANA_KEY: key }, net: { mainnet: true, deployment }, connection: f.connection }).status().state, 'mainnet_needs_approval');
   assert.equal(configuredSolanaV2Keeper({ env: { ELPIDA_V2_KEEPER_SOLANA_KEY: key }, net: { deployment }, connection: f.connection, path: ':memory:' }).enabled, true);
+});
+
+test('Solana V2 rounds (step 4b-2): plans keep base58 addresses, holders need two snapshots, and the keeper posts and pays a round in SOL', { skip: raySkip }, async () => {
+  // Plans: Solana addresses are case-sensitive and must survive the shared planners unchanged.
+  const [a, b, c] = Array.from({ length: 3 }, () => Keypair.generate().publicKey.toBase58());
+  const day = 86_400, start = 1_800_000_000 - (1_800_000_000 % day), end = start + 30 * day;
+  const trades = [a, b].flatMap(w => [0, 2].map(d => ({ timestamp: start + d * day + 60, account: w, token: 'T', feeRaw: 50_000_000n, quoteDecimals: 9, asset: WSOL_MINT, quoteAmount: '5', quoteUsd: 50 })));
+  const plan = airdropRound({ trades, start, end, usdPerUnit: () => 10, firstSeen: () => start - 30 * day, pools: { [WSOL_MINT]: 1_000_000_000n } });
+  assert.deepEqual([...plan.byAsset[WSOL_MINT].payouts.keys()].sort(), [a, b].sort(), 'payees keep their exact base58 addresses');
+  const snaps = [{ day: 1, holders: new Map([[a, 100n], [b, 300n]]) }, { day: 2, holders: new Map([[a, 100n], [b, 300n], [c, 1_000n]]) }];
+  const h = snapshotHolderRound({ snapshots: snaps, pool: 1_000_000n, excluded: [] });
+  assert.ok(h.payouts.has(a) && h.payouts.has(b) && !h.payouts.has(c), 'a wallet in only one snapshot is not paid');
+  assert.ok(h.payouts.get(b) > h.payouts.get(a), 'bigger, steadier holders get more');
+  assert.equal(snapshotHolderRound({ snapshots: snaps, pool: 1_000_000n, creatorLinked: [b] }).payouts.has(b), false, 'creator-linked wallets are excluded');
+
+  // Posting and paying: the airdrop distributor's operator posts an ended round's list and pays every leaf in plain SOL.
+  const deployment = { programId: f.programId.toBase58(), v2: { config: f.client.configV2For(new PublicKey(WSOL_MINT)).toBase58() } };
+  const operator = f.v2Operator;
+  if (!operator) return; // the S3 test sets the operator; without it this part has nothing to run as
+  const keeper = new SolanaV2Keeper({ connection: f.connection, payer: operator, deployment, publicUrl: 'https://elpida.test' });
+  if (await f.connection.getAccountInfo(f.client.ata(f.client.distVault(V2_DIST.airdrop), new PublicKey(WSOL_MINT)))) await keeper.sweep();
+  const avail = await keeper.solAvailable(V2_DIST.airdrop);
+  assert.ok(avail > 2_000_000n, `the airdrop vault has SOL to promise (${avail})`);
+  const p1 = Keypair.generate().publicKey, p2 = Keypair.generate().publicKey;
+  const result = await keeper.post(V2_DIST.airdrop, 15, new Map([[p1.toBase58(), 1_000_000n], [p2.toBase58(), 1_200_000n]]));
+  assert.deepEqual({ posted: result.posted, paid: result.paid, failed: result.failed }, { posted: true, paid: 2, failed: 0 });
+  assert.equal(await f.connection.getBalance(p1), 1_000_000); assert.equal(await f.connection.getBalance(p2), 1_200_000);
+  const m = keeper.manifest(V2_DIST.airdrop, 15);
+  assert.equal(m.rows.length, 2); assert.equal(m.total, '2200000');
+  assert.ok(await keeper.solAvailable(V2_DIST.airdrop) <= avail - 2_200_000n, 'paid SOL left the pool');
+  const again = await keeper.post(V2_DIST.airdrop, 15, new Map([[p1.toBase58(), 1_000_000n], [p2.toBase58(), 1_200_000n]]));
+  assert.equal(again.failed, 0, 'a repeat finds every leaf already paid');
 });

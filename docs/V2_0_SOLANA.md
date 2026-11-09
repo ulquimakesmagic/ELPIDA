@@ -16,7 +16,8 @@ Not audited. Test networks first; mainnet only with Malik's explicit approval.
 | S3 | Trader airdrop and holder reward rounds (Merkle claims) and the flywheel buy-and-burn, from the vault PDAs | Done |
 | S4a | Deploy script `--v2 --keeper` (V2 SOL pair with USD pricing, distributors), keeper key script, launch page and trading for Solana V2 | This PR |
 | S4b-1 | Server keeper on Solana: fee payouts, harvests, SOL sweeps, flywheel (`apps/api/v2-keeper-solana.mjs`) | This PR |
-| S4b-2 | Reward rounds on Solana (airdrop, holders), indexer and analytics | Next |
+| S4b-2 | Reward rounds on Solana (airdrop monthly, holders weekly) in the keeper; trade fees in the Solana index | This PR |
+| S4c | Solana in the analytics Rewards section (vaults, rounds, burns) | Next |
 | S5 | Malik upgrades devnet and runs the V2 setup (docs/HUMAN_ACTIONS.md); the flywheel is checked on devnet | After S4a |
 
 ## S1: what the program does
@@ -103,6 +104,16 @@ for the airdrop and holder vaults; and flywheel orders: up to ten V2 tokens at l
 slices of 10% of the flywheel vault, 1% slippage from a live quote, never a curve-completing buy. The EVM flywheel's
 independent-buyer and price-average filters need the Solana trade index and arrive with step 4b-2; the program's own
 limits (age, 10%, 6 hours, no completion) hold either way. Status at `/api/public/v2-rewards` (`keeper.solana`).
+
+## S4b-2: reward rounds
+
+The keeper runs the same plans as EVM (`packages/core/v2-keeper-plan.mjs`): the airdrop's 20% equal / 40% square root /
+40% pro rata blend with the 1% cap, $1 minimum (carried), $20 volume, two active days and a week-old wallet; creator and
+reward wallets excluded. Trades come from the Solana index, which now records each trade's fee (curve: the token's own
+rate; Raydium 1%; PumpSwap 0.30%). Holder rewards per token once its holder share since the last payout reaches the
+threshold ($0.25 test, $25 mainnet), weighted by daily holder snapshots (a wallet must be in two). Lists are posted
+(`post_v2_root`), published at `/api/public/v2-rewards/solana-manifest/<kind>/<round>`, and every leaf is paid in plain
+SOL. Wallet funding links (exchange-safe, as on EVM) are not applied on Solana yet: each wallet counts on its own.
 
 ## Errors added
 

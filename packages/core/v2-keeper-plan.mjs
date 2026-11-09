@@ -57,7 +57,8 @@ export const FLYWHEEL_RULES = Object.freeze({
   priceWindowSeconds: 3600,
 });
 
-const lower = a => String(a).toLowerCase();
+// EVM addresses compare lowercase; Solana addresses (base58) are case-sensitive and stay as they are.
+const lower = a => (/^0x/i.test(String(a)) ? String(a).toLowerCase() : String(a));
 const DAY = 86_400;
 
 /** Groups wallets by the linking rule; the creator-linked set grows to whole groups. */

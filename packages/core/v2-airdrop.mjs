@@ -42,17 +42,20 @@ export function qualifies({ volumeUsd, activeDays, walletAgeDays, creatorLinked 
  * Groups wallets that are linked (pairs such as [funder, funded]) so each group counts as one trader. Returns
  * Map(wallet → group id), the group id being the group's lowest wallet address (lower-cased), so it is deterministic.
  */
+/** EVM addresses compare lowercase; Solana addresses (base58) are case-sensitive and stay as they are. */
+const norm = a => (/^0x/i.test(String(a)) ? String(a).toLowerCase() : String(a));
+
 export function linkWallets(wallets, links = []) {
   const parent = new Map();
   const find = a => { let r = a; while (parent.get(r) !== r) r = parent.get(r); let x = a; while (parent.get(x) !== r) { const n = parent.get(x); parent.set(x, r); x = n; } return r; };
-  const add = a => { a = String(a).toLowerCase(); if (!parent.has(a)) parent.set(a, a); return a; };
+  const add = a => { a = norm(a); if (!parent.has(a)) parent.set(a, a); return a; };
   for (const w of wallets) add(w);
   for (const [x, y] of links) {
     const a = find(add(x)), b = find(add(y));
     if (a !== b) a < b ? parent.set(b, a) : parent.set(a, b);
   }
   const out = new Map();
-  for (const w of wallets) out.set(String(w).toLowerCase(), find(String(w).toLowerCase()));
+  for (const w of wallets) out.set(norm(w), find(norm(w)));
   return out;
 }
 
@@ -114,7 +117,7 @@ function shareOut(amount, traders, rules) {
  */
 export function walletPayouts(allocations, wallets, minPayout = 0n, carriedIn = new Map()) {
   const byGroup = new Map();
-  for (const w of wallets) { const g = String(w.group); if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g).push({ wallet: String(w.wallet).toLowerCase(), fees: BigInt(w.fees) }); }
+  for (const w of wallets) { const g = String(w.group); if (!byGroup.has(g)) byGroup.set(g, []); byGroup.get(g).push({ wallet: norm(w.wallet), fees: BigInt(w.fees) }); }
   const payouts = new Map(), carried = new Map();
   const credit = (wallet, amount) => {
     const total = amount + (carriedIn.get(wallet) ?? 0n);
