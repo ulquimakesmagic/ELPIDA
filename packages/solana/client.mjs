@@ -17,7 +17,27 @@ export const POOL_SIZE = 260;
 /** Pools launched by the partner-tier program carry POOL_EXT_LEN more bytes (buyback share and burn totals). */
 export const POOL_EXT_LEN = 32;
 export const POOL_SIZE_PARTNER = POOL_SIZE + POOL_EXT_LEN;
-export const POOL_SIZES = [POOL_SIZE, POOL_SIZE_PARTNER];
+// ELPIDA V2 pools: the pool extension, then the fee ledger (version, fee_bps, accrued, paid[5]).
+export const V2_EXT_LEN = 64;
+export const POOL_SIZE_V2 = POOL_SIZE_PARTNER + V2_EXT_LEN;
+export const POOL_SIZES = [POOL_SIZE, POOL_SIZE_PARTNER, POOL_SIZE_V2];
+/** ELPIDA V2 on Solana (contracts/solana, `launch_v2`): the same split, fee range, anti-snipe and cap as on EVM. */
+export const V2_MODEL_VERSION = 4;
+export const V2 = Object.freeze({ maxFeeBps: 400, defaultFeeBps: 125, mainnetMinFeeBps: 100, firstBuyCapBps: 300, snipeStartBps: 9_000, snipeWindowSecs: 60,
+  split: Object.freeze([3_000, 3_000, 1_000, 1_000, 2_000]), recipients: Object.freeze(['creator', 'traderAirdrop', 'flywheel', 'holderRewards', 'treasury']) });
+/** `withdraw_v2_fees` may create up to four associated accounts and makes five transfers. */
+export const V2_WITHDRAW_COMPUTE_UNITS = 400_000;
+export const V2_VAULTS = Object.freeze({ traderAirdrop: 'airdrop', flywheel: 'flywheel', holderRewards: 'holder' });
+/** The fee `elapsed` seconds after launch for a token whose own fee is `feeBps` (the program rounds the same way). */
+export function v2FeeBps(feeBps, elapsed) {
+  const e = Math.max(0, Math.floor(Number(elapsed)));
+  if (e >= V2.snipeWindowSecs) return feeBps;
+  return feeBps + Math.floor((V2.snipeStartBps - feeBps) * (V2.snipeWindowSecs - e) / V2.snipeWindowSecs);
+}
+/** What each of the five recipients is owed from a pool's ledger ({ accrued, paid: [5] }). */
+export const v2Owed = ({ accrued, paid }) => V2.split.map((bps, i) => BigInt(accrued) * BigInt(bps) / BPS - BigInt(paid[i]));
+/** V2 tickers: 1 to 10 letters or digits, any case. */
+export const validV2Symbol = symbol => typeof symbol === 'string' && /^[A-Za-z0-9]{1,10}$/.test(symbol);
 /** Early-partner burn shares of the base fee (docs/DESIGN_PARTNER_TIERS.md): Partner 10%, Elite 20%. */
 export const PARTNER_BPS = [1000, 2000];
 export const MAX_PARTNER_WINDOW_SECS = 180 * 86_400;
@@ -138,6 +158,9 @@ export const DISCRIMINATORS = {
   raydiumBuyback: [126, 209, 249, 126, 8, 105, 62, 28],
   RaydiumPoolState: [247, 237, 227, 245, 215, 195, 222, 70],
   raydiumSwapBaseInput: [143, 190, 90, 218, 196, 30, 51, 222],
+  addV2Config: [34, 113, 107, 236, 128, 8, 90, 131],
+  launchV2: [174, 154, 226, 122, 140, 148, 156, 150],
+  withdrawV2Fees: [219, 82, 62, 244, 167, 194, 73, 182],
 };
 
 // sha256("event:<Name>")[0..8] and field layouts (32-byte keys or little-endian u64s after the
@@ -171,6 +194,10 @@ export const EVENTS = {
   // PumpSwap partner pools: quote an earlier build queued, released to the treasury at a harvest (review finding S-2).
   StrandedBuybackReleased: { discriminator: [191, 1, 27, 168, 214, 152, 26, 204], fields: [['pool', 'key'], ['amount', 'u64']] },
   PartnerLpBuyback: { discriminator: [48, 42, 185, 144, 180, 81, 42, 219], fields: [['pool', 'key'], ['quoteIn', 'u64'], ['tokensBurned', 'u64'], ['pendingBuyback', 'u64'], ['totalBurned', 'u64']] },
+  // ELPIDA V2. V2FeesPaid.recipient: 0 creator, 1 trader airdrop, 2 flywheel, 3 holder rewards, 4 treasury.
+  V2ConfigAdded: { discriminator: [239, 9, 113, 171, 54, 108, 17, 148], fields: [['config', 'key'], ['quoteMint', 'key'], ['minFeeBps', 'u16']] },
+  V2PoolLaunched: { discriminator: [238, 243, 215, 187, 98, 226, 224, 169], fields: [['pool', 'key'], ['mint', 'key'], ['creator', 'key'], ['feeBps', 'u16']] },
+  V2FeesPaid: { discriminator: [225, 206, 2, 3, 203, 216, 255, 104], fields: [['pool', 'key'], ['recipient', 'u8'], ['to', 'key'], ['amount', 'u64']] },
 };
 
 // Events of the first deployed program version (locked-pool model), still present in devnet history.
@@ -202,10 +229,11 @@ export function decodeEvents(logs, PublicKey) {
       if (legacy) event.legacy = true;
       let offset = 8;
       for (const [field, type] of fields) {
-        const size = type === 'key' ? 32 : type === 'u16' ? 2 : 8;
+        const size = type === 'key' ? 32 : type === 'u16' ? 2 : type === 'u8' ? 1 : 8;
         if (offset + size > bytes.length) { event.legacy = true; break; }
         if (type === 'key') event[field] = new PublicKey(bytes.subarray(offset, offset + 32)).toBase58();
         else if (type === 'u16') event[field] = view.getUint16(offset, true);
+        else if (type === 'u8') event[field] = bytes[offset];
         else event[field] = view.getBigUint64(offset, true);
         offset += size;
       }
@@ -256,6 +284,10 @@ export const PROGRAM_ERRORS = [
   'Unexpected Raydium account.',
   'No queued partner buyback to spend yet.',
   'A buyback ran less than a minute ago; the next one waits. Try again shortly.',
+  'This needs an ELPIDA V2 pool or trading pair.',
+  'The token\'s fee must be between the pair\'s minimum and 4%.',
+  'Nothing is owed yet.',
+  'V2 graduated-pool fees are harvested by the next program version.',
 ];
 
 /** Turns a Solana/Anchor error into a readable message. */
@@ -495,6 +527,9 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
   const testUsdcMint = PublicKey.findProgramAddressSync([enc('test-usdc')], programId)[0];
   const faucetAuthority = PublicKey.findProgramAddressSync([enc('test-usdc-authority')], programId)[0];
   const poolPda = mint => PublicKey.findProgramAddressSync([enc('curve'), key(mint).toBytes()], programId)[0];
+  /** ELPIDA V2 trading pair for a quote mint, and the three reward vaults (data-less PDAs that own one account per asset). */
+  const configV2For = quoteMint => PublicKey.findProgramAddressSync([enc('curve-config-v2'), key(quoteMint).toBytes()], programId)[0];
+  const v2VaultPda = kind => PublicKey.findProgramAddressSync([enc('v2-vault'), enc(kind)], programId)[0];
   const ata = (owner, mint, program = tokenProgram) => PublicKey.findProgramAddressSync([key(owner).toBytes(), key(program).toBytes(), key(mint).toBytes()], ataProgram)[0];
   /** The quote mint's token program for a config (`quoteTokenProgram`, default SPL Token). */
   const qp = config => key(config.quoteTokenProgram ?? tokenProgram);
@@ -553,7 +588,7 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
   };
 
   return {
-    programId, configPda, configFor, partnerPda, betaGatePda, metadataPda, betaCreatorPda, pricingPda, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, raydiumAccounts, raydium: ray, wsol,
+    programId, configPda, configFor, configV2For, v2VaultPda, partnerPda, betaGatePda, metadataPda, betaCreatorPda, pricingPda, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, raydiumAccounts, raydium: ray, wsol,
     computeBudget: (units = LAUNCH_COMPUTE_UNITS) => ComputeBudgetProgram.setComputeUnitLimit({ units }),
     createAtaIdempotent(payer, owner, mint, program = tokenProgram) {
       return new TransactionInstruction({ programId: ataProgram, data: data([1]), keys: [meta(payer, true, true), meta(ata(owner, mint, program), true), meta(owner), meta(mint), meta(SystemProgram.programId), meta(program)] });
@@ -575,6 +610,32 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
     addCurveConfig({ authority, quoteMint, treasury, params = curveParams(), quoteTokenProgram = tokenProgram }) {
       return ix([meta(authority, true, true), meta(configFor(quoteMint), true), meta(quoteMint), meta(treasury), meta(ata(treasury, quoteMint, quoteTokenProgram), true), meta(programId), meta(programDataAddress), meta(quoteTokenProgram), meta(ataProgram), meta(SystemProgram.programId)],
         concat(DISCRIMINATORS.addCurveConfig, encodeCurveParams(params)));
+    },
+    /** ELPIDA V2 trading pair (upgrade authority). `params.baseFeeBps` is the minimum fee creators may choose. */
+    addV2Config({ authority, quoteMint, treasury, params, quoteTokenProgram = tokenProgram }) {
+      return ix([meta(authority, true, true), meta(configV2For(quoteMint), true), meta(quoteMint), meta(treasury), meta(ata(treasury, quoteMint, quoteTokenProgram), true), meta(programId), meta(programDataAddress), meta(quoteTokenProgram), meta(ataProgram), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.addV2Config, encodeCurveParams(params)));
+    },
+    /** ELPIDA V2 launch: `feeBps` is the token's own fee (the pair's minimum to 4%, fixed for good); first buy at most 3%. */
+    launchV2({ creator, config, mint, name, symbol, feeBps, firstBuy = 0n, minTokensOut = 0n, reward, uri, priceUpdate = null, maxFee = (1n << 64n) - 1n, usdc = null }) {
+      if (!validMetadataUri(uri) || uri.length > MAX_LAUNCH_URI) throw new Error(PROGRAM_ERRORS[30]);
+      if (!validV2Symbol(symbol)) throw new Error('Tickers are 1 to 10 letters or digits.');
+      const pool = poolPda(mint), cfg = config.address;
+      const usdcMetas = usdc ? [meta(usdc.mint), meta(ata(creator, usdc.mint, usdc.tokenProgram ?? tokenProgram), true), meta(ata(config.treasury, usdc.mint, usdc.tokenProgram ?? tokenProgram), true), meta(usdc.tokenProgram ?? tokenProgram)] : [];
+      return ix([
+        meta(creator, true, true), meta(cfg), meta(config.quoteMint), meta(config.treasury, true),
+        meta(mint, true, true), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true),
+        meta(qata(creator, config), true), meta(ata(creator, mint), true), meta(tokenProgram), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId),
+        meta(betaGatePda), meta(betaCreatorPda(creator)), meta(pricingPda(cfg)), meta(priceUpdate ?? SystemProgram.programId),
+        meta(metadataPda(mint), true), meta(mplProgram), ...usdcMetas,
+      ], concat(DISCRIMINATORS.launchV2, str(name), str(symbol), u16(feeBps), u64(firstBuy), u64(minTokensOut), key(reward).toBytes(), u64(maxFee), [usdc ? 1 : 0], str(uri)));
+    },
+    /** Permissionless: pays a V2 pool's owed shares to the creator, the three reward vaults and the treasury. */
+    withdrawV2Fees({ payer, config, mint, reward }) {
+      const pool = poolPda(mint), vaults = ['airdrop', 'flywheel', 'holder'].map(v2VaultPda);
+      return ix([meta(payer, true, true), meta(config.address), meta(config.quoteMint), meta(mint), meta(pool, true), meta(config.treasury), meta(reward), ...vaults.map(v => meta(v)),
+        meta(qata(reward, config), true), ...vaults.map(v => meta(qata(v, config), true)), meta(qata(config.treasury, config), true), meta(qata(pool, config), true), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId)],
+        DISCRIMINATORS.withdrawV2Fees);
     },
     /** Test networks only: creates the Elpida tUSDC mint (upgrade authority). */
     createTestUsdc({ authority }) {
@@ -866,8 +927,11 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
     decodePool(raw) {
       const bytes = new Uint8Array(raw);
       if (!POOL_SIZES.includes(bytes.length) || !sameBytes(bytes, DISCRIMINATORS.CurvePool)) throw new Error('Not an Elpida curve pool account.');
-      // Partner-era pools: version byte 1, buyback share, tokens burned and quote spent on buybacks.
-      const ext = bytes.length === POOL_SIZE_PARTNER && bytes[POOL_SIZE] === 1;
+      // Partner-era and V2 pools: version byte 1, buyback share, tokens burned and quote spent on buybacks.
+      const ext = bytes.length >= POOL_SIZE_PARTNER && bytes[POOL_SIZE] === 1;
+      // V2 pools: the fee ledger after the extension.
+      const o = POOL_SIZE_PARTNER, v2 = bytes.length === POOL_SIZE_V2 && bytes[o] === 1
+        ? { feeBps: readU16(bytes, o + 1), accrued: readU64(bytes, o + 3), paid: [0, 1, 2, 3, 4].map(i => readU64(bytes, o + 11 + i * 8)) } : null;
       return {
         config: new PublicKey(bytes.subarray(8, 40)), mint: new PublicKey(bytes.subarray(40, 72)), creator: new PublicKey(bytes.subarray(72, 104)), reward: new PublicKey(bytes.subarray(104, 136)),
         name: text(bytes.subarray(136, 168)), symbol: text(bytes.subarray(168, 178)),
@@ -875,6 +939,7 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
         sold: readU64(bytes, 210), liquidityBonus: readU64(bytes, 218), protocolFees: readU64(bytes, 226), creatorFees: readU64(bytes, 234),
         createdAt: readI64(bytes, 242), graduatedAt: readI64(bytes, 250), status: bytes[258],
         buybackBps: ext ? readU16(bytes, POOL_SIZE + 1) : 0, buybackBurned: ext ? readU64(bytes, POOL_SIZE + 3) : 0n, buybackQuoteSpent: ext ? readU64(bytes, POOL_SIZE + 11) : 0n,
+        v2,
       };
     },
     /** Raw SPL token-account amount (offset 64), or 0 when the account does not exist. */

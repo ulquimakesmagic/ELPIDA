@@ -16,7 +16,7 @@ test('discriminators, events and the PartnerTerms error', () => {
   for (const [key, name] of [['setPartner', 'global:set_partner'], ['partnerTiersVersion', 'global:partner_tiers_version'], ['PartnerConfig', 'account:PartnerConfig']]) assert.deepEqual(DISCRIMINATORS[key], disc(name), key);
   for (const name of ['PartnerSet', 'PartnerPoolLaunched', 'PartnerBuyback', 'PartnerHarvest']) assert.deepEqual(EVENTS[name].discriminator, disc(`event:${name}`), name);
   assert.match(explainError(new Error('custom program error: 0x1790')), /10% or 20%/);
-  assert.equal(PROGRAM_ERRORS.length, 37);
+  assert.equal(PROGRAM_ERRORS.length, 41, 'four V2 errors follow the partner-era ones');
   // Raydium (SOL pairs): instructions, events and errors 6033-6035.
   for (const [key, name] of [['migrateToRaydium', 'global:migrate_to_raydium'], ['harvestRaydiumFees', 'global:harvest_raydium_fees'], ['raydiumBuyback', 'global:raydium_buyback'], ['raydiumSwapBaseInput', 'global:swap_base_input'], ['RaydiumPoolState', 'account:PoolState']]) assert.deepEqual(DISCRIMINATORS[key], disc(name), key);
   for (const name of ['RaydiumMigrated', 'PartnerLpBuyback']) assert.deepEqual(EVENTS[name].discriminator, disc(`event:${name}`), name);
@@ -63,7 +63,7 @@ test('pools: both sizes are listed and decoded; only partner-era pools carry the
   assert.throws(() => client.decodePool(Buffer.concat([pool, Buffer.alloc(5)])), /Not an Elpida curve pool/);
   const asked = [];
   await client.poolAccounts({ getProgramAccounts: async (_, options) => { asked.push(options.filters[0].dataSize); return [{ size: options.filters[0].dataSize }]; } });
-  assert.deepEqual(asked, [POOL_SIZE, POOL_SIZE_PARTNER]);
+  assert.deepEqual(asked, [POOL_SIZE, POOL_SIZE_PARTNER, POOL_SIZE_PARTNER + 64], 'older, partner-era and V2 pools');
 });
 
 test('launch layout: the partner account takes the rent sysvar\'s place; trades and harvests mark the mint writable', () => {

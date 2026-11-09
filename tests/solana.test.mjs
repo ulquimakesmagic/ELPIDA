@@ -19,6 +19,7 @@ import {
   DISCRIMINATORS, EVENTS, LEGACY_EVENTS, TOKEN_SUPPLY, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, lockedPoolVenue, tradeFeeBps, testConversionOut, decodeTestConversion, BPS, explainError, decodeEvents,
   harvestableLp, harvestNow, MPL_TOKEN_METADATA, MAX_LAUNCH_URI, GRADUATION_GRACE_SECS, validMetadataUri, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint, PYTH_RECEIVER, SOL_USD_FEED_ID, SOL_USD_PRICE_ACCOUNT, parsePriceUpdate, usdToQuote, virtualQuoteForFdv,
   RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, VENUE_RAYDIUM, raydiumCreationCost, raydiumQuote, raydiumBuybackAmount,
+  V2, v2FeeBps, v2Owed, validV2Symbol, POOL_SIZE_V2, V2_WITHDRAW_COMPUTE_UNITS,
 } from '../packages/solana/client.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
@@ -1487,3 +1488,107 @@ test('Solana partner tiers: a buyback never completes the curve; on PumpSwap the
   assert.ok(liquidityUnits(m1.lpLocked, await pumpState(mint)) >= m0.principal, 'principal liquidity stays locked');
 });
 
+
+// ---------- ELPIDA V2 on Solana (launch_v2, the five-way fee ledger, withdraw_v2_fees) ----------
+const V2_PARAMS = curveParams({ startFdv: 5_000, endFdv: 25_000, quoteDecimals: 6, launchFee: '0.01', baseFeeBps: 100, snipeStartBps: 9_000, snipeWindowSecs: 60, maxCreatorBuyBps: 300 });
+
+test('Solana V2 client: discriminators, fee schedule, ledger and tickers match the program', () => {
+  const disc = name => [...createHash('sha256').update(name).digest().subarray(0, 8)];
+  for (const [key, name] of [['addV2Config', 'global:add_v2_config'], ['launchV2', 'global:launch_v2'], ['withdrawV2Fees', 'global:withdraw_v2_fees']]) assert.deepEqual(DISCRIMINATORS[key], disc(name), key);
+  assert.deepEqual(V2.split, [3_000, 3_000, 1_000, 1_000, 2_000]);
+  assert.deepEqual([0, 30, 59, 60, 600].map(t => v2FeeBps(125, t)), [9_000, 4_562, 272, 125, 125]);
+  assert.deepEqual(v2Owed({ accrued: 1_003n, paid: [100n, 0n, 0n, 0n, 0n] }), [200n, 300n, 100n, 100n, 200n]);
+  assert.ok(validV2Symbol('hope2') && !validV2Symbol('HOPE!') && !validV2Symbol('ABCDEFGHIJK'));
+  assert.equal(V2_PARAMS.virtualToken, TOKEN_SUPPLY * 5n / 4n, 'the ×5 curve: virtual token reserve 1.25B');
+  assert.match(explainError(new Error('custom program error: 0x1796')), /4%/);
+});
+
+test('Solana V2: own fee, anti-snipe to liquidity, five-way ledger, permissionless withdrawal before and after migration', { skip }, async () => {
+  const config = { address: f.client.configV2For(f.quoteMint), quoteMint: f.quoteMint, treasury: f.treasury };
+  // Earlier tests spend the trader's test tokens; top it up so this test can complete a curve on its own.
+  await send(f.connection, f.authority, [f.spl.mintTo(f.quoteMint, f.client.ata(f.trader.publicKey, f.quoteMint), f.authority.publicKey, 60_000n * USDC)]);
+  const add = (payer, params = V2_PARAMS) => send(f.connection, payer, [f.client.computeBudget(), f.client.addV2Config({ authority: payer.publicKey, quoteMint: f.quoteMint, treasury: f.treasury, params })], [], 1);
+  await failsWith(add(f.outsider), /0x1770/);
+  await failsWith(add(f.authority, { ...V2_PARAMS, maxCreatorBuyBps: 0 }), /0x1774/);
+  await failsWith(add(f.authority, { ...V2_PARAMS, baseFeeBps: 150 }), /0x1774/);
+  await add(f.authority);
+  // The legacy launch refuses a V2 pair.
+  const legacyMint = Keypair.generate();
+  await failsWith(send(f.connection, f.creator, [f.client.computeBudget(), f.client.launch({ uri: TEST_URI, creator: f.creator.publicKey, config, mint: legacyMint.publicKey, name: 'Old', symbol: 'OLD', firstBuy: USDC, minTokensOut: 0n, reward: f.rewardWallet.publicKey })], [legacyMint], 1), /0x177e/);
+
+  const launchV2 = ({ feeBps = 250, firstBuy = 25n * USDC, symbol = 'hope' } = {}) => {
+    const mint = Keypair.generate();
+    return { mint: mint.publicKey, sent: send(f.connection, f.creator, [f.client.computeBudget(), f.client.launchV2({ uri: TEST_URI, creator: f.creator.publicKey, config, mint: mint.publicKey, name: 'Hope V2', symbol, feeBps, firstBuy, reward: f.rewardWallet.publicKey })], [mint], 1) };
+  };
+  await failsWith(launchV2({ feeBps: 99 }).sent, /0x1796/);
+  await failsWith(launchV2({ feeBps: 401 }).sent, /0x1796/);
+  await failsWith(launchV2({ firstBuy: 5_000n * USDC }).sent, /0x177d/);
+  assert.throws(() => f.client.launchV2({ uri: TEST_URI, creator: f.creator.publicKey, config, mint: Keypair.generate().publicKey, name: 'x', symbol: 'HO PE', feeBps: 250, reward: f.rewardWallet.publicKey }), /letters or digits/);
+
+  const { mint, sent } = launchV2();
+  const signature = await sent;
+  const raw = (await f.connection.getAccountInfo(f.client.poolPda(mint))).data;
+  assert.equal(raw.length, POOL_SIZE_V2);
+  let p = f.client.decodePool(raw);
+  assert.equal(p.v2.feeBps, 250); assert.equal(p.v2.accrued, 25n * USDC * 250n / BPS, 'the first buy pays the token\'s own fee');
+  assert.equal(p.liquidityBonus, 0n); assert.equal(p.protocolFees + p.creatorFees, 0n, 'V2 pools never use the legacy counters');
+  const launched = (await eventsOf(signature)).find(e => e.name === 'V2PoolLaunched');
+  assert.equal(launched.feeBps, 250); assert.equal(launched.mint, mint.toBase58());
+
+  const vault = () => balance(f.client.ata(f.client.poolPda(mint), f.quoteMint));
+  const owedSum = q => v2Owed(q.v2).reduce((a, b) => a + b, 0n);
+  // Everything the ledger has not paid out: the owed shares plus the split's rounding (at most 4 base units).
+  const unpaid = q => q.v2.accrued - q.v2.paid.reduce((a, b) => a + b, 0n);
+  // Inside the anti-snipe window: the token's own fee joins the ledger, everything above it is locked as liquidity.
+  const before = p, gross = 100n * USDC;
+  await send(f.connection, f.trader, [f.client.buy({ buyer: f.trader.publicKey, config, mint, grossIn: gross, minTokensOut: 0n })], [], 1);
+  p = f.client.decodePool((await f.connection.getAccountInfo(f.client.poolPda(mint))).data);
+  const own = gross * 250n / BPS, bonus = p.liquidityBonus - before.liquidityBonus;
+  assert.equal(p.v2.accrued - before.v2.accrued, own);
+  assert.ok(bonus > 0n, 'a buy in the first minute pays the anti-snipe surplus');
+  assert.ok(own + bonus <= gross * 9_000n / BPS && own + bonus > gross * 250n / BPS);
+  assert.equal(await vault(), p.realQuote + p.liquidityBonus + unpaid(p), 'vault = reserve + locked surplus + unpaid fees');
+
+  // Withdrawal pays every owed share to its fixed destination, once.
+  const dest = [f.client.ata(f.rewardWallet.publicKey, f.quoteMint), ...['airdrop', 'flywheel', 'holder'].map(k => f.client.ata(f.client.v2VaultPda(k), f.quoteMint)), f.client.ata(f.treasury, f.quoteMint)];
+  const bal = () => Promise.all(dest.map(balance));
+  const owed = v2Owed(p.v2), b0 = await bal();
+  const withdraw = () => send(f.connection, f.outsider, [f.client.computeBudget(V2_WITHDRAW_COMPUTE_UNITS), f.client.withdrawV2Fees({ payer: f.outsider.publicKey, config, mint, reward: f.rewardWallet.publicKey })], [], 1);
+  const paidSig = await withdraw();
+  const b1 = await bal();
+  assert.deepEqual(b1.map((v, i) => v - b0[i]), owed, 'creator 30%, airdrop 30%, flywheel 10%, holders 10%, treasury 20%');
+  assert.deepEqual((await eventsOf(paidSig)).filter(e => e.name === 'V2FeesPaid').map(e => [e.recipient, e.amount]), owed.map((v, i) => [i, v]).filter(([, v]) => v > 0n));
+  await failsWith(withdraw(), /0x1797/);
+  p = f.client.decodePool((await f.connection.getAccountInfo(f.client.poolPda(mint))).data);
+  assert.equal(await vault(), p.realQuote + p.liquidityBonus + unpaid(p));
+  assert.ok(owedSum(p) <= 4n, 'only the split\'s rounding stays behind');
+
+  // After the first minute the fee is the token's own: nothing more is locked as anti-snipe liquidity. That buy
+  // completes the curve (filled only up to the curve supply); fees owed at graduation stay withdrawable.
+  for (;;) {
+    const now = await f.connection.getBlockTime(await f.connection.getSlot('confirmed'));
+    if (BigInt(now ?? 0) >= p.createdAt + BigInt(V2.snipeWindowSecs) + 1n) break;
+    await sleep(500);
+  }
+  const pre = p, payer0 = await balance(f.client.ata(f.trader.publicKey, f.quoteMint));
+  await send(f.connection, f.trader, [f.client.buy({ buyer: f.trader.publicKey, config, mint, grossIn: 50_000n * USDC, minTokensOut: 0n })], [], 1);
+  const spent = payer0 - await balance(f.client.ata(f.trader.publicKey, f.quoteMint));
+  p = f.client.decodePool((await f.connection.getAccountInfo(f.client.poolPda(mint))).data);
+  assert.equal(p.status, STATUS_GRADUATED); assert.equal(p.sold, p.curveSupply);
+  assert.ok(spent < 50_000n * USDC, 'the completing buy is filled only up to the curve supply');
+  assert.equal(p.v2.accrued - pre.v2.accrued, spent * 250n / BPS, 'own fee only');
+  assert.equal(p.liquidityBonus, pre.liquidityBonus, 'no anti-snipe surplus after the first minute');
+  assert.equal(await vault(), p.realQuote + p.liquidityBonus + unpaid(p));
+  if (pumpSkip) return;
+  await send(f.connection, f.outsider, [f.client.computeBudget(MIGRATE_COMPUTE_UNITS), f.client.migrateToPumpswap({ payer: f.outsider.publicKey, config, mint })], [], 1);
+  p = f.client.decodePool((await f.connection.getAccountInfo(f.client.poolPda(mint))).data);
+  assert.equal(p.status, STATUS_MIGRATED);
+  const owedAfter = v2Owed(p.v2), c0 = await bal();
+  assert.equal(await vault(), unpaid(p), 'migration moved the liquidity and left exactly the unpaid fees');
+  assert.ok(unpaid(p) - owedAfter.reduce((a, b) => a + b, 0n) <= 4n);
+  await withdraw();
+  const c1 = await bal();
+  assert.deepEqual(c1.map((v, i) => v - c0[i]), owedAfter);
+  // Graduated-pool fees of V2 pools wait for the five-way harvest of the next program version.
+  await failsWith(send(f.connection, f.outsider, [f.client.computeBudget(HARVEST_COMPUTE_UNITS), ...f.client.harvestLpFees({ payer: f.outsider.publicKey, config, mint, reward: f.rewardWallet.publicKey })], [], 1), /0x1798/);
+});

@@ -152,6 +152,34 @@ pub const POOL_EXT_LEN: usize = 32;
 /// 1 Raydium CPMM); the rest is reserved.
 pub const MIGRATION_EXT_LEN: usize = 48;
 const EXT_VERSION: u8 = 1;
+
+// ---------- ELPIDA V2 (docs/V2_0_SOLANA.md) ----------
+/// `CurveConfig.model_version` of V2 configs (PDA ["curve-config-v2", quote_mint]). In a V2 config `base_fee_bps` is
+/// the minimum fee a creator may choose; each pool fixes its own fee at launch.
+pub const V2_MODEL_VERSION: u8 = 4;
+pub const V2_MAX_FEE_BPS: u16 = 400;
+/// The mainnet minimum fee Malik approved (1.00%); test builds accept any minimum from 0.01% up to the default.
+pub const V2_MAINNET_MIN_FEE_BPS: u16 = 100;
+pub const V2_DEFAULT_FEE_BPS: u16 = 125;
+pub const V2_FIRST_BUY_CAP_BPS: u16 = 300;
+pub const V2_SNIPE_START_BPS: u16 = 9_000;
+pub const V2_SNIPE_WINDOW_SECS: u32 = 60;
+/// The five-way split of every fee at the token's own rate, in the EVM hook's order: creator, trader airdrop,
+/// flywheel, holder rewards, treasury.
+pub const V2_SPLIT: [u16; 5] = [3_000, 3_000, 1_000, 1_000, 2_000];
+pub const V2_CREATOR: usize = 0;
+pub const V2_AIRDROP: usize = 1;
+pub const V2_FLYWHEEL: usize = 2;
+pub const V2_HOLDER: usize = 3;
+pub const V2_TREASURY: usize = 4;
+/// Seeds of the three reward vaults (PDAs ["v2-vault", kind]); each holds one associated account per asset.
+pub const V2_VAULT_AIRDROP: &[u8] = b"airdrop";
+pub const V2_VAULT_FLYWHEEL: &[u8] = b"flywheel";
+pub const V2_VAULT_HOLDER: &[u8] = b"holder";
+/// Bytes appended after the pool extension in V2 pools: version u8, fee_bps u16, accrued u64, paid [u64; 5]; the rest
+/// is reserved.
+pub const V2_EXT_LEN: usize = 64;
+const V2_EXT_VERSION: u8 = 1;
 // PumpSwap `Pool` layout offsets (8-byte discriminator included).
 const PUMP_POOL_LP_SUPPLY: usize = 203;
 const PUMP_POOL_PROTOCOL_FEES: usize = 271;
@@ -241,8 +269,10 @@ pub mod elpida_launchpad {
             params.base_fee_bps == config.base_fee_bps && params.snipe_start_bps == config.snipe_start_bps && params.snipe_window_secs == config.snipe_window_secs,
             ElpidaError::FeeScheduleFixed
         );
-        let (quote_mint, decimals, treasury, bump) = (config.quote_mint, config.quote_decimals, config.treasury, config.bump);
+        let (quote_mint, decimals, treasury, bump, version) = (config.quote_mint, config.quote_decimals, config.treasury, config.bump, config.model_version);
+        if version == V2_MODEL_VERSION { check_v2_config(&params)?; }
         write_config(config, quote_mint, decimals, treasury, &params, bump)?;
+        config.model_version = version;
         emit!(CurveConfigUpdated {
             config: config.key(), quote_mint, virtual_quote: params.virtual_quote, virtual_token: params.virtual_token,
             curve_supply: params.curve_supply, launch_fee: params.launch_fee, max_creator_buy_bps: params.max_creator_buy_bps,
@@ -372,6 +402,7 @@ pub mod elpida_launchpad {
     /// `uri`: the token's IPFS metadata document (`ipfs://…`), written once into immutable Metaplex metadata.
     #[allow(clippy::too_many_arguments)]
     pub fn launch<'info>(ctx: Context<'_, '_, 'info, 'info, Launch<'info>>, name: String, symbol: String, first_buy: u64, min_tokens_out: u64, reward: Pubkey, max_fee: u64, fee_in_usdc: bool, uri: String) -> Result<()> {
+        require!(ctx.accounts.curve_config.model_version != V2_MODEL_VERSION, ElpidaError::WrongConfig);
         check_beta(&ctx.accounts.beta_gate.to_account_info(), &ctx.accounts.beta_creator.to_account_info())?;
         let name = name.trim().to_string();
         require!(!name.is_empty() && name.len() <= MAX_NAME, ElpidaError::InvalidName);
@@ -386,39 +417,10 @@ pub mod elpida_launchpad {
         let a = &ctx.accounts;
         let tp = a.token_program.to_account_info();
         let decimals = a.quote_mint.decimals;
-        // Creation fee: fixed lamports from the config, or USD from the bound Pyth price when pricing is on.
-        let pricing = load_pricing(&a.pricing.to_account_info(), &a.curve_config.key())?;
-        let (fee_lamports, usdc_fee, start_quote, price) = match &pricing {
-            None => { require!(!fee_in_usdc, ElpidaError::UsdcFeeUnavailable); (a.curve_config.launch_fee, 0u64, None, None) }
-            Some(p) => {
-                let px = read_price(&a.price_update.to_account_info(), p, now)?;
-                let start = if p.start_fdv_usd_e6 > 0 { Some(usd_to_quote(p.start_fdv_usd_e6, &px, 9)?) } else { None };
-                if fee_in_usdc { (0, p.fee_usd_e6, start, Some(px)) } else { (usd_to_quote(p.fee_usd_e6, &px, 9)?, 0, start, Some(px)) }
-            }
-        };
-        require!(fee_lamports <= max_fee, ElpidaError::FeeAboveMax);
-        if fee_lamports > 0 {
-            system_program::transfer(
-                CpiContext::new(a.system_program.to_account_info(), system_program::Transfer { from: a.creator.to_account_info(), to: a.treasury.to_account_info() }),
-                fee_lamports,
-            )?;
-        }
-        if usdc_fee > 0 {
-            let p = pricing.as_ref().ok_or(ElpidaError::UsdcFeeUnavailable)?;
-            require!(p.usdc_mint != Pubkey::default() && ctx.remaining_accounts.len() >= 4, ElpidaError::UsdcFeeUnavailable);
-            let (usdc_mint, creator_usdc, treasury_usdc, usdc_program) = (&ctx.remaining_accounts[0], &ctx.remaining_accounts[1], &ctx.remaining_accounts[2], &ctx.remaining_accounts[3]);
-            require_keys_eq!(usdc_mint.key(), p.usdc_mint, ElpidaError::UsdcFeeUnavailable);
-            require!(*usdc_program.key == anchor_spl::token::ID || *usdc_program.key == anchor_spl::token_2022::ID, ElpidaError::UsdcFeeUnavailable);
-            require!(*usdc_mint.owner == *usdc_program.key, ElpidaError::UsdcFeeUnavailable);
-            require_keys_eq!(treasury_usdc.key(), get_associated_token_address_with_program_id(&a.treasury.key(), &p.usdc_mint, usdc_program.key), ElpidaError::UsdcFeeUnavailable);
-            let usdc_decimals = usdc_mint.try_borrow_data()?.get(44).copied().ok_or(ElpidaError::UsdcFeeUnavailable)?;
-            require!(usdc_decimals as u32 == USD_DECIMALS, ElpidaError::UsdcFeeUnavailable);
-            // The token program enforces that the creator owns and signs for `creator_usdc`.
-            ti::transfer_checked(CpiContext::new(usdc_program.clone(), ti::TransferChecked { from: creator_usdc.clone(), mint: usdc_mint.clone(), to: treasury_usdc.clone(), authority: a.creator.to_account_info() }), usdc_fee, usdc_decimals)?;
-        }
-        if let Some(px) = &price {
-            emit!(LaunchFeePaid { mint: a.mint.key(), payer: a.creator.key(), asset: if usdc_fee > 0 { pricing.as_ref().map(|p| p.usdc_mint).unwrap_or_default() } else { Pubkey::default() }, amount: if usdc_fee > 0 { usdc_fee } else { fee_lamports }, price: px.price, exponent: px.exponent, publish_time: px.publish_time });
-        }
+        let start_quote = pay_creation_fee(&CreationFee {
+            creator: a.creator.to_account_info(), treasury: a.treasury.to_account_info(), system_program: a.system_program.to_account_info(),
+            pricing: a.pricing.to_account_info(), price_update: a.price_update.to_account_info(), config: a.curve_config.key(), launch_fee: a.curve_config.launch_fee, mint: a.mint.key(),
+        }, ctx.remaining_accounts, max_fee, fee_in_usdc, now)?;
         token::mint_to(
             CpiContext::new(tp.clone(), MintTo { mint: a.mint.to_account_info(), to: a.token_vault.to_account_info(), authority: a.creator.to_account_info() }),
             TOKEN_SUPPLY,
@@ -511,19 +513,21 @@ pub mod elpida_launchpad {
         let now = Clock::get()?.unix_timestamp;
         let cfg: CurveConfig = **ctx.accounts.curve_config;
         let mut ext = PoolExt::read(&ctx.accounts.pool.to_account_info().try_borrow_data()?);
+        let mut v2 = v2_of(&cfg, &ctx.accounts.pool.to_account_info())?;
         let locked_venue = locked_pool_venue(&ctx.accounts.quote_mint.to_account_info())?;
         let pool = &mut ctx.accounts.pool;
         require!(pool.status == STATUS_TRADING || pool.status == STATUS_LOCKED, ElpidaError::CurveClosed);
-        let fee_bps = trade_fee_bps(&cfg, pool, now);
-        let trade = quote_buy(pool, gross_in, fee_bps, cfg.base_fee_bps as u64)?;
+        let (fee_bps, own_bps) = match &v2 { Some(x) => (v2_fee_bps(x.fee_bps, pool.created_at, now), x.fee_bps as u64), None => (trade_fee_bps(&cfg, pool, now), cfg.base_fee_bps as u64) };
+        let trade = quote_buy(pool, gross_in, fee_bps, own_bps)?;
         require!(trade.tokens >= min_tokens_out, ElpidaError::Slippage);
-        let burn_quote = apply_buy(pool, &trade, now, ext.buyback_bps)?;
+        let burn_quote = match v2.as_mut() { Some(x) => { v2_apply_buy(pool, x, &trade, now)?; 0 } None => apply_buy(pool, &trade, now, ext.buyback_bps)? };
         let burned = partner_buyback(pool, burn_quote)?;
         let opened = pool.status == STATUS_GRADUATED && locked_venue;
         if opened { open_locked_pool(pool)?; }
         let (mint_key, bump, pool_key) = (pool.mint, pool.bump, pool.key());
         let snapshot = Snapshot::of(pool);
         if ext.record(burned, burn_quote)? { ext.write(&mut ctx.accounts.pool.to_account_info().try_borrow_mut_data()?)?; }
+        if let Some(x) = v2 { x.write(&mut ctx.accounts.pool.to_account_info().try_borrow_mut_data()?)?; }
         let a = &ctx.accounts;
         quote_transfer(&a.quote_token_program, &a.quote_mint, a.trader_quote.to_account_info(), a.quote_vault.to_account_info(), a.trader.to_account_info(), trade.gross, a.quote_mint.decimals, &[])?;
         let seeds: &[&[u8]] = &[b"curve", mint_key.as_ref(), &[bump]];
@@ -546,18 +550,20 @@ pub mod elpida_launchpad {
         let now = Clock::get()?.unix_timestamp;
         let cfg: CurveConfig = **ctx.accounts.curve_config;
         let mut ext = PoolExt::read(&ctx.accounts.pool.to_account_info().try_borrow_data()?);
+        let mut v2 = v2_of(&cfg, &ctx.accounts.pool.to_account_info())?;
         let pool = &mut ctx.accounts.pool;
         require!(pool.status == STATUS_TRADING || pool.status == STATUS_LOCKED, ElpidaError::CurveClosed);
-        let fee_bps = trade_fee_bps(&cfg, pool, now);
-        let trade = quote_sell(pool, tokens_in, fee_bps, cfg.base_fee_bps as u64)?;
+        let (fee_bps, own_bps) = match &v2 { Some(x) => (v2_fee_bps(x.fee_bps, pool.created_at, now), x.fee_bps as u64), None => (trade_fee_bps(&cfg, pool, now), cfg.base_fee_bps as u64) };
+        let trade = quote_sell(pool, tokens_in, fee_bps, own_bps)?;
         require!(trade.net >= min_quote_out, ElpidaError::Slippage);
         pool.real_quote = pool.real_quote.checked_sub(trade.gross).ok_or(ElpidaError::MathOverflow)?;
         pool.sold = pool.sold.checked_sub(tokens_in).ok_or(ElpidaError::MathOverflow)?;
-        let burn_quote = split_fee(pool, &trade, ext.buyback_bps)?;
+        let burn_quote = match v2.as_mut() { Some(x) => { v2_book_fee(pool, x, &trade)?; 0 } None => split_fee(pool, &trade, ext.buyback_bps)? };
         let burned = partner_buyback(pool, burn_quote)?;
         let (mint_key, bump, pool_key) = (pool.mint, pool.bump, pool.key());
         let snapshot = Snapshot::of(pool);
         if ext.record(burned, burn_quote)? { ext.write(&mut ctx.accounts.pool.to_account_info().try_borrow_mut_data()?)?; }
+        if let Some(x) = v2 { x.write(&mut ctx.accounts.pool.to_account_info().try_borrow_mut_data()?)?; }
         let a = &ctx.accounts;
         token::transfer(
             CpiContext::new(a.token_program.to_account_info(), Transfer { from: a.trader_token.to_account_info(), to: a.token_vault.to_account_info(), authority: a.trader.to_account_info() }),
@@ -589,6 +595,136 @@ pub mod elpida_launchpad {
                 quote_transfer(&a.quote_token_program, &a.quote_mint, a.quote_vault.to_account_info(), to.clone(), a.pool.to_account_info(), amount, a.quote_mint.decimals, &[seeds])?;
                 emit!(FeesWithdrawn { pool: pool_key, recipient: to.key(), amount });
             }
+        }
+        Ok(())
+    }
+
+    /// ELPIDA V2, upgrade authority: a V2 trading pair for `quote_mint` (PDA ["curve-config-v2", quote_mint]). Pools
+    /// fix their own fee at launch, from `base_fee_bps` (the minimum) to 4%, with the 90% anti-snipe start over 60 s and
+    /// a 3% first-buy cap. Quotes that would need the locked pool (no DEX venue) are refused: V2 graduates to a DEX.
+    pub fn add_v2_config(ctx: Context<AddV2Config>, params: CurveParams) -> Result<()> {
+        check_v2_config(&params)?;
+        let bump = ctx.bumps.curve_config;
+        let (quote_mint, treasury) = (ctx.accounts.quote_mint.key(), ctx.accounts.treasury.key());
+        let info = ctx.accounts.quote_mint.to_account_info();
+        check_quote_mint(&info)?;
+        require!(!locked_pool_venue(&info)?, ElpidaError::UnsupportedQuote);
+        let config = &mut ctx.accounts.curve_config;
+        write_config(config, quote_mint, ctx.accounts.quote_mint.decimals, treasury, &params, bump)?;
+        config.model_version = V2_MODEL_VERSION;
+        emit!(V2ConfigAdded { config: config.key(), quote_mint, min_fee_bps: params.base_fee_bps });
+        Ok(())
+    }
+
+    /// ELPIDA V2 launch: like `launch`, but the creator chooses the token's fee (`fee_bps`, from the config's minimum to
+    /// 4%, fixed for good), the first buy pays that fee and is capped at 3% of supply, tickers are 1 to 10 letters or
+    /// digits, and every fee at the token's rate is split 30% creator / 30% trader airdrop / 10% flywheel / 10% holder
+    /// rewards / 20% treasury (`withdraw_v2_fees`). There are no partner tiers.
+    #[allow(clippy::too_many_arguments)]
+    pub fn launch_v2<'info>(ctx: Context<'_, '_, 'info, 'info, LaunchV2<'info>>, name: String, symbol: String, fee_bps: u16, first_buy: u64, min_tokens_out: u64, reward: Pubkey, max_fee: u64, fee_in_usdc: bool, uri: String) -> Result<()> {
+        check_beta(&ctx.accounts.beta_gate.to_account_info(), &ctx.accounts.beta_creator.to_account_info())?;
+        let name = name.trim().to_string();
+        require!(!name.is_empty() && name.len() <= MAX_NAME, ElpidaError::InvalidName);
+        require!(valid_v2_symbol(&symbol), ElpidaError::InvalidSymbol);
+        require!(reward != Pubkey::default(), ElpidaError::RewardRequired);
+        require!(valid_metadata_uri(&uri), ElpidaError::InvalidUri);
+        let cfg: CurveConfig = **ctx.accounts.curve_config;
+        require!(fee_bps >= cfg.base_fee_bps && fee_bps <= V2_MAX_FEE_BPS, ElpidaError::V2FeeRange);
+
+        let now = Clock::get()?.unix_timestamp;
+        let a = &ctx.accounts;
+        let tp = a.token_program.to_account_info();
+        let decimals = a.quote_mint.decimals;
+        let start_quote = pay_creation_fee(&CreationFee {
+            creator: a.creator.to_account_info(), treasury: a.treasury.to_account_info(), system_program: a.system_program.to_account_info(),
+            pricing: a.pricing.to_account_info(), price_update: a.price_update.to_account_info(), config: a.curve_config.key(), launch_fee: cfg.launch_fee, mint: a.mint.key(),
+        }, ctx.remaining_accounts, max_fee, fee_in_usdc, now)?;
+        token::mint_to(CpiContext::new(tp.clone(), MintTo { mint: a.mint.to_account_info(), to: a.token_vault.to_account_info(), authority: a.creator.to_account_info() }), TOKEN_SUPPLY)?;
+        create_metadata(&a.token_metadata_program, &a.metadata, &a.mint.to_account_info(), &a.creator.to_account_info(), &a.pool.to_account_info(), &a.system_program.to_account_info(), &name, &symbol, &uri)?;
+        token::set_authority(CpiContext::new(tp.clone(), SetAuthority { current_authority: a.creator.to_account_info(), account_or_mint: a.mint.to_account_info() }), AuthorityType::MintTokens, None)?;
+
+        let mut name_bytes = [0u8; MAX_NAME];
+        name_bytes[..name.len()].copy_from_slice(name.as_bytes());
+        let mut symbol_bytes = [0u8; MAX_SYMBOL];
+        symbol_bytes[..symbol.len()].copy_from_slice(symbol.as_bytes());
+        let (mint_key, creator_key, config_key) = (a.mint.key(), a.creator.key(), a.curve_config.key());
+        let pool = &mut ctx.accounts.pool;
+        pool.config = config_key;
+        pool.mint = mint_key;
+        pool.creator = creator_key;
+        pool.reward = reward;
+        pool.name = name_bytes;
+        pool.symbol = symbol_bytes;
+        pool.virtual_quote = match start_quote {
+            Some(fdv_lamports) => {
+                let vq = (fdv_lamports as u128).checked_mul(cfg.virtual_token as u128).ok_or(ElpidaError::MathOverflow)?.div_ceil(TOKEN_SUPPLY as u128);
+                require!(vq > 0 && vq <= u64::MAX as u128, ElpidaError::InvalidParams);
+                vq as u64
+            }
+            None => cfg.virtual_quote,
+        };
+        pool.virtual_token = cfg.virtual_token;
+        pool.curve_supply = cfg.curve_supply;
+        pool.real_quote = 0;
+        pool.sold = 0;
+        pool.liquidity_bonus = 0;
+        pool.protocol_fees = 0;
+        pool.creator_fees = 0;
+        pool.created_at = now;
+        pool.graduated_at = 0;
+        pool.status = STATUS_TRADING;
+        pool.bump = ctx.bumps.pool;
+
+        // Optional first buy at the token's own fee (no anti-snipe surplus), at most 3% of supply.
+        let mut ext = V2Ext { fee_bps, ..V2Ext::default() };
+        let trade = if first_buy == 0 {
+            TradeQuote { gross: 0, net: 0, tokens: 0, fee: 0, base_fee: 0, surplus: 0, graduates: false }
+        } else { quote_buy(pool, first_buy, fee_bps as u64, fee_bps as u64)? };
+        require!(trade.tokens >= min_tokens_out, ElpidaError::Slippage);
+        require!(trade.tokens as u128 * BPS <= TOKEN_SUPPLY as u128 * V2_FIRST_BUY_CAP_BPS as u128, ElpidaError::CreatorBuyCap);
+        v2_apply_buy(pool, &mut ext, &trade, now)?;
+        let (bump, pool_key) = (pool.bump, pool.key());
+        let snapshot = Snapshot::of(pool);
+        {
+            let info = ctx.accounts.pool.to_account_info();
+            let mut data = info.try_borrow_mut_data()?;
+            PoolExt::default().write(&mut data)?;
+            ext.write(&mut data)?;
+        }
+        let a = &ctx.accounts;
+        quote_transfer(&a.quote_token_program, &a.quote_mint, a.creator_quote.to_account_info(), a.quote_vault.to_account_info(), a.creator.to_account_info(), trade.gross, decimals, &[])?;
+        let seeds: &[&[u8]] = &[b"curve", mint_key.as_ref(), &[bump]];
+        token::transfer(
+            CpiContext::new_with_signer(a.token_program.to_account_info(), Transfer { from: a.token_vault.to_account_info(), to: a.creator_token.to_account_info(), authority: a.pool.to_account_info() }, &[seeds]),
+            trade.tokens,
+        )?;
+        emit!(V2PoolLaunched { pool: pool_key, mint: mint_key, creator: creator_key, fee_bps });
+        emit!(CurveLaunched {
+            creator: creator_key, mint: mint_key, pool: pool_key, quote_in: trade.gross, tokens_out: trade.tokens, fee: trade.fee,
+            real_quote: snapshot.real_quote, virtual_quote: snapshot.virtual_quote_total, token_reserve: snapshot.token_reserve, sold: snapshot.sold,
+        });
+        if snapshot.graduated { emit!(CurveGraduated { pool: pool_key, mint: mint_key, real_quote: snapshot.real_quote, liquidity_bonus: snapshot.liquidity_bonus, lp_tokens: TOKEN_SUPPLY - snapshot.sold }); }
+        Ok(())
+    }
+
+    /// Permissionless: pays a V2 pool's owed fee shares to the creator reward account, the three reward vaults and the
+    /// treasury, before or after migration. Destinations are fixed: the pool's reward wallet, the vault PDAs and the
+    /// config's treasury. Liquidity (`real_quote`, `liquidity_bonus`) is never touched.
+    pub fn withdraw_v2_fees(ctx: Context<WithdrawV2Fees>) -> Result<()> {
+        let info = ctx.accounts.pool.to_account_info();
+        let mut ext = V2Ext::read(&info.try_borrow_data()?).ok_or(ElpidaError::NotV2)?;
+        let owed = ext.owed();
+        require!(owed.iter().any(|v| *v > 0), ElpidaError::NothingToWithdraw);
+        for (i, v) in owed.iter().enumerate() { ext.paid[i] = ext.paid[i].checked_add(*v).ok_or(ElpidaError::MathOverflow)?; }
+        ext.write(&mut info.try_borrow_mut_data()?)?;
+        let (mint_key, bump, pool_key) = (ctx.accounts.pool.mint, ctx.accounts.pool.bump, ctx.accounts.pool.key());
+        let a = &ctx.accounts;
+        let seeds: &[&[u8]] = &[b"curve", mint_key.as_ref(), &[bump]];
+        let to = [a.reward_quote.to_account_info(), a.airdrop_quote.to_account_info(), a.flywheel_quote.to_account_info(), a.holder_quote.to_account_info(), a.treasury_quote.to_account_info()];
+        for (i, amount) in owed.into_iter().enumerate() {
+            if amount == 0 { continue; }
+            quote_transfer(&a.quote_token_program, &a.quote_mint, a.quote_vault.to_account_info(), to[i].clone(), a.pool.to_account_info(), amount, a.quote_mint.decimals, &[seeds])?;
+            emit!(V2FeesPaid { pool: pool_key, recipient: i as u8, to: to[i].key(), amount });
         }
         Ok(())
     }
@@ -721,6 +857,7 @@ pub mod elpida_launchpad {
     /// with the rest of the protocol half instead of waiting forever (review finding S-2), and any quote an earlier
     /// build left queued here is released to the treasury too.
     pub fn harvest_lp_fees(ctx: Context<HarvestLpFees>) -> Result<()> {
+        require!(ctx.accounts.curve_config.model_version != V2_MODEL_VERSION, ElpidaError::V2HarvestPending);
         ctx.accounts.check_token_accounts()?;
         let a = &ctx.accounts;
         let state = PumpState::read(&a.pump_pool.to_account_info(), &a.pump_pool_base.to_account_info(), &a.pump_pool_quote.to_account_info())?;
@@ -891,6 +1028,7 @@ pub mod elpida_launchpad {
     /// Permissionless: the Raydium counterpart of `harvest_lp_fees`. Withdraws only the LP tokens that represent
     /// trading-fee growth since migration and splits the proceeds the same way; the principal liquidity stays locked.
     pub fn harvest_raydium_fees(ctx: Context<HarvestRaydiumFees>) -> Result<()> {
+        require!(ctx.accounts.curve_config.model_version != V2_MODEL_VERSION, ElpidaError::V2HarvestPending);
         ctx.accounts.check_token_accounts()?;
         let a = &ctx.accounts;
         let mint_key = a.mint.key();
@@ -1179,6 +1317,48 @@ fn test_networks_only() -> Result<()> {
 /// A token metadata URI: `ipfs://` followed by printable ASCII, at most Metaplex's 200 bytes.
 pub fn valid_metadata_uri(uri: &str) -> bool {
     uri.len() > "ipfs://".len() && uri.len() <= MAX_URI && uri.starts_with("ipfs://") && uri.bytes().all(|b| b.is_ascii_graphic())
+}
+
+/// The accounts the creation fee touches (shared by `launch` and `launch_v2`).
+pub struct CreationFee<'info> {
+    pub creator: AccountInfo<'info>, pub treasury: AccountInfo<'info>, pub system_program: AccountInfo<'info>,
+    pub pricing: AccountInfo<'info>, pub price_update: AccountInfo<'info>, pub config: Pubkey, pub launch_fee: u64, pub mint: Pubkey,
+}
+
+/// Charges the creation fee: fixed lamports from the config, or USD from the bound Pyth price when pricing is on (paid
+/// in SOL, or in USDC with the four USDC accounts in `remaining`). Returns the oracle-sized starting FDV in lamports for
+/// SOL pairs priced in USD, if any.
+fn pay_creation_fee<'info>(f: &CreationFee<'info>, remaining: &[AccountInfo<'info>], max_fee: u64, fee_in_usdc: bool, now: i64) -> Result<Option<u64>> {
+    let pricing = load_pricing(&f.pricing, &f.config)?;
+    let (fee_lamports, usdc_fee, start_quote, price) = match &pricing {
+        None => { require!(!fee_in_usdc, ElpidaError::UsdcFeeUnavailable); (f.launch_fee, 0u64, None, None) }
+        Some(p) => {
+            let px = read_price(&f.price_update, p, now)?;
+            let start = if p.start_fdv_usd_e6 > 0 { Some(usd_to_quote(p.start_fdv_usd_e6, &px, 9)?) } else { None };
+            if fee_in_usdc { (0, p.fee_usd_e6, start, Some(px)) } else { (usd_to_quote(p.fee_usd_e6, &px, 9)?, 0, start, Some(px)) }
+        }
+    };
+    require!(fee_lamports <= max_fee, ElpidaError::FeeAboveMax);
+    if fee_lamports > 0 {
+        system_program::transfer(CpiContext::new(f.system_program.clone(), system_program::Transfer { from: f.creator.clone(), to: f.treasury.clone() }), fee_lamports)?;
+    }
+    if usdc_fee > 0 {
+        let p = pricing.as_ref().ok_or(ElpidaError::UsdcFeeUnavailable)?;
+        require!(p.usdc_mint != Pubkey::default() && remaining.len() >= 4, ElpidaError::UsdcFeeUnavailable);
+        let (usdc_mint, creator_usdc, treasury_usdc, usdc_program) = (&remaining[0], &remaining[1], &remaining[2], &remaining[3]);
+        require_keys_eq!(usdc_mint.key(), p.usdc_mint, ElpidaError::UsdcFeeUnavailable);
+        require!(*usdc_program.key == anchor_spl::token::ID || *usdc_program.key == anchor_spl::token_2022::ID, ElpidaError::UsdcFeeUnavailable);
+        require!(*usdc_mint.owner == *usdc_program.key, ElpidaError::UsdcFeeUnavailable);
+        require_keys_eq!(treasury_usdc.key(), get_associated_token_address_with_program_id(&f.treasury.key(), &p.usdc_mint, usdc_program.key), ElpidaError::UsdcFeeUnavailable);
+        let usdc_decimals = usdc_mint.try_borrow_data()?.get(44).copied().ok_or(ElpidaError::UsdcFeeUnavailable)?;
+        require!(usdc_decimals as u32 == USD_DECIMALS, ElpidaError::UsdcFeeUnavailable);
+        // The token program enforces that the creator owns and signs for `creator_usdc`.
+        ti::transfer_checked(CpiContext::new(usdc_program.clone(), ti::TransferChecked { from: creator_usdc.clone(), mint: usdc_mint.clone(), to: treasury_usdc.clone(), authority: f.creator.clone() }), usdc_fee, usdc_decimals)?;
+    }
+    if let Some(px) = &price {
+        emit!(LaunchFeePaid { mint: f.mint, payer: f.creator.key(), asset: if usdc_fee > 0 { pricing.as_ref().map(|p| p.usdc_mint).unwrap_or_default() } else { Pubkey::default() }, amount: if usdc_fee > 0 { usdc_fee } else { fee_lamports }, price: px.price, exponent: px.exponent, publish_time: px.publish_time });
+    }
+    Ok(start_quote)
 }
 
 /// Metaplex `CreateMetadataAccountV3` with `is_mutable = false`: name, symbol and URI can never change.
@@ -1554,6 +1734,88 @@ impl PoolExt {
     }
 }
 
+/// A V2 pool's fee ledger, stored after the pool extension. `accrued` is the running total of fees at the token's own
+/// rate (the anti-snipe surplus above it is liquidity, not fees); recipient i is owed floor(accrued x V2_SPLIT[i] /
+/// 10,000) less what it has been paid. The split's rounding remainder (at most 4 base units) stays in the vault.
+#[derive(Clone, Copy, Default, PartialEq, Eq, Debug)]
+pub struct V2Ext { pub fee_bps: u16, pub accrued: u64, pub paid: [u64; 5] }
+pub fn v2_ext_offset() -> usize { pool_ext_offset() + POOL_EXT_LEN }
+impl V2Ext {
+    pub fn read(data: &[u8]) -> Option<V2Ext> {
+        let o = v2_ext_offset();
+        if data.len() < o + V2_EXT_LEN || data[o] != V2_EXT_VERSION { return None; }
+        let u64_at = |i: usize| u64::from_le_bytes(data[i..i + 8].try_into().unwrap());
+        let mut paid = [0u64; 5];
+        for (i, p) in paid.iter_mut().enumerate() { *p = u64_at(o + 11 + i * 8); }
+        Some(V2Ext { fee_bps: u16::from_le_bytes([data[o + 1], data[o + 2]]), accrued: u64_at(o + 3), paid })
+    }
+    pub fn write(&self, data: &mut [u8]) -> Result<()> {
+        let o = v2_ext_offset();
+        require!(data.len() >= o + V2_EXT_LEN, ElpidaError::NotV2);
+        data[o] = V2_EXT_VERSION;
+        data[o + 1..o + 3].copy_from_slice(&self.fee_bps.to_le_bytes());
+        data[o + 3..o + 11].copy_from_slice(&self.accrued.to_le_bytes());
+        for (i, p) in self.paid.iter().enumerate() { data[o + 11 + i * 8..o + 19 + i * 8].copy_from_slice(&p.to_le_bytes()); }
+        Ok(())
+    }
+    /// What each recipient is owed now.
+    pub fn owed(&self) -> [u64; 5] {
+        let mut out = [0u64; 5];
+        for i in 0..5 { out[i] = v2_share(self.accrued, i).saturating_sub(self.paid[i]); }
+        out
+    }
+}
+
+/// Recipient i's share of a running fee total, rounded down.
+pub fn v2_share(accrued: u64, i: usize) -> u64 { (accrued as u128 * V2_SPLIT[i] as u128 / BPS) as u64 }
+
+/// The fee of a V2 trade `now`: 90% at launch, falling linearly to the token's own fee over 60 seconds (as on EVM).
+pub fn v2_fee_bps(own_bps: u16, created_at: i64, now: i64) -> u64 {
+    let (own, start, window) = (own_bps as u64, V2_SNIPE_START_BPS as u64, V2_SNIPE_WINDOW_SECS as u64);
+    let elapsed = now.saturating_sub(created_at).max(0) as u64;
+    if elapsed >= window { return own; }
+    own + (start - own) * (window - elapsed) / window
+}
+
+/// Books a V2 trade's fee: the part at the token's own rate joins the ledger, the anti-snipe surplus is locked as
+/// liquidity. The legacy protocol / creator counters stay at zero for V2 pools.
+pub fn v2_book_fee(pool: &mut CurvePool, ext: &mut V2Ext, trade: &TradeQuote) -> Result<()> {
+    ext.accrued = ext.accrued.checked_add(trade.base_fee).ok_or(ElpidaError::MathOverflow)?;
+    pool.liquidity_bonus = pool.liquidity_bonus.checked_add(trade.surplus).ok_or(ElpidaError::MathOverflow)?;
+    Ok(())
+}
+
+/// The pool's V2 ledger when it trades through a V2 config (a V2 config's pools always have one), otherwise None.
+pub fn v2_of(cfg: &CurveConfig, pool: &AccountInfo) -> Result<Option<V2Ext>> {
+    if cfg.model_version != V2_MODEL_VERSION { return Ok(None); }
+    Ok(Some(V2Ext::read(&pool.try_borrow_data()?).ok_or(ElpidaError::NotV2)?))
+}
+
+/// Books a V2 buy: reserves, the fee ledger, and completion of the curve.
+pub fn v2_apply_buy(pool: &mut CurvePool, ext: &mut V2Ext, trade: &TradeQuote, now: i64) -> Result<()> {
+    pool.real_quote = pool.real_quote.checked_add(trade.net).ok_or(ElpidaError::MathOverflow)?;
+    pool.sold = pool.sold.checked_add(trade.tokens).ok_or(ElpidaError::MathOverflow)?;
+    v2_book_fee(pool, ext, trade)?;
+    if trade.graduates {
+        pool.status = STATUS_GRADUATED;
+        pool.graduated_at = now;
+    }
+    Ok(())
+}
+
+/// The V2 ticker rule: 1 to 10 ASCII letters or digits (not unique).
+pub fn valid_v2_symbol(symbol: &str) -> bool { !symbol.is_empty() && symbol.len() <= MAX_SYMBOL && symbol.bytes().all(|b| b.is_ascii_alphanumeric()) }
+
+/// The fee range a V2 config allows: from its minimum to 4%. Mainnet builds require the approved 1.00% minimum.
+pub fn check_v2_config(params: &CurveParams) -> Result<()> {
+    #[cfg(not(feature = "testnet"))]
+    require!(params.base_fee_bps == V2_MAINNET_MIN_FEE_BPS, ElpidaError::InvalidParams);
+    require!(params.base_fee_bps >= 1 && params.base_fee_bps <= V2_DEFAULT_FEE_BPS, ElpidaError::InvalidParams);
+    require!(params.snipe_start_bps == V2_SNIPE_START_BPS && params.snipe_window_secs == V2_SNIPE_WINDOW_SECS, ElpidaError::InvalidParams);
+    require!(params.max_creator_buy_bps == V2_FIRST_BUY_CAP_BPS, ElpidaError::InvalidParams);
+    Ok(())
+}
+
 struct Snapshot { real_quote: u64, virtual_quote_total: u64, token_reserve: u64, sold: u64, liquidity_bonus: u64, graduated: bool }
 impl Snapshot {
     fn of(pool: &CurvePool) -> Self {
@@ -1738,6 +2000,112 @@ pub struct Launch<'info> {
     /// CHECK: PDA ["partner", creator]; when it holds a live tier, this pool buys back and burns that share of its fees.
     #[account(seeds = [b"partner", creator.key().as_ref()], bump)]
     pub partner: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct AddV2Config<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(init, payer = authority, space = 8 + CurveConfig::INIT_SPACE, seeds = [b"curve-config-v2", quote_mint.key().as_ref()], bump)]
+    pub curve_config: Box<Account<'info, CurveConfig>>,
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    /// CHECK: any wallet; the treasury share goes to its quote-token associated account.
+    pub treasury: UncheckedAccount<'info>,
+    #[account(init_if_needed, payer = authority, associated_token::mint = quote_mint, associated_token::authority = treasury, associated_token::token_program = token_program)]
+    pub treasury_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ ElpidaError::Unauthorized)]
+    pub program: Program<'info, crate::program::ElpidaLaunchpad>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ ElpidaError::Unauthorized)]
+    pub program_data: Box<Account<'info, ProgramData>>,
+    pub token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct LaunchV2<'info> {
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    #[account(has_one = quote_mint, has_one = treasury, constraint = curve_config.model_version == V2_MODEL_VERSION @ ElpidaError::NotV2)]
+    pub curve_config: Box<Account<'info, CurveConfig>>,
+    #[account(mint::token_program = quote_token_program)]
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    /// CHECK: verified against curve_config.treasury; receives the SOL creation fee.
+    #[account(mut)]
+    pub treasury: UncheckedAccount<'info>,
+    #[account(init, payer = creator, mint::decimals = TOKEN_DECIMALS, mint::authority = creator)]
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(init, payer = creator, space = 8 + CurvePool::INIT_SPACE + POOL_EXT_LEN + V2_EXT_LEN, seeds = [b"curve", mint.key().as_ref()], bump)]
+    pub pool: Box<Account<'info, CurvePool>>,
+    #[account(init, payer = creator, associated_token::mint = mint, associated_token::authority = pool)]
+    pub token_vault: Box<Account<'info, TokenAccount>>,
+    #[account(init, payer = creator, associated_token::mint = quote_mint, associated_token::authority = pool, associated_token::token_program = quote_token_program)]
+    pub quote_vault: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(mut, token::mint = quote_mint, token::authority = creator, token::token_program = quote_token_program)]
+    pub creator_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(init, payer = creator, associated_token::mint = mint, associated_token::authority = creator)]
+    pub creator_token: Box<Account<'info, TokenAccount>>,
+    pub token_program: Program<'info, Token>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+    /// CHECK: PDA ["beta-gate"]; launches are open while it does not exist or is disabled.
+    #[account(seeds = [b"beta-gate"], bump)]
+    pub beta_gate: UncheckedAccount<'info>,
+    /// CHECK: PDA ["beta-creator", creator]; must exist while the beta gate is enabled.
+    #[account(seeds = [b"beta-creator", creator.key().as_ref()], bump)]
+    pub beta_creator: UncheckedAccount<'info>,
+    /// CHECK: PDA ["pricing", curve_config]; when it exists the fee and SOL curve are priced in USD.
+    pub pricing: UncheckedAccount<'info>,
+    /// CHECK: the Pyth price account bound in `pricing` (any account when pricing is off).
+    pub price_update: UncheckedAccount<'info>,
+    /// CHECK: Metaplex metadata PDA ["metadata", program, mint]; created and seed-checked by Metaplex.
+    #[account(mut)]
+    pub metadata: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = MPL_TOKEN_METADATA)]
+    pub token_metadata_program: UncheckedAccount<'info>,
+}
+
+#[derive(Accounts)]
+pub struct WithdrawV2Fees<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(has_one = quote_mint, has_one = treasury, constraint = curve_config.model_version == V2_MODEL_VERSION @ ElpidaError::NotV2)]
+    pub curve_config: Box<Account<'info, CurveConfig>>,
+    #[account(mint::token_program = quote_token_program)]
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(mut, seeds = [b"curve", mint.key().as_ref()], bump = pool.bump, has_one = mint, has_one = reward, constraint = pool.config == curve_config.key() @ ElpidaError::WrongConfig)]
+    pub pool: Box<Account<'info, CurvePool>>,
+    /// CHECK: verified against curve_config.treasury.
+    pub treasury: UncheckedAccount<'info>,
+    /// CHECK: verified against pool.reward.
+    pub reward: UncheckedAccount<'info>,
+    /// CHECK: data-less PDA ["v2-vault", "airdrop"]; owns the trader-airdrop vault's token accounts.
+    #[account(seeds = [b"v2-vault", V2_VAULT_AIRDROP], bump)]
+    pub airdrop_vault: UncheckedAccount<'info>,
+    /// CHECK: data-less PDA ["v2-vault", "flywheel"].
+    #[account(seeds = [b"v2-vault", V2_VAULT_FLYWHEEL], bump)]
+    pub flywheel_vault: UncheckedAccount<'info>,
+    /// CHECK: data-less PDA ["v2-vault", "holder"].
+    #[account(seeds = [b"v2-vault", V2_VAULT_HOLDER], bump)]
+    pub holder_vault: UncheckedAccount<'info>,
+    #[account(init_if_needed, payer = payer, associated_token::mint = quote_mint, associated_token::authority = reward, associated_token::token_program = quote_token_program)]
+    pub reward_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(init_if_needed, payer = payer, associated_token::mint = quote_mint, associated_token::authority = airdrop_vault, associated_token::token_program = quote_token_program)]
+    pub airdrop_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(init_if_needed, payer = payer, associated_token::mint = quote_mint, associated_token::authority = flywheel_vault, associated_token::token_program = quote_token_program)]
+    pub flywheel_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(init_if_needed, payer = payer, associated_token::mint = quote_mint, associated_token::authority = holder_vault, associated_token::token_program = quote_token_program)]
+    pub holder_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = treasury, associated_token::token_program = quote_token_program)]
+    pub treasury_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = pool, associated_token::token_program = quote_token_program)]
+    pub quote_vault: Box<InterfaceAccount<'info, QuoteAccount>>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]
@@ -2363,6 +2731,14 @@ pub struct PartnerLpBuyback { pub pool: Pubkey, pub quote_in: u64, pub tokens_bu
 #[event]
 pub struct LpFeesHarvested { pub pool: Pubkey, pub pump_pool: Pubkey, pub lp_burned: u64, pub base_out: u64, pub quote_out: u64, pub protocol_base: u64, pub protocol_quote: u64, pub lp_locked: u64 }
 
+#[event]
+pub struct V2ConfigAdded { pub config: Pubkey, pub quote_mint: Pubkey, pub min_fee_bps: u16 }
+#[event]
+pub struct V2PoolLaunched { pub pool: Pubkey, pub mint: Pubkey, pub creator: Pubkey, pub fee_bps: u16 }
+/// `recipient`: 0 creator, 1 trader airdrop, 2 flywheel, 3 holder rewards, 4 treasury.
+#[event]
+pub struct V2FeesPaid { pub pool: Pubkey, pub recipient: u8, pub to: Pubkey, pub amount: u64 }
+
 #[error_code]
 pub enum ElpidaError {
     #[msg("Only the program upgrade authority can initialize")] Unauthorized,
@@ -2402,4 +2778,8 @@ pub enum ElpidaError {
     #[msg("Unexpected Raydium account")] RaydiumAccount,
     #[msg("No queued partner buyback to spend")] NothingToBuyBack,
     #[msg("A buyback ran less than a minute ago; the next one waits")] BuybackTooSoon,
+    #[msg("This needs an ELPIDA V2 pool or config")] NotV2,
+    #[msg("The token's fee must be between the pair's minimum and 4%")] V2FeeRange,
+    #[msg("Nothing owed yet")] NothingToWithdraw,
+    #[msg("V2 pools split graduated-pool fees five ways; that harvest arrives with the next program version")] V2HarvestPending,
 }
