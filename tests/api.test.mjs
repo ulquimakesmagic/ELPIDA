@@ -52,6 +52,10 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.equal((await fetch(`${base}/launch`)).status,200);
     assert.equal((await fetch(`${base}/analytics`)).status,200);
     assert.equal((await fetch(`${base}/analytics-view.mjs`)).status,200);
+    assert.equal((await fetch(`${base}/v2-rewards-view.mjs`)).status,200);
+    // No V2 deployment is pinned yet: the Rewards section has nothing to show and stays hidden.
+    assert.deepEqual(await(await fetch(`${base}/api/public/v2-rewards`)).json(),{deployed:false,chains:[]});
+    assert.equal((await fetch(`${base}/api/public/v2-rewards/payouts?wallet=x`)).status,400);
     const operations=await(await fetch(`${base}/api/operations/status`)).json();assert.equal(operations.backup.enabled,false);assert.ok(operations.incidents.some(i=>i.code==='backup_disabled'));assert.ok(!JSON.stringify(operations).includes('secretAccessKey'));
     assert.equal((await fetch(`${base}/chain-ui.mjs`)).status,200);
     assert.equal((await fetch(`${base}/wallet-discovery.mjs`)).status,200);

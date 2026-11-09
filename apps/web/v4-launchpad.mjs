@@ -5,6 +5,7 @@
 import { Contract, ContractFactory, AbiCoder, concat, keccak256, getBytes, getAddress, zeroPadValue, toBeHex, parseUnits, formatUnits, isAddress, ZeroAddress } from '/vendor/ethers.js';
 import { V4_MODEL, V4_HOOK_FLAGS, V4_FLAG_MASK, V4_FEE, V4_NETWORKS, firstBuyOut } from '/v4-model.mjs';
 import { TESTNET_START_FDV_USD, usdQuoteTemplate } from '/curve-model.mjs';
+import { V2_MODEL } from '/v2-economics.mjs';
 import { normalizeMetadata } from './metadata.mjs';
 import { prepareUploadProof } from './upload-proof.mjs';
 import { approvalFor } from './one-confirmation.mjs';
@@ -18,8 +19,10 @@ const savedKey = chainId => `elpida:v4:deployment:${chainId}`;
 const read = key => { try { return JSON.parse(localStorage.getItem(key)); } catch { return null; } };
 const write = (key, value) => { try { localStorage.setItem(key, JSON.stringify(value)); return true; } catch { return false; } };
 
-/** True for a token launched on Model 11 (the public index tags its rows with the deployment model). */
-export const isV4Token = item => item?.deploymentModel === V4_MODEL || item?.model === V4_MODEL;
+/** True for a token launched on ELPIDA V2 (built on Model 11's hook design: same pool, router and trading path). */
+export const isV2Token = item => item?.deploymentModel === V2_MODEL || item?.model === V2_MODEL;
+/** True for a token that lives in a Uniswap v4 pool behind an Elpida hook: Model 11 or V2 (the index tags its rows). */
+export const isV4Token = item => item?.deploymentModel === V4_MODEL || item?.model === V4_MODEL || isV2Token(item);
 const poolManagerKey = chainId => `elpida:v4:pool-manager:${chainId}`;
 /**
  * Whether Model 11 can run on this network: one with Uniswap v4 (networks.mjs `v4.poolManager`), or a test network
@@ -41,6 +44,16 @@ export function v4Deployment(net) {
   const saved = read(savedKey(net.chainId));
   return saved?.factory && saved.poolManager?.toLowerCase() === manager.toLowerCase() ? { ...saved, pinned: false } : null;
 }
+const v2Key = chainId => `elpida:v2:deployment:${chainId}`;
+/** The network's V2 launchpad: the team deployment pinned in networks.mjs (`v2.shared`), else one this browser deployed. */
+export function v2Deployment(net) {
+  const manager = v4PoolManager(net);
+  if (!manager) return null;
+  if (net.v2?.shared?.factory) return { ...net.v2.shared, poolManager: manager, pinned: true };
+  const saved = read(v2Key(net.chainId));
+  return saved?.factory && saved.poolManager?.toLowerCase() === manager.toLowerCase() ? { ...saved, pinned: false } : null;
+}
+export const saveV2Deployment = (net, record) => write(v2Key(net.chainId), record);
 /** A test copy of the PoolManager this browser deployed and that is not pinned yet ({ address, block }), or null. */
 export function savedTestPoolManager(net) {
   if (!v4Available(net) || net.v4.poolManager) return null;
@@ -290,9 +303,9 @@ export async function launchV4(w, body) {
 }
 
 function routerFor(w, item, runner) {
-  const d = v4Deployment(w.net);
-  if (!d?.router) throw new Error('This network has no Model 11 router. Trading is unavailable.');
-  if (item.factory && item.factory.toLowerCase() !== d.factory.toLowerCase()) throw new Error('This token belongs to another Model 11 launchpad.');
+  const v2 = isV2Token(item), d = v2 ? v2Deployment(w.net) : v4Deployment(w.net), name = v2 ? 'V2' : 'Model 11';
+  if (!d?.router) throw new Error(`This network has no ${name} router. Trading is unavailable.`);
+  if (item.factory && item.factory.toLowerCase() !== d.factory.toLowerCase()) throw new Error(`This token belongs to another ${name} launchpad.`);
   return { router: new Contract(d.router, V4_ROUTER_ABI, runner), hook: new Contract(d.hook, HOOK_ABI, runner), d };
 }
 const quoteDecimals = item => item.pair === 'native' ? 18 : Number(item.quoteDecimals ?? 18);
@@ -304,7 +317,7 @@ export async function v4Quote(w, item, side, amount) {
   if (input <= 0n) throw new Error('Enter a positive amount.');
   const [[, out], bps] = await Promise.all([router.quote.staticCall(item.address, buy, input), hook.currentFeeBps(item.address)]);
   const feeBps = Number(bps), fee = buy ? input * bps / 10000n : (out * bps + 10000n - bps - 1n) / (10000n - bps);
-  return { out: formatUnits(out, buy ? 18 : d), fee: formatUnits(fee, d), feeBps, launchedAt: item.launchedAt, antiSnipeActive: !item.graduated && feeBps > V4_FEE.base, venue: 'Uniswap v4' };
+  return { out: formatUnits(out, buy ? 18 : d), fee: formatUnits(fee, d), feeBps, launchedAt: item.launchedAt, antiSnipeActive: !item.graduated && feeBps > (item.feeBps ?? V4_FEE.base), venue: 'Uniswap v4' };
 }
 
 /** A buy or sell through the Model 11 router: an approval only when an ERC-20 input needs one, then the trade. */

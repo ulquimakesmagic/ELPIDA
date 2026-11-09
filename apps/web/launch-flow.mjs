@@ -13,7 +13,9 @@ import { PAIR_KINDS, PAIR_INFO, EQUITY_PROVIDERS, issuerNotice } from '/pairs.mj
 import { stockPicker, loadStockCatalog, stockCatalog } from './stock-picker.mjs';
 import { curveShape, DEX_MODEL, BETA_MODEL, BASE_FEE_BPS, LOCAL_START_FDV_USD } from '/curve-model.mjs';
 import { launchTierNotice } from './partner-labels.mjs';
-import { v4Deployment } from './v4-launchpad.mjs';
+import { v4Deployment, v2Deployment } from './v4-launchpad.mjs';
+import { splitPreview } from './v2-launchpad.mjs';
+import { V2, V2_MODEL } from '/v2-economics.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
 
 const DRAFT_KEY = 'elpida:launch-draft';
@@ -101,7 +103,7 @@ export function renderLaunch(ctx) {
   // (apps/web/launch-conversion.mjs). Public EVM testnets with a DEX only; the quote shows what the swap delivers.
   // Solana: stock pairs only, converted in the program's devnet SOL/stock pool (Jupiter on mainnet later).
   // Model 11 pays its first buy in the pair asset itself (no conversion step in its launch).
-  const canPayNative = () => !(draft.launchModel === 'v11' && v4Offered()) && (!solana() || !!selectedAsset()?.lockedPool) && isPublic() && draft.pair !== 'native' && connected() && !net()?.mainnet && typeof ctx.wallet.firstBuyConversionQuote === 'function' && !!selectedAsset();
+  const canPayNative = () => !(draft.launchModel === 'v11' && v4Offered()) && !(draft.launchModel === 'v20' && v2Offered()) && (!solana() || !!selectedAsset()?.lockedPool) && isPublic() && draft.pair !== 'native' && connected() && !net()?.mainnet && typeof ctx.wallet.firstBuyConversionQuote === 'function' && !!selectedAsset();
   const payNative = () => draft.buyWith === 'native' && canPayNative();
   let conversion = { key: '', state: 'idle' };
   const conversionFor = () => `${draft.chain}:${selectedAsset()?.id}:${draft.nativeBuy}`;
@@ -129,8 +131,13 @@ export function renderLaunch(ctx) {
   // Model 11 (Uniswap v4 hook) is offered where its test launchpad exists; it pairs with the native coin or USDC.
   const v4Offered = () => !!draft.chain && draft.chain !== 'local' && !solana() && !!v4Deployment(net());
   const v4Chosen = () => draft.launchModel === 'v11' && v4Offered();
-  const modelName = () => v4Chosen() ? 'Model 11 test · Uniswap v4' : 'Model 10 · bonding curve';
-  const dexName = () => v4Chosen() ? 'Uniswap v4' : !draft.chain ? 'DEX' : solana() ? 'Raydium' : draft.chain === 'local' ? (ctx.config.dex ? 'Uniswap v3' : 'test') : draft.chain === 'base-sepolia' ? 'Uniswap v3' : ctx.config.publicDexes?.[draft.chain]?.name ?? 'test';
+  // ELPIDA V2 is offered where its test launchpad exists: the creator's own fee, the five-way split, native or USDC pairs.
+  const v2Offered = () => !!draft.chain && draft.chain !== 'local' && !solana() && !!v2Deployment(net());
+  const v2Chosen = () => draft.launchModel === 'v20' && v2Offered();
+  const modelsOffered = () => v4Offered() || v2Offered();
+  const feePercent = () => (Number(draft.feeBps ?? V2.defaultFeeBps) / 100).toFixed(2);
+  const modelName = () => v2Chosen() ? `ELPIDA V2 test · ${feePercent()}% fee` : v4Chosen() ? 'Model 11 test · Uniswap v4' : 'Model 10 · bonding curve';
+  const dexName = () => v4Chosen() || v2Chosen() ? 'Uniswap v4' : !draft.chain ? 'DEX' : solana() ? 'Raydium' : draft.chain === 'local' ? (ctx.config.dex ? 'Uniswap v3' : 'test') : draft.chain === 'base-sepolia' ? 'Uniswap v3' : ctx.config.publicDexes?.[draft.chain]?.name ?? 'test';
 
   async function loadRewards() {
     if (rewardData || ctx.mode !== 'local') return;
@@ -154,7 +161,7 @@ export function renderLaunch(ctx) {
         h('p.desc', draft.description || 'Your description appears here.'), links,
         h('div.chips', { class: 'links' }, h('span.chip',chainIcon(draft.chain), draft.chain ? (draft.chain === 'local' ? 'Local simulation' : net()?.name ?? draft.chain) : 'Network not chosen'), h('span.chip',assetIcon(pairSymbol()), `Pair: ${pairSymbol()}`))),
       h('div.summary-card', h('h4', 'Launch summary'), h('dl.kv',
-        ...(v4Offered() ? [h('dt', 'Launch model'), h('dd', modelName())] : []),
+        ...(modelsOffered() ? [h('dt', 'Launch model'), h('dd', modelName())] : []),
         h('dt', 'Launch fee · $10'), h('dd', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`),
         h('dt', 'First purchase'), h('dd', buyText()),
         h('dt', 'Estimated tokens'), h('dd', est ? `${compact(est.tokens)}` : '—'),
@@ -183,6 +190,12 @@ export function renderLaunch(ctx) {
     // The creator's first buy always pays the 1.25% base fee; the anti-snipe fee applies to other traders only.
     const tax=solana()?0:Number(draft.taxBuy??0);
     if(!Number.isFinite(tax)||tax<0||tax>10)return null;
+    if (v2Chosen()) {
+      // V2: virtual token 1.25 B and virtual quote = start × 5/4 (Model 10's is start × 10/9 at the same test start), the
+      // creator's own fee, no token tax; the hook refuses a first buy above 3% of supply.
+      const net = buy * (1 - Number(draft.feeBps ?? V2.defaultFeeBps) / 10000), vq = curve.vq * 1.125, tokens = 1.25e9 * net / (vq + net), cap = 3e7;
+      return { tokens: Math.min(tokens, cap), exceeds: tokens > cap, completes: false, share: Math.min(tokens, cap) / 1e9 * 100 };
+    }
     const net = buy * (1 - ((curve.feeBps ?? 125)+tax*100) / 10000), tokens = curve.vt * net / (curve.vq + net);
     return { tokens: Math.min(tokens, curve.cap),exceeds:tokens>curve.cap, completes: tokens >= curve.cap, share: Math.min(tokens, curve.cap) / 1e9 * 100 };
   }
@@ -238,12 +251,28 @@ export function renderLaunch(ctx) {
   }
 
   /** Model 11 pairs with the native coin, USDC or a test stock: a saved token pair falls back to the native coin. */
-  const V4_PAIRS = ['native', 'usdc', 'xstock'];
+  const V4_PAIRS = ['native', 'usdc', 'xstock'], V2_PAIRS = ['native', 'usdc'];
+  const modelPairs = () => v2Chosen() ? V2_PAIRS : v4Chosen() ? V4_PAIRS : null;
   function fitPairToModel() {
-    if (!v4Chosen() || V4_PAIRS.includes(draft.pair)) return;
+    if (!modelPairs() || modelPairs().includes(draft.pair)) return;
     draft.pair = 'native';
     const native = pairOptions()?.native?.assets?.[0];
     if (native) { draft.quoteAsset = native.id; draft.firstBuy = defaultBuy('native', native); }
+  }
+  /** V2: the creator's trading fee, from the launchpad's minimum to 4%, and what it means on a $1,000 trade. */
+  const minFeeBps = () => Number(v2Deployment(net())?.minFeeBps ?? 100);
+  function feeSelector() {
+    const bps = draft.feeBps ?? V2.defaultFeeBps, set = value => { draft.feeBps = value; save(); draw(); };
+    const presets = [...new Set([minFeeBps(), 125, 200, 300, 400])].filter(b => b >= minFeeBps() && b <= V2.maxFeeBps).sort((a, b) => a - b);
+    const input = h('input.input', { type: 'number', min: (minFeeBps() / 100).toFixed(2), max: '4.00', step: '0.01', value: (bps / 100).toFixed(2), inputmode: 'decimal', 'aria-label': 'Trading fee, percent',
+      on: { change: e => { const v = Math.round(Number(e.target.value) * 100); set(Number.isFinite(v) ? Math.min(V2.maxFeeBps, Math.max(minFeeBps(), v)) : V2.defaultFeeBps); } } });
+    const preview = splitPreview('1000', bps, 6), labels = { creator: 'You (creator)', traderAirdrop: 'Traders · monthly airdrop', flywheel: 'Flywheel · buy and burn', holderRewards: 'Holders', treasury: 'Elpida treasury' };
+    return h('div.stack.fee-picker', h('h3', 'Trading fee'), h('p.small.muted', `Charged on every buy and sell, before and after graduation. You choose it once: it can never be changed. ${(minFeeBps() / 100).toFixed(2)}% to 4.00%; 1.25% is the default. A higher fee earns more per trade but may slow trading.`),
+      h('div.fee-row', h('div.fee-presets', { role: 'group', 'aria-label': 'Common fees' }, ...presets.map(b => h('button.btn.btn-secondary.btn-sm', { type: 'button', 'aria-pressed': String(b === bps), on: { click: () => set(b) } }, `${(b / 100).toFixed(2)}%${b === 125 ? ' · default' : ''}`))),
+        h('label.fee-input', input, h('span', '%'))),
+      h('div.fee-split', h('p.small', h('strong', `On a $1,000 trade: $${Number(preview.fee).toFixed(2)} fee`)),
+        h('ul', ...preview.parts.map(p => h('li', h('span', labels[p.key]), h('span.small.muted', `${p.bps / 100}%`), h('strong', `$${Number(p.amount).toFixed(2)}`))))),
+      h('p.small.muted', 'For the first 60 seconds after launch the fee starts at 90% and falls to your fee, to deter sniping; that surplus is added to the locked liquidity.'));
   }
   function networkStep() {
     fitPairToModel();
@@ -284,7 +313,7 @@ export function renderLaunch(ctx) {
     if (!stockCatalog() && pairs?.xstock?.assets?.length) loadStockCatalog().then(c => { if (c) draw(); });
     const pairGrid = h('div.choice-grid', { class: 'pair-grid', role: 'radiogroup', 'aria-label': 'Trading pair' }, PAIR_KINDS.map(kind => {
       const info = PAIR_INFO[kind], group = pairs?.[kind];
-      const reason = !draft.chain ? 'Choose a network first.' : v4Chosen() && !V4_PAIRS.includes(kind) ? 'Model 11 test launches pair with the native coin, USDC or a test stock. Choose Model 10 above for this pair.' : !pairs ? 'Connect your wallet to see the assets on this network.' : group?.unavailable ?? (group?.assets.length ? null : 'Not available on this network.');
+      const reason = !draft.chain ? 'Choose a network first.' : v2Chosen() && !V2_PAIRS.includes(kind) ? 'V2 test launches pair with the native coin or USDC. Choose Model 10 above for this pair.' : v4Chosen() && !V4_PAIRS.includes(kind) ? 'Model 11 test launches pair with the native coin, USDC or a test stock. Choose Model 10 above for this pair.' : !pairs ? 'Connect your wallet to see the assets on this network.' : group?.unavailable ?? (group?.assets.length ? null : 'Not available on this network.');
       const symbols = group?.assets.map(a => a.symbol).join(', ');
       const ownerSetup=kind==='usdc'&&!!reason&&draft.chain!=='local'&&!solana()&&connected()&&ctx.state?.pricing?.owner&&ctx.wallet.dex&&ctx.wallet.feeUsdc;
       const finish=ownerSetup?h('a.btn.btn-secondary.btn-sm',{href:'#/monkey?tab=pairs'},'Approve in the operator panel'):null;
@@ -309,10 +338,13 @@ export function renderLaunch(ctx) {
       asset.wsol ? callout('', 'info', 'You pay and receive plain SOL. Elpida wraps it for each trade and unwraps what is left in the same transaction.') : null) : null;
     return { body: [
       networkPicker(), connection,
-      v4Offered() ? h('div.stack', h('h3', 'Launch model'), h('div.choice-grid', { role: 'radiogroup', 'aria-label': 'Launch model' },
-        [['v10', 'Model 10 · bonding curve', `The curve sells the supply, then the buy that completes it moves the liquidity into a locked ${ctx.config.publicDexes?.[draft.chain]?.name ?? 'Uniswap v3'} pool.`], ['v11', 'Model 11 test · Uniswap v4', 'The same curve inside one Uniswap v4 pool, with the liquidity locked from the first trade: no graduation step. Native, USDC or test-stock pairs (stocks once the operator approves them for Model 11), no token tax. Not audited; test networks only.']].map(([key, title, text]) =>
+      modelsOffered() ? h('div.stack', h('h3', 'Launch model'), h('div.choice-grid', { role: 'radiogroup', 'aria-label': 'Launch model' },
+        [['v10', 'Model 10 · bonding curve', `The curve sells the supply, then the buy that completes it moves the liquidity into a locked ${ctx.config.publicDexes?.[draft.chain]?.name ?? 'Uniswap v3'} pool.`],
+          ...(v4Offered() ? [['v11', 'Model 11 test · Uniswap v4', 'The same curve inside one Uniswap v4 pool, with the liquidity locked from the first trade: no graduation step. Native, USDC or test-stock pairs (stocks once the operator approves them for Model 11), no token tax. Not audited; test networks only.']] : []),
+          ...(v2Offered() ? [['v20', 'ELPIDA V2 test · your fee', 'Liquidity locked from the first trade in one Uniswap v4 pool. You choose the trading fee (up to 4%), fixed for good. Every fee is shared: 30% to you, 30% to traders as a monthly airdrop, 10% buys and burns top tokens, 10% to holders, 20% to Elpida. First buy capped at 3% of supply. Native or USDC pairs. Not audited; test networks only.']] : [])].map(([key, title, text]) =>
           h('label.choice', h('input', { type: 'radio', name: 'launch-model', value: key, checked: (draft.launchModel ?? 'v10') === key, on: { change: () => { draft.launchModel = key; fitPairToModel(); save(); draw(); } } }),
-            h('span.choice-title', icon(key === 'v11' ? 'flask-conical' : 'chart-line'), title), h('p', text), key === 'v11' ? h('span.chip', 'Test') : null)))) : null,
+            h('span.choice-title', icon(key === 'v20' ? 'sparkles' : key === 'v11' ? 'flask-conical' : 'chart-line'), title), h('p', text), key !== 'v10' ? h('span.chip', 'Test') : null)))) : null,
+      v2Chosen() ? feeSelector() : null,
       h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'Choose native currency, USDC, an xStock or another approved token. Buyers pay in this asset, and the graduated pool keeps the same pair. Pay the $10 launch fee separately in native currency or USDC. Network gas is always paid in the native coin.'), pairGrid, assetBox),
       draft.chain!=='local'&&(solana()?!solanaPriced():!ctx.config.oracles?.[draft.chain]?.available)?callout('warn','info',solana()?'USD pricing is not active on this Solana cluster yet. It turns on when the team upgrades the program and runs the deploy (solana-upgrade.cmd). Existing tokens can still be browsed and traded.':'Verified launch pricing is pending configuration on this network. Use simulation to test creation.') : null,
       error,
@@ -324,6 +356,8 @@ export function renderLaunch(ctx) {
       const group = pairOptions()?.[draft.pair];
       if (!group?.assets.length) { error.textContent = group?.unavailable ?? 'Choose a trading pair.'; return false; }
       if (v4Chosen() && !V4_PAIRS.includes(draft.pair)) { error.textContent = 'Model 11 test launches pair with the native coin, USDC or a test stock.'; return false; }
+      if (v2Chosen() && !V2_PAIRS.includes(draft.pair)) { error.textContent = 'V2 test launches pair with the native coin or USDC.'; return false; }
+      if (v2Chosen() && !(Number.isInteger(draft.feeBps ?? V2.defaultFeeBps) && (draft.feeBps ?? V2.defaultFeeBps) >= minFeeBps() && (draft.feeBps ?? V2.defaultFeeBps) <= V2.maxFeeBps)) { error.textContent = `Choose a trading fee from ${(minFeeBps() / 100).toFixed(2)}% to 4.00%.`; return false; }
       if (!group.assets.some(a => a.id === draft.quoteAsset)) { draft.quoteAsset = group.assets[0].id; save(); }
       return true;
     } };
@@ -396,7 +430,7 @@ export function renderLaunch(ctx) {
     const amountField = h('div');
     const drawAmount = () => amountField.replaceChildren(payNative()
       ? field({ label: 'Purchase amount', control: h('div.input-affix', nativeAmount, h('span.affix', nativeSymbol())), hint: `Optional. Swapped into ${pairSymbol()} on ${dexName()} at the live pool price, at most 1% below the quote, in a separate confirmation before the launch. If the launch then stops, the ${pairSymbol()} stays in your wallet and your next attempt uses it.` })
-      : field({ label: 'Purchase amount', control: h('div.input-affix', amount, h('span.affix', pairSymbol())), hint: 'Optional. Enter 0 to launch without buying. Launch fees and network gas still apply.' }));
+      : field({ label: 'Purchase amount', control: h('div.input-affix', amount, h('span.affix', pairSymbol())), hint: v2Chosen() ? 'Optional. Your first buy can receive at most 3% of the supply (30,000,000 tokens); a larger amount is refused before anything is sent. Enter 0 to launch without buying.' : 'Optional. Enter 0 to launch without buying. Launch fees and network gas still apply.' }));
     const buyWith = canPayNative() ? h('select.select', { on: { change: e => { draft.buyWith = e.target.value; save(); drawAmount(); quoteConversion(); drawEstimate(); } } },
       h('option', { value: 'pair', selected: !payNative() }, `${pairSymbol()} from your wallet`),
       h('option', { value: 'native', selected: payNative() }, `${nativeSymbol()}, converted to ${pairSymbol()} first`)) : null;
@@ -413,7 +447,7 @@ export function renderLaunch(ctx) {
     const balance = () => { if (!connected()) return null; const a = selectedAsset(); const v = a ? ctx.state?.pairBalances?.[a.id] ?? (draft.pair === 'native' ? ctx.state?.nativeBalance : null) : null; return v == null ? null : `${number(v, 6)} ${pairSymbol()}`; };
     const drawEstimate = () => {
       const e = estimate();
-      estBox.replaceChildren(...[...conversionRows(), h('dl.kv', h('dt', 'Launch fee · $10'), h('dd', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), h('dt', 'First purchase'), h('dd', buyText()), h('dt', 'Trading fee included'), h('dd', `${number(buyAmount() * 0.0125, 6)} ${pairSymbol()}`),
+      estBox.replaceChildren(...[...conversionRows(), h('dl.kv', h('dt', 'Launch fee · $10'), h('dd', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), h('dt', 'First purchase'), h('dd', buyText()), h('dt', 'Trading fee included'), h('dd', `${number(buyAmount() * (v2Chosen() ? Number(draft.feeBps ?? V2.defaultFeeBps) / 10000 : 0.0125), 6)} ${pairSymbol()}`),
         h('dt', 'Estimated tokens'), h('dd', e ? `${compact(e.tokens)} (${number(e.share, 2)}% of supply)` : 'Shown after launch'), balance() ? [h('dt', 'Available balance'), h('dd', balance())] : null,
         connected()&&draft.chain!=='local'?[h('dt','Available for native payment and gas'),h('dd',`${number(ctx.state?.nativeBalance??0,8)} ${nativeSymbol()}`)]:null),
         connected()&&draft.chain!=='local'&&Number(ctx.state?.nativeBalance)===0?callout('warn','info',`This wallet has no ${nativeSymbol()} on ${net()?.name}. Add native currency for approval and launch gas, even when both payments use USDC.`):null,
@@ -443,7 +477,7 @@ export function renderLaunch(ctx) {
         return true;
       }
       const control = amount;
-      if(estimate()?.exceeds){setError(control,'This amount exceeds the curve. Reduce your first purchase.');control.focus();return false;}
+      if(estimate()?.exceeds){setError(control,v2Chosen()?'A first buy can receive at most 3% of the supply. Reduce your first purchase.':'This amount exceeds the curve. Reduce your first purchase.');control.focus();return false;}
       if (!(Number(draft.firstBuy) >= 0)) { setError(control, 'Enter zero or a positive amount.'); control.focus(); return false; }
       const places = assetDecimals();
       if (!new RegExp(`^\\d+(\\.\\d{0,${places}})?$`).test(draft.firstBuy)) { setError(control, `Use at most ${places} decimal places.`); return false; }
@@ -473,11 +507,11 @@ export function renderLaunch(ctx) {
     return { body: [
       h('div.review',
         block('Token', 0, row('Name', draft.name), row('Symbol', `$${draft.symbol.toUpperCase()}`), row('Description', draft.description), row('Logo', draft.image ? (draft.image.startsWith('data:') ? 'Uploaded image' : draft.image) : '—'), row('Links', ['website', 'twitter', 'telegram', 'discord'].filter(k => draft[k]).map(k => ({ website: 'Website', twitter: 'X', telegram: 'Telegram', discord: 'Discord' })[k]).join(', ') || 'None')),
-        block('Network and trading pair', 1, ...(v4Offered() ? [row('Launch model', modelName())] : []), row('Network', draft.chain === 'local' ? 'Local simulation' : net()?.name ?? '—'), row('Wallet', draft.chain === 'local' ? `Demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()}` : short(ctx.wallet.address)), row('Trading pair', `${PAIR_INFO[draft.pair]?.title ?? ''} · ${pairSymbol()}`), v4Chosen() ? row('Liquidity', 'Locked from launch in the same Uniswap v4 pool') : row('Graduates into', `A locked ${dexName()} pool`), notice?.live ? row('Partner tier', `${notice.tier} · ${notice.percent}% of fees buy back and burn`) : null),
+        block('Network and trading pair', 1, ...(modelsOffered() ? [row('Launch model', modelName())] : []), ...(v2Chosen() ? [row('Trading fee', `${feePercent()}% on every trade, fixed for good`), row('Fee split', '30% you · 30% traders · 10% flywheel · 10% holders · 20% Elpida')] : []), row('Network', draft.chain === 'local' ? 'Local simulation' : net()?.name ?? '—'), row('Wallet', draft.chain === 'local' ? `Demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()}` : short(ctx.wallet.address)), row('Trading pair', `${PAIR_INFO[draft.pair]?.title ?? ''} · ${pairSymbol()}`), v4Chosen() || v2Chosen() ? row('Liquidity', 'Locked from launch in the same Uniswap v4 pool') : row('Graduates into', `A locked ${dexName()} pool`), notice?.live ? row('Partner tier', `${notice.tier} · ${notice.percent}% of fees buy back and burn`) : null),
         block('Creator rewards', 2, row('Strategy', STRATEGIES[draft.rewardMode].name), ...(['holders', 'paired', 'buyback'].includes(draft.rewardMode) ? [row('Distribution threshold', `${draft.threshold} ${pairSymbol()}`), row('Minimum token holding', `${number(draft.minimumHolding, 0)} ${draft.symbol.toUpperCase()}`)] : [row('Recipients', recipients)]), draft.rewardMode === 'paired' ? row('Reward asset', rewardData?.assets.find(a => a.address === draft.rewardToken)?.symbol ?? '—') : null, draft.rewardMode === 'buyback' ? row('Vesting', `${draft.vestingDays} days`) : null),
         block('Creator purchase and costs', 3, row('Launch fee · $10', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), row('First purchase', buyText()), payNative() ? row('Paid with', `${nativeSymbol()}, converted to ${pairSymbol()} in a separate confirmation first`) : null, row('Buy / sell token tax', `${draft.taxBuy||0}% / ${draft.taxSell||0}% · additional to trading fees`), row('Estimated tokens', estimate() ? compact(estimate().tokens) : 'Shown after launch'), row('Conversion',priceNote()),row('Network gas', 'Estimated before signing; paid separately'))),
       notice ? callout(notice.live ? '' : 'warn', notice.live ? 'flame' : 'info', notice.text) : null,
-      h('section.summary-card', h('h4', 'Fixed after launch'), h('ul.fixed-list', h('li', 'Name, symbol and the 1,000,000,000 fixed supply'), h('li', `Trading pair (${pairSymbol()})`), h('li', 'Creator reward strategy, recipients and percentages'), h('li', v4Chosen() ? 'Uniswap v4 liquidity locked from launch; the milestone keeps the same pool' : `Graduation into a ${dexName()} pool with permanently locked liquidity`), notice?.live ? h('li', `${notice.tier} tier: ${notice.percent}% of trading fees buy back and burn the token, for life`) : null)),
+      h('section.summary-card', h('h4', 'Fixed after launch'), h('ul.fixed-list', h('li', 'Name, symbol and the 1,000,000,000 fixed supply'), h('li', `Trading pair (${pairSymbol()})`), h('li', 'Creator reward strategy, recipients and percentages'), ...(v2Chosen() ? [h('li', `Trading fee ${feePercent()}% and its five-way split`)] : []), h('li', v4Chosen() || v2Chosen() ? 'Uniswap v4 liquidity locked from launch; the milestone keeps the same pool' : `Graduation into a ${dexName()} pool with permanently locked liquidity`), notice?.live ? h('li', `${notice.tier} tier: ${notice.percent}% of trading fees buy back and burn the token, for life`) : null)),
       ctx.mode!=='local'&&!solana() ? h('p.hint',draft.pair==='native'&&draft.feeCurrency!=='usdc' ? 'One launch confirmation pays the native fee, records supported metadata, creates your token and makes the first purchase. No token spending approval is needed.' : ctx.wallet.atomicLaunch ? 'Your wallet supports one atomic confirmation for payment approval, creation, supported metadata and the first purchase.' : 'Metadata uses the launch confirmation. This wallet may require a separate token payment approval; one-confirmation approval and launch requires an atomic-capable wallet.') : null,
       draft.chain==='base-sepolia'&&!ctx.wallet.needsMetadataUpgrade ? h('p.hint',ctx.config.metadataPublishing?.publicEnabled ? 'Token details are pinned to public IPFS and their reference is included in your launch transaction.' : 'Token details are stored on Elpida’s persistent server and their content reference is included in your launch transaction. Public IPFS pinning is not configured.') : null,
       policy ? null : callout('error', 'circle-alert', 'The reward settings need attention before you can create this token.'),
@@ -502,6 +536,7 @@ export function renderLaunch(ctx) {
     if (payNative() && Number(draft.nativeBuy) > 0) { body.firstBuyPayment = 'native'; body.nativeBuy = String(draft.nativeBuy); }
     if(!solana())body.tax=taxPolicy({buy:draft.taxBuy,sell:draft.taxSell,recipients:draft.recipients,owner:ctx.state?.wallet});
     if (v4Chosen()) { body.model = V4_MODEL; delete body.tax; delete body.firstBuyPayment; delete body.nativeBuy; }
+    if (v2Chosen()) { body.model = V2_MODEL; body.feeBps = draft.feeBps ?? V2.defaultFeeBps; delete body.tax; delete body.firstBuyPayment; delete body.nativeBuy; }
     if (draft.chain === 'local' && (draft.pair === 'token' || draft.pair === 'xstock')) body.quoteToken = body.quoteAsset;
     if (draft.chain === 'local') body.rewardPolicy = policy;
     else body.reward = policy.recipients[0].target || ctx.wallet.address;
@@ -537,7 +572,7 @@ export function renderLaunch(ctx) {
     if (phase === 'done') {
       const token = { symbol: draft.symbol, metadata: { image: draft.image } };
       panel.replaceChildren(h('div.success.panel', avatar(token, 'avatar-lg'), h('h2', { tabindex: '-1' }, `${draft.symbol.toUpperCase()} is live`),
-        h('p', v4Chosen() ? `${draft.name} is trading in its Uniswap v4 pool on ${net()?.name}, with its liquidity locked from the first trade (Model 11 test, not audited). Share it with your community; creator fees follow the reward settings you chose.` : `${draft.name} is trading on its bonding curve${draft.chain === 'local' ? ' in the local simulation' : ` on ${net()?.name}`}. Share it with your community; creator fees follow the reward settings you chose.`),
+        h('p', v2Chosen() ? `${draft.name} is trading in its Uniswap v4 pool on ${net()?.name}, liquidity locked from the first trade, at a ${feePercent()}% fee shared five ways (ELPIDA V2 test, not audited). Share it with your community.` : v4Chosen() ? `${draft.name} is trading in its Uniswap v4 pool on ${net()?.name}, with its liquidity locked from the first trade (Model 11 test, not audited). Share it with your community; creator fees follow the reward settings you chose.` : `${draft.name} is trading on its bonding curve${draft.chain === 'local' ? ' in the local simulation' : ` on ${net()?.name}`}. Share it with your community; creator fees follow the reward settings you chose.`),
         result?.metadataPublished ? h('p.small',result.metadataStorage==='elpida-hosted' ? 'Token details are hosted by Elpida, with their content reference recorded on-chain. Public IPFS pinning is not configured.' : 'Token details published and linked on-chain.') : null,
         h('div.actions', result?.token ? h('a.btn.btn-primary', { href: `#/token/${result.token}` }, 'View token') : null, ctx.txLink(result?.hash) ? h('a.btn.btn-secondary', { href: ctx.txLink(result.hash).href, target: '_blank', rel: 'noopener noreferrer' }, 'View transaction', icon('external-link', 'icon-sm')) : null,
           h('button.btn.btn-ghost', { type: 'button', on: { click: () => { Object.assign(draft, blankDraft(), { chain: ctx.currentChain() }); step = 0; maxStep = 0; phase = 'edit'; result = null; draw(); } } }, 'Create another'))));

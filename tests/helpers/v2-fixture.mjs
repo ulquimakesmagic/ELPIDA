@@ -20,7 +20,12 @@ export const RECIPIENTS = ['creator', 'traderAirdrop', 'flywheel', 'holderReward
 
 const hex = s => (s.startsWith('0x') ? s : '0x' + s);
 
-export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN_FEE_BPS, requireMetadata = false } = {}) {
+/**
+ * `vaults: true` deploys the real reward contracts as the hook's recipients: the trader-airdrop distributor (calendar
+ * months from the start of the chain's current month), the holder-reward distributor (weekly from today) and the
+ * flywheel vault; signer 4 is their keeper.
+ */
+export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN_FEE_BPS, requireMetadata = false, vaults: realVaults = false } = {}) {
   const connection = await network.create('localCancun'), provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 });
   provider.pollingInterval = 10; t.after(async () => { provider.destroy(); await connection.close(); });
   const signers = await Promise.all([0, 1, 2, 3, 4].map(i => provider.getSigner(i))), addresses = await Promise.all(signers.map(s => s.getAddress()));
@@ -28,9 +33,17 @@ export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN
   const treasury = addresses[2], owner = signers[2];
   const vaults = { traderAirdrop: Wallet.createRandom().address, flywheel: Wallet.createRandom().address, holderRewards: Wallet.createRandom().address };
   const manager = await deploy(uniswapV4Artifact('PoolManager'), addresses[0]);
+  const contracts = {};
   const swapRouter = await deploy(uniswapV4Artifact('PoolSwapTest'), manager.target);
   const liquidityRouter = await deploy(uniswapV4Artifact('PoolModifyLiquidityTest'), manager.target);
   const factory = await deploy(v4Art('ElpidaV2Factory'), treasury, startMcapUsd, requireMetadata);
+  if (realVaults) {
+    const now = (await provider.getBlock('latest')).timestamp, today = now - now % 86_400, d = new Date(now * 1000);
+    contracts.airdrop = await deploy(v4Art('ElpidaV2Distributor'), addresses[4], 0, Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000, 'trader-airdrop');
+    contracts.holder = await deploy(v4Art('ElpidaV2Distributor'), addresses[4], 7 * 86_400, today, 'holder-rewards');
+    contracts.flywheel = await deploy(v4Art('ElpidaV2FlywheelVault'), addresses[4], factory.target);
+    Object.assign(vaults, { traderAirdrop: contracts.airdrop.target, flywheel: contracts.flywheel.target, holderRewards: contracts.holder.target });
+  }
   const feed = await deploy(v4Art('MockUsdFeed'), ETH_USD * 10n ** 8n), usdc = await deploy(v4Art('MockUSDC'));
   const stock = await deploy(v4Art('MockIssuerStock'));
   await mined(factory.connect(owner).configureUsdPricing(feed.target, 86400, usdc.target));
@@ -46,7 +59,8 @@ export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN
   const hook = new Contract(address, hookArt.abi, signers[0]);
   await mined(factory.connect(owner).setHook(address));
   const router = await deploy(v4Art('ElpidaV4Router'), manager.target, address);
-  const f = { provider, signers, addresses, treasury, owner, vaults, manager, swapRouter, liquidityRouter, factory, hook, router, feed, usdc, stock, deploy };
+  if (realVaults) await mined(contracts.flywheel.connect(signers[4]).setRouter(router.target));
+  const f = { provider, signers, addresses, treasury, owner, vaults, contracts, manager, swapRouter, liquidityRouter, factory, hook, router, feed, usdc, stock, deploy };
   f.recipient = (l, r) => (r === 'creator' ? l.reward : r === 'treasury' ? treasury : vaults[r]);
   f.now = async () => (await provider.getBlock('latest')).timestamp;
   f.advance = async s => { await provider.send('evm_increaseTime', [s]); await provider.send('evm_mine', []); };

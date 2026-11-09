@@ -1,0 +1,88 @@
+// The Rewards figures on the analytics page, read back from chain events and checked against the contracts.
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import { parseEther, ZeroAddress } from 'ethers';
+import { v2Fixture, launchV2, trade, mined } from './helpers/v2-fixture.mjs';
+import { buildRound } from '../packages/core/v2-rounds.mjs';
+import { V2RewardsIndexer, toJson } from '../packages/indexer/v2-rewards.mjs';
+import { V2RewardsService } from '../apps/api/v2-rewards-service.mjs';
+
+const DAY = 86_400;
+const chainNow = async f => (await f.provider.getBlock('latest')).timestamp;
+
+test('vault sizes by day, rounds, countdown and flywheel burns match the chain', async t => {
+  const f = await v2Fixture(t, { vaults: true }), { airdrop, holder, flywheel } = f.contracts, keeper = f.signers[4];
+  const index = new V2RewardsIndexer({ provider: f.provider, contracts: { hook: f.hook.target, airdrop: airdrop.target, holder: holder.target, flywheel: flywheel.target } });
+  const l = await launchV2(f, { feeBps: 250 });
+  await f.advance(61);
+  for (let day = 0; day < 3; day++) {
+    for (const i of [1, 2, 3]) await trade(f, l, { signer: f.signers[i], buy: true, amount: parseEther(String(0.2 * i)) });
+    await f.advance(DAY);
+  }
+  await mined(f.hook.withdrawFees(l.token.target));
+  // Pay this month's airdrop round once it ends.
+  const round = Number(await airdrop.currentRound()), pool = await f.provider.getBalance(airdrop.target), chainId = (await f.provider.getNetwork()).chainId;
+  const m = buildRound({ chainId, distributor: airdrop.target, round, asset: ZeroAddress }, [[f.addresses[1], pool / 2n], [f.addresses[2], pool / 3n], [f.addresses[3], pool - pool / 2n - pool / 3n]]);
+  await f.provider.send('evm_setNextBlockTimestamp', [Number(await airdrop.roundEnd(round))]);
+  await mined(airdrop.connect(keeper).postRoot(round, ZeroAddress, m.root, m.total, m.recipients, 'ipfs://round'));
+  await mined(airdrop.connect(keeper).claimMany(round, ZeroAddress, m.entries.slice(0, 2).map(e => [e.account, e.amount, e.proof])));
+  // A flywheel cycle, and more trading after it.
+  const fwPool = await f.provider.getBalance(flywheel.target);
+  await mined(flywheel.connect(keeper).buyAndBurn(l.token.target, fwPool / 10n, 1n, 1));
+  await trade(f, l, { buy: true, amount: parseEther('0.4') });
+
+  await index.sync();
+  const now = await chainNow(f), s = index.summary(now), [owed] = await f.hook.ledgers(l.token.target);
+  // Size = what the hook still owes the vault + what the vault holds (including amounts promised to a round).
+  const native = v => v.assets.find(a => a.asset === ZeroAddress.toLowerCase());
+  assert.equal(native(s.airdrop).size, owed[1] + await f.provider.getBalance(airdrop.target));
+  assert.equal(native(s.holder).size, owed[3] + await f.provider.getBalance(holder.target));
+  assert.equal(native(s.flywheel).size, owed[2] + await f.provider.getBalance(flywheel.target));
+  // One point per UTC day, growing while traders trade.
+  const series = native(s.airdrop).series;
+  assert.ok(series.length >= 4);
+  for (let i = 1; i < series.length; i++) assert.equal(series[i].day - series[i - 1].day, DAY);
+  assert.ok(series[1].size > series[0].size && series[2].size > series[1].size);
+  // The round: posted total, two of three paid, statistics of what was paid.
+  const [r] = s.airdrop.rounds;
+  assert.equal(r.round, round); assert.equal(r.total, BigInt(m.total)); assert.equal(r.recipients, 3); assert.equal(r.paidRecipients, 2);
+  assert.equal(r.unclaimed, BigInt(m.entries[2].amount)); assert.equal(r.manifestURI, 'ipfs://round');
+  assert.equal(r.stats.recipients, 2); assert.equal(r.end, Number(await airdrop.roundEnd(round)));
+  // The countdown is the contract's own schedule.
+  assert.equal(s.airdrop.countdown.round, Number(await airdrop.currentRound()));
+  assert.equal(s.airdrop.countdown.endsAt, Number(await airdrop.roundEnd(s.airdrop.countdown.round)));
+  assert.equal(s.holder.countdown.endsAt - Number(await holder.roundStart(s.holder.countdown.round)), 7 * DAY);
+  // Flywheel burns, as recorded on chain.
+  assert.equal(s.flywheel.burns.length, 1); assert.equal(s.flywheel.cycles, 1);
+  assert.equal(s.flywheel.burns[0].supplyAfter, await l.token.totalSupply());
+  assert.equal(s.flywheel.burnedByToken[0].amount, await flywheel.burnedOf(l.token.target));
+  // A trader can look up what they received.
+  assert.equal(index.payoutsOf(f.addresses[1]).length, 1);
+  assert.equal(index.payoutsOf(f.addresses[3]).length, 0);
+  // The API copy has no BigInt.
+  assert.equal(typeof toJson(s).airdrop.rounds[0].total, 'string');
+  // Syncing again reads only new blocks and changes nothing.
+  await index.sync();
+  const again = toJson(index.summary(now)), first = toJson(s);
+  delete again.status.lastSync; delete first.status.lastSync;
+  assert.deepEqual(again, first);
+});
+
+test('the public service: hidden without a pinned V2 deployment, live with one, never on mainnet', async t => {
+  assert.deepEqual(new V2RewardsService({ networks: [{ key: 'base-sepolia', v4: {} }] }).summary(), { deployed: false, chains: [] });
+  const f = await v2Fixture(t, { vaults: true }), { airdrop, holder, flywheel } = f.contracts;
+  const shared = { hook: f.hook.target, airdrop: airdrop.target, holder: holder.target, flywheel: flywheel.target, block: 0 };
+  const net = { key: 'base-sepolia', name: 'Base Sepolia', rpcUrl: 'local', explorer: 'https://sepolia.basescan.org', nativeCurrency: { symbol: 'ETH' }, v2: { shared } };
+  assert.equal(new V2RewardsService({ networks: [{ ...net, mainnet: true }], providerFactory: () => f.provider }).deployed, false, 'mainnet needs its own approval');
+  const service = new V2RewardsService({ networks: [net], providerFactory: () => f.provider, log: () => {} });
+  const l = await launchV2(f);
+  await f.advance(61);
+  await trade(f, l, { buy: true, amount: parseEther('1') });
+  await service.entries[0].index.sync();
+  const s = service.summary({ 'base-sepolia': { status: 'fresh', usd: 2500 } });
+  assert.equal(s.deployed, true); assert.equal(s.chains[0].assets[ZeroAddress].usd, 2500);
+  assert.ok(BigInt(s.chains[0].airdrop.assets[0].size) > 0n);
+  assert.equal(service.summary({ 'base-sepolia': { status: 'stale', usd: 2500 } }).chains[0].assets[ZeroAddress].usd, null, 'no stale dollar figures');
+  assert.throws(() => service.payouts('nope'), /wallet address/);
+  assert.deepEqual(service.payouts(f.addresses[1]).chains[0].payouts, []);
+});
