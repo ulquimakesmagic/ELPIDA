@@ -89,8 +89,44 @@
     "usdcMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
   },
   "deployer": "FeUWFps7CYtrXNXosirwJCfFQM5Na6PamEV6hpFcKaH8",
-  "recordedAt": "2026-10-17T09:22:03.889Z",
+  "recordedAt": "2026-11-09T19:56:32.612Z",
   "build": "testnet",
   "betaGate": null,
+  "v2": {
+    "config": "ELZHReuEkMRnCjZd7m8vCQQMdJGrq4JNmCLiro27Y6wr",
+    "quoteMint": "So11111111111111111111111111111111111111112",
+    "treasury": "FeUWFps7CYtrXNXosirwJCfFQM5Na6PamEV6hpFcKaH8",
+    "minFeeBps": 100,
+    "maxFeeBps": 400,
+    "curve": {
+      "virtualQuote": "625000000",
+      "virtualToken": "1250000000000000",
+      "curveSupply": "690983005625053"
+    },
+    "usdPricing": {
+      "priceAccount": "7UVimffxr9ow1uXYxsr4LHAcV58mLzhmwaeKvJ1pjLiE",
+      "feeUsdE6": "10000000",
+      "startFdvUsdE6": "50000000",
+      "created": true
+    },
+    "distributors": {
+      "airdrop": {
+        "address": "2Qgk2GzVtFqUj2pdwxMWb8rxto6DQnEkuTzvQvnWBRbJ",
+        "vault": "HEQWMUNnXhSwPx3yqXQrq1qX4qCx71QLLnudWyXUtJCd",
+        "operator": "3CcwEu3nSM9Y7UQCgqggiqZrUb361JNRZi9oA7KNQxZW",
+        "period": 0,
+        "genesis": 1793491200
+      },
+      "holder": {
+        "address": "HrPV72p1XtGU946MKQ6qNr47wdxP8EoDdxHUj9WnKt2G",
+        "vault": "9iDxEvLNAe8b8ygJjgkmqomDQrSecgMSjYYPV6hPypgn",
+        "operator": "3CcwEu3nSM9Y7UQCgqggiqZrUb361JNRZi9oA7KNQxZW",
+        "period": 604800,
+        "genesis": 1794182400
+      }
+    },
+    "flywheelVault": "Di2nEuoWepxHR3F8xy1WJyk7sSBuAykozTnjTY5kNqxx",
+    "keeper": "3CcwEu3nSM9Y7UQCgqggiqZrUb361JNRZi9oA7KNQxZW"
+  },
   "upgradeAuthority": "FeUWFps7CYtrXNXosirwJCfFQM5Na6PamEV6hpFcKaH8"
 }
