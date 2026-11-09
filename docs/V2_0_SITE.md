@@ -96,3 +96,18 @@ V2 replaces Model 11.
   with an ERC-20: a buy converts the coin into the pair asset on the conversion pool and then buys on the v4 pool; a
   sell does the reverse. Each hop keeps a 1% margin. One confirmation when the wallet batches calls, otherwise separate
   steps; extra pair asset stays in the wallet. It needs a funded conversion pool for that pair on the network.
+
+## Creator splits, burn tag, stock card (Malik, 10 November)
+
+- **Creator splits on V2 (EVM test networks).** The launch form's creator wallets step accepts up to 8 wallets with
+  percentages. A split deploys `ElpidaCreatorAllocation` (no owner; wallets and shares fixed for good) right before the
+  launch, and the launch names it as the token's creator vault, so the hook pays the creator's 30% into it. A retry with
+  the same wallets and shares reuses the contract this browser deployed. The token page shows a **Creator split** card:
+  each wallet, its share and what it can claim, and **Collect and pay out**, which collects the token's fees from the
+  pool and pays that wallet (anyone may press it; the money only goes to that wallet). One wallet works as before.
+  Holder strategies and X or website allocations are the next phases.
+- **Burn tag.** The Explore and token-page tag shows only the flame and the percentage; the full text is its tooltip.
+- **Stock pair card.** Long asset lists stay inside the card (shortened, full list on hover).
+- **Native route errors.** Two Sepolia test stocks share the symbol tNVDAon (Model 10's has an ETH conversion pool,
+  V2's `0x8Db1…D921` does not yet). The operator's conversion-liquidity picker shows each stock's address, and the token
+  page names the exact asset whose pool is missing.

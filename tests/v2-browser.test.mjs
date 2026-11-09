@@ -10,7 +10,7 @@ import { v4Artifacts } from '../apps/api/v4-artifacts.mjs';
 import { V2Indexer } from '../packages/indexer/v2-indexer.mjs';
 import { V2_MODEL, splitFee } from '../packages/core/v2-economics.mjs';
 
-const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom, v2StockPairs, approveV2Stock } = await import('../apps/web/v2-launchpad.mjs');
+const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom, v2StockPairs, approveV2Stock, claimCreatorSplit, creatorSplitState } = await import('../apps/web/v2-launchpad.mjs');
 const { v2Deployment, v4Quote, v4Trade, isV4Token, isV2Token, v4WithdrawFees } = await import('../apps/web/v4-launchpad.mjs');
 
 function browser(t) {
@@ -101,6 +101,34 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   await v4WithdrawFees(bw, item);
   assert.ok(await f.provider.getBalance(record.flywheel) > 0n);
   await assert.rejects(v4Trade(bw, { ...item, factory: '0x0000000000000000000000000000000000000001' }, 'buy', { amount: '0.01' }), /another V2 launchpad/);
+
+  // Creator split: the creator's 30% goes to an ownerless split contract for 3 wallets (50/30/20); each wallet is paid
+  // only its share, whoever presses the button; a second launch with the same split reuses the same contract.
+  const { art } = await import('./helpers/dex-fixture.mjs'), { Wallet } = await import('ethers');
+  const alloc = art('ElpidaCreatorAllocation');
+  cw.config.contracts = { creatorAllocation: { abi: alloc.abi, bytecode: '0x' + alloc.evm.bytecode.object } };
+  const third = Wallet.createRandom().address, rewardSplit = [{ wallet: cw.address, bps: 5000 }, { wallet: bw.address, bps: 3000 }, { wallet: third, bps: 2000 }];
+  await assert.rejects(launchV2(cw, { name: 'Split', symbol: 'SPLIT', feeBps: 300, rewardSplit: [{ wallet: cw.address, bps: 5000 }, { wallet: third, bps: 4000 }] }), /exactly 100%/);
+  await assert.rejects(launchV2(cw, { name: 'Split', symbol: 'SPLIT', feeBps: 300, rewardSplit: [{ wallet: cw.address, bps: 5000 }, { wallet: cw.address, bps: 5000 }] }), /appear once/);
+  const splitLaunch = await launchV2(cw, { name: 'Split', symbol: 'SPLIT', feeBps: 300, rewardSplit, description: '', image: '' });
+  assert.ok(cw.progress.some(m => /Deploy your creator split \(3 wallets\)/.test(m)));
+  await index.sync();
+  const splitItem = { ...index.listings().find(x => x.address.toLowerCase() === splitLaunch.token.toLowerCase()), deploymentModel: V2_MODEL, factory: record.factory };
+  await f.advance(120);
+  await v4Trade(bw, splitItem, 'buy', { amount: '0.05', slippage: '1' });
+  const before3 = await f.provider.getBalance(third);
+  await claimCreatorSplit(bw, { token: splitItem.address, wallet: third });
+  const paid3 = await f.provider.getBalance(third) - before3;
+  assert.ok(paid3 > 0n, 'the third wallet was paid by someone else pressing the button');
+  const state = await creatorSplitState({ provider: f.provider, net, token: splitItem.address });
+  assert.deepEqual(state.rows.map(r => r.bps), [5000, 3000, 2000]);
+  assert.equal(state.rows[2].claimable, 0n, 'paid out');
+  const [a, b] = state.rows.map(r => r.claimable);
+  assert.ok(a > 0n && a * 3000n / 5000n - b <= 1n && paid3 * 5000n / 2000n - a <= 2n, `shares follow 50/30/20 (${a}, ${b}, ${paid3})`);
+  await assert.rejects(claimCreatorSplit(bw, { token: splitItem.address, wallet: Wallet.createRandom().address }), /not in this token's creator split/);
+  cw.progress.length = 0;
+  await launchV2(cw, { name: 'Split two', symbol: 'SPLIT2', feeBps: 300, rewardSplit, description: '', image: '' });
+  assert.ok(cw.progress.some(m => /Reusing your creator split/.test(m)), 'the same split is reused');
 });
 
 test('V2 deploy: a lagging wallet’s reused nonce is asked again; a resumed deploy replaces reward contracts run by the wrong operator; test stocks become V2 pairs', async t => {

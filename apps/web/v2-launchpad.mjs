@@ -209,8 +209,9 @@ export async function launchV2(w, body) {
   if (!Number.isInteger(feeBps) || feeBps < minFee || feeBps > V2.maxFeeBps) throw new Error(`Choose a fee from ${(minFee / 100).toFixed(2)}% to 4.00%.`);
   const pair = body.pair ?? 'native';
   if (!['native', 'usdc', 'xstock'].includes(pair)) throw new Error('V2 test launches pair with the native coin, USDC or a test stock approved for V2.');
-  const reward = body.reward || w.address;
-  if (!isAddress(reward) || reward === ZeroAddress) throw new Error('Enter a valid creator reward wallet.');
+  const split = body.rewardSplit?.length ? creatorSplitTerms(body.rewardSplit) : null;
+  let reward = split ? null : body.reward || w.address;
+  if (!split && (!isAddress(reward) || reward === ZeroAddress)) throw new Error('Enter a valid creator reward wallet.');
   const asset = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? getAddress(testStock(w, body.quoteAsset)?.address ?? ZeroAddress) : ZeroAddress;
   if (pair === 'xstock') {
     if (asset === ZeroAddress) throw new Error('Choose a test stock that is approved on this network.');
@@ -244,6 +245,8 @@ export async function launchV2(w, body) {
     if (await quote.balanceOf(w.address) < firstBuy) throw new Error(`You need ${formatUnits(firstBuy, decimals)} ${sym} for the first buy.`);
     if (await quote.allowance(w.address, d.factory) < firstBuy) await step(w, quote.approve(d.factory, firstBuy), `Approve exactly the first buy in ${sym}…`);
   }
+  // Creator split: an ownerless contract that receives the creator's 30% and lets each wallet claim its fixed share.
+  if (split) reward = await creatorSplit(w, split);
   w.onProgress('Preparing public token details for the launch transaction…');
   const payload = JSON.stringify({ network: w.net.key, name, symbol, ...normalizeMetadata(body) }), proof = await prepareUploadProof(payload);
   const response = await fetch('/api/metadata/stage', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': w.config.csrf, ...proof }, body: payload });
@@ -255,6 +258,77 @@ export async function launchV2(w, body) {
   const event = result.receipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(e => e?.name === 'Launched');
   return { hash: result.tx.hash, token: event?.args.token, feeBps, metadataSaved: true, metadataPublished: true, metadataStorage: published.storage,
     message: `Your token is live on ${w.net.name} (ELPIDA V2, liquidity locked from launch, ${(feeBps / 100).toFixed(2)}% fee for good). ${d.pinned ? '' : 'This launchpad is not pinned yet, so the site lists the token once it is.'}`.trim() };
+}
+
+/** Checks a creator split: 2 to 8 distinct wallets whose shares (basis points) add up to exactly 100%. */
+export function creatorSplitTerms(rows) {
+  if (!Array.isArray(rows) || rows.length < 2 || rows.length > 8) throw new Error('A creator split has 2 to 8 wallets. Nothing was submitted.');
+  const wallets = rows.map(r => { if (!isAddress(r.wallet) || r.wallet === ZeroAddress) throw new Error('Every creator split wallet must be a valid address. Nothing was submitted.'); return getAddress(r.wallet); });
+  const shares = rows.map(r => Number(r.bps));
+  if (new Set(wallets.map(a => a.toLowerCase())).size !== wallets.length) throw new Error('Each wallet can appear once in a creator split. Nothing was submitted.');
+  if (shares.some(b => !Number.isInteger(b) || b <= 0) || shares.reduce((a, b) => a + b, 0) !== 10000) throw new Error('Creator split shares must be positive and add up to exactly 100%. Nothing was submitted.');
+  return { wallets, shares };
+}
+export const SPLIT_ABI = ['function recipients(uint256) view returns(address)', 'function shares(uint256) view returns(uint16)', 'function accounted(address) view returns(uint256)', 'function claimable(address,address) view returns(uint256)', 'function claim(address asset,address recipient) returns(bool)'];
+export const V2_HOOK_FEES_ABI = ['function launchOf(address) view returns(address quote,address creatorVault,uint64 launchedAt,uint16 feeBps,bool graduated,int24 upperTick,int24 lowerTick,uint128 liquidityBonus,uint128 accrued)', 'function withdrawFees(address token)'];
+
+/** The split's wallets and shares, or null when the token's creator vault is a plain wallet (or anything else). */
+export async function readSplit(provider, vault) {
+  if (!vault || vault === ZeroAddress || (await provider.getCode(vault)) === '0x') return null;
+  const c = new Contract(vault, SPLIT_ABI, provider), rows = [];
+  for (let i = 0; i < 8; i++) { let wallet; try { wallet = await c.recipients(i); } catch { break; } rows.push({ wallet, bps: Number(await c.shares(i)) }); }
+  return rows.length >= 2 && rows.reduce((a, r) => a + r.bps, 0) === 10000 ? rows : null;
+}
+
+/**
+ * A V2 token's creator split, if its creator vault is one: each wallet's share and what it can claim now (synced
+ * plus not yet synced). Fees still inside the pool are collected by the payout itself.
+ */
+export async function creatorSplitState({ provider, net, token }) {
+  const d = v2Deployment(net); if (!d?.hook) return null;
+  const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
+  const rows = await readSplit(provider, l.creatorVault); if (!rows) return null;
+  const c = new Contract(l.creatorVault, SPLIT_ABI, provider), asset = l.quote;
+  const held = asset === ZeroAddress ? await provider.getBalance(l.creatorVault) : await new Contract(asset, ERC20, provider).balanceOf(l.creatorVault);
+  const accounted = await c.accounted(asset), fresh = held > accounted ? held - accounted : 0n;
+  let assigned = 0n;
+  for (const [i, r] of rows.entries()) {
+    const part = i + 1 === rows.length ? fresh - assigned : fresh * BigInt(r.bps) / 10000n; assigned += part;
+    r.claimable = (await c.claimable(asset, r.wallet)) + part;
+  }
+  return { vault: l.creatorVault, asset, rows };
+}
+
+/** Collects the token's fees from the pool (permissionless) and pays one split wallet its share, in one go when the wallet batches. */
+export async function claimCreatorSplit(w, { token, wallet } = {}) {
+  await w.checkNetwork();
+  const d = v2Deployment(w.net); if (!d?.hook) throw new Error(`There is no V2 launchpad on ${w.net.name}.`);
+  if (!isAddress(token) || !isAddress(wallet)) throw new Error('Choose a token and a split wallet.');
+  const hook = new Contract(d.hook, V2_HOOK_FEES_ABI, w.provider), l = await hook.launchOf(token);
+  const rows = await readSplit(w.provider, l.creatorVault);
+  if (!rows?.some(r => r.wallet.toLowerCase() === wallet.toLowerCase())) throw new Error('That wallet is not in this token\'s creator split.');
+  const split = new Contract(l.creatorVault, SPLIT_ABI, w.provider);
+  const calls = [{ to: d.hook, data: hook.interface.encodeFunctionData('withdrawFees', [token]), label: 'Collect the token\'s fees from the pool…' },
+    { to: l.creatorVault, data: split.interface.encodeFunctionData('claim', [l.quote, getAddress(wallet)]), label: `Pay ${wallet.slice(0, 6)}…${wallet.slice(-4)} its share…` }];
+  const r = await w.sendCalls(calls, 'Collect fees and pay out this share.');
+  return { hash: r.tx.hash, message: `Paid out to ${wallet.slice(0, 6)}…${wallet.slice(-4)}. The split sends each wallet only its own share.` };
+}
+/** The split contract for these exact wallets and shares: one this browser deployed before (checked on chain), else a new one. */
+async function creatorSplit(w, { wallets, shares }) {
+  const art = w.config.contracts?.creatorAllocation;
+  if (!art?.bytecode) throw new Error('Creator splits are not available on this server yet. Use one creator wallet. Nothing was submitted.');
+  const key = `elpida:v2:split:${w.net.chainId}:${wallets.map((a, i) => `${a.toLowerCase()}=${shares[i]}`).join(',')}`, saved = read(key)?.address;
+  if (saved && await hasCode(w.provider, saved)) {
+    const c = new Contract(saved, SPLIT_ABI, w.provider);
+    try { const same = (await Promise.all(wallets.map(async (a, i) => (await c.recipients(i)).toLowerCase() === a.toLowerCase() && Number(await c.shares(i)) === shares[i]))).every(Boolean); if (same) { w.onProgress('Reusing your creator split contract from an earlier attempt…'); return saved; } } catch { /* not ours: deploy a new one */ }
+  }
+  const deployed = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(wallets, shares);
+  const r = await w.wait(Promise.resolve(deployed.deploymentTransaction()), `Deploy your creator split (${wallets.length} wallets). It has no owner and cannot be changed…`);
+  await walletCaughtUp(w, r?.tx?.nonce);
+  const address = await deployed.getAddress();
+  if (!await hasCode(w.provider, address, { wait: true })) throw new Error('The creator split contract is not visible on the network yet. Try again; nothing else was submitted.');
+  write(key, { address });
+  return address;
 }
 
 async function step(w, pending, message) { const r = await w.wait(pending, message); await walletCaughtUp(w, r?.tx?.nonce); return r; }

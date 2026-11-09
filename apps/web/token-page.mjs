@@ -18,6 +18,7 @@ import {filterTrades} from './trade-filter.mjs';
 import {odometer} from './odometer.mjs';
 import {filterByWho,topTraders,safetyChecks,quickAmounts,walletHolders} from './token-insights.mjs';
 import {flywheelChip} from './burn-labels.mjs';
+import { creatorSplitCard } from './creator-split.mjs';
 export { exceedsRemaining };
 
 const metadataRequests = new Map();
@@ -194,7 +195,7 @@ export function renderToken(ctx, address) {
   const page=h('div.tk-page', head, strip,
     h('div.tk-layout',
       h('div.tk-top', priceCard),
-      h('aside.tk-rail.stack', trade, desk.position, curve, safety, creatorFeesStat),
+      h('aside.tk-rail.stack', trade, desk.position, curve, safety, creatorFeesStat, creatorSplitCard(ctx, token)),
       h('div.tk-rest.stack', activity)), mobileBar);
   async function loadCreatorFees(){if(!page.isConnected)return;try{const result=await ctx.api(`creator-fees?network=${encodeURIComponent(token.network??ctx.currentChain())}&token=${encodeURIComponent(token.address)}`);if(!page.isConnected)return;if(result.status==='ready'){creatorFeesTotal.textContent=result.assets.filter(a=>Number(a.amount)>0).map(a=>`${number(a.amount,6)} ${a.symbol}`).join(' + ')||`0 ${q}`;creatorFeesStat.title=`Lifetime creator fees through indexed block ${result.indexedBlock}, including claimed amounts. Token and quote assets are shown separately.`;}else{creatorFeesTotal.textContent=result.status==='loading'?'Loading…':'Unavailable';}}catch{creatorFeesTotal.textContent='Unavailable';}if(page.isConnected)setTimeout(loadCreatorFees,15000);}
   queueMicrotask(loadCreatorFees);

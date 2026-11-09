@@ -94,3 +94,8 @@
 .chip.chip-xs{padding:1px 7px;font-size:11px;line-height:16px}
 .chip.chip-test{color:var(--warn,#f5b041);border-color:currentColor}
 @media (max-width:520px){.stock-select-count{display:none}.stock-select-trigger{grid-template-columns:auto minmax(0,1fr) 16px}}
+/* Pair cards: long asset lists (several test stocks) stay inside the card; the full list is in the chip's tooltip. */
+.pair-grid > .choice, .pair-grid > .choice > label { min-width: 0; }
+.pair-grid .choice-title { flex-wrap: wrap; min-width: 0; row-gap: 6px; }
+.pair-grid .choice-title .chip { display: block; min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.pair-grid .choice p { overflow-wrap: anywhere; }

@@ -140,6 +140,8 @@ export function renderLaunch(ctx) {
   // Model 10 is retired from the launch page (Malik, 9 November 2026): ELPIDA V2 is the only model wherever its
   // launchpad exists. Model 10 tokens keep trading. The local simulation keeps its own test curve.
   const v2Chosen = () => v2Offered();
+  // V2 creator splits on public EVM networks: up to 8 wallets through an ownerless split contract (v2-launchpad.mjs).
+  const v2Splits = () => v2Chosen() && !solana() && draft.chain !== 'local' && !!ctx.config.contracts?.creatorAllocation?.bytecode;
   const v2Missing = () => !!draft.chain && draft.chain !== 'local' && !v2Offered();
   const modelsOffered = () => v4Offered() || v2Offered();
   // Where a native-coin first buy is swapped into the pair asset: V2 trades on its own v4 pool but converts on the
@@ -328,7 +330,7 @@ export function renderLaunch(ctx) {
       const ownerSetup=kind==='usdc'&&!!reason&&draft.chain!=='local'&&!solana()&&connected()&&ctx.state?.pricing?.owner&&ctx.wallet.dex&&ctx.wallet.feeUsdc;
       const finish=ownerSetup?h('a.btn.btn-secondary.btn-sm',{href:'#/monkey?tab=pairs'},'Approve in the operator panel'):null;
       return h('div.choice', { 'data-unavailable': reason ? 'true' : undefined }, h('label',h('input', { type: 'radio', name: 'pair', value: kind, checked: draft.pair === kind, disabled: !!reason, on: { change: () => { draft.pair = kind; draft.quoteAsset = group.assets[0].id; draft.firstBuy = defaultBuy(kind, group.assets[0]); save(); draw(); } } }),
-        h('span.choice-title', pairIcon(kind, group), info.title, symbols ? h('span.chip', symbols) : null), h('p', ownerSetup?'This launchpad has not approved USDC yet. Pair approvals are made by the treasury in the operator panel (Pairs).':reason ?? info.note(kind === 'native' ? group.assets[0].symbol : ''))),finish);
+        h('span.choice-title', pairIcon(kind, group), info.title, symbols ? h('span.chip', { title: symbols }, symbols) : null), h('p', ownerSetup?'This launchpad has not approved USDC yet. Pair approvals are made by the treasury in the operator panel (Pairs).':reason ?? info.note(kind === 'native' ? group.assets[0].symbol : ''))),finish);
     }));
     const asset = selectedAsset(), group = pairs?.[draft.pair];
     const balanceOf = a => ctx.state?.pairBalances?.[a.id] ?? (draft.pair === 'native' ? ctx.state?.nativeBalance : null);
@@ -394,7 +396,7 @@ export function renderLaunch(ctx) {
       h('p.hint',canTax?'0–10% per side, fixed at launch. Additional tax splits 30% to Elpida and 70% to your wallet allocations. The 1.25% curve fee remains 50/50. After migration, the token tax and V2 pool fee apply. Creator tax rewards after migration are paid in your launched token.':'Tax launches require the verified V2 tax factory deployment. Available in the local DEX rehearsal; existing public V3 factories cannot create transfer-tax tokens.')) : null;
     settings.append(h('div.summary-card', h('h4', 'Fixed at launch'), h('ul.fixed-list', h('li', 'The reward strategy and its settings'), h('li', 'Recipients and their percentages'), h('li', 'Your creator share of trading fees'))));
     return { body: [
-      local ? null : callout('', 'info', 'On public testnets, creator fees go to one creator wallet. Holder distributions, buybacks and X or website allocations are available in the local simulation until their contracts are deployed publicly.'),
+      local ? null : callout('', 'info', v2Splits() ? 'Your 30% creator share can go to one wallet or be split between up to 8 wallets. A split deploys a small contract with no owner that fixes the wallets and percentages for good; each wallet claims its own share on the token page. Holder distributions, buybacks and X or website allocations are coming to test networks; they work in the local simulation now.' : 'On public testnets, creator fees go to one creator wallet. Holder distributions, buybacks and X or website allocations are available in the local simulation until their contracts are deployed publicly.'),
       taxControls, grid, settings, error,
     ], validate: () => {
       error.textContent = '';
@@ -404,7 +406,8 @@ export function renderLaunch(ctx) {
   }
   function allocationEditor() {
     const exclusive = draft.rewardMode === 'exclusive';
-    const local = draft.chain === 'local' || !!ctx.wallet?.net?.taxDeployment;
+    const local = draft.chain === 'local' || !!ctx.wallet?.net?.taxDeployment || v2Splits();
+    const maxRows = v2Splits() && draft.chain !== 'local' ? 8 : 12;
     const list = h('div.alloc');
     const total = h('div.alloc-total', { role: 'status' });
     const updateTotal = () => { const sum = draft.recipients.reduce((n, r) => n + Number(r.percent || 0), 0); total.dataset.ok = String(Math.abs(sum - 100) < 1e-9); total.replaceChildren(h('span', 'Total'), h('span', `${number(sum, 2)}% of 100%`)); };
@@ -420,14 +423,16 @@ export function renderLaunch(ctx) {
     };
     drawRows();
     return h('div.stack', h('h3', exclusive ? 'Allocations' : 'Creator wallets'),
-      h('p.small.muted', exclusive ? 'Split the creator share between wallets, X accounts and websites. Percentages must total exactly 100%.' : 'Split the creator share between up to 12 wallets. Percentages must total exactly 100%.'),
-      list, h('div', h('button.btn.btn-secondary.btn-sm', { type: 'button', disabled: !local && !exclusive, on: { click: () => { if (draft.recipients.length >= 12) return; draft.recipients.push({ kind: 'wallet', target: '', percent: '0' }); save(); drawRows(); } } }, icon('plus', 'icon-sm'), 'Add recipient'), !local ? h('span.hint', '  Public testnets support one creator wallet.') : null), total,
+      h('p.small.muted', exclusive ? 'Split the creator share between wallets, X accounts and websites. Percentages must total exactly 100%.' : `Split the creator share between up to ${maxRows} wallets. Percentages must total exactly 100%.`),
+      list, h('div', h('button.btn.btn-secondary.btn-sm', { type: 'button', disabled: !local && !exclusive, on: { click: () => { if (draft.recipients.length >= maxRows) return; draft.recipients.push({ kind: 'wallet', target: '', percent: '0' }); save(); drawRows(); } } }, icon('plus', 'icon-sm'), 'Add recipient'), !local ? h('span.hint', '  Public testnets support one creator wallet.') : null), total,
       exclusive ? callout('warn', 'shield-check', 'X and website shares stay in the treasury until the owner verifies the account or domain and chooses a payout wallet. Nobody else, including you, can claim them.') : null);
   }
   function buildPolicy() {
     const policy = normalizeRewardPolicy({ mode: draft.rewardMode, threshold: draft.threshold, minimumHolding: draft.minimumHolding, minimumHoldingUsd: draft.minimumHoldingUsd || '0', vestingDays: draft.vestingDays, rewardToken: draft.rewardToken, recipients: draft.recipients }, draft.chain || 'local');
     const taxed=!solana()&&(Number(draft.taxBuy)>0||Number(draft.taxSell)>0)&&!!ctx.wallet?.net?.taxDeployment;
-    if (draft.chain !== 'local' && (policy.mode !== 'creator' || (!taxed&&policy.recipients.length!==1) || policy.recipients.some(r=>r.kind!=='wallet'))) throw new Error('Public standard launches support one creator wallet. Verified tax deployments support fixed wallet allocations.');
+    const split=v2Splits()&&policy.recipients.length<=8;
+    if (split && policy.recipients.length > 1 && policy.recipients.slice(1).some(r => !r.target)) throw new Error('Enter a wallet address for every recipient after the first (the first can stay empty for your connected wallet).');
+    if (draft.chain !== 'local' && (policy.mode !== 'creator' || (!taxed&&!split&&policy.recipients.length!==1) || policy.recipients.some(r=>r.kind!=='wallet'))) throw new Error(v2Splits() ? 'On test networks a V2 launch pays its creator share to wallets: one, or a split between up to 8.' : 'Public standard launches support one creator wallet. Verified tax deployments support fixed wallet allocations.');
     return policy;
   }
 
@@ -533,6 +538,7 @@ export function renderLaunch(ctx) {
     if (v2Chosen()) { body.model = V2_MODEL; body.feeBps = draft.feeBps ?? V2.defaultFeeBps; delete body.tax; }
     if (draft.chain === 'local' && (draft.pair === 'token' || draft.pair === 'xstock')) body.quoteToken = body.quoteAsset;
     if (draft.chain === 'local') body.rewardPolicy = policy;
+    else if (v2Splits() && policy.recipients.length > 1) { body.rewardSplit = policy.recipients.map((r, i) => ({ wallet: r.target || (i === 0 ? ctx.wallet.address : ''), bps: Math.round(Number(r.percent) * 100) })); delete body.reward; }
     else body.reward = policy.recipients[0].target || ctx.wallet.address;
     phase = 'submitting'; statusState = { step: ctx.mode === 'local' ? 'submit' : STATUS_STEPS()[0][0], error: null, done: false }; draw();
     const onProgress = message => {
