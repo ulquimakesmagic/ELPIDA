@@ -856,9 +856,9 @@ pub mod elpida_launchpad {
     /// passed writable to burn). PumpSwap pools have no buyback, so the quote side of that share goes to the treasury
     /// with the rest of the protocol half instead of waiting forever (review finding S-2), and any quote an earlier
     /// build left queued here is released to the treasury too.
-    pub fn harvest_lp_fees(ctx: Context<HarvestLpFees>) -> Result<()> {
-        require!(ctx.accounts.curve_config.model_version != V2_MODEL_VERSION, ElpidaError::V2HarvestPending);
+    pub fn harvest_lp_fees<'info>(ctx: Context<'_, '_, 'info, 'info, HarvestLpFees<'info>>) -> Result<()> {
         ctx.accounts.check_token_accounts()?;
+        let v2 = ctx.accounts.curve_config.model_version == V2_MODEL_VERSION;
         let a = &ctx.accounts;
         let state = PumpState::read(&a.pump_pool.to_account_info(), &a.pump_pool_base.to_account_info(), &a.pump_pool_quote.to_account_info())?;
         let lp_locked = token_amount(&a.authority_lp.to_account_info())?;
@@ -902,6 +902,24 @@ pub mod elpida_launchpad {
         )?;
         let base_out = token_amount(&a.authority_base.to_account_info())?.checked_sub(base_before).ok_or(ElpidaError::MathOverflow)?;
         let quote_out = token_amount(&a.authority_quote.to_account_info())?.checked_sub(quote_before).ok_or(ElpidaError::MathOverflow)?;
+        if v2 {
+            let lp_after = token_amount(&a.authority_lp.to_account_info())?;
+            let after = PumpState::read(&a.pump_pool.to_account_info(), &a.pump_pool_base.to_account_info(), &a.pump_pool_quote.to_account_info())?;
+            require!(liquidity_units(lp_after, &after)? >= a.migration.principal, ElpidaError::PrincipalBreached);
+            V2Harvest {
+                token_program: a.token_program.to_account_info(), quote_program: a.quote_program_info(), mint: a.mint.to_account_info(), quote_mint: a.quote_mint.to_account_info(),
+                quote_decimals: a.curve_config.quote_decimals, lp_authority: a.lp_authority.to_account_info(), seeds: authority_seeds,
+                authority_base: a.authority_base.to_account_info(), authority_quote: a.authority_quote.to_account_info(), pool: a.pool.to_account_info(),
+            }.settle(ctx.remaining_accounts, base_out, quote_out)?;
+            let (pool_key, pump_pool) = (a.pool.key(), a.pump_pool.key());
+            let migration = &mut ctx.accounts.migration;
+            migration.lp_locked = lp_after;
+            migration.harvested_lp = migration.harvested_lp.checked_add(harvest).ok_or(ElpidaError::MathOverflow)?;
+            migration.harvested_base = migration.harvested_base.checked_add(base_out).ok_or(ElpidaError::MathOverflow)?;
+            migration.harvested_quote = migration.harvested_quote.checked_add(quote_out).ok_or(ElpidaError::MathOverflow)?;
+            emit!(LpFeesHarvested { pool: pool_key, pump_pool, lp_burned: harvest, base_out, quote_out, protocol_base: 0, protocol_quote: 0, lp_locked: lp_after });
+            return Ok(());
+        }
         let buyback_bps = PoolExt::read(&a.pool.to_account_info().try_borrow_data()?).buyback_bps as u128;
         let payout = HarvestPayout {
             token_program: a.token_program.to_account_info(), quote_program: a.quote_program_info(), mint: a.mint.to_account_info(), quote_mint: a.quote_mint.to_account_info(),
@@ -1027,9 +1045,9 @@ pub mod elpida_launchpad {
 
     /// Permissionless: the Raydium counterpart of `harvest_lp_fees`. Withdraws only the LP tokens that represent
     /// trading-fee growth since migration and splits the proceeds the same way; the principal liquidity stays locked.
-    pub fn harvest_raydium_fees(ctx: Context<HarvestRaydiumFees>) -> Result<()> {
-        require!(ctx.accounts.curve_config.model_version != V2_MODEL_VERSION, ElpidaError::V2HarvestPending);
+    pub fn harvest_raydium_fees<'info>(ctx: Context<'_, '_, 'info, 'info, HarvestRaydiumFees<'info>>) -> Result<()> {
         ctx.accounts.check_token_accounts()?;
+        let v2 = ctx.accounts.curve_config.model_version == V2_MODEL_VERSION;
         let a = &ctx.accounts;
         let mint_key = a.mint.key();
         let (state, base_is_0) = read_raydium(&a.ray_pool.to_account_info(), &a.ray_vault_0.to_account_info(), &a.ray_vault_1.to_account_info(), &mint_key)?;
@@ -1057,6 +1075,24 @@ pub mod elpida_launchpad {
         invoke_signed(&Instruction { program_id: raydium::PROGRAM, accounts, data }, &infos, &[authority_seeds])?;
         let base_out = token_amount(&a.authority_base.to_account_info())?.checked_sub(base_before).ok_or(ElpidaError::MathOverflow)?;
         let quote_out = token_amount(&a.authority_quote.to_account_info())?.checked_sub(quote_before).ok_or(ElpidaError::MathOverflow)?;
+        if v2 {
+            let (after, _) = read_raydium(&a.ray_pool.to_account_info(), &a.ray_vault_0.to_account_info(), &a.ray_vault_1.to_account_info(), &mint_key)?;
+            let lp_after = token_amount(&a.authority_lp.to_account_info())?;
+            require!(liquidity_units(lp_after, &after)? >= a.migration.principal, ElpidaError::PrincipalBreached);
+            V2Harvest {
+                token_program: a.token_program.to_account_info(), quote_program: a.token_program.to_account_info(), mint: a.mint.to_account_info(), quote_mint: a.quote_mint.to_account_info(),
+                quote_decimals: a.curve_config.quote_decimals, lp_authority: a.lp_authority.to_account_info(), seeds: authority_seeds,
+                authority_base: a.authority_base.to_account_info(), authority_quote: a.authority_quote.to_account_info(), pool: a.pool.to_account_info(),
+            }.settle(ctx.remaining_accounts, base_out, quote_out)?;
+            let (pool_key, ray_pool) = (a.pool.key(), a.ray_pool.key());
+            let migration = &mut ctx.accounts.migration;
+            migration.lp_locked = lp_after;
+            migration.harvested_lp = migration.harvested_lp.checked_add(harvest).ok_or(ElpidaError::MathOverflow)?;
+            migration.harvested_base = migration.harvested_base.checked_add(base_out).ok_or(ElpidaError::MathOverflow)?;
+            migration.harvested_quote = migration.harvested_quote.checked_add(quote_out).ok_or(ElpidaError::MathOverflow)?;
+            emit!(LpFeesHarvested { pool: pool_key, pump_pool: ray_pool, lp_burned: harvest, base_out, quote_out, protocol_base: 0, protocol_quote: 0, lp_locked: lp_after });
+            return Ok(());
+        }
         let buyback_bps = PoolExt::read(&a.pool.to_account_info().try_borrow_data()?).buyback_bps as u128;
         let split = HarvestPayout {
             token_program: a.token_program.to_account_info(), quote_program: a.token_program.to_account_info(), mint: a.mint.to_account_info(), quote_mint: a.quote_mint.to_account_info(),
@@ -1183,6 +1219,36 @@ fn raydium_create_fee(amm_config: &AccountInfo) -> Result<u64> {
 /// Pays out one LP-fee harvest that the LP authority has just received: the creator's half of each side goes to the
 /// reward wallet; the protocol half goes to the treasury, less a partner pool's share, whose token side is burned and
 /// whose quote side stays with the LP authority for buybacks.
+/// V2 pools after graduation: the token side of each harvest is burned, and the quote side returns to the curve's quote
+/// vault and joins the fee ledger, so `withdraw_v2_fees` splits it five ways like every curve fee. `remaining[0]` must
+/// be the curve's quote vault (ATA(pool, quote_mint), writable) and the pool must be passed writable.
+struct V2Harvest<'a, 'info> {
+    token_program: AccountInfo<'info>, quote_program: AccountInfo<'info>, mint: AccountInfo<'info>, quote_mint: AccountInfo<'info>, quote_decimals: u8,
+    lp_authority: AccountInfo<'info>, seeds: &'a [&'a [u8]], authority_base: AccountInfo<'info>, authority_quote: AccountInfo<'info>, pool: AccountInfo<'info>,
+}
+impl<'a, 'info> V2Harvest<'a, 'info> {
+    #[inline(never)]
+    fn settle(&self, remaining: &[AccountInfo<'info>], base_out: u64, quote_out: u64) -> Result<()> {
+        let vault = remaining.first().ok_or(ElpidaError::NotV2)?;
+        require_keys_eq!(vault.key(), get_associated_token_address_with_program_id(&self.pool.key(), &self.quote_mint.key(), self.quote_program.key), ElpidaError::NotV2);
+        require!(vault.is_writable && self.pool.is_writable, ElpidaError::NotV2);
+        let mut ext = V2Ext::read(&self.pool.try_borrow_data()?).ok_or(ElpidaError::NotV2)?;
+        if base_out > 0 {
+            token::burn(CpiContext::new_with_signer(self.token_program.clone(), Burn { mint: self.mint.clone(), from: self.authority_base.clone(), authority: self.lp_authority.clone() }, &[self.seeds]), base_out)?;
+        }
+        if quote_out > 0 {
+            ti::transfer_checked(
+                CpiContext::new_with_signer(self.quote_program.clone(), ti::TransferChecked { from: self.authority_quote.clone(), mint: self.quote_mint.clone(), to: vault.clone(), authority: self.lp_authority.clone() }, &[self.seeds]),
+                quote_out, self.quote_decimals,
+            )?;
+        }
+        ext.accrued = ext.accrued.checked_add(quote_out).ok_or(ElpidaError::MathOverflow)?;
+        ext.write(&mut self.pool.try_borrow_mut_data()?)?;
+        emit!(V2Harvested { pool: self.pool.key(), base_burned: base_out, quote_accrued: quote_out, accrued: ext.accrued });
+        Ok(())
+    }
+}
+
 struct HarvestPayout<'a, 'info> {
     token_program: AccountInfo<'info>, quote_program: AccountInfo<'info>, mint: AccountInfo<'info>, quote_mint: AccountInfo<'info>, quote_decimals: u8,
     lp_authority: AccountInfo<'info>, seeds: &'a [&'a [u8]],
@@ -2736,6 +2802,9 @@ pub struct V2ConfigAdded { pub config: Pubkey, pub quote_mint: Pubkey, pub min_f
 #[event]
 pub struct V2PoolLaunched { pub pool: Pubkey, pub mint: Pubkey, pub creator: Pubkey, pub fee_bps: u16 }
 /// `recipient`: 0 creator, 1 trader airdrop, 2 flywheel, 3 holder rewards, 4 treasury.
+/// A V2 pool's graduated-pool fees: the token side burned, the quote side added to the five-way ledger.
+#[event]
+pub struct V2Harvested { pub pool: Pubkey, pub base_burned: u64, pub quote_accrued: u64, pub accrued: u64 }
 #[event]
 pub struct V2FeesPaid { pub pool: Pubkey, pub recipient: u8, pub to: Pubkey, pub amount: u64 }
 
@@ -2781,5 +2850,5 @@ pub enum ElpidaError {
     #[msg("This needs an ELPIDA V2 pool or config")] NotV2,
     #[msg("The token's fee must be between the pair's minimum and 4%")] V2FeeRange,
     #[msg("Nothing owed yet")] NothingToWithdraw,
-    #[msg("V2 pools split graduated-pool fees five ways; that harvest arrives with the next program version")] V2HarvestPending,
+    #[msg("Unused (kept so later error codes do not shift)")] V2HarvestPending,
 }
