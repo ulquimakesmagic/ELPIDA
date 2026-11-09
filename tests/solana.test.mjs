@@ -19,9 +19,10 @@ import {
   DISCRIMINATORS, EVENTS, LEGACY_EVENTS, TOKEN_SUPPLY, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, lockedPoolVenue, tradeFeeBps, testConversionOut, decodeTestConversion, BPS, explainError, decodeEvents,
   harvestableLp, harvestNow, MPL_TOKEN_METADATA, MAX_LAUNCH_URI, GRADUATION_GRACE_SECS, validMetadataUri, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint, PYTH_RECEIVER, SOL_USD_FEED_ID, SOL_USD_PRICE_ACCOUNT, parsePriceUpdate, usdToQuote, virtualQuoteForFdv,
   RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, VENUE_RAYDIUM, raydiumCreationCost, raydiumQuote, raydiumBuybackAmount,
-  V2, v2FeeBps, v2Owed, validV2Symbol, POOL_SIZE_V2, V2_WITHDRAW_COMPUTE_UNITS,
+  V2, v2FeeBps, v2Owed, validV2Symbol, POOL_SIZE_V2, V2_WITHDRAW_COMPUTE_UNITS, V2_DIST,
 } from '../packages/solana/client.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
+import { buildSolanaRound, verifySolanaProof } from '../packages/solana/v2-rounds.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
 import { vaultUpgrade, vaultHandBack, closeProgram, readProgramData } from '../scripts/squads-devnet-trial.mjs';
 import { deployProgram, upgradeProgram, ensurePairConfigs, pricingUpdates, ensurePricing, ensureBetaGate, rejectsTestInstructions, prepareUpgradeBuffer, transferUpgradeAuthority, send, airdrop } from '../packages/solana/deploy.mjs';
@@ -1651,3 +1652,56 @@ async function afterV2Window(mint) {
     await sleep(500);
   }
 }
+
+test('Solana V2 rewards (S3): Merkle rounds paid once per leaf, funded rounds only, expiry back to the pool, SOL paid natively; flywheel guards', { skip: raySkip }, async () => {
+  const kind = V2_DIST.airdrop, wsol = new PublicKey(WSOL_MINT), keeper = Keypair.generate();
+  await airdrop(f.connection, keeper.publicKey, 5 * web3.LAMPORTS_PER_SOL);
+  const today = Math.floor((await f.connection.getBlockTime(await f.connection.getSlot('confirmed'))) / 86_400) * 86_400;
+  // Daily rounds that started 20 days ago: round 0 ended long ago and is already past its 12-round claim window.
+  const init = (who, args) => send(f.connection, who, [f.client.initV2Distributor({ authority: who.publicKey, kind, operator: keeper.publicKey, ...args })], [], 1);
+  await failsWith(init(f.outsider, { period: 86_400, genesis: today - 20 * 86_400 }), /0x1770/);
+  await failsWith(init(f.authority, { period: 3_600, genesis: today - 20 * 86_400 }), /0x1799/);
+  await init(f.authority, { period: 86_400, genesis: today - 20 * 86_400 });
+  const ctx = { programId: f.programId, kind, round: 0, asset: f.quoteMint };
+  const [a, b, c] = [f.trader, f.outsider, f.creator].map(k => k.publicKey);
+  const list = buildSolanaRound(ctx, [[a, 1_000_000n], [b, 2_000_000n], [c, 3_000_000n]]);
+  for (const r of list.rows) assert.ok(verifySolanaProof(r.proof, list.root, (await import('../packages/solana/v2-rounds.mjs')).solanaPayoutLeaf(ctx, r)));
+  const post = (who, round, l, asset = f.quoteMint) => send(f.connection, who, [f.client.postV2Root({ operator: who.publicKey, kind, round, asset, root: l.root, total: l.total, recipients: l.recipients, manifestUri: 'ipfs://bafkreih6ilp3u4ue7fmqjnxdnq4ejxn6s5edsxqy7y5c3x2tsnkacsm4zu' })], [], 1);
+  await failsWith(post(f.outsider, 0, list), /0x1770/);
+  await failsWith(post(keeper, 25, list), /0x179a/);
+  const vaultBal = await balance(f.client.ata(f.client.distVault(kind), f.quoteMint));
+  await failsWith(post(keeper, 0, { ...list, total: vaultBal + 1n }), /0x179b/);
+  await post(keeper, 0, list);
+  await failsWith(post(keeper, 0, list), /already in use|0x0/);
+  const claim = (row, over = {}) => send(f.connection, f.authority, [f.client.claimV2({ payer: f.authority.publicKey, kind, round: 0, asset: f.quoteMint, index: row.index, account: row.account, amount: row.amount, proof: row.proof, ...over })], [], 1);
+  const before = await balance(f.client.ata(b, f.quoteMint));
+  await failsWith(claim(list.rows[1], { amount: 9_000_000n }), /0x179c/);
+  const sig = await claim(list.rows[1]);
+  assert.equal(await balance(f.client.ata(b, f.quoteMint)) - before, 2_000_000n);
+  const ev = (await eventsOf(sig)).find(e => e.name === 'V2Claimed');
+  assert.equal(ev.amount, 2_000_000n); assert.equal(ev.account, b.toBase58()); assert.equal(ev.index, 1);
+  await failsWith(claim(list.rows[1]), /0x179d/);
+  // Twelve rounds later the unclaimed 4 units return to the pool; the round then refuses claims.
+  const exp = await send(f.connection, f.outsider, [f.client.expireV2({ kind, round: 0, asset: f.quoteMint })], [], 1);
+  assert.equal((await eventsOf(exp)).find(e => e.name === 'V2Expired').returnedToPool, 4_000_000n);
+  await failsWith(claim(list.rows[0]), /0x179e/);
+
+  // SOL rounds pay native SOL from the vault after the wrapped SOL is swept into it.
+  if (await f.connection.getAccountInfo(f.client.ata(f.client.distVault(kind), wsol))) await send(f.connection, f.outsider, [f.client.sweepV2Sol({ kind })], [], 1);
+  const pot = BigInt(await f.connection.getBalance(f.client.distVault(kind)));
+  assert.ok(pot > 2_000_000n, 'the airdrop vault holds SOL from the Raydium V2 test');
+  const payee = Keypair.generate().publicKey, solList = buildSolanaRound({ ...ctx, round: 1, asset: wsol }, [[payee, 1_000_000n]]);
+  await post(keeper, 1, solList, wsol);
+  await send(f.connection, f.authority, [f.client.claimV2({ payer: f.authority.publicKey, kind, round: 1, asset: wsol, index: 0, account: payee, amount: 1_000_000n, proof: solList.rows[0].proof })], [], 1);
+  assert.equal(await f.connection.getBalance(payee), 1_000_000, 'paid in plain SOL');
+
+  // Flywheel guards: a token less than a day old is refused, as is an order above 10% of the vault.
+  const v2cfg = { address: f.client.configV2For(f.quoteMint), quoteMint: f.quoteMint, treasury: f.treasury }, mint = Keypair.generate();
+  await send(f.connection, f.creator, [f.client.computeBudget(), f.client.launchV2({ uri: TEST_URI, creator: f.creator.publicKey, config: v2cfg, mint: mint.publicKey, name: 'Fly', symbol: 'FLY', feeBps: 125, firstBuy: USDC, reward: f.rewardWallet.publicKey })], [mint], 1);
+  const flyBal = await balance(f.client.ata(f.client.v2VaultPda('flywheel'), f.quoteMint));
+  assert.ok(flyBal > 0n, 'the flywheel vault holds the 10% share');
+  const fly = amountIn => send(f.connection, keeper, [f.client.v2FlywheelCurve({ operator: keeper.publicKey, config: v2cfg, mint: mint.publicKey, amountIn, minOut: 0n })], [], 1);
+  await failsWith(fly(flyBal / 20n), /0x179f/);
+  await failsWith(fly(flyBal), /0x179f/);
+  await failsWith(send(f.connection, f.outsider, [f.client.v2FlywheelCurve({ operator: f.outsider.publicKey, config: v2cfg, mint: mint.publicKey, amountIn: 1n, minOut: 0n })], [], 1), /0x1770/);
+});

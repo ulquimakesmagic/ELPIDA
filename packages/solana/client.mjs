@@ -27,6 +27,11 @@ export const V2 = Object.freeze({ maxFeeBps: 400, defaultFeeBps: 125, mainnetMin
   split: Object.freeze([3_000, 3_000, 1_000, 1_000, 2_000]), recipients: Object.freeze(['creator', 'traderAirdrop', 'flywheel', 'holderRewards', 'treasury']) });
 /** `withdraw_v2_fees` may create up to four associated accounts and makes five transfers. */
 export const V2_WITHDRAW_COMPUTE_UNITS = 400_000;
+/** S3 reward distributors: kind 0 trader airdrop (calendar months), 1 holder rewards (weekly). */
+export const V2_DIST = Object.freeze({ airdrop: 0, holder: 1 });
+export const V2_CLAIM_WINDOW_ROUNDS = 12;
+export const V2_FLYWHEEL = Object.freeze({ cooldownSecs: 6 * 3_600, minAgeSecs: 86_400, maxShareBps: 1_000 });
+export const V2_ROUND_FIXED = 8 + 1 + 4 + 32 + 32 + 8 + 8 + 4 + 8 + 1 + 1;
 export const V2_VAULTS = Object.freeze({ traderAirdrop: 'airdrop', flywheel: 'flywheel', holderRewards: 'holder' });
 /** The fee `elapsed` seconds after launch for a token whose own fee is `feeBps` (the program rounds the same way). */
 export function v2FeeBps(feeBps, elapsed) {
@@ -161,6 +166,17 @@ export const DISCRIMINATORS = {
   addV2Config: [34, 113, 107, 236, 128, 8, 90, 131],
   launchV2: [174, 154, 226, 122, 140, 148, 156, 150],
   withdrawV2Fees: [219, 82, 62, 244, 167, 194, 73, 182],
+  initV2Distributor: [72, 170, 234, 92, 79, 137, 10, 176],
+  postV2Root: [122, 14, 220, 226, 244, 171, 14, 45],
+  claimV2: [229, 87, 46, 162, 21, 157, 231, 114],
+  expireV2: [68, 80, 219, 161, 198, 255, 228, 51],
+  sweepV2Sol: [214, 100, 209, 232, 40, 180, 166, 8],
+  v2FlywheelCurve: [22, 29, 103, 158, 14, 53, 184, 66],
+  v2FlywheelRaydium: [65, 198, 186, 145, 35, 211, 156, 35],
+  V2Distributor: [238, 195, 74, 246, 18, 130, 232, 0],
+  V2Round: [179, 130, 36, 121, 146, 190, 219, 94],
+  V2AssetLedger: [127, 165, 23, 5, 152, 175, 206, 102],
+  V2FlywheelOrder: [213, 21, 238, 121, 127, 198, 45, 192],
 };
 
 // sha256("event:<Name>")[0..8] and field layouts (32-byte keys or little-endian u64s after the
@@ -198,6 +214,13 @@ export const EVENTS = {
   V2ConfigAdded: { discriminator: [239, 9, 113, 171, 54, 108, 17, 148], fields: [['config', 'key'], ['quoteMint', 'key'], ['minFeeBps', 'u16']] },
   V2PoolLaunched: { discriminator: [238, 243, 215, 187, 98, 226, 224, 169], fields: [['pool', 'key'], ['mint', 'key'], ['creator', 'key'], ['feeBps', 'u16']] },
   V2Harvested: { discriminator: [149, 220, 160, 141, 51, 79, 197, 193], fields: [['pool', 'key'], ['baseBurned', 'u64'], ['quoteAccrued', 'u64'], ['accrued', 'u64']] },
+  // S3 rewards. V2RootPosted's trailing manifest string is not decoded; root is read as 32 bytes ('key' layout, base58).
+  V2DistributorSet: { discriminator: [232, 44, 82, 9, 132, 129, 159, 56], fields: [['kind', 'u8'], ['operator', 'key'], ['period', 'u32'], ['genesis', 'u64']] },
+  V2RootPosted: { discriminator: [176, 44, 197, 15, 187, 24, 195, 252], fields: [['kind', 'u8'], ['round', 'u32'], ['asset', 'key'], ['root', 'key'], ['total', 'u64'], ['recipients', 'u32']] },
+  V2Claimed: { discriminator: [166, 110, 210, 85, 83, 77, 50, 232], fields: [['kind', 'u8'], ['round', 'u32'], ['asset', 'key'], ['index', 'u32'], ['account', 'key'], ['amount', 'u64']] },
+  V2Expired: { discriminator: [223, 3, 47, 31, 191, 214, 216, 65], fields: [['kind', 'u8'], ['round', 'u32'], ['asset', 'key'], ['returnedToPool', 'u64']] },
+  V2SolSwept: { discriminator: [235, 8, 48, 143, 127, 5, 110, 112], fields: [['kind', 'u8'], ['lamports', 'u64']] },
+  V2BoughtAndBurned: { discriminator: [39, 203, 6, 135, 126, 128, 108, 99], fields: [['pool', 'key'], ['mint', 'key'], ['asset', 'key'], ['spent', 'u64'], ['burned', 'u64'], ['supplyAfter', 'u64'], ['venue', 'u8']] },
   V2FeesPaid: { discriminator: [225, 206, 2, 3, 203, 216, 255, 104], fields: [['pool', 'key'], ['recipient', 'u8'], ['to', 'key'], ['amount', 'u64']] },
 };
 
@@ -230,11 +253,12 @@ export function decodeEvents(logs, PublicKey) {
       if (legacy) event.legacy = true;
       let offset = 8;
       for (const [field, type] of fields) {
-        const size = type === 'key' ? 32 : type === 'u16' ? 2 : type === 'u8' ? 1 : 8;
+        const size = type === 'key' ? 32 : type === 'u16' ? 2 : type === 'u8' ? 1 : type === 'u32' ? 4 : 8;
         if (offset + size > bytes.length) { event.legacy = true; break; }
         if (type === 'key') event[field] = new PublicKey(bytes.subarray(offset, offset + 32)).toBase58();
         else if (type === 'u16') event[field] = view.getUint16(offset, true);
         else if (type === 'u8') event[field] = bytes[offset];
+        else if (type === 'u32') event[field] = view.getUint32(offset, true);
         else event[field] = view.getBigUint64(offset, true);
         offset += size;
       }
@@ -531,6 +555,11 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
   /** ELPIDA V2 trading pair for a quote mint, and the three reward vaults (data-less PDAs that own one account per asset). */
   const configV2For = quoteMint => PublicKey.findProgramAddressSync([enc('curve-config-v2'), key(quoteMint).toBytes()], programId)[0];
   const v2VaultPda = kind => PublicKey.findProgramAddressSync([enc('v2-vault'), enc(kind)], programId)[0];
+  const distVault = kind => v2VaultPda(kind === 0 ? 'airdrop' : 'holder');
+  const v2DistPda = kind => PublicKey.findProgramAddressSync([enc('v2-dist'), Uint8Array.of(kind)], programId)[0];
+  const v2LedgerPda = (kind, asset) => PublicKey.findProgramAddressSync([enc('v2-reserved'), Uint8Array.of(kind), key(asset).toBytes()], programId)[0];
+  const v2RoundPda = (kind, asset, round) => PublicKey.findProgramAddressSync([enc('v2-round'), Uint8Array.of(kind), key(asset).toBytes(), u32(round)], programId)[0];
+  const v2FlyPda = mint => PublicKey.findProgramAddressSync([enc('v2-fly'), key(mint).toBytes()], programId)[0];
   const ata = (owner, mint, program = tokenProgram) => PublicKey.findProgramAddressSync([key(owner).toBytes(), key(program).toBytes(), key(mint).toBytes()], ataProgram)[0];
   /** The quote mint's token program for a config (`quoteTokenProgram`, default SPL Token). */
   const qp = config => key(config.quoteTokenProgram ?? tokenProgram);
@@ -589,7 +618,7 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
   };
 
   return {
-    programId, configPda, configFor, configV2For, v2VaultPda, partnerPda, betaGatePda, metadataPda, betaCreatorPda, pricingPda, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, raydiumAccounts, raydium: ray, wsol,
+    programId, configPda, configFor, configV2For, v2VaultPda, distVault, v2DistPda, v2LedgerPda, v2RoundPda, v2FlyPda, partnerPda, betaGatePda, metadataPda, betaCreatorPda, pricingPda, testUsdcMint, faucetAuthority, poolPda, ata, quoteAta: qata, programDataAddress, tokenProgram, token2022, ataProgram, lpAuthorityPda, migrationPda, pumpAccounts, raydiumAccounts, raydium: ray, wsol,
     computeBudget: (units = LAUNCH_COMPUTE_UNITS) => ComputeBudgetProgram.setComputeUnitLimit({ units }),
     createAtaIdempotent(payer, owner, mint, program = tokenProgram) {
       return new TransactionInstruction({ programId: ataProgram, data: data([1]), keys: [meta(payer, true, true), meta(ata(owner, mint, program), true), meta(owner), meta(mint), meta(SystemProgram.programId), meta(program)] });
@@ -637,6 +666,50 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
       return ix([meta(payer, true, true), meta(config.address), meta(config.quoteMint), meta(mint), meta(pool, true), meta(config.treasury), meta(reward), ...vaults.map(v => meta(v)),
         meta(qata(reward, config), true), ...vaults.map(v => meta(qata(v, config), true)), meta(qata(config.treasury, config), true), meta(qata(pool, config), true), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId)],
         DISCRIMINATORS.withdrawV2Fees);
+    },
+    /** S3, upgrade authority, once per kind: the distributor's operator and schedule (`period` 0: calendar months). */
+    initV2Distributor({ authority, kind, operator, period, genesis }) {
+      return ix([meta(authority, true, true), meta(v2DistPda(kind), true), meta(programId), meta(programDataAddress), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.initV2Distributor, [kind], key(operator).toBytes(), u32(period), u64(BigInt(genesis))));
+    },
+    /** S3, operator: posts a round's Merkle root for `asset` (wrapped SOL = native SOL payouts). */
+    postV2Root({ operator, kind, round, asset, root, total, recipients, manifestUri = '', assetProgram = tokenProgram }) {
+      const vault = distVault(kind);
+      return ix([meta(operator, true, true), meta(v2DistPda(kind)), meta(vault), meta(ata(vault, asset, assetProgram)), meta(asset), meta(v2LedgerPda(kind, asset), true), meta(v2RoundPda(kind, asset, round), true), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.postV2Root, [kind], u32(round), root, u64(total), u32(recipients), str(manifestUri)));
+    },
+    /** S3, anyone: pays one leaf. SOL rounds pay native SOL to `account`; others its associated token account. */
+    claimV2({ payer, kind, round, asset, index, account, amount, proof, assetProgram = tokenProgram }) {
+      const vault = distVault(kind), sol = key(asset).equals(wsol);
+      const proofBytes = concat(u32(proof.length), ...proof.map(p => Uint8Array.from(p)));
+      return ix([meta(payer, true, true), meta(vault, true), meta(v2RoundPda(kind, asset, round), true), meta(v2LedgerPda(kind, asset), true), meta(asset), meta(account, true),
+        meta(ata(vault, asset, assetProgram), !sol), sol ? meta(programId) : meta(ata(account, asset, assetProgram), true), meta(assetProgram), meta(ataProgram), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.claimV2, [kind], u32(round), u32(index), u64(amount), proofBytes));
+    },
+    /** S3, anyone, 12 rounds later: an unclaimed remainder returns to the pool. */
+    expireV2({ kind, round, asset }) {
+      return ix([meta(v2DistPda(kind)), meta(asset), meta(v2RoundPda(kind, asset, round), true), meta(v2LedgerPda(kind, asset), true)], concat(DISCRIMINATORS.expireV2, [kind], u32(round)));
+    },
+    /** S3, anyone: the distributor's wrapped SOL becomes native SOL in its vault (SOL rounds pay plain SOL). */
+    sweepV2Sol({ kind }) {
+      const vault = distVault(kind);
+      return ix([meta(vault, true), meta(ata(vault, wsol), true), meta(tokenProgram)], concat(DISCRIMINATORS.sweepV2Sol, [kind]));
+    },
+    /** S3 flywheel, operator: buys on the curve with the flywheel vault and burns the tokens bought. */
+    v2FlywheelCurve({ operator, config, mint, amountIn, minOut }) {
+      const pool = poolPda(mint), fly = v2VaultPda('flywheel');
+      return ix([meta(operator, true, true), meta(v2DistPda(0)), meta(config.address), meta(config.quoteMint), meta(mint, true), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true),
+        meta(fly), meta(qata(fly, config), true), meta(v2FlyPda(mint), true), meta(tokenProgram), meta(qp(config)), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.v2FlywheelCurve, u64(amountIn), u64(minOut)));
+    },
+    /** S3 flywheel after graduation to Raydium (SOL pairs), operator: swaps wrapped SOL for the token and burns it. */
+    v2FlywheelRaydium({ operator, config, mint, amountIn, minOut }) {
+      const r = raydiumAccounts(mint), fly = v2VaultPda('flywheel');
+      return [this.createAtaIdempotent(operator, fly, mint), ix([
+        meta(operator, true, true), meta(v2DistPda(0)), meta(config.address), meta(mint, true), meta(wsol), meta(poolPda(mint)), meta(migrationPda(mint)),
+        meta(fly), meta(ata(fly, wsol), true), meta(ata(fly, mint), true), meta(r.pool, true), meta(r.authority), meta(r.ammConfig), meta(r.vault0, true), meta(r.vault1, true), meta(r.observation, true), meta(r.program),
+        meta(v2FlyPda(mint), true), meta(tokenProgram), meta(SystemProgram.programId),
+      ], concat(DISCRIMINATORS.v2FlywheelRaydium, u64(amountIn), u64(minOut)))];
     },
     /** Test networks only: creates the Elpida tUSDC mint (upgrade authority). */
     createTestUsdc({ authority }) {
