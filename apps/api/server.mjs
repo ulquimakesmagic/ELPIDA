@@ -418,7 +418,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/graduation/status')return send(200,graduationKeeper.status());
         if(url.pathname==='/api/buyback/status')return send(200,buybackKeeper.status());
         if(url.pathname==='/api/public/flywheel')return send(200,flywheelKeeper.summary());
-        if(url.pathname==='/api/public/v2-rewards')return send(200,{...v2Rewards.summary(priceSnapshot()),keeper:v2Keeper.status()});
+        if(url.pathname==='/api/public/v2-rewards')return send(200,{...v2Rewards.summary(priceSnapshot(),undefined,key=>publicIndex.listings(key).filter(t=>t.deploymentModel==='v2-hook')),keeper:v2Keeper.status()});
         {const m=url.pathname.match(/^\/api\/public\/v2-rewards\/manifest\/(\d+)\/(0x[0-9a-fA-F]{40})\/(\d+)\/(0x[0-9a-fA-F]{40})$/);if(m){const manifest=v2Keeper.manifest(m[1],m[2],m[3],m[4]);return manifest?send(200,manifest):send(404,{error:'No published payout list for that round.'});}}
         if(url.pathname==='/api/public/v2-rewards/payouts'){try{return send(200,v2Rewards.payouts(url.searchParams.get('wallet')));}catch(error){return send(400,{error:error.message});}}
         if(url.pathname==='/api/public/stock-catalog'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,stockCatalog.summary());}

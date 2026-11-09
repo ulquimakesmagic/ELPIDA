@@ -84,6 +84,36 @@ test('the public service: hidden without a pinned V2 deployment, live with one, 
   assert.equal(s.deployed, true); assert.equal(s.chains[0].assets[ZeroAddress].usd, 2500);
   assert.ok(BigInt(s.chains[0].airdrop.assets[0].size) > 0n);
   assert.equal(service.summary({ 'base-sepolia': { status: 'stale', usd: 2500 } }).chains[0].assets[ZeroAddress].usd, null, 'no stale dollar figures');
+  // Pair assets come from the V2 token records: USDC is priced at $1, other tokens stay in their own units.
+  const usdcAddr = f.usdc.target, stockAddr = f.stock.target;
+  const priced = service.summary({}, undefined, () => [{ pair: 'usdc', quoteAddress: usdcAddr, quoteSymbol: 'USDC', quoteDecimals: 6 }, { pair: 'xstock', quoteAddress: stockAddr, quoteSymbol: 'tNVDAon', quoteDecimals: 18 }, { pair: 'native', quoteAddress: ZeroAddress }]);
+  assert.deepEqual(priced.chains[0].assets[usdcAddr.toLowerCase()], { symbol: 'USDC', decimals: 6, usd: 1 });
+  assert.deepEqual(priced.chains[0].assets[stockAddr.toLowerCase()], { symbol: 'tNVDAon', decimals: 18, usd: null });
   assert.throws(() => service.payouts('nope'), /wallet address/);
   assert.deepEqual(service.payouts(f.addresses[1]).chains[0].payouts, []);
+});
+
+test('public RPCs that cap eth_getLogs ranges: the index halves its range and carries on', async t => {
+  const f = await v2Fixture(t, { vaults: true }), { airdrop, holder, flywheel } = f.contracts;
+  const l = await launchV2(f);
+  await f.advance(61);
+  await trade(f, l, { buy: true, amount: parseEther('1') });
+  // Base Sepolia's public node: "eth_getLogs is limited to a 200 range", sent as HTTP 413.
+  let refused = 0;
+  const capped = new Proxy(f.provider, { get(target, prop) {
+    if (prop === 'getLogs') return async filter => {
+      if (filter.toBlock - filter.fromBlock + 1 > 3) { refused++; const e = new Error('server response 413 Payload Too Large'); e.info = { responseBody: '{"error":{"code":-32614,"message":"eth_getLogs is limited to a 200 range"}}' }; throw e; }
+      return target.getLogs(filter);
+    };
+    const v = target[prop]; return typeof v === 'function' ? v.bind(target) : v;
+  } });
+  const index = new V2RewardsIndexer({ provider: capped, contracts: { hook: f.hook.target, airdrop: airdrop.target, holder: holder.target, flywheel: flywheel.target }, batchSize: 100 });
+  await index.sync();
+  assert.ok(refused > 0, 'the cap was hit'); assert.ok(index.batchSize <= 3, 'and the range shrank to fit');
+  assert.equal(index.status().error, null);
+  assert.ok(BigInt(index.summary(await chainNow(f)).airdrop.assets[0].size) > 0n, 'the trade still reached the airdrop vault');
+  // Other errors are not range caps: they surface instead of shrinking forever.
+  const broken = new V2RewardsIndexer({ provider: new Proxy(f.provider, { get(target, prop) { if (prop === 'getLogs') return async () => { throw new Error('connection reset'); }; const v = target[prop]; return typeof v === 'function' ? v.bind(target) : v; } }), contracts: { hook: f.hook.target, airdrop: airdrop.target, holder: holder.target, flywheel: flywheel.target }, batchSize: 100 });
+  await assert.rejects(broken.sync(), /connection reset/);
+  assert.equal(broken.batchSize, 100);
 });
