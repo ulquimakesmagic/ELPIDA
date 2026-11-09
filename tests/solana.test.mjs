@@ -1505,6 +1505,8 @@ test('Solana V2 client: discriminators, fee schedule, ledger and tickers match t
 
 test('Solana V2: own fee, anti-snipe to liquidity, five-way ledger, permissionless withdrawal before and after migration', { skip }, async () => {
   const config = { address: f.client.configV2For(f.quoteMint), quoteMint: f.quoteMint, treasury: f.treasury };
+  // Earlier tests spend the trader's test tokens; top it up so this test can complete a curve on its own.
+  await send(f.connection, f.authority, [f.spl.mintTo(f.quoteMint, f.client.ata(f.trader.publicKey, f.quoteMint), f.authority.publicKey, 60_000n * USDC)]);
   const add = (payer, params = V2_PARAMS) => send(f.connection, payer, [f.client.computeBudget(), f.client.addV2Config({ authority: payer.publicKey, quoteMint: f.quoteMint, treasury: f.treasury, params })], [], 1);
   await failsWith(add(f.outsider), /0x1770/);
   await failsWith(add(f.authority, { ...V2_PARAMS, maxCreatorBuyBps: 0 }), /0x1774/);

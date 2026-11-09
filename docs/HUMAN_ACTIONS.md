@@ -80,6 +80,12 @@ one is an unused test token. For step 3, in PowerShell type the price itself, wi
 `node scripts/seed-solana-conversion.mjs --stock-usd 440 --mint HE4LBuPDgFQCHT88Z4UMh62xKoJaTAQuzNHjAvCkHjYd --dry-run --keypair <deploy key path>`
 (440 is only an example: use Tesla's share price now), and the same without `--dry-run`.
 
+**Solana V2 (docs/V2_0_SOLANA.md): do not upgrade devnet yet.** The program in `contracts/solana/build` now carries
+ELPIDA V2 step 1 (V2 pairs, `launch_v2`, the five-way fee ledger). The devnet upgrade waits until steps 2 and 3 (the
+graduated-pool harvest, then airdrop, holder rewards and flywheel) are merged; the note will then give the final
+hashes and the steps. This build: test `4e3cda7778c26ba47aa29cf798a639d85a973e6277a66c53fbe4121c6d6037ae`, mainnet
+`202992db1700711a370bfc87109e7d6f120b81edf5aa548cfe839117e513b7e5`.
+
 No devnet DEX accepts Ondo-shaped mints, and Jupiter does not run on devnet, so the program's test build now has its
 own small SOL/stock conversion pool. The mainnet build refuses it; on mainnet the same payments will go through
 Jupiter. Two steps, both with the deploy key, after this PR is merged:
