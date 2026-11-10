@@ -16,10 +16,10 @@ test('no burns, no tag', () => {
 });
 
 test('the tag is the share of the original 1B supply bought and burned', () => {
-  assert.deepEqual(flywheelChip({ symbol: 'HOPE', flywheelBurned: '12500000' }), { text: '1.25% burned', title: 'Flywheel: 12.50M $HOPE bought and burned, 1.25% of the 1B supply.' });
-  assert.equal(flywheelChip({ symbol: 'A', flywheelBurned: '50000.5' }).text, '0.005% burned');
-  assert.equal(flywheelChip({ symbol: 'A', flywheelBurned: '3' }).text, '<0.001% burned');
-  assert.equal(flywheelChip({ symbol: 'A', flywheelBurned: '2000000000' }).text, '100% burned', 'never above the supply');
+  assert.deepEqual(flywheelChip({ symbol: 'HOPE', flywheelBurned: '12500000' }), { text: '1.25%', title: 'Flywheel: 12.50M $HOPE bought and burned, 1.25% of the 1B supply.' });
+  assert.equal(flywheelChip({ symbol: 'A', flywheelBurned: '50000.5' }).text, '0.005%');
+  assert.equal(flywheelChip({ symbol: 'A', flywheelBurned: '3' }).text, '<0.001%');
+  assert.equal(flywheelChip({ symbol: 'A', flywheelBurned: '2000000000' }).text, '100%', 'never above the supply');
   for (const [share, text] of [[0.5, '0.50%'], [0.01, '0.01%'], [0.0099, '0.010%'], [0.0001, '<0.001%'], [42.123, '42.12%']]) assert.equal(percentText(share), text);
 });
 

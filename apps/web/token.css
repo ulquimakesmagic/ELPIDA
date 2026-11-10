@@ -441,3 +441,10 @@ a#tv-attr-logo svg { display: block; width: 100%; height: 100%; }
 
 /* Keep the complete Ethereum diamond inside its badge, including chain-logo token artwork. */
 .tk-trade .asset-icon[data-asset="eth"],.tk-trade .asset-icon[data-asset="weth"],.tk-trade .swap-asset>.avatar img[src$="/assets/chains/ethereum.png"]{box-sizing:border-box;object-fit:contain;padding:2px;border-radius:50%;background:#eceefb}
+/* V2 creator split card: one row per wallet (address, share, claimable, payout button). */
+.split-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.split-list li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 4px 10px; align-items: center; padding: 8px 0; border-top: 1px solid var(--line); }
+.split-list li:first-child { border-top: 0; }
+.split-share { justify-self: end; font-weight: 600; }
+.split-amount { color: var(--muted); font-size: 13px; }
+.split-list .btn { justify-self: end; }

@@ -29,7 +29,7 @@ export function flywheelChip(token) {
   const b = flywheelBurnOf(token);
   if (!b) return null;
   const symbol = token.symbol ? `$${token.symbol}` : 'this token';
-  return { text: `${b.percent} burned`, title: `Flywheel: ${b.burnedText} ${symbol} bought and burned, ${b.percent} of the 1B supply.` };
+  return { text: b.percent, title: `Flywheel: ${b.burnedText} ${symbol} bought and burned, ${b.percent} of the 1B supply.` };
 }
 
 /** The safety-checklist line; null for tokens the flywheels have not burned. */

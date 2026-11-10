@@ -97,6 +97,8 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   config.taxLaunch={available:dex,experimental:true,venue:'Uniswap v2 (local rehearsal)',creatorAllocation:'wallets',taxProtocolBps:3000};
   config.contracts.atomicFactory={abi:artifact('ElpidaAtomicDexFactory').abi,bytecode:'0x'+artifact('ElpidaAtomicDexFactory').evm.bytecode.object};
   for(const [key,name] of [['taxFactory','ElpidaTaxFactory'],['taxCurve','ElpidaTaxCurve'],['taxToken','ElpidaTaxToken'],['taxRouter','ElpidaV2TaxRouter'],['creatorAllocation','ElpidaCreatorAllocation']])config.contracts[key]={abi:artifact(name).abi};
+  // V2 creator splits on public test networks: the browser deploys this ownerless split contract as the token's reward address.
+  config.contracts.creatorAllocation.bytecode='0x'+artifact('ElpidaCreatorAllocation').evm.bytecode.object;
   const combinedIndex=new Proxy(indexer,{get(target,key){
     if(key==='indexFor')return address=>taxRuntime?.record(address)?taxRuntime.index:indexer;
     if(key==='listings')return listings;
