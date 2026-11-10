@@ -5,16 +5,19 @@ import {tmpdir} from 'node:os';
 import {createPublicBackup} from './storage-operations.mjs';
 import {encryptBackupFile,backupKey,fileHash} from './backup-encryption.mjs';
 import {BackupStore} from './backup-store.mjs';
+import {retentionPlan} from './backup-retention.mjs';
 
 const ownName=n=>/^ops-\d{13}-[a-f0-9-]{36}$/.test(n);
 const safeError=e=>['ENOSPC','EACCES','ENOENT','AccessDenied','NoSuchBucket','InvalidAccessKeyId','SignatureDoesNotMatch','TimeoutError','AbortError'].find(c=>c===e.code||c===e.name)??'BACKUP_FAILED';
 export class BackupRunner{
- constructor({dataDir,statePath,workDir,store,mirror=null,mirrorConfigurationError=null,key,intervalMs=86400000,now=Date.now,log=console.log,configurationError=null}={}){
+ /** `retention`: { daily, weekly, monthly } snapshots kept in each bucket (null: never delete). `chainIndexes`: include the rebuildable chain indexes. */
+ constructor({dataDir,statePath,workDir,store,mirror=null,mirrorConfigurationError=null,key,intervalMs=86400000,now=Date.now,log=console.log,configurationError=null,retention={daily:7,weekly:4,monthly:3},chainIndexes=false}={}){
+  this.retention=retention;this.chainIndexes=chainIndexes;
   // mirror: an optional second bucket at a different provider, so a hosting outage does not also take the backups.
-  this.dataDir=dataDir;this.statePath=statePath;this.workDir=workDir?resolve(workDir):null;this.store=store;this.mirror=store?mirror:null;this.mirrorConfigurationError=store?mirrorConfigurationError:null;this.key=key;this.intervalMs=intervalMs;this.now=now;this.log=log;this.state={lastAttempt:null,lastSuccess:null,lastError:configurationError,lastRemoteId:null,workIds:[],mirrorLastAttempt:null,mirrorLastSuccess:null,mirrorLastError:null,mirrorRemoteId:null};
+  this.dataDir=dataDir;this.statePath=statePath;this.workDir=workDir?resolve(workDir):null;this.store=store;this.mirror=store?mirror:null;this.mirrorConfigurationError=store?mirrorConfigurationError:null;this.key=key;this.intervalMs=intervalMs;this.now=now;this.log=log;this.state={lastAttempt:null,lastSuccess:null,lastError:configurationError,lastRemoteId:null,workIds:[],mirrorLastAttempt:null,mirrorLastSuccess:null,mirrorLastError:null,mirrorRemoteId:null,pruneLastRun:null,pruneLastError:null,prunedSnapshots:0};
   if(statePath&&existsSync(statePath))try{const saved=JSON.parse(readFileSync(statePath,'utf8'));for(const k of Object.keys(this.state))if(k in saved)this.state[k]=saved[k];if(this.state.mirrorRemoteId!==null&&!ownName(this.state.mirrorRemoteId))throw new Error('Invalid mirror state');if(!Array.isArray(this.state.workIds)||this.state.workIds.some(n=>!ownName(n)))throw new Error('Invalid work registry');if(configurationError)this.state.lastError=configurationError;}catch{this.store=null;this.state.lastError='BACKUP_STATE_INVALID';}
  }
- status(){return {enabled:!!this.store,running:!!this.running,intervalMs:this.intervalMs,lastAttempt:this.state.lastAttempt,lastSuccess:this.state.lastSuccess,lastError:this.state.lastError,mirror:{enabled:!!this.mirror||!!this.mirrorConfigurationError,lastAttempt:this.state.mirrorLastAttempt,lastSuccess:this.state.mirrorLastSuccess,lastError:this.mirrorConfigurationError??this.state.mirrorLastError,current:!!this.state.lastRemoteId&&this.state.mirrorRemoteId===this.state.lastRemoteId,reachable:this.mirrorReachable??null,checkedAt:this.mirrorCheckedAt??null,
+ status(){return {enabled:!!this.store,running:!!this.running,intervalMs:this.intervalMs,lastAttempt:this.state.lastAttempt,lastSuccess:this.state.lastSuccess,lastError:this.state.lastError,retention:{policy:this.retention,chainIndexes:this.chainIndexes,lastRun:this.state.pruneLastRun,lastError:this.state.pruneLastError,prunedSnapshots:this.state.prunedSnapshots},mirror:{enabled:!!this.mirror||!!this.mirrorConfigurationError,lastAttempt:this.state.mirrorLastAttempt,lastSuccess:this.state.mirrorLastSuccess,lastError:this.mirrorConfigurationError??this.state.mirrorLastError,current:!!this.state.lastRemoteId&&this.state.mirrorRemoteId===this.state.lastRemoteId,reachable:this.mirrorReachable??null,checkedAt:this.mirrorCheckedAt??null,
    // The local copy of the latest snapshot is gone (the work folder does not survive a redeploy): the mirror gets the next one.
    waitingForNextBackup:!!this.mirror&&!!this.state.lastRemoteId&&this.state.mirrorRemoteId!==this.state.lastRemoteId&&!this.snapshotReady(this.state.lastRemoteId)}};}
  save(){if(this.statePath){mkdirSync(dirname(this.statePath),{recursive:true});writeFileSync(this.statePath+'.tmp',JSON.stringify(this.state));renameSync(this.statePath+'.tmp',this.statePath);}}
@@ -49,15 +52,28 @@ export class BackupRunner{
   try{
    this.save();
    mkdirSync(this.workDir,{recursive:true});if(lstatSync(this.workDir).isSymbolicLink())throw new Error('Unsafe backup work directory');if(readdirSync(this.workDir).filter(ownName).length>=3)throw new Error('Backup work directory needs review');const previous=[...this.state.workIds];
-   const id='ops-'+String(this.now())+'-'+randomUUID(),job=join(this.workDir,id),snapshot=join(job,'snapshot');mkdirSync(job);this.state.workIds.push(id);this.save();const manifest=await createPublicBackup(this.dataDir,snapshot);
+   const id='ops-'+String(this.now())+'-'+randomUUID(),job=join(this.workDir,id),snapshot=join(job,'snapshot');mkdirSync(job);this.state.workIds.push(id);this.save();const manifest=await createPublicBackup(this.dataDir,snapshot,{chainIndexes:this.chainIndexes});
    const entries=[...manifest.files.map(f=>f.path),'MANIFEST.json'];if(manifest.files.length>50000||statSync(join(snapshot,'MANIFEST.json')).size>16*1024*1024||entries.some(p=>statSync(join(snapshot,p)).size+32>2*1024*1024*1024))throw new Error('Snapshot exceeds verified restore capacity');
    for(const path of entries){const objectKey='elpida-backups/'+id+'/'+path+'.enc',sealed=join(job,'sealed',path+'.enc');mkdirSync(dirname(sealed),{recursive:true});await encryptBackupFile(join(snapshot,path),sealed,this.key,objectKey);await this.store.uploadVerified(objectKey,sealed,await fileHash(sealed));}
    // Manifest is uploaded last and read back; incomplete sets have no committed remote manifest.
    this.state.lastSuccess=new Date(this.now()).toISOString();this.state.lastError=null;this.state.lastRemoteId=id;this.save();this.log(JSON.stringify({event:'backup_verified',files:entries.length}));
    if(this.mirror)await this.copyToMirror(id);
+   // Old snapshots go only after this one is verified; on the mirror, only once it holds this one too.
+   await this.prune(this.store,id);if(this.mirror&&this.state.mirrorRemoteId===id)await this.prune(this.mirror,id);
    // Only remove our own local work folders after a newer off-site copy is verified.
    for(const name of previous){const target=resolve(this.workDir,name);if(!ownName(name)||dirname(target)!==this.workDir)throw new Error('Unsafe backup cleanup target');if(existsSync(target)){if(lstatSync(target).isSymbolicLink())throw new Error('Unsafe backup cleanup target');rmSync(target,{recursive:true,force:false});}}this.state.workIds=[id];this.save();
   }catch(error){this.state.lastError=safeError(error);try{this.save();}catch{/* Full or inaccessible volumes still produce a visible incident. */}this.log(JSON.stringify({event:'backup_failed',code:this.state.lastError}));}
+ }
+ /** Deletes the snapshot sets the retention policy no longer keeps. Never the one just verified; a failure is reported, never fatal. */
+ async prune(store,verifiedId){
+  if(!this.retention||!store?.inventory||!store?.deleteKeys)return;
+  this.state.pruneLastRun=new Date(this.now()).toISOString();
+  try{
+   const plan=retentionPlan(await store.inventory(),{now:this.now(),...this.retention}),drop=plan.delete.filter(g=>g.id!==verifiedId);
+   for(const g of drop)await store.deleteKeys(g.keys);
+   this.state.prunedSnapshots+=drop.length;this.state.pruneLastError=null;this.save();
+   if(drop.length)this.log(JSON.stringify({event:'backup_pruned',snapshots:drop.length,bytes:drop.reduce((n,g)=>n+g.bytes,0)}));
+  }catch(error){this.state.pruneLastError=safeError(error);try{this.save();}catch{/* reported through status */}this.log(JSON.stringify({event:'backup_prune_failed',code:this.state.pruneLastError}));}
  }
  start(){this.startTimer=setTimeout(()=>this.tick().catch(()=>{}),30000);this.startTimer.unref();this.timer=setInterval(()=>this.tick().catch(()=>{}),60000);this.timer.unref();return this;}
  async close(){this.stopped=true;clearTimeout(this.startTimer);clearInterval(this.timer);if(this.running)await this.running;this.store?.close?.();this.mirror?.close?.();}
@@ -78,6 +94,8 @@ export function configuredBackup({env=process.env,dataDir,statePath,workDir,log}
   const intervalMs=Number(env.ELPIDA_BACKUP_INTERVAL_HOURS??24)*3600000;if(!Number.isSafeInteger(intervalMs)||intervalMs<3600000||intervalMs>7*86400000)throw new Error('Invalid backup interval');
   const key=backupKey(env.ELPIDA_BACKUP_ENCRYPTION_KEY),store=storeFrom(env,'ELPIDA_BACKUP_S3_');
   let mirror=null,mirrorConfigurationError=null;try{mirror=mirrorFrom(env);}catch{mirrorConfigurationError='BACKUP_MIRROR_CONFIGURATION';}
-  return new BackupRunner({dataDir,statePath,workDir,log,key,store,mirror,mirrorConfigurationError,intervalMs});
+  const count=(name,fallback)=>{const v=env[name]===undefined?fallback:Number(env[name]);if(!Number.isInteger(v)||v<0||v>3650)throw new Error('Invalid backup retention');return v;};
+  const retention=env.ELPIDA_BACKUP_RETENTION==='off'?null:{daily:count('ELPIDA_BACKUP_KEEP_DAILY',7),weekly:count('ELPIDA_BACKUP_KEEP_WEEKLY',4),monthly:count('ELPIDA_BACKUP_KEEP_MONTHLY',3)};
+  return new BackupRunner({dataDir,statePath,workDir,log,key,store,mirror,mirrorConfigurationError,intervalMs,retention,chainIndexes:env.ELPIDA_BACKUP_CHAIN_INDEXES==='true'});
  }catch{return new BackupRunner({dataDir,statePath,workDir,log,configurationError:'BACKUP_CONFIGURATION'});}
 }

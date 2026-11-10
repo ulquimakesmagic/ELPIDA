@@ -1,5 +1,11 @@
 # Actions that need Malik
 
+## Backups clean themselves up, 10 November 2026 — nothing to do
+
+On 10 November the 27 oldest backup folders were deleted by hand (27 GB → 3 kept). After this change is merged, each
+daily backup deletes the ones its policy no longer keeps (7 daily, 4 weekly, 3 monthly) and leaves out the chain
+indexes, so a copy is a few MB instead of ~1 GB. Optional Railway variables are in `docs/RAILWAY_BACKUPS_AND_MONITORING.md`.
+
 ## Optional: X sign-in for X allocations (V2 test networks)
 
 Website allocations verify with a DNS record and need nothing from you. To let X account owners claim their share:

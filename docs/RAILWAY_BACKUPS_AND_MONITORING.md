@@ -44,6 +44,18 @@ it never fails or delays the primary backup, and it retries hourly. Restore from
 
 ## Scope, retention and limits
 
+**10 November 2026 (Malik):** remote snapshots were never deleted, so 30 daily full copies (~0.9 GB each, mostly chain
+indexes) filled 27 GB. Now, after each verified snapshot, the runner deletes the sets its policy no longer keeps, in
+the primary bucket and (once it holds the new one) the mirror: the newest 7 daily, the newest in each of the last 4
+weeks and 3 months (UTC), never fewer than 2; incomplete sets older than 7 days (no manifest, so not restorable) go too.
+Never the snapshot just made; a failed clean-up is logged as `backup_prune_failed` and shown under
+`backup.retention` in `/api/operations/status`, and never fails the backup. Scheduled snapshots also leave out the
+chain index databases (`public-<chain>-0x….sqlite`, `public-solana-….sqlite`): after a restore they rebuild from the
+chain (a slower first start, nothing lost). The V2 keepers' databases (`v2-keeper.sqlite`, `v2-keeper-solana.sqlite`:
+published payout lists, carried balances) are now included. Railway variables (all optional):
+`ELPIDA_BACKUP_KEEP_DAILY` / `_WEEKLY` / `_MONTHLY` (7 / 4 / 3), `ELPIDA_BACKUP_RETENTION=off` (never delete),
+`ELPIDA_BACKUP_CHAIN_INDEXES=true` (include the indexes again). Manual `npm run backup` copies still include them.
+
 Backups include metadata (including provisional drafts), retention state and recognized public index databases. SQLite backup includes committed WAL data. Circle wallet/entity-secret material, private simulation journals and upload-admission state are excluded and require separately reviewed recovery procedures.
 
 The backup format supports up to 50,000 files, a 16 MB manifest and 2 GB per encrypted object. Larger snapshots fail visibly rather than being reported as recoverable. Streaming encryption limits memory use. Local work folders are registered persistently; older registered work copies are removed only after a newer remote copy has been verified, with paths checked against the selected work directory. Unknown folders and symlinks are never deleted. Three unfinished working folders stop further attempts for operator review, preventing uncontrolled local growth.
