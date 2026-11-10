@@ -144,7 +144,7 @@ export function renderLaunch(ctx) {
   const v2Splits = () => v2Chosen() && !solana() && draft.chain !== 'local' && !!ctx.config.contracts?.creatorAllocation?.bytecode;
   // V2 holder strategies on public EVM networks: a strategy vault run by the server's V2 keeper (v2-launchpad.mjs).
   const v2Strategies = () => v2Splits() && !!ctx.config.v2Keeper?.address && !!ctx.config.v2Keeper?.active;
-  const strategyAllowed = key => draft.chain === 'local' || key === 'creator' || (v2Strategies() && ['holders', 'paired', 'buyback'].includes(key));
+  const strategyAllowed = key => draft.chain === 'local' || key === 'creator' || (v2Strategies() && ['holders', 'paired', 'buyback', 'exclusive'].includes(key));
   // Reward assets on public networks: the native coin and the approved pair assets, except the token's own pair asset.
   const publicRewardAssets = () => [{ address: '0x0000000000000000000000000000000000000000', symbol: nativeSymbol() }, ...(ctx.wallet?.approvedQuotes ?? []).map(a => ({ address: a.address, symbol: `${a.symbol} · ${a.address.slice(0, 6)}…${a.address.slice(-4)}` }))]
     .filter(a => a.address.toLowerCase() !== String(draft.pair === 'native' ? '0x0000000000000000000000000000000000000000' : selectedAsset()?.address ?? '').toLowerCase());
@@ -403,7 +403,7 @@ export function renderLaunch(ctx) {
       h('p.hint',canTax?'0–10% per side, fixed at launch. Additional tax splits 30% to Elpida and 70% to your wallet allocations. The 1.25% curve fee remains 50/50. After migration, the token tax and V2 pool fee apply. Creator tax rewards after migration are paid in your launched token.':'Tax launches require the verified V2 tax factory deployment. Available in the local DEX rehearsal; existing public V3 factories cannot create transfer-tax tokens.')) : null;
     settings.append(h('div.summary-card', h('h4', 'Fixed at launch'), h('ul.fixed-list', h('li', 'The reward strategy and its settings'), h('li', 'Recipients and their percentages'), h('li', 'Your creator share of trading fees'))));
     return { body: [
-      local ? null : callout('', 'info', v2Splits() ? 'Your 30% creator share can go to one wallet or be split between up to 8 wallets. A split deploys a small contract with no owner that fixes the wallets and percentages for good; each wallet claims its own share on the token page. Holder distributions, buybacks and X or website allocations are coming to test networks; they work in the local simulation now.' : 'On public testnets, creator fees go to one creator wallet. Holder distributions, buybacks and X or website allocations are available in the local simulation until their contracts are deployed publicly.'),
+      local ? null : callout('', 'info', v2Splits() ? 'Your 30% creator share can go to one wallet or be split between up to 8 wallets. A split deploys a small contract with no owner that fixes the wallets and percentages for good; each wallet claims its own share on the token page. ' + (v2Strategies() ? 'Holder strategies and X or website allocations are run by the Elpida keeper: X and website shares stay held until their owners verify on the token page. Test networks only; not audited.' : 'Holder strategies and X or website allocations need the Elpida V2 keeper, which is not running on this server; they work in the local simulation.') : 'On public testnets, creator fees go to one creator wallet. Holder distributions, buybacks and X or website allocations are available in the local simulation until their contracts are deployed publicly.'),
       taxControls, grid, settings, error,
     ], validate: () => {
       error.textContent = '';
@@ -439,6 +439,11 @@ export function renderLaunch(ctx) {
     const taxed=!solana()&&(Number(draft.taxBuy)>0||Number(draft.taxSell)>0)&&!!ctx.wallet?.net?.taxDeployment;
     const split=v2Splits()&&policy.recipients.length<=8;
     if (split && policy.recipients.length > 1 && policy.recipients.slice(1).some(r => !r.target)) throw new Error('Enter a wallet address for every recipient after the first (the first can stay empty for your connected wallet).');
+    if (draft.chain !== 'local' && policy.mode === 'exclusive') {
+      if (!v2Strategies()) throw new Error('X and website allocations need ELPIDA V2 and its keeper on this network; they work in the local simulation now.');
+      if (policy.recipients.length > 8) throw new Error('On test networks allocations have up to 8 recipients.');
+      return policy;
+    }
     if (draft.chain !== 'local' && ['holders', 'paired', 'buyback'].includes(policy.mode)) {
       if (!v2Strategies()) throw new Error('Holder strategies need ELPIDA V2 and its keeper on this network; they work in the local simulation now.');
       if (Number(policy.minimumHoldingUsd) > 0) throw new Error('A USD minimum holding works in the local simulation only for now. Set the minimum in tokens.');
@@ -550,6 +555,7 @@ export function renderLaunch(ctx) {
     if (v2Chosen()) { body.model = V2_MODEL; body.feeBps = draft.feeBps ?? V2.defaultFeeBps; delete body.tax; }
     if (draft.chain === 'local' && (draft.pair === 'token' || draft.pair === 'xstock')) body.quoteToken = body.quoteAsset;
     if (draft.chain === 'local') body.rewardPolicy = policy;
+    else if (v2Strategies() && policy.mode === 'exclusive') { const rows = policy.recipients.map(r => ({ kind: r.kind, target: r.target, bps: Math.round(Number(r.percent) * 100) })); if (rows.some(r => r.kind !== 'wallet')) { body.rewardIdentities = rows; delete body.reward; } else if (rows.length > 1) { body.rewardSplit = rows.map((r, i) => ({ wallet: r.target || (i === 0 ? ctx.wallet.address : ''), bps: r.bps })); delete body.reward; } else body.reward = rows[0].target || ctx.wallet.address; }
     else if (v2Strategies() && ['holders', 'paired', 'buyback'].includes(policy.mode)) { body.rewardStrategy = { mode: policy.mode, threshold: String(policy.threshold), minimumHolding: String(policy.minimumHolding), vestingDays: policy.vestingDays, rewardAsset: policy.rewardToken ?? null }; delete body.reward; }
     else if (v2Splits() && policy.recipients.length > 1) { body.rewardSplit = policy.recipients.map((r, i) => ({ wallet: r.target || (i === 0 ? ctx.wallet.address : ''), bps: Math.round(Number(r.percent) * 100) })); delete body.reward; }
     else body.reward = policy.recipients[0].target || ctx.wallet.address;

@@ -90,3 +90,17 @@ token's creator vault. Its strategy and settings are fixed in the contract:
 - **Who gets paid.** Holders are paid by their balance at that moment, at least the vault's minimum holding. The pool manager, the hook, the router, the factory, the reward vaults, the vault itself and the burn addresses are excluded. A USD minimum holding is local-simulation only for now.
 - **What the keeper cannot do.** It cannot move funds anywhere but to the wallets in a posted round. It cannot post more than the vault holds unpromised, or swap below the threshold or with a zero minimum output. Anyone may pay any listed wallet with its proof.
 - **Where it shows.** The token page shows a **Creator rewards** card with the strategy, settings, what has gathered toward the threshold and the latest rounds. The admin keepers card shows the `creator` job.
+
+## X and website allocations (Malik, 10 November)
+
+A V2 launch on a public EVM test network can split the creator's 30% between up to 8 wallets, X accounts and websites.
+The launch deploys `contracts/evm/v2/ElpidaV2IdentityAllocation.sol` (NOT AUDITED) with this keeper as its verifier.
+- **Rows.** Wallet rows are paid directly. An X or website row is held until its owner proves control.
+- **Verification on the token page (Allocations card, "Verify ownership").** The owner connects the wallet that should receive the share and signs a claim message.
+  - Website: they add a DNS TXT record at `_elpida.<domain>` with the given value; the server checks it.
+  - X account: they sign in to X as that handle.
+  - The server (`apps/api/v2-identities.mjs`) then has the network's V2 keeper bind that wallet, once.
+- **Payouts.** "Collect and pay out" collects the token's fees from the pool and pays a row. Anyone may press it; the money goes only to the row's wallet.
+- **Limits.** Nobody, including the creator and the keeper, can take a held share, and a bound wallet cannot be changed.
+
+**X sign-in needs an X developer app.** Set `ELPIDA_X_CLIENT_ID` (and `ELPIDA_X_CLIENT_SECRET` for a confidential app) and `ELPIDA_X_REDIRECT_URI=https://elpida.fun/api/rewards/x/callback` in Railway. Without them, X shares stay held and the button says so; websites work without any setup.

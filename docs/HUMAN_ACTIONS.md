@@ -1,5 +1,13 @@
 # Actions that need Malik
 
+## Optional: X sign-in for X allocations (V2 test networks)
+
+Website allocations verify with a DNS record and need nothing from you. To let X account owners claim their share:
+1. Create an app at developer.x.com with OAuth 2.0 (read-only scopes: tweet.read, users.read).
+2. Set its callback URL to `https://elpida.fun/api/rewards/x/callback`.
+3. In Railway add `ELPIDA_X_CLIENT_ID`, `ELPIDA_X_CLIENT_SECRET` and `ELPIDA_X_REDIRECT_URI=https://elpida.fun/api/rewards/x/callback`.
+Until then X shares stay held in their allocation contract (nobody can take them).
+
 ## ELPIDA V2 on Solana devnet: upgrade and set up, after step 4a is merged
 
 The program in `contracts/solana/build` carries ELPIDA V2 steps 1 to 3 (V2 pairs, `launch_v2`, the five-way fee ledger,

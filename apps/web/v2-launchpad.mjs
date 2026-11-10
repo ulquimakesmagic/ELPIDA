@@ -209,9 +209,9 @@ export async function launchV2(w, body) {
   if (!Number.isInteger(feeBps) || feeBps < minFee || feeBps > V2.maxFeeBps) throw new Error(`Choose a fee from ${(minFee / 100).toFixed(2)}% to 4.00%.`);
   const pair = body.pair ?? 'native';
   if (!['native', 'usdc', 'xstock'].includes(pair)) throw new Error('V2 test launches pair with the native coin, USDC or a test stock approved for V2.');
-  const split = body.rewardSplit?.length ? creatorSplitTerms(body.rewardSplit) : null, strategy = body.rewardStrategy ?? null;
-  let reward = split || strategy ? null : body.reward || w.address;
-  if (!split && !strategy && (!isAddress(reward) || reward === ZeroAddress)) throw new Error('Enter a valid creator reward wallet.');
+  const split = body.rewardSplit?.length ? creatorSplitTerms(body.rewardSplit) : null, strategy = body.rewardStrategy ?? null, identities = body.rewardIdentities?.length ? identityTerms(body.rewardIdentities, w.address) : null;
+  let reward = split || strategy || identities ? null : body.reward || w.address;
+  if (!split && !strategy && !identities && (!isAddress(reward) || reward === ZeroAddress)) throw new Error('Enter a valid creator reward wallet.');
   const asset = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? getAddress(testStock(w, body.quoteAsset)?.address ?? ZeroAddress) : ZeroAddress;
   if (pair === 'xstock') {
     if (asset === ZeroAddress) throw new Error('Choose a test stock that is approved on this network.');
@@ -248,6 +248,7 @@ export async function launchV2(w, body) {
   // Creator split: an ownerless contract that receives the creator's 30% and lets each wallet claim its fixed share.
   if (split) reward = await creatorSplit(w, split);
   if (strategy) reward = await creatorStrategyVault(w, d, { ...strategy, feeAsset: asset, feeDecimals: decimals });
+  if (identities) reward = await identityAllocation(w, identities);
   w.onProgress('Preparing public token details for the launch transaction…');
   const payload = JSON.stringify({ network: w.net.key, name, symbol, ...normalizeMetadata(body) }), proof = await prepareUploadProof(payload);
   const response = await fetch('/api/metadata/stage', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': w.config.csrf, ...proof }, body: payload });
@@ -259,6 +260,42 @@ export async function launchV2(w, body) {
   const event = result.receipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(e => e?.name === 'Launched');
   return { hash: result.tx.hash, token: event?.args.token, feeBps, metadataSaved: true, metadataPublished: true, metadataStorage: published.storage,
     message: `Your token is live on ${w.net.name} (ELPIDA V2, liquidity locked from launch, ${(feeBps / 100).toFixed(2)}% fee for good). ${d.pinned ? '' : 'This launchpad is not pinned yet, so the site lists the token once it is.'}`.trim() };
+}
+
+/**
+ * Checks wallet, X and website allocations: 1 to 8 rows, at least one X or website, shares adding up to 100%. Labels:
+ * "wallet", "x:<handle>" (lowercase, no @) or "domain:<name>" (lowercase).
+ */
+export function identityTerms(rows, me) {
+  if (!Array.isArray(rows) || !rows.length || rows.length > 8) throw new Error('Allocations have 1 to 8 recipients. Nothing was submitted.');
+  const out = rows.map((r, i) => {
+    const bps = Number(r.bps);
+    if (!Number.isInteger(bps) || bps <= 0) throw new Error('Every allocation share must be above zero. Nothing was submitted.');
+    if (r.kind === 'wallet') { const wallet = r.target || (i === 0 ? me : ''); if (!isAddress(wallet) || wallet === ZeroAddress) throw new Error('Enter a wallet address for every wallet allocation. Nothing was submitted.'); return { label: 'wallet', wallet: getAddress(wallet), bps }; }
+    const target = String(r.target ?? '').trim().toLowerCase().replace(/^@/, '');
+    if (r.kind === 'x' && !/^[a-z0-9_]{1,15}$/.test(target)) throw new Error('Enter an X handle (letters, digits or _, up to 15). Nothing was submitted.');
+    if (r.kind === 'domain' && !/^(?=.{3,70}$)([a-z0-9-]+\.)+[a-z]{2,}$/.test(target)) throw new Error('Enter a website domain like community.org. Nothing was submitted.');
+    if (!['x', 'domain'].includes(r.kind)) throw new Error('Recipients are wallets, X accounts or websites. Nothing was submitted.');
+    return { label: `${r.kind}:${target}`, wallet: ZeroAddress, bps };
+  });
+  if (out.reduce((a, r) => a + r.bps, 0) !== 10000) throw new Error('Allocation shares must add up to exactly 100%. Nothing was submitted.');
+  if (!out.some(r => r.label !== 'wallet')) return null;
+  if (new Set(out.filter(r => r.label !== 'wallet').map(r => r.label)).size !== out.filter(r => r.label !== 'wallet').length) throw new Error('Each X account or website can appear once. Nothing was submitted.');
+  return out;
+}
+/** Deploys the allocation (ElpidaV2IdentityAllocation) with the server's V2 keeper as the verifier of X and website rows. */
+async function identityAllocation(w, rows) {
+  const keeper = w.config.v2Keeper;
+  if (!keeper?.address || !keeper.active) throw new Error('X and website allocations need the Elpida V2 keeper, which is not running on this server. Nothing was submitted.');
+  const response = await fetch('/api/v4-artifacts');
+  const art = response.ok ? (await response.json()).v2?.identityAllocation : null;
+  if (!art?.bytecode) throw new Error('The allocation contract is unavailable on this server. Nothing was submitted.');
+  const deployed = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(keeper.address, rows.map(r => r.label), rows.map(r => r.wallet), rows.map(r => r.bps));
+  const r = await w.wait(Promise.resolve(deployed.deploymentTransaction()), 'Deploy your allocations. X and website shares stay held until their owners verify…');
+  await walletCaughtUp(w, r?.tx?.nonce);
+  const address = await deployed.getAddress();
+  if (!await hasCode(w.provider, address, { wait: true })) throw new Error('The allocation contract is not visible on the network yet. Try again; nothing else was submitted.');
+  return address;
 }
 
 const STRATEGY_MODES = { holders: 0, paired: 1, buyback: 2 };
@@ -359,6 +396,37 @@ export async function creatorStrategyState({ provider, net, token }) {
   const rounds = [];
   for (let i = Number(count) - 1; i >= 0 && rounds.length < 5; i--) { const r = await v.rounds(i); rounds.push({ round: i, asset: r.asset, total: r.total, claimed: r.claimed, recipients: Number(r.recipients), postedAt: Number(r.postedAt), vesting: Number(r.vesting) }); }
   return { vault: l.creatorVault, mode: ['holders', 'paired', 'buyback'][Number(mode)], threshold, minimumHolding, vesting: Number(vesting), rewardAsset, gathered: (await v.available(l.quote)) + pending, rounds, roundCount: Number(count) };
+}
+
+const IDENTITY_ABI = ['function IDENTITY_ALLOCATION_VERSION() view returns(uint256)', 'function rowCount() view returns(uint256)', 'function row(uint256) view returns(string label,address wallet,uint16 share)',
+  'function accounted(address) view returns(uint256)', 'function claimable(address,uint256) view returns(uint256)', 'function claim(address asset,uint256 i) returns(bool)'];
+/** A V2 token's wallet, X and website allocations, if its creator vault is one: each row and what it can claim now. */
+export async function identityAllocationState({ provider, net, token }) {
+  const d = v2Deployment(net); if (!d?.hook) return null;
+  const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
+  if (!l.creatorVault || l.creatorVault === ZeroAddress || (await provider.getCode(l.creatorVault)) === '0x') return null;
+  const c = new Contract(l.creatorVault, IDENTITY_ABI, provider);
+  try { if ((await c.IDENTITY_ALLOCATION_VERSION()) !== 1n) return null; } catch { return null; }
+  const n = Number(await c.rowCount()), asset = l.quote, rows = [];
+  for (let i = 0; i < n; i++) { const r = await c.row(i), [kind, ...rest] = String(r.label).split(':'); rows.push({ index: i, kind, target: rest.join(':') || null, wallet: r.wallet === ZeroAddress ? null : r.wallet, bps: Number(r.share) }); }
+  const held = asset === ZeroAddress ? await provider.getBalance(l.creatorVault) : await new Contract(asset, ERC20, provider).balanceOf(l.creatorVault);
+  const accounted = await c.accounted(asset), fresh = held > accounted ? held - accounted : 0n;
+  let assigned = 0n;
+  for (const [i, r] of rows.entries()) { const part = i + 1 === rows.length ? fresh - assigned : fresh * BigInt(r.bps) / 10000n; assigned += part; r.claimable = (await c.claimable(asset, i)) + part; }
+  return { vault: l.creatorVault, asset, rows };
+}
+
+/** Collects the token's fees from the pool and pays one allocation row (a wallet, or a verified X account or website). */
+export async function claimIdentityRow(w, { token, index } = {}) {
+  await w.checkNetwork();
+  const d = v2Deployment(w.net); if (!d?.hook) throw new Error(`There is no V2 launchpad on ${w.net.name}.`);
+  const hook = new Contract(d.hook, V2_HOOK_FEES_ABI, w.provider), l = await hook.launchOf(token), c = new Contract(l.creatorVault, IDENTITY_ABI, w.provider);
+  const r = await c.row(Number(index));
+  if (r.wallet === ZeroAddress) throw new Error('This share is held until its owner verifies. Nothing was sent.');
+  const calls = [{ to: d.hook, data: hook.interface.encodeFunctionData('withdrawFees', [token]), label: 'Collect the token\'s fees from the pool…' },
+    { to: l.creatorVault, data: c.interface.encodeFunctionData('claim', [l.quote, Number(index)]), label: 'Pay this allocation its share…' }];
+  const res = await w.sendCalls(calls, 'Collect fees and pay out this allocation.');
+  return { hash: res.tx.hash, message: `Paid out to ${r.wallet.slice(0, 6)}…${r.wallet.slice(-4)}.` };
 }
 
 /** Collects the token's fees from the pool (permissionless) and pays one split wallet its share, in one go when the wallet batches. */
