@@ -74,7 +74,7 @@ export function linkGroups(wallets, { links = [], creatorLinked = [] } = {}) {
  * asset at the round's end; `firstSeen(wallet)` its first activity (seconds); `pools`: { asset: bigint } funds
  * available for this round (after amounts carried from earlier rounds); `carried`: { asset: Map(wallet → bigint) }.
  */
-export function airdropRound({ trades, start, end, usdPerUnit, firstSeen, pools, carried = {}, links = [], creatorLinked = [], minPayoutUsd = AIRDROP_RULES.minPayoutUsd, rules = AIRDROP_RULES }) {
+export function airdropRound({ trades, start, end, usdPerUnit, firstSeen, pools, carried = {}, decimals = {}, links = [], creatorLinked = [], minPayoutUsd = AIRDROP_RULES.minPayoutUsd, rules = AIRDROP_RULES }) {
   const window = trades.filter(t => t.timestamp >= start && t.timestamp < end && t.account);
   const { groupOf, isCreatorLinked } = linkGroups(window.map(t => t.account), { links, creatorLinked });
   const groups = new Map(), wallets = new Map();
@@ -91,8 +91,8 @@ export function airdropRound({ trades, start, end, usdPerUnit, firstSeen, pools,
   const byAsset = {};
   for (const [asset, pool] of Object.entries(pools)) {
     const a = lower(asset), { allocations, unallocated } = allocateAirdrop(pool, traders, rules);
-    const unit = usdPerUnit(a), decimals = trades.find(t => lower(t.asset) === a)?.quoteDecimals ?? 18;
-    const min = unit > 0 ? BigInt(Math.ceil(minPayoutUsd / unit * 10 ** decimals)) : 0n;
+    const unit = usdPerUnit(a), places = decimals[a] ?? trades.find(t => lower(t.asset) === a)?.quoteDecimals ?? 18;
+    const min = unit > 0 ? BigInt(Math.ceil(minPayoutUsd / unit * 10 ** places)) : 0n;
     const { payouts, carried: next } = walletPayouts(allocations, [...wallets.values()].filter(w => allocations.has(w.group)), min, carried[a] ?? new Map());
     byAsset[a] = { payouts, carried: next, unallocated };
   }
@@ -195,7 +195,13 @@ export function latestJobs(rows, checked = {}) {
   return rows.map(r => {
     // A job that failed and has since run cleanly (with nothing to record, e.g. no round due) is shown as ok again.
     if (r.status === 'failed' && checked[r.job] > r.at) return { job: r.job, at: checked[r.job], status: 'ok', error: null };
-    let error = null; try { error = r.detail ? JSON.parse(r.detail).error ?? null : null; } catch { error = null; }
-    return { job: r.job, at: r.at, status: r.status, error: error ? String(error).slice(0, 240) : null };
+    let error = null, note = null;
+    try {
+      const d = r.detail ? JSON.parse(r.detail) : {}; error = d.error ?? null;
+      // USDC payouts: assets left where they are (no USDC route yet, or a conversion that failed) are named.
+      const held = Object.entries(d.skipped ?? {});
+      if (held.length) note = `Not converted to USDC: ${held.map(([a, why]) => `${a.slice(0, 10)}… (${why})`).join('; ')}`;
+    } catch { error = null; }
+    return { job: r.job, at: r.at, status: r.status, error: error ? String(error).slice(0, 240) : null, note: note ? note.slice(0, 240) : null };
   });
 }

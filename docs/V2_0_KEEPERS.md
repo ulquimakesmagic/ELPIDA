@@ -104,3 +104,37 @@ The launch deploys `contracts/evm/v2/ElpidaV2IdentityAllocation.sol` (NOT AUDITE
 - **Limits.** Nobody, including the creator and the keeper, can take a held share, and a bound wallet cannot be changed.
 
 **X sign-in needs an X developer app.** Set `ELPIDA_X_CLIENT_ID` (and `ELPIDA_X_CLIENT_SECRET` for a confidential app) and `ELPIDA_X_REDIRECT_URI=https://elpida.fun/api/rewards/x/callback` in Railway. Without them, X shares stay held and the button says so; websites work without any setup.
+
+## USDC payouts (Malik, 10 November)
+
+The trader airdrop and holder rewards pay **only USDC**, on every EVM test network that has a USDC distributor pinned.
+The flywheel is unchanged. Solana is a later phase (it needs a program upgrade and a devnet SOL/USDC pool).
+
+- **Contract** `contracts/evm/v2/ElpidaV2UsdcDistributor.sol` (VERSION 2): the same rounds, Merkle leaves, claim window
+  and push payouts as `ElpidaV2Distributor`, but a root may only be posted in USDC. Its operator (the keeper) can also
+  `convert(asset, amountIn, minOut, path)`: an asset it holds (or the native coin, wrapped first) to USDC through the
+  network's Uniswap v3 SwapRouter02, along a path that must start at that asset and end at USDC, keeping the USDC.
+  It cannot send anything anywhere else. One per kind per chain; it copies its source distributor's schedule.
+- **No hook redeploy.** The hook still pays the old distributors. At each round's end the keeper posts a one-recipient
+  round there that pays the USDC distributor (published like any round), converts what arrived (at least 97% of a fresh
+  QuoterV2 quote; direct pool or through the wrapped coin, 0.05% / 0.3% / 1% tiers), then posts the real round in USDC.
+- **Airdrop:** every asset with a route moves and is converted; the USDC pool is split by the same rules (fees in USD,
+  qualification, linked wallets, $ minimum carried forward in USDC).
+- **Holder rewards:** a token is due when its pending share's USDC quote reaches the threshold (so a priced-by-route
+  pair such as a test stock counts too). Due shares move per asset, are converted, split back pro rata and paid in one
+  USDC round. USDC a token cannot pay yet (no eligible holders) is kept for it.
+- **No route, no move.** An asset with no Uniswap v3 path to USDC (an unseeded test stock, a chain whose router is not
+  SwapRouter02, e.g. BNB Chain testnet's PancakeSwap router) stays in the old distributor until a route exists. The
+  operator panel's keeper card names what was not converted and why.
+- **Keeper gas:** when native coin moves to USDC, the keeper tops its own wallet up to `ELPIDA_V2_KEEPER_GAS_TARGET`
+  (default 0.05 of the native coin) from it, never more than `ELPIDA_V2_KEEPER_GAS_SHARE_BPS` (default 1000 = 10%) of
+  that move, as a second recipient of the same published round. Analytics show it as keeper gas, not as a payout.
+  USDC-paired fees cannot pay gas, so a chain with little native-coin volume still needs the keeper funded by hand.
+- **Already-posted rounds** keep paying from the old distributors as before; only unpromised balances move.
+- **Analytics:** the moves are internal (not payouts) and hidden; a conversion takes the asset out of the vault and adds
+  its USDC; payouts show in USDC.
+- **Turning it on:** operator panel → Launchpads → the V2 card → *Deploy USDC payout distributors* (2 confirmations),
+  then pin `usdcAirdrop` and `usdcHolder` in `networks.mjs` (`v2.shared`). Until pinned, nothing changes.
+- **Tests:** `tests/v2-usdc-rewards.test.mjs` (the contract's guards; native, USDC and an unrouted stock through both
+  jobs on real contracts; the analytics; the browser deploy).
+
