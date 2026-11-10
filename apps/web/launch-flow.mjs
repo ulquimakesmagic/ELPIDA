@@ -142,6 +142,12 @@ export function renderLaunch(ctx) {
   const v2Chosen = () => v2Offered();
   // V2 creator splits on public EVM networks: up to 8 wallets through an ownerless split contract (v2-launchpad.mjs).
   const v2Splits = () => v2Chosen() && !solana() && draft.chain !== 'local' && !!ctx.config.contracts?.creatorAllocation?.bytecode;
+  // V2 holder strategies on public EVM networks: a strategy vault run by the server's V2 keeper (v2-launchpad.mjs).
+  const v2Strategies = () => v2Splits() && !!ctx.config.v2Keeper?.address && !!ctx.config.v2Keeper?.active;
+  const strategyAllowed = key => draft.chain === 'local' || key === 'creator' || (v2Strategies() && ['holders', 'paired', 'buyback'].includes(key));
+  // Reward assets on public networks: the native coin and the approved pair assets, except the token's own pair asset.
+  const publicRewardAssets = () => [{ address: '0x0000000000000000000000000000000000000000', symbol: nativeSymbol() }, ...(ctx.wallet?.approvedQuotes ?? []).map(a => ({ address: a.address, symbol: `${a.symbol} · ${a.address.slice(0, 6)}…${a.address.slice(-4)}` }))]
+    .filter(a => a.address.toLowerCase() !== String(draft.pair === 'native' ? '0x0000000000000000000000000000000000000000' : selectedAsset()?.address ?? '').toLowerCase());
   const v2Missing = () => !!draft.chain && draft.chain !== 'local' && !v2Offered();
   const modelsOffered = () => v4Offered() || v2Offered();
   // Where a native-coin first buy is swapped into the pair asset: V2 trades on its own v4 pool but converts on the
@@ -376,16 +382,17 @@ export function renderLaunch(ctx) {
   function rewardsStep() {
     const error = h('p.error-text', { role: 'alert' });
     const local = draft.chain === 'local';
-    const grid = h('div.choice-grid', { role: 'radiogroup', 'aria-label': 'Reward strategy' }, Object.entries(STRATEGIES).map(([key, s]) => h('label.choice', h('input', { type: 'radio', name: 'strategy', value: key, checked: draft.rewardMode === key, disabled: !local && key !== 'creator', on: { change: () => { draft.rewardMode = key; if (key === 'creator') draft.recipients = draft.recipients.map(r => ({ ...r, kind: 'wallet' })); save(); draw(); } } }),
-      h('span.choice-title', icon(s.glyph), s.name), h('p', STRATEGY_TEXT[key]), !local && key !== 'creator' ? h('span.chip', 'Local simulation only') : null)));
+    const grid = h('div.choice-grid', { role: 'radiogroup', 'aria-label': 'Reward strategy' }, Object.entries(STRATEGIES).map(([key, s]) => h('label.choice', h('input', { type: 'radio', name: 'strategy', value: key, checked: draft.rewardMode === key, disabled: !strategyAllowed(key), on: { change: () => { draft.rewardMode = key; if (key === 'creator') draft.recipients = draft.recipients.map(r => ({ ...r, kind: 'wallet' })); save(); draw(); } } }),
+      h('span.choice-title', icon(s.glyph), s.name), h('p', STRATEGY_TEXT[key]), !strategyAllowed(key) ? h('span.chip', 'Local simulation only') : null)));
     const settings = h('div.stack.reveal');
     const automated = ['holders', 'paired', 'buyback'].includes(draft.rewardMode);
+    if (draft.rewardMode === 'paired' && !local && !publicRewardAssets().some(a => a.address.toLowerCase() === String(draft.rewardToken ?? '').toLowerCase())) draft.rewardToken = publicRewardAssets()[0]?.address.toLowerCase();
     if (automated) {
       settings.append(h('div.row-2',
         field({ label: 'Distribution threshold', control: h('div.input-affix', input('threshold', { type: 'number', min: '0.000001', step: 'any' }), h('span.affix', pairSymbol())), hint: 'Creator fees collected before each distribution runs, in the trading asset.' }),
         field({ label: 'Minimum token holding', control: h('div.input-affix', input('minimumHolding', { type: 'number', min: '0', step: 'any' }), h('span.affix', (draft.symbol || 'tokens').toUpperCase())), hint: 'Wallets holding less are skipped. Pools, the curve and treasuries never qualify.' })),
         field({ label: 'Minimum holding value (optional)', control: h('div.input-affix', input('minimumHoldingUsd', { type: 'number', min: '0', max: '100000', step: 'any', placeholder: 'e.g. 30' }), h('span.affix', 'USD')), hint: 'Holders must also hold at least this much in USD, converted to tokens at each distribution using a fresh price. The larger of the two minimums applies. If no fresh USD price exists for the pair, distributions wait instead of guessing.' }));
-      if (draft.rewardMode === 'paired') settings.append(field({ label: 'Reward asset', control: h('select.select', { on: { change: e => { draft.rewardToken = e.target.value; save(); drawPreview(); } } }, (rewardData?.assets ?? []).map(a => h('option', { value: a.address, selected: a.address === draft.rewardToken }, a.symbol))), hint: 'The asset holders receive. It can differ from the trading pair; if it is the same, fees are paid directly without a swap.' }));
+      if (draft.rewardMode === 'paired') settings.append(field({ label: 'Reward asset', control: h('select.select', { on: { change: e => { draft.rewardToken = e.target.value.toLowerCase(); save(); drawPreview(); } } }, (local ? rewardData?.assets ?? [] : publicRewardAssets()).map(a => h('option', { value: a.address, selected: a.address.toLowerCase() === String(draft.rewardToken ?? '').toLowerCase() }, a.symbol))), hint: 'The asset holders receive. It can differ from the trading pair; if it is the same, fees are paid directly without a swap.' }));
       if (draft.rewardMode === 'buyback') settings.append(field({ label: 'Vesting duration', control: h('div.input-affix', input('vestingDays', { type: 'number', min: '1', max: '3650', step: '1' }), h('span.affix', 'days')), hint: 'Bought-back tokens unlock linearly over this period for the eligible holders at each snapshot.' }));
       settings.append(callout('', 'info', 'Holder payouts are weighted by each wallet’s eligible token balance at the recorded snapshot, not by total supply.'));
     } else settings.append(allocationEditor());
@@ -432,6 +439,11 @@ export function renderLaunch(ctx) {
     const taxed=!solana()&&(Number(draft.taxBuy)>0||Number(draft.taxSell)>0)&&!!ctx.wallet?.net?.taxDeployment;
     const split=v2Splits()&&policy.recipients.length<=8;
     if (split && policy.recipients.length > 1 && policy.recipients.slice(1).some(r => !r.target)) throw new Error('Enter a wallet address for every recipient after the first (the first can stay empty for your connected wallet).');
+    if (draft.chain !== 'local' && ['holders', 'paired', 'buyback'].includes(policy.mode)) {
+      if (!v2Strategies()) throw new Error('Holder strategies need ELPIDA V2 and its keeper on this network; they work in the local simulation now.');
+      if (Number(policy.minimumHoldingUsd) > 0) throw new Error('A USD minimum holding works in the local simulation only for now. Set the minimum in tokens.');
+      return policy;
+    }
     if (draft.chain !== 'local' && (policy.mode !== 'creator' || (!taxed&&!split&&policy.recipients.length!==1) || policy.recipients.some(r=>r.kind!=='wallet'))) throw new Error(v2Splits() ? 'On test networks a V2 launch pays its creator share to wallets: one, or a split between up to 8.' : 'Public standard launches support one creator wallet. Verified tax deployments support fixed wallet allocations.');
     return policy;
   }
@@ -538,6 +550,7 @@ export function renderLaunch(ctx) {
     if (v2Chosen()) { body.model = V2_MODEL; body.feeBps = draft.feeBps ?? V2.defaultFeeBps; delete body.tax; }
     if (draft.chain === 'local' && (draft.pair === 'token' || draft.pair === 'xstock')) body.quoteToken = body.quoteAsset;
     if (draft.chain === 'local') body.rewardPolicy = policy;
+    else if (v2Strategies() && ['holders', 'paired', 'buyback'].includes(policy.mode)) { body.rewardStrategy = { mode: policy.mode, threshold: String(policy.threshold), minimumHolding: String(policy.minimumHolding), vestingDays: policy.vestingDays, rewardAsset: policy.rewardToken ?? null }; delete body.reward; }
     else if (v2Splits() && policy.recipients.length > 1) { body.rewardSplit = policy.recipients.map((r, i) => ({ wallet: r.target || (i === 0 ? ctx.wallet.address : ''), bps: Math.round(Number(r.percent) * 100) })); delete body.reward; }
     else body.reward = policy.recipients[0].target || ctx.wallet.address;
     phase = 'submitting'; statusState = { step: ctx.mode === 'local' ? 'submit' : STATUS_STEPS()[0][0], error: null, done: false }; draw();

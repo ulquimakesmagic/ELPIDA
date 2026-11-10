@@ -73,3 +73,20 @@ operator when it is configured (`/api/config` → `v2Keeper.address`), and with 
     the pool are not; every payout is pushed and every proof checks;
   - the monthly airdrop in ETH and USDC: only the two independent traders qualify, all payouts are pushed;
   - re-running changes nothing.
+
+## Creator holder strategies (Malik, 10 November)
+
+A V2 launch on a public EVM test network can send the creator's 30% to a holder strategy instead of wallets. The launch
+deploys `contracts/evm/v2/ElpidaV2CreatorRewards.sol` (NOT AUDITED) with this keeper as its operator and names it as the
+token's creator vault. Its strategy and settings are fixed in the contract:
+
+| Strategy | What the keeper does once the vault holds the threshold |
+|---|---|
+| Share fees with holders | pays the fees to holders |
+| Buy a reward token | swaps the fees into the reward asset on the network's Uniswap v3 pool (fee tier fixed at launch from the deepest funded pool), then pays holders in it |
+| Buy back and vest | buys the token through the V2 router (the token's own fee applies); holders receive it linearly over the vesting period, pushed daily |
+
+- **Job `creator` (hourly).** It finds V2 tokens whose creator vault is such a contract with this keeper as operator, binds it to its token (anyone may; checked against the hook), and collects the creator share from the hook. When the vault holds at least the threshold, it swaps (with a 3% bound on the expected output), then posts a Merkle round and pushes every payout. The list is published at `/api/public/v2-rewards/manifest/<chain>/<vault>/<round>/<asset>`.
+- **Who gets paid.** Holders are paid by their balance at that moment, at least the vault's minimum holding. The pool manager, the hook, the router, the factory, the reward vaults, the vault itself and the burn addresses are excluded. A USD minimum holding is local-simulation only for now.
+- **What the keeper cannot do.** It cannot move funds anywhere but to the wallets in a posted round. It cannot post more than the vault holds unpromised, or swap below the threshold or with a zero minimum output. Anyone may pay any listed wallet with its proof.
+- **Where it shows.** The token page shows a **Creator rewards** card with the strategy, settings, what has gathered toward the threshold and the latest rounds. The admin keepers card shows the `creator` job.
