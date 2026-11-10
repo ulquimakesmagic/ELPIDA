@@ -1,4 +1,4 @@
-import {S3Client,PutObjectCommand,GetObjectCommand,ListObjectsV2Command} from '@aws-sdk/client-s3';
+import {S3Client,PutObjectCommand,GetObjectCommand,ListObjectsV2Command,DeleteObjectsCommand,DeleteObjectCommand} from '@aws-sdk/client-s3';
 import {createReadStream,createWriteStream,statSync} from 'node:fs';
 import {pipeline} from 'node:stream/promises';
 import {Transform} from 'node:stream';
@@ -29,6 +29,14 @@ export class BackupStore{
    token=response.NextContinuationToken;if(!token||seen.has(token))throw new Error('Invalid backup inventory pagination');seen.add(token);
   }while(true);
   return objects;
+ }
+ /** Deletes backup objects (only under elpida-backups/), in batches of up to 1,000; one at a time where the provider has no batch delete. */
+ async deleteKeys(keys){
+  if(keys.some(k=>typeof k!=='string'||!/^elpida-backups\/ops-\d{13}-[a-f0-9-]{36}\//.test(k)))throw new Error('Refusing to delete an object outside a backup snapshot');
+  for(let i=0;i<keys.length;i+=1000){const part=keys.slice(i,i+1000);
+   try{const r=await this.client.send(new DeleteObjectsCommand({Bucket:this.bucket,Delete:{Objects:part.map(Key=>({Key})),Quiet:true}}),{abortSignal:AbortSignal.timeout(120000)});if(r?.Errors?.length)throw new Error('Backup delete failed');}
+   catch(error){if(error.message==='Backup delete failed')throw error;for(const Key of part)await this.client.send(new DeleteObjectCommand({Bucket:this.bucket,Key}),{abortSignal:AbortSignal.timeout(120000)});}
+  }
  }
  close(){this.client.destroy?.();}
 }

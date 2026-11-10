@@ -1,5 +1,11 @@
 # Actions that need Malik
 
+## Backups clean themselves up, 10 November 2026 — nothing to do
+
+On 10 November the 27 oldest backup folders were deleted by hand (27 GB → 3 kept). After this change is merged, each
+daily backup deletes the ones its policy no longer keeps (7 daily, 4 weekly, 3 monthly) and leaves out the chain
+indexes, so a copy is a few MB instead of ~1 GB. Optional Railway variables are in `docs/RAILWAY_BACKUPS_AND_MONITORING.md`.
+
 ## USDC payouts for the trader airdrop and holder rewards (EVM test networks), 10 November 2026
 
 After the USDC payouts PR is merged and Railway has redeployed, on each EVM test network (Base Sepolia, Ethereum
