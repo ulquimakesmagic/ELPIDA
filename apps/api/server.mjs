@@ -141,6 +141,7 @@ const vendorFiles = new Map([
   ['/curve-model.mjs', fileURLToPath(new URL('../../packages/core/curve-model.mjs', import.meta.url))],
   ['/v4-model.mjs', fileURLToPath(new URL('../../packages/core/v4-model.mjs', import.meta.url))],
   ['/v2-economics.mjs', fileURLToPath(new URL('../../packages/core/v2-economics.mjs', import.meta.url))],
+  ['/stock-list.mjs', fileURLToPath(new URL('../../packages/core/stock-list.mjs', import.meta.url))],
 ]);
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const IMMUTABLE = 'public, max-age=31536000, immutable';
@@ -471,6 +472,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         {const m=url.pathname.match(/^\/api\/public\/v2-rewards\/solana-manifest\/([01])\/(\d{1,6})$/);if(m){const manifest=solanaV2Keeper.manifest?.(m[1],m[2]);return manifest?send(200,manifest):send(404,{error:'No such Solana round list.'});}}
         {const m=url.pathname.match(/^\/api\/public\/v2-rewards\/manifest\/(\d+)\/(0x[0-9a-fA-F]{40})\/(\d+)\/(0x[0-9a-fA-F]{40})$/);if(m){const manifest=v2Keeper.manifest(m[1],m[2],m[3],m[4]);return manifest?send(200,manifest):send(404,{error:'No published payout list for that round.'});}}
         if(url.pathname==='/api/public/v2-rewards/payouts'){try{return send(200,v2Rewards.payouts(url.searchParams.get('wallet')));}catch(error){return send(400,{error:error.message});}}
+        // The verified stock list for a chain (config/stocks/<network>.json, built by scripts/stock-list.mjs): what the operator approves.
+        if(url.pathname==='/api/public/stock-list'){const key=String(url.searchParams.get('network')??'');if(!/^[a-z0-9-]{2,40}$/.test(key))return send(400,{error:'Choose a network.'});let list=null;try{list=JSON.parse(readFileSync(fileURLToPath(new URL(`../../config/stocks/${key}.json`,import.meta.url)),'utf8'));}catch{list=null;}res.setHeader('Cache-Control','public, max-age=300');return list?send(200,list):send(404,{error:'No verified stock list for this network yet.'});}
         if(url.pathname==='/api/public/stock-catalog'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,stockCatalog.summary());}
         const stockIcon=url.pathname.match(/^\/api\/public\/stock-icon\/([A-Z0-9.]{1,12}on)\.png$/);
         if(stockIcon){const bytes=await stockCatalog.icon(stockIcon[1]);if(!bytes)return send(404,{error:'No icon for this stock.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});return res.end(bytes);}

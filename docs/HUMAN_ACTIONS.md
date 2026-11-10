@@ -1,5 +1,16 @@
 # Actions that need Malik
 
+## Stock list for mainnet (100+ stocks), 10 November 2026 — when Ondo and Chainlink answer
+
+1. Collect, per chain, each stock's token address (Ondo's addresses page / GM API) and its Chainlink Ondo GM feed
+   proxy (docs.chain.link → Tokenized equity feeds → Ondo) into a `candidates.json` like
+   `[{"symbol":"TSLAon","name":"Tesla","address":"0x…","feed":"0x…"}]`. Send it to me if you prefer; I format it.
+2. Run `STOCK_LIST_RPC_URL=<your RPC> node scripts/stock-list.mjs ethereum candidates.json` (likewise `bnb`). It checks
+   every stock on chain and writes `config/stocks/<chain>.json`; rejects are listed with the reason. Commit it in a PR.
+3. After the mainnet V2 launchpad exists: operator panel → Launchpads → V2 card → **Approve N more stocks**. With a Safe
+   treasury this downloads one file per 25 stocks; drag each into Safe{Wallet} → Transaction Builder and sign.
+Details: `docs/V2_0_STOCKS.md`.
+
 ## Optional: X sign-in for X allocations (V2 test networks)
 
 Website allocations verify with a DNS record and need nothing from you. To let X account owners claim their share:
