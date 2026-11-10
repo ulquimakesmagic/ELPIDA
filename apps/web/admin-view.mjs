@@ -126,7 +126,7 @@ export function renderAdmin(ctx, { connect }) {
       ({ running: 'running', not_configured: 'no key set', invalid_key: 'key unreadable', waiting_for_v2_setup: 'waiting for V2 setup', waiting_for_v2_deployment: 'waiting for V2 deployment', mainnet_needs_approval: 'mainnet needs approval' })[state] ?? (state || 'unknown'));
     // Each job's latest result; a failed job shows its error so the cause is visible without the server logs.
     const jobLevel = st => (st === 'ok' ? 'ok' : st === 'failed' ? 'bad' : 'warn');
-    const lastRun = (runs, jobs) => (jobs?.length ? h('ul.op-jobs', jobs.map(j => h('li', pill(jobLevel(j.status), j.job), h('small.muted', ` ${j.status} ${ago(j.at * 1000)}`), j.error ? h('small.op-job-error', ` ${j.error}`) : null)))
+    const lastRun = (runs, jobs) => (jobs?.length ? h('ul.op-jobs', jobs.map(j => h('li', pill(jobLevel(j.status), j.job), h('small.muted', ` ${j.status} ${ago(j.at * 1000)}`), j.error ? h('small.op-job-error', ` ${j.error}`) : null, j.note ? h('small.muted', ` ${j.note}`) : null)))
       : runs?.length ? h('small.muted', ` last ${runs[0].job} ${runs[0].status} ${ago(runs[0].at * 1000)}`) : h('small.muted', ' no jobs yet'));
     const evmChains = k.evm?.chains ?? [];
     const keepers = k.evm || k.solana ? card('V2 keepers', kv([

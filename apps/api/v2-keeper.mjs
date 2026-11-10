@@ -7,10 +7,11 @@
 // with the plans in packages/core/v2-keeper-plan.mjs, so every list and order can be recomputed from public data.
 // Payout lists are published at /api/public/v2-rewards/manifest/… and linked from the on-chain root.
 import { DatabaseSync } from 'node:sqlite';
-import { Contract, JsonRpcProvider, NonceManager, Wallet, ZeroAddress, getAddress } from 'ethers';
+import { Contract, JsonRpcProvider, NonceManager, Wallet, ZeroAddress, getAddress, solidityPacked } from 'ethers';
 import { buildRound } from '../../packages/core/v2-rounds.mjs';
 import { airdropRound, holderRound, flywheelOrders, personalFunder, boundedFunderLinks, HOLDER_RULES, FLYWHEEL_RULES, latestJobs } from '../../packages/core/v2-keeper-plan.mjs';
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
+import { testnetDexes } from '../../packages/core/uniswap.mjs';
 import { holderDistribution } from '../web/reward-policy.mjs';
 
 const DAY = 86_400, BATCH = 80;
@@ -18,6 +19,13 @@ const HOOK = ['function ledgers(address) view returns(uint256[5] owed,uint128[5]
 const DISTRIBUTOR = ['function currentRound() view returns(uint256)', 'function roundStart(uint256) view returns(uint256)', 'function roundEnd(uint256) view returns(uint256)', 'function available(address) view returns(uint256)',
   'function rounds(uint256,address) view returns(bytes32 root,uint128 total,uint128 claimed,uint32 recipients,uint64 postedAt,bool expired)', 'function postRoot(uint256,address,bytes32,uint256,uint32,string)',
   'function claimMany(uint256,address,(address account,uint256 amount,bytes32[] proof)[]) returns(uint256)', 'function convertToNative(uint256,uint256,uint24) returns(uint256)', 'function convertible() view returns(address)'];
+// USDC payouts (contracts/evm/v2/ElpidaV2UsdcDistributor.sol; Malik, 10 November): the trader airdrop and holder
+// rewards pay only USDC. Each finished round's balance moves from the hook's distributor into its USDC distributor (a
+// published round with that contract as the one recipient), is converted there to USDC, and is paid out in USDC.
+const USDC_DISTRIBUTOR = [...DISTRIBUTOR, 'function usdc() view returns(address)', 'function source() view returns(address)', 'function convert(address,uint256,uint256,bytes) returns(uint256)'];
+const QUOTER = ['function quoteExactInput(bytes,uint256) returns(uint256,uint160[],uint32[],uint256)'];
+const FEE_TIERS = [500, 3000, 10000];
+const ZERO_ROOT = '0x' + '0'.repeat(64);
 // Creator strategy vaults (contracts/evm/v2/ElpidaV2CreatorRewards.sol): the keeper is their operator.
 const CREATOR = ['function CREATOR_REWARDS_VERSION() view returns(uint256)', 'function operator() view returns(address)', 'function token() view returns(address)', 'function feeAsset() view returns(address)',
   'function mode() view returns(uint8)', 'function threshold() view returns(uint256)', 'function minimumHolding() view returns(uint256)', 'function vesting() view returns(uint64)', 'function bind(address)',
@@ -206,9 +214,49 @@ export class V2Keeper {
     return open.length;
   }
 
-  /** Monthly: each finished trader-airdrop round, per pool asset. */
+  /** The USDC distributor that pays `kind` ('airdrop' | 'holder') on this chain, or null while rewards pay in kind. */
+  usdcDistributor(w, kind) {
+    const a = w.deployment[kind === 'airdrop' ? 'usdcAirdrop' : 'usdcHolder'];
+    return a && w.usdc ? new Contract(a, USDC_DISTRIBUTOR, w.signer) : null;
+  }
+
+  /**
+   * Moves `amount` of `asset` for `round` from the hook's distributor into its USDC distributor: a published round
+   * whose one recipient is that contract. False when this round and asset already have a root (posted before USDC).
+   */
+  async sweep(w, source, target, round, asset, amount) {
+    if (amount <= 0n || (await source.rounds(round, asset)).root !== ZERO_ROOT) return false;
+    await this.post(w, source, round, asset, new Map([[lower(target.target), amount]]));
+    return true;
+  }
+
+  /** The best Uniswap v3 route from `asset` to USDC for `amount`: direct, or through the wrapped native coin. */
+  async usdcRoute(w, asset, amount) {
+    const dex = w.dex; if (!dex?.quoter || !dex?.weth) return null;
+    const tokenIn = lower(asset) === lower(ZeroAddress) ? dex.weth : asset, quoter = new Contract(dex.quoter, QUOTER, w.provider), paths = [];
+    for (const f of FEE_TIERS) paths.push(solidityPacked(['address', 'uint24', 'address'], [tokenIn, f, w.usdc]));
+    if (lower(tokenIn) !== lower(dex.weth)) for (const f1 of FEE_TIERS) for (const f2 of FEE_TIERS) paths.push(solidityPacked(['address', 'uint24', 'address', 'uint24', 'address'], [tokenIn, f1, dex.weth, f2, w.usdc]));
+    let best = null;
+    for (const path of paths) { try { const [out] = await quoter.quoteExactInput.staticCall(path, amount); if (out > 0n && (!best || out > best.quoted)) best = { path, quoted: out }; } catch { /* no pool or no liquidity on this route */ } }
+    return best;
+  }
+
+  /**
+   * Converts `amount` of `asset` held by the USDC distributor into USDC along `route` (at least 97% of a fresh quote).
+   * Returns the USDC received, or throws with the reason.
+   */
+  async toUsdc(w, target, asset, amount, route) {
+    const fresh = await this.usdcRoute(w, asset, amount) ?? route;
+    if (!fresh) throw new Error('no USDC route');
+    const minOut = fresh.quoted * 97n / 100n, out = await target.convert.staticCall(asset, amount, minOut, fresh.path);
+    await (await target.convert(asset, amount, minOut, fresh.path)).wait();
+    return out;
+  }
+
+  /** Monthly: each finished trader-airdrop round, per pool asset (in USDC once the chain has a USDC distributor). */
   async airdrop(w) {
     const index = w.index(); if (!index) return;
+    if (this.usdcDistributor(w, 'airdrop')) return this.airdropUsdc(w, index);
     const drop = new Contract(w.deployment.airdrop, DISTRIBUTOR, w.signer), current = Number(await drop.currentRound());
     for (let round = this.get(`${w.chain}:airdrop:next`, 0); round < current; round++) {
       const [start, end] = (await Promise.all([drop.roundStart(round), drop.roundEnd(round)])).map(Number);
@@ -232,9 +280,114 @@ export class V2Keeper {
     }
   }
 
+  /**
+   * The trader airdrop in USDC: at each round's end, every asset with a USDC route (USDC itself, or a Uniswap v3 pool
+   * path) moves into the USDC distributor and is converted; an asset without a route stays where it is until one exists.
+   * The whole USDC pool (less amounts carried for wallets under the minimum) is split by the same rules as before.
+   */
+  async airdropUsdc(w, index) {
+    const drop = new Contract(w.deployment.airdrop, DISTRIBUTOR, w.signer), target = this.usdcDistributor(w, 'airdrop'), usdc = lower(w.usdc), current = Number(await drop.currentRound());
+    for (let round = this.get(`${w.chain}:airdrop:next`, 0); round < current; round++) {
+      const [start, end] = (await Promise.all([drop.roundStart(round), drop.roundEnd(round)])).map(Number);
+      await this.fees(w, { force: true });
+      const assets = [...new Set([lower(ZeroAddress), usdc, ...index.listings().map(t => lower(t.quoteAddress ?? ZeroAddress))])], moved = {}, converted = {}, skipped = {};
+      for (const a of assets) {
+        const avail = await drop.available(a); if (avail <= 0n) continue;
+        const route = a === usdc ? null : await this.usdcRoute(w, a, avail);
+        if (a !== usdc && !route) { skipped[a] = 'no USDC route yet: held for a later round'; continue; }
+        if (await this.sweep(w, drop, target, round, a, avail)) moved[a] = avail.toString();
+      }
+      // Everything of a non-USDC asset the USDC distributor holds (this round's, and any earlier conversion that failed).
+      for (const a of assets) {
+        if (a === usdc) continue;
+        const held = await target.available(a); if (held <= 0n) continue;
+        try { converted[a] = (await this.toUsdc(w, target, a, held)).toString(); } catch (e) { skipped[a] = e.shortMessage ?? e.message; }
+      }
+      const linked = this.creatorLinked(index);
+      const all = index.tradesBetween(0, end), trades = all.filter(t => t.timestamp >= start && !linked.get(lower(t.token))?.has(lower(t.account ?? '')));
+      const firstSeen = new Map(); for (const t of all) if (t.account && !firstSeen.has(lower(t.account))) firstSeen.set(lower(t.account), t.timestamp);
+      const usd = a => lower(a) === usdc ? 1 : w.usdPerUnit(a) ?? 0;
+      const carried = new Map(Object.entries(this.get(`${w.chain}:airdrop:usdcCarried`, {})).map(([k, v]) => [k, BigInt(v)]));
+      const held = [...carried.values()].reduce((x, y) => x + y, 0n), avail = await target.available(usdc), pools = avail > held ? { [usdc]: avail - held } : {};
+      const plan = airdropRound({ trades: trades.map(t => ({ ...t, quoteUsd: Number(t.quoteAmount ?? 0) * usd(t.asset) })), start, end, usdPerUnit: usd, firstSeen: a => firstSeen.get(a), pools, carried: { [usdc]: carried }, decimals: { [usdc]: 6 },
+        links: await this.links(w, trades.map(t => lower(t.account ?? ''))), creatorLinked: [...linked.values()].flatMap(s => [...s]) });
+      const p = plan.byAsset[usdc];
+      let result = null;
+      if (p) {
+        this.set(`${w.chain}:airdrop:usdcCarried`, Object.fromEntries([...p.carried].map(([k, v]) => [k, v.toString()])));
+        if (p.payouts.size && (await target.rounds(round, usdc)).root === ZERO_ROOT) result = await this.post(w, target, round, usdc, p.payouts);
+      }
+      this.set(`${w.chain}:airdrop:next`, round + 1);
+      this.record(w.chain, 'airdrop', 'ok', { round, usdc: true, moved, converted, skipped, qualified: plan.qualified.length, result });
+    }
+  }
+
+  /**
+   * Holder rewards in USDC. A token is due when its pending holder share is worth the threshold (its USDC quote, so an
+   * unpriced pair such as a test stock counts too). Due shares move into the USDC distributor per asset, are converted,
+   * split back to the tokens pro rata, and paid to each token's holders in one USDC round. A share whose asset has no
+   * USDC route stays in the holder distributor until one exists. USDC a token could not pay (no eligible holders) is
+   * kept for it and added next time.
+   */
+  async holderUsdc(w, index) {
+    const dist = new Contract(w.deployment.holder, DISTRIBUTOR, w.signer), target = this.usdcDistributor(w, 'holder'), usdc = lower(w.usdc), current = Number(await dist.currentRound());
+    const hook = new Contract(w.deployment.hook, HOOK, w.provider), threshold = BigInt(Math.round(HOLDER_RULES.thresholdUsd[this.network] * 1e6));
+    for (let round = this.get(`${w.chain}:holder:next`, 0); round < current; round++) {
+      const [start, end] = (await Promise.all([dist.roundStart(round), dist.roundEnd(round)])).map(Number);
+      await this.fees(w, { force: true });
+      const done = this.get(`${w.chain}:holder:distributed`, {}), bank = new Map(Object.entries(this.get(`${w.chain}:holder:usdcBank`, {})).map(([k, v]) => [k, BigInt(v)]));
+      const byAsset = new Map();
+      for (const t of index.listings()) {
+        const { owed, paid } = await hook.ledgers(t.address), pending = owed[3] + paid[3] - BigInt(done[lower(t.address)] ?? 0);
+        if (pending <= 0n) continue;
+        const a = lower(t.quoteAddress ?? ZeroAddress);
+        if (!byAsset.has(a)) byAsset.set(a, []);
+        byAsset.get(a).push({ token: lower(t.address), pending });
+      }
+      const moved = {}, skipped = {}, pools = new Map(bank);
+      for (const [asset, list] of byAsset) {
+        const total = list.reduce((x, d) => x + d.pending, 0n), route = asset === usdc ? { quoted: total } : await this.usdcRoute(w, asset, total);
+        if (!route) { skipped[asset] = 'no USDC route yet: held for a later round'; continue; }
+        const due = list.filter(d => route.quoted * d.pending / total + (bank.get(d.token) ?? 0n) >= threshold);
+        let amount = due.reduce((x, d) => x + d.pending, 0n);
+        const avail = await dist.available(asset); if (amount > avail) amount = avail;
+        if (amount <= 0n || !await this.sweep(w, dist, target, round, asset, amount)) continue;
+        moved[asset] = amount.toString();
+        let out = amount;
+        if (asset !== usdc) { try { out = await this.toUsdc(w, target, asset, amount, route); } catch (e) { skipped[asset] = e.shortMessage ?? e.message; out = 0n; } }
+        // The moved amount is no longer pending in the holder distributor; its USDC goes to the tokens pro rata.
+        const dueTotal = due.reduce((x, d) => x + d.pending, 0n);
+        let given = 0n;
+        for (const [i, d] of due.entries()) {
+          done[d.token] = (BigInt(done[d.token] ?? 0) + amount * d.pending / dueTotal).toString();
+          const part = i + 1 === due.length ? out - given : out * d.pending / dueTotal; given += part;
+          pools.set(d.token, (pools.get(d.token) ?? 0n) + part);
+        }
+      }
+      const linked = this.creatorLinked(index), payouts = new Map(), stats = [], left = new Map();
+      const excluded = [w.deployment.poolManager, w.deployment.hook, w.deployment.router, w.deployment.factory, w.deployment.airdrop, w.deployment.holder, w.deployment.flywheel, w.deployment.usdcAirdrop, w.deployment.usdcHolder].filter(Boolean);
+      for (const [token, pool] of pools) {
+        if (pool <= 0n) continue;
+        const plan = pool >= threshold ? holderRound({ transfers: index.transfersOf(token), start, end, pool, excluded, creatorLinked: [...(linked.get(token) ?? [])] }) : null;
+        if (!plan?.payouts.size) { left.set(token, pool); continue; }
+        const sum = [...plan.payouts.values()].reduce((x, y) => x + y, 0n);
+        for (const [k, v] of plan.payouts) payouts.set(k, (payouts.get(k) ?? 0n) + v);
+        if (pool > sum) left.set(token, pool - sum);
+        stats.push({ token, holders: plan.holders, usdc: sum.toString() });
+      }
+      let result = null;
+      if (payouts.size && (await target.rounds(round, usdc)).root === ZERO_ROOT) result = await this.post(w, target, round, usdc, payouts);
+      this.set(`${w.chain}:holder:distributed`, done);
+      this.set(`${w.chain}:holder:usdcBank`, Object.fromEntries([...left].map(([k, v]) => [k, v.toString()])));
+      this.set(`${w.chain}:holder:next`, round + 1);
+      this.record(w.chain, 'holder', 'ok', { round, usdc: true, moved, skipped, tokens: stats, result });
+    }
+  }
+
   /** Weekly: holders of tokens whose holder share has reached the threshold; USDC pairs converted to native first. */
   async holder(w) {
     const index = w.index(); if (!index) return;
+    if (this.usdcDistributor(w, 'holder')) return this.holderUsdc(w, index);
     const dist = new Contract(w.deployment.holder, DISTRIBUTOR, w.signer), current = Number(await dist.currentRound()), hook = new Contract(w.deployment.hook, HOOK, w.provider);
     for (let round = this.get(`${w.chain}:holder:next`, 0); round < current; round++) {
       const [start, end] = (await Promise.all([dist.roundStart(round), dist.roundEnd(round)])).map(Number);
@@ -336,6 +489,7 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
   const workers = nets.map(net => {
     const provider = new JsonRpcProvider(net.rpcUrl, undefined, { cacheTimeout: -1, batchMaxCount: 1 }), d = net.v2.shared;
     return { chain: net.key, net, provider, signer: Object.assign(new NonceManager(new Wallet(key, provider)), { address }), deployment: { ...d, poolManager: net.v4?.poolManager },
+      dex: testnetDexes[net.key]?.enabled ? testnetDexes[net.key] : null, usdc: oracles[net.key]?.usdc ?? null,
       index: () => indexFor(net.key), funderOf: env.ELPIDA_EXPLORER_API_KEY ? etherscanFunder(net.chainId, env.ELPIDA_EXPLORER_API_KEY) : null, ignoredFunders,
       usdPerUnit: asset => { if (lower(asset) === lower(ZeroAddress)) { const p = prices()[net.key]; return p?.status === 'fresh' ? p.usd : null; } const usdc = oracles[net.key]?.usdc; return usdc && lower(asset) === lower(usdc) ? 1 : null; } };
   });

@@ -28,9 +28,10 @@ const hex = s => (s.startsWith('0x') ? s : '0x' + s);
  */
 /**
  * `convert: true` (with vaults) also deploys a local Uniswap v3 with a USDC/WETH pool at $2,500 and gives the holder
- * distributor its USDC → native conversion.
+ * distributor its USDC → native conversion. `usdcPayouts: true` (with convert) also deploys the two USDC payout
+ * distributors (contracts.usdcAirdrop, contracts.usdcHolder) fed by the airdrop and holder distributors.
  */
-export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN_FEE_BPS, requireMetadata = false, vaults: realVaults = false, convert = false } = {}) {
+export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN_FEE_BPS, requireMetadata = false, vaults: realVaults = false, convert = false, usdcPayouts = false } = {}) {
   const connection = await network.create('localCancun'), provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 });
   provider.pollingInterval = 10; t.after(async () => { provider.destroy(); await connection.close(); });
   const signers = await Promise.all([0, 1, 2, 3, 4].map(i => provider.getSigner(i))), addresses = await Promise.all(signers.map(s => s.getAddress()));
@@ -50,6 +51,8 @@ export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN
     contracts.airdrop = await deploy(v4Art('ElpidaV2Distributor'), addresses[4], 0, Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000, 'trader-airdrop', Z, Z, Z);
     contracts.holder = await deploy(v4Art('ElpidaV2Distributor'), addresses[4], 7 * 86_400, today, 'holder-rewards', convert ? usdc.target : Z, convert ? contracts.v3.router.target : Z, convert ? contracts.v3.weth.target : Z);
     contracts.flywheel = await deploy(v4Art('ElpidaV2FlywheelVault'), addresses[4], factory.target);
+    if (usdcPayouts) for (const [k, src, purpose] of [['usdcAirdrop', contracts.airdrop, 'trader-airdrop-usdc'], ['usdcHolder', contracts.holder, 'holder-rewards-usdc']])
+      contracts[k] = await deploy(v4Art('ElpidaV2UsdcDistributor'), addresses[4], await src.period(), await src.genesis(), purpose, usdc.target, contracts.v3.router.target, contracts.v3.weth.target, src.target);
     Object.assign(vaults, { traderAirdrop: contracts.airdrop.target, flywheel: contracts.flywheel.target, holderRewards: contracts.holder.target });
   }
   const feed = await deploy(v4Art('MockUsdFeed'), ETH_USD * 10n ** 8n);

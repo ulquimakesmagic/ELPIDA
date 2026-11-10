@@ -1,7 +1,10 @@
 // ELPIDA V2.0 rewards indexer: the figures behind the analytics page's Rewards section, read from chain events only.
 //  - the V2 hook:      Launched (each token's quote), Fee (fees at the token's rate), FeesWithdrawn;
 //  - the distributors: RootPosted, Claimed, ClaimFailed, Expired (trader airdrop and holder rewards);
-//  - the flywheel:     BoughtAndBurned.
+//  - the flywheel:     BoughtAndBurned;
+//  - the USDC payout distributors (when pinned): RootPosted, Claimed, ClaimFailed, Expired, Converted. A finished round's
+//    balance moves from the hook's distributor into its USDC distributor (a one-recipient round, hidden here: the money
+//    stays in the same vault), is converted (the asset leaves the vault, its USDC arrives) and is paid in USDC.
 // A vault's size is what it has earned so far less what it has paid out: earned is its exact share of every token's
 // running fee total (splitAccrued, as the hook computes it), whether or not the hook has paid it over yet. Nothing is
 // estimated: a chain without a pinned V2 deployment has no Rewards section at all.
@@ -18,6 +21,7 @@ export const V2_REWARD_ABIS = Object.freeze({
     'event ClaimFailed(uint256 indexed round,address indexed asset,address indexed account,uint256 amount)',
     'event Expired(uint256 indexed round,address indexed asset,uint256 returnedToPool)',
     'function period() view returns(uint256)', 'function genesis() view returns(uint256)', 'function CLAIM_WINDOW_ROUNDS() view returns(uint256)'],
+  usdc: ['event Converted(address indexed asset,uint256 amountIn,uint256 usdcOut)'],
   flywheel: ['event BoughtAndBurned(address indexed token,address indexed asset,uint256 indexed cycle,uint256 spent,uint256 burned,uint256 supplyAfter)'],
 });
 
@@ -26,15 +30,17 @@ const DAY = 86_400;
 export const RANGE_LIMIT = /range|too large|413|too many|limit exceeded|query returned more than|block range|exceed/i;
 const rpcMessage = e => [e?.message, e?.info?.responseBody, e?.error?.message, e?.shortMessage].filter(Boolean).join(' ');
 const SHARE = { airdrop: 'traderAirdrop', holder: 'holderRewards', flywheel: 'flywheel' };
+const USDC_PARENT = { usdcAirdrop: 'airdrop', usdcHolder: 'holder' }, USDC_OF = { airdrop: 'usdcAirdrop', holder: 'usdcHolder' };
 const lower = a => String(a).toLowerCase();
 
 export class V2RewardsIndexer {
-  /** `contracts`: { hook, airdrop, holder, flywheel } addresses; `fromBlock`: the deployment block. */
+  /** `contracts`: { hook, airdrop, holder, flywheel, usdcAirdrop?, usdcHolder? } addresses; `fromBlock`: the deployment block. */
   constructor({ provider, contracts, fromBlock = 0, confirmations = 0, batchSize = 2000 }) {
     this.provider = provider; this.fromBlock = fromBlock; this.confirmations = confirmations; this.batchSize = batchSize;
-    this.addresses = Object.fromEntries(Object.entries(contracts).map(([k, v]) => [k, lower(getAddress(v))]));
+    this.addresses = Object.fromEntries(Object.entries(contracts).filter(([, v]) => v).map(([k, v]) => [k, lower(getAddress(v))]));
     this.kinds = new Map(Object.entries(this.addresses).map(([k, v]) => [v, k]));
     this.iface = { hook: new Interface(V2_REWARD_ABIS.hook), airdrop: new Interface(V2_REWARD_ABIS.distributor), holder: new Interface(V2_REWARD_ABIS.distributor), flywheel: new Interface(V2_REWARD_ABIS.flywheel) };
+    this.iface.usdcAirdrop = this.iface.usdcHolder = new Interface([...V2_REWARD_ABIS.distributor, ...V2_REWARD_ABIS.usdc]);
     this.next = fromBlock; this.blockTimes = new Map(); this.reset();
   }
 
@@ -82,9 +88,11 @@ export class V2RewardsIndexer {
   }
 
   async apply(log) {
-    const kind = this.kinds.get(lower(log.address));
-    let ev; try { ev = this.iface[kind].parseLog(log); } catch { return; }
+    const source = this.kinds.get(lower(log.address));
+    let ev; try { ev = this.iface[source].parseLog(log); } catch { return; }
     if (!ev) return;
+    // A USDC distributor's events count for the vault it pays (the trader airdrop or holder rewards).
+    const kind = USDC_PARENT[source] ?? source, at = lower(log.address), key = a => `${at}:${a.round}:${lower(a.asset)}`;
     const time = await this.time(log.blockNumber), tx = log.transactionHash, a = ev.args;
     if (kind === 'hook' && ev.name === 'Launched') this.tokens.set(lower(a.token), { quote: lower(a.quote), accrued: 0n, feeBps: Number(a.feeBps) });
     if (kind === 'hook' && ev.name === 'Fee') {
@@ -93,14 +101,23 @@ export class V2RewardsIndexer {
       for (const [vault, key] of Object.entries(SHARE)) if (after[key] > before[key]) this.events.push({ time, kind: vault, asset: t.quote, delta: after[key] - before[key] });
     }
     if ((kind === 'airdrop' || kind === 'holder') && ev.name === 'RootPosted')
-      this.rounds[kind].set(`${a.round}:${lower(a.asset)}`, { round: Number(a.round), asset: lower(a.asset), root: a.root, total: a.total, recipients: Number(a.recipients), manifestURI: a.manifestURI, postedAt: time, postTx: tx, paid: [], failed: 0, expired: false });
+      this.rounds[kind].set(key(a), { round: Number(a.round), asset: lower(a.asset), root: a.root, total: a.total, recipients: Number(a.recipients), manifestURI: a.manifestURI, postedAt: time, postTx: tx, paid: [], failed: 0, expired: false });
+    if ((kind === 'airdrop' || kind === 'holder') && ev.name === 'Claimed' && lower(a.account) === this.addresses[USDC_OF[kind]]) {
+      // Moved into this vault's USDC distributor: the same vault's money, so not a payout. Its one-recipient round is hidden.
+      this.rounds[kind].delete(key(a));
+      return;
+    }
+    if ((kind === 'airdrop' || kind === 'holder') && ev.name === 'Converted') {
+      this.events.push({ time, kind, asset: lower(a.asset), delta: -a.amountIn }, { time, kind, asset: this.usdcAsset ?? (this.usdcAsset = lower(await new Contract(at, ['function usdc() view returns(address)'], this.provider).usdc())), delta: a.usdcOut });
+      return;
+    }
     if ((kind === 'airdrop' || kind === 'holder') && ev.name === 'Claimed') {
-      const r = this.rounds[kind].get(`${a.round}:${lower(a.asset)}`); if (r) r.paid.push(a.amount);
+      const r = this.rounds[kind].get(key(a)); if (r) r.paid.push(a.amount);
       this.events.push({ time, kind, asset: lower(a.asset), delta: -a.amount });
       this.claims.push({ kind, round: Number(a.round), asset: lower(a.asset), account: lower(a.account), amount: a.amount, time, tx });
     }
-    if ((kind === 'airdrop' || kind === 'holder') && ev.name === 'ClaimFailed') { const r = this.rounds[kind].get(`${a.round}:${lower(a.asset)}`); if (r) r.failed++; }
-    if ((kind === 'airdrop' || kind === 'holder') && ev.name === 'Expired') { const r = this.rounds[kind].get(`${a.round}:${lower(a.asset)}`); if (r) { r.expired = true; r.returnedToPool = a.returnedToPool; } }
+    if ((kind === 'airdrop' || kind === 'holder') && ev.name === 'ClaimFailed') { const r = this.rounds[kind].get(key(a)); if (r) r.failed++; }
+    if ((kind === 'airdrop' || kind === 'holder') && ev.name === 'Expired') { const r = this.rounds[kind].get(key(a)); if (r) { r.expired = true; r.returnedToPool = a.returnedToPool; } }
     if (kind === 'flywheel' && ev.name === 'BoughtAndBurned') {
       this.events.push({ time, kind: 'flywheel', asset: lower(a.asset), delta: -a.spent });
       this.burns.push({ token: lower(a.token), asset: lower(a.asset), cycle: Number(a.cycle), spent: a.spent, burned: a.burned, supplyAfter: a.supplyAfter, time, tx });

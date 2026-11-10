@@ -137,6 +137,49 @@ export async function deployV2(w, body = {}) {
   return { record, message: `The ${net.name} V2 test launchpad is deployed with its reward contracts, from block ${record.block}. Send the addresses to be pinned in networks.mjs (v2.shared) so the site lists its tokens and shows its Rewards analytics.` };
 }
 
+const usdcKey = chainId => `elpida:v2:usdc-distributors:${chainId}`;
+/** The network's USDC payout distributors: pinned in networks.mjs (v2.shared.usdcAirdrop / usdcHolder), else deployed from this browser. */
+export function v2UsdcDistributors(net) {
+  const d = net?.v2?.shared;
+  if (d?.usdcAirdrop && d?.usdcHolder) return { airdrop: d.usdcAirdrop, holder: d.usdcHolder, pinned: true };
+  const saved = read(usdcKey(net?.chainId));
+  return saved?.airdrop && saved?.holder && saved.source?.toLowerCase() === String(d?.airdrop ?? '').toLowerCase() ? { ...saved, pinned: false } : null;
+}
+
+/**
+ * Deploys the two USDC payout distributors (contracts/evm/v2/ElpidaV2UsdcDistributor.sol) for the pinned V2 launchpad:
+ * one fed by the trader-airdrop distributor, one by the holder-reward distributor, each with the same schedule and the
+ * server keeper as operator. The keeper moves each finished round's balance into them, converts it to USDC through the
+ * network's Uniswap v3 router (at least 97% of the quote) and pays USDC only. Nothing about the hook changes.
+ */
+export async function deployV2UsdcDistributors(w) {
+  const net = w.net, d = v2Deployment(net);
+  if (net.mainnet) throw new Error('USDC payouts are not approved for mainnet. Nothing was deployed.');
+  if (!d?.pinned || !d.airdrop || !d.holder) throw new Error(`Pin the ${net.name} V2 launchpad first. Nothing was deployed.`);
+  if (v2UsdcDistributors(net)) throw new Error(`The ${net.name} USDC payout distributors already exist. Nothing was deployed.`);
+  const keeper = w.config?.v2Keeper;
+  if (!keeper?.address || !keeper.active) throw new Error('USDC payouts need the Elpida V2 keeper, which is not running on this server. Nothing was deployed.');
+  const usdc = w.oracle?.usdc && w.oracle.usdc !== ZeroAddress ? getAddress(w.oracle.usdc) : null, dex = w.dex;
+  if (!usdc) throw new Error(`${net.name} has no USDC configured. Nothing was deployed.`);
+  if (!dex?.router || !dex?.weth || (dex.routerVersion ?? 2) !== 2) throw new Error(`There is no Uniswap v3 router (SwapRouter02) on ${net.name} to convert rewards to USDC. Nothing was deployed.`);
+  const response = await fetch('/api/v4-artifacts');
+  const art = response.ok ? (await response.json()).v2?.usdcDistributor : null;
+  if (!art?.bytecode) throw new Error('The USDC distributor contract is unavailable on this server. Nothing was deployed.');
+  const SCHEDULE = ['function period() view returns(uint256)', 'function genesis() view returns(uint256)'];
+  const record = { source: d.airdrop, holderSource: d.holder, usdc, swapRouter: getAddress(dex.router) };
+  for (const [kind, source, purpose, n] of [['airdrop', d.airdrop, 'trader-airdrop-usdc', 1], ['holder', d.holder, 'holder-rewards-usdc', 2]]) {
+    const c = new Contract(source, SCHEDULE, w.provider), [period, genesis] = await Promise.all([c.period(), c.genesis()]);
+    const deployed = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(keeper.address, period, genesis, purpose, usdc, getAddress(dex.router), getAddress(dex.weth), source);
+    const r = await w.wait(Promise.resolve(deployed.deploymentTransaction()), `Step ${n} of 2: confirm the ${kind === 'airdrop' ? 'trader-airdrop' : 'holder-reward'} USDC distributor…`);
+    await walletCaughtUp(w, r?.tx?.nonce);
+    record[kind] = await deployed.getAddress();
+    if (!await hasCode(w.provider, record[kind], { wait: true })) throw new Error('The USDC distributor is not visible on the network yet. Try again.');
+    if (kind === 'airdrop' && r?.receipt?.blockNumber) record.block = r.receipt.blockNumber;
+  }
+  if (!write(usdcKey(net.chainId), record)) throw new Error(`Deployed, but this browser blocks storage. Save these addresses: ${JSON.stringify({ usdcAirdrop: record.airdrop, usdcHolder: record.holder })}.`);
+  return { record, message: `The ${net.name} USDC payout distributors are deployed. Send them to be pinned in networks.mjs (v2.shared.usdcAirdrop and usdcHolder); from then on the keeper pays the trader airdrop and holder rewards in USDC.` };
+}
+
 const testStock = (w, address) => (w.approvedQuotes ?? []).find(a => a.kind === 'xstock' && a.test && a.address.toLowerCase() === String(address ?? '').toLowerCase()) ?? null;
 
 /** The network's test stocks (approved on its Model 10 launchpad) and whether each is a V2 pair yet. */

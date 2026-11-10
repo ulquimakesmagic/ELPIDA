@@ -1,5 +1,15 @@
 # Actions that need Malik
 
+## USDC payouts for the trader airdrop and holder rewards (EVM test networks), 10 November 2026
+
+After the USDC payouts PR is merged and Railway has redeployed, on each EVM test network (Base Sepolia, Ethereum
+Sepolia, Robinhood Chain testnet; BNB Chain testnet has no SwapRouter02, so it keeps paying in kind for now):
+1. Operator panel → Launchpads → switch to the network → V2 card → **Deploy USDC payout distributors** (2 confirmations).
+2. Send me the two addresses it shows (`usdcAirdrop`, `usdcHolder`) to pin in `networks.mjs`.
+3. For assets you want converted, make sure a Uniswap v3 pool to USDC (or to WETH) has liquidity, e.g. the test stock
+   tNVDAon. Without one, that asset stays in its vault and the keeper card says so; nothing is lost.
+Rounds already posted keep paying as before. The flywheel is unchanged.
+
 ## Optional: X sign-in for X allocations (V2 test networks)
 
 Website allocations verify with a DNS record and need nothing from you. To let X account owners claim their share:
