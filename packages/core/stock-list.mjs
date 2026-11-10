@@ -3,7 +3,7 @@
 // each one is checked on chain before it can be approved on a V2 launchpad: the token is a contract with the expected
 // symbol and sane decimals, and its feed is a contract whose description names the stock and whose latest answer is
 // valid. The result is config/stocks/<network>.json; the operator panel turns it into Safe batches of
-// approveFeedQuote calls (25 per transaction), skipping stocks already approved.
+// approvePricedQuote calls (25 per transaction), skipping stocks already approved.
 
 export const STOCK_LIST_SCHEMA = 'elpida-stock-list-v1';
 export const STOCK_BATCH_SIZE = 25;
@@ -65,10 +65,10 @@ export function checkStockList(list, chainId) {
   return list;
 }
 
-/** The approveFeedQuote calls for the listed stocks not yet approved, in groups of STOCK_BATCH_SIZE. */
+/** The approvePricedQuote calls for the listed stocks not yet approved, in groups of STOCK_BATCH_SIZE. */
 export function stockApprovalGroups({ iface, factory, list, approved }) {
   const todo = list.stocks.filter(s => !approved.has(s.address.toLowerCase()));
-  const calls = todo.map(s => ({ to: factory, value: 0n, data: iface.encodeFunctionData('approveFeedQuote', [s.address, s.feed, s.maxAge]), symbol: s.symbol }));
+  const calls = todo.map(s => ({ to: factory, value: 0n, data: iface.encodeFunctionData('approvePricedQuote', [s.address, s.feed, s.maxAge]), symbol: s.symbol }));
   const groups = [];
   for (let i = 0; i < calls.length; i += STOCK_BATCH_SIZE) groups.push(calls.slice(i, i + STOCK_BATCH_SIZE));
   return groups;

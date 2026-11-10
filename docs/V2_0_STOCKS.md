@@ -4,7 +4,7 @@ Malik, 10 November: mainnet will list over 100 tokenized stocks, so each stock m
 launch on any stock must start at the same dollar market cap whatever the stock has done since it was approved.
 
 ## Contract (`contracts/evm/v2/ElpidaV2Factory.sol`, `STOCK_FEEDS_VERSION` 1)
-- `approveFeedQuote(asset, feed, maxAge)` (treasury only, once per asset, never alongside a fixed `approveQuote`):
+- `approvePricedQuote(asset, feed, maxAge)` (treasury only, once per asset, never alongside a fixed `approveQuote`):
   the stock is priced at every launch by its USD feed (Chainlink's Ondo GM feed on mainnet). `maxAge` is at most
   4 days (`MAX_STOCK_FEED_AGE`: a weekend plus a market holiday).
 - `quoteVirtual(asset)`: the virtual quote a launch gets now: the native coin and fixed approvals as before; a

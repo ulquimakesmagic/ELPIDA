@@ -12,13 +12,13 @@ test('a feed-priced stock launches at the dollar starting market cap; stale or b
   const f = await v2Fixture(t), owner = f.owner, now = async () => (await f.provider.getBlock('latest')).timestamp;
   const feed = await f.deploy(v4Art('MockUsdFeed'), 180n * 10n ** 8n);
   assert.equal(await f.factory.STOCK_FEEDS_VERSION(), 1n);
-  await assert.rejects(f.factory.connect(f.signers[1]).approveFeedQuote(f.stock.target, feed.target, 86_400), /quote approval/, 'treasury only');
-  await assert.rejects(f.factory.connect(owner).approveFeedQuote(f.stock.target, feed.target, 5 * 86_400), /feed age/);
-  await assert.rejects(f.factory.connect(owner).approveFeedQuote(f.stock.target, Wallet.createRandom().address, 86_400), /quote approval/, 'the feed must be a contract');
-  await mined(f.factory.connect(owner).approveFeedQuote(f.stock.target, feed.target, 4 * 86_400));
+  await assert.rejects(f.factory.connect(f.signers[1]).approvePricedQuote(f.stock.target, feed.target, 86_400), /quote approval/, 'treasury only');
+  await assert.rejects(f.factory.connect(owner).approvePricedQuote(f.stock.target, feed.target, 5 * 86_400), /feed age/);
+  await assert.rejects(f.factory.connect(owner).approvePricedQuote(f.stock.target, Wallet.createRandom().address, 86_400), /quote approval/, 'the feed must be a contract');
+  await mined(f.factory.connect(owner).approvePricedQuote(f.stock.target, feed.target, 4 * 86_400));
   const q = await f.factory.quoteFeeds(f.stock.target);
   assert.equal(q.feed, feed.target); assert.equal(q.maxAge, 4n * 86_400n);
-  await assert.rejects(f.factory.connect(owner).approveFeedQuote(f.stock.target, feed.target, 86_400), /quote approval/, 'once');
+  await assert.rejects(f.factory.connect(owner).approvePricedQuote(f.stock.target, feed.target, 86_400), /quote approval/, 'once');
   await assert.rejects(f.factory.connect(owner).approveQuote(f.stock.target, parseEther('100')), /quote approval/, 'never both kinds');
   // $20,000 × 5/4 at $180 per share, in 18-decimal units.
   const at180 = ceilDiv(20_000n * 5n * 10n ** 18n * 10n ** 8n, 4n * 180n * 10n ** 8n);
@@ -84,7 +84,7 @@ test('the stock list keeps only stocks whose token and feed check out on chain',
   assert.throws(() => checkStockList(list, 56), /chain 1, not 56/);
   // 60 stocks → batches of 25, 25 and 10, skipping the approved ones.
   const many = { ...list, stocks: Array.from({ length: 62 }, (_, i) => ({ symbol: `S${i}on`, address: A(100 + i), feed: A(11), maxAge: 86_400 })) };
-  const groups = stockApprovalGroups({ iface: new Interface(['function approveFeedQuote(address,address,uint256)']), factory: A(7), list: many, approved: new Set([A(100), A(101)].map(a => a.toLowerCase())) });
+  const groups = stockApprovalGroups({ iface: new Interface(['function approvePricedQuote(address,address,uint256)']), factory: A(7), list: many, approved: new Set([A(100), A(101)].map(a => a.toLowerCase())) });
   assert.deepEqual(groups.map(g => g.length), [25, 25, 10]);
   assert.equal(groups[0][0].symbol, 'S2on');
 });

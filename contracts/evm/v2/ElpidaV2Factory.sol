@@ -83,7 +83,7 @@ contract ElpidaV2Factory is ElpidaUsdPricing {
 
     /// Team-approved, immutable ERC-20 quote priced at each launch by `feed` (USD per whole token, at most `maxAge` old):
     /// the virtual quote is the starting market cap × 5/4 in that asset at the feed's price. Once per asset, never both kinds.
-    function approveFeedQuote(address asset, address feed, uint256 maxAge) external {
+    function approvePricedQuote(address asset, address feed, uint256 maxAge) external {
         require(msg.sender == treasury && asset.code.length > 0 && feed.code.length > 0 && approvedQuotes[asset] == 0 && quoteFeeds[asset].feed == address(0), "quote approval");
         require(maxAge > 0 && maxAge <= MAX_STOCK_FEED_AGE, "feed age");
         uint8 d = IV2Quote(asset).decimals(); require(d >= 6 && d <= 18, "quote decimals");

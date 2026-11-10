@@ -19,7 +19,7 @@ export const V2_FACTORY_ABI = ['function launch(string name,string symbol,addres
   'function feeUsdc() view returns(address)', 'function usdFeed() view returns(address)', 'function requiresMetadata() view returns(bool)', 'function MODEL_VERSION() view returns(uint256)', 'function startMcapUsd() view returns(uint256)',
   'function setHook(address)', 'function configureUsdPricing(address,uint256,address)', 'function approveQuote(address,uint256)',
   // Stocks priced at launch (STOCK_FEEDS_VERSION 1; launchpads deployed after 10 November 2026).
-  'function STOCK_FEEDS_VERSION() view returns(uint256)', 'function quoteVirtual(address) view returns(uint256)', 'function quoteFeeds(address) view returns(address feed,uint64 maxAge,uint8 feedDecimals,uint8 assetDecimals)', 'function approveFeedQuote(address,address,uint256)',
+  'function STOCK_FEEDS_VERSION() view returns(uint256)', 'function quoteVirtual(address) view returns(uint256)', 'function quoteFeeds(address) view returns(address feed,uint64 maxAge,uint8 feedDecimals,uint8 assetDecimals)', 'function approvePricedQuote(address,address,uint256)',
   'event Launched(address indexed creator,address indexed token,address indexed quote,uint256 feeBps,uint256 firstBuy,uint256 bought)'];
 const HOOK_ABI = ['function factory() view returns(address)', 'function protocolTreasury() view returns(address)', 'function minFeeBps() view returns(uint256)', 'function traderAirdropVault() view returns(address)', 'function flywheelVault() view returns(address)', 'function holderRewardVault() view returns(address)'];
 const ERC20 = ['function approve(address,uint256) returns(bool)', 'function allowance(address,address) view returns(uint256)', 'function balanceOf(address) view returns(uint256)', 'function decimals() view returns(uint8)', 'function symbol() view returns(string)'];
@@ -213,7 +213,7 @@ export async function v2StockPairs(w) {
   const d = v2Deployment(w.net);
   if (!d) return [];
   const factory = new Contract(d.factory, V2_FACTORY_ABI, w.provider);
-  return Promise.all([...new Map((w.approvedQuotes ?? []).filter(a => a.kind === 'xstock' && a.test).map(a => [a.address.toLowerCase(), a])).values()].map(async s => ({ address: s.address, symbol: s.symbol, approved: await v2PairApproved(factory, s.address) || 0n })));
+  return Promise.all([...new Map((w.approvedQuotes ?? []).filter(a => a.kind === 'xstock' && a.test).map(a => [a.address.toLowerCase(), a])).values()].map(async s => ({ address: s.address, symbol: s.symbol, approved: await v2PairApproved(factory, s.address) })));
 }
 
 /**
@@ -231,7 +231,7 @@ export async function approveV2Stock(w, { asset } = {}) {
   // Newer launchpads price each stock launch from its feed (the same dollar start every time); older ones take a fixed amount.
   const feed = record.stock?.feed && (await stockFeedsVersion(factory)) ? getAddress(record.stock.feed) : null;
   const result = feed
-    ? await step(w, factory.approveFeedQuote(record.address, feed, 4 * 86_400), `Approve ${record.symbol} as a V2 test pair, priced at each launch by its feed…`)
+    ? await step(w, factory.approvePricedQuote(record.address, feed, 4 * 86_400), `Approve ${record.symbol} as a V2 test pair, priced at each launch by its feed…`)
     : await step(w, factory.approveQuote(record.address, BigInt(record.virtualQuote) * 9n / 8n), `Approve ${record.symbol} as a V2 test pair (same starting market cap as on Model 10)…`);
   return { hash: result.tx.hash, message: `${record.symbol} is now a V2 test pair on ${w.net.name}. Its holders are paid in ${record.symbol}.` };
 }
