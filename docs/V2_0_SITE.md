@@ -111,3 +111,6 @@ V2 replaces Model 11.
 - **Native route errors.** Two Sepolia test stocks share the symbol tNVDAon (Model 10's has an ETH conversion pool,
   V2's `0x8Db1…D921` does not yet). The operator's conversion-liquidity picker shows each stock's address, and the token
   page names the exact asset whose pool is missing.
+- **Holder strategies on V2 (EVM test networks).** "Share fees with holders", "Buy a reward token for holders" and
+  "Buy back and vest to holders" are selectable in the launch form when the server's V2 keeper is running; see
+  docs/V2_0_KEEPERS.md (Creator holder strategies). X and website allocations are the next phase.

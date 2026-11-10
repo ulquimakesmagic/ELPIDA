@@ -10,7 +10,7 @@ import { v4Artifacts } from '../apps/api/v4-artifacts.mjs';
 import { V2Indexer } from '../packages/indexer/v2-indexer.mjs';
 import { V2_MODEL, splitFee } from '../packages/core/v2-economics.mjs';
 
-const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom, v2StockPairs, approveV2Stock, claimCreatorSplit, creatorSplitState } = await import('../apps/web/v2-launchpad.mjs');
+const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom, v2StockPairs, approveV2Stock, claimCreatorSplit, creatorSplitState, creatorStrategyState } = await import('../apps/web/v2-launchpad.mjs');
 const { v2Deployment, v4Quote, v4Trade, isV4Token, isV2Token, v4WithdrawFees } = await import('../apps/web/v4-launchpad.mjs');
 
 function browser(t) {
@@ -129,6 +129,15 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   cw.progress.length = 0;
   await launchV2(cw, { name: 'Split two', symbol: 'SPLIT2', feeBps: 300, rewardSplit, description: '', image: '' });
   assert.ok(cw.progress.some(m => /Reusing your creator split/.test(m)), 'the same split is reused');
+
+  // Holder strategy: a vault run by the server keeper, its settings fixed at deployment; the token page reads them back.
+  await assert.rejects(launchV2(cw, { name: 'Strat', symbol: 'STRAT', feeBps: 300, rewardStrategy: { mode: 'holders', threshold: '0.01', minimumHolding: '1000' } }), /keeper, which is not running/);
+  cw.config.v2Keeper = { address: await f.signers[3].getAddress(), active: true };
+  await assert.rejects(launchV2(cw, { name: 'Strat', symbol: 'STRAT', feeBps: 300, rewardStrategy: { mode: 'paired', threshold: '0.01', minimumHolding: '0', rewardAsset: f.usdc.target } }), /no Uniswap v3 market/);
+  const strat = await launchV2(cw, { name: 'Strat', symbol: 'STRAT', feeBps: 300, rewardStrategy: { mode: 'buyback', threshold: '0.01', minimumHolding: '1000', vestingDays: 30 }, description: '', image: '' });
+  const s = await creatorStrategyState({ provider: f.provider, net, token: strat.token });
+  assert.equal(s.mode, 'buyback'); assert.equal(s.threshold, parseEther('0.01')); assert.equal(s.minimumHolding, parseEther('1000')); assert.equal(s.vesting, 30 * 86_400); assert.equal(s.roundCount, 0);
+  assert.equal(await creatorSplitState({ provider: f.provider, net, token: strat.token }), null, 'a strategy vault is not a split');
 });
 
 test('V2 deploy: a lagging wallet’s reused nonce is asked again; a resumed deploy replaces reward contracts run by the wrong operator; test stocks become V2 pairs', async t => {

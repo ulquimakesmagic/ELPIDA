@@ -11,12 +11,19 @@ import { Contract, JsonRpcProvider, NonceManager, Wallet, ZeroAddress, getAddres
 import { buildRound } from '../../packages/core/v2-rounds.mjs';
 import { airdropRound, holderRound, flywheelOrders, personalFunder, boundedFunderLinks, HOLDER_RULES, FLYWHEEL_RULES, latestJobs } from '../../packages/core/v2-keeper-plan.mjs';
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
+import { holderDistribution } from '../web/reward-policy.mjs';
 
 const DAY = 86_400, BATCH = 80;
 const HOOK = ['function ledgers(address) view returns(uint256[5] owed,uint128[5] paid)', 'function withdrawFees(address)', 'function launchOf(address) view returns(address quote,address creatorVault,uint64 launchedAt,uint16 feeBps,bool graduated,int24 upperTick,int24 lowerTick,uint128 liquidityBonus,uint128 accrued)'];
 const DISTRIBUTOR = ['function currentRound() view returns(uint256)', 'function roundStart(uint256) view returns(uint256)', 'function roundEnd(uint256) view returns(uint256)', 'function available(address) view returns(uint256)',
   'function rounds(uint256,address) view returns(bytes32 root,uint128 total,uint128 claimed,uint32 recipients,uint64 postedAt,bool expired)', 'function postRoot(uint256,address,bytes32,uint256,uint32,string)',
   'function claimMany(uint256,address,(address account,uint256 amount,bytes32[] proof)[]) returns(uint256)', 'function convertToNative(uint256,uint256,uint24) returns(uint256)', 'function convertible() view returns(address)'];
+// Creator strategy vaults (contracts/evm/v2/ElpidaV2CreatorRewards.sol): the keeper is their operator.
+const CREATOR = ['function CREATOR_REWARDS_VERSION() view returns(uint256)', 'function operator() view returns(address)', 'function token() view returns(address)', 'function feeAsset() view returns(address)',
+  'function mode() view returns(uint8)', 'function threshold() view returns(uint256)', 'function minimumHolding() view returns(uint256)', 'function vesting() view returns(uint64)', 'function bind(address)',
+  'function payoutAsset() view returns(address)', 'function available(address) view returns(uint256)', 'function roundCount() view returns(uint256)', 'function swap(uint256,uint256) returns(uint256)',
+  'function postRound(bytes32,uint256,uint32,string) returns(uint256)', 'function claimMany(uint256,(address account,uint256 amount,bytes32[] proof)[]) returns(uint256)', 'function rounds(uint256) view returns(address asset,bytes32 root,uint128 total,uint128 claimed,uint32 recipients,uint64 postedAt,uint64 vesting)'];
+const DEAD = '0x000000000000000000000000000000000000dead';
 const FLYWHEEL = ['function buyAndBurn(address,uint256,uint256,uint256) returns(uint256)', 'function lastBuy(address) view returns(uint64)'];
 const ROUTER = ['function quote(address token,bool buy,uint256 amountIn) returns(uint256 fee,uint256 out)'];
 const ERC20 = ['function balanceOf(address) view returns(uint256)'];
@@ -49,7 +56,7 @@ export class V2Keeper {
 
   async tick() {
     if (this.busy) return; this.busy = true;
-    try { for (const w of this.workers) for (const job of ['fees', 'airdrop', 'holder', 'flywheel']) { try { await this[job](w); } catch (e) { this.record(w.chain, job, 'failed', { error: e.shortMessage ?? e.message }); } } }
+    try { for (const w of this.workers) for (const job of ['fees', 'airdrop', 'holder', 'creator', 'flywheel']) { try { await this[job](w); } catch (e) { this.record(w.chain, job, 'failed', { error: e.shortMessage ?? e.message }); } } }
     finally { this.busy = false; }
   }
 
@@ -128,6 +135,75 @@ export class V2Keeper {
       await (await distributor.claimMany(round, asset, batch)).wait(); paid += batch.length;
     }
     return { root: m.root, total: m.total, recipients: m.recipients, pushed: paid };
+  }
+
+  /**
+   * Hourly: tokens whose creator chose a holder strategy at launch (their creator vault is an ElpidaV2CreatorRewards
+   * this keeper operates). Once the vault holds at least its threshold: collect the creator share from the hook, swap
+   * it into the payout asset (reward token or buyback), and pay holders by their balance now, at least the vault's
+   * minimum holding, pools and Elpida contracts excluded. Buyback rounds vest; their vested parts are pushed daily.
+   */
+  async creator(w) {
+    if (!this.due(w, 'creator', 3600)) return;
+    const index = w.index(); if (!index) return;
+    const hook = new Contract(w.deployment.hook, HOOK, w.signer), me = lower(await w.signer.getAddress()), out = [];
+    for (const t of index.listings()) {
+      const key = `${w.chain}:creator:${lower(t.address)}`;
+      let known = this.get(key, null);
+      if (known === false) continue;
+      if (!known) {
+        const vault = (await hook.launchOf(t.address)).creatorVault;
+        let ours = false;
+        try { const c = new Contract(vault, CREATOR, w.provider); ours = (await c.CREATOR_REWARDS_VERSION()) === 1n && lower(await c.operator()) === me; } catch { ours = false; }
+        this.set(key, ours ? { vault } : false);
+        if (!ours) continue;
+        known = { vault };
+      }
+      try { out.push(await this.creatorStep(w, hook, index, t, new Contract(known.vault, CREATOR, w.signer))); }
+      catch (e) { this.record(w.chain, 'creator', 'failed', { token: t.address, error: e.shortMessage ?? e.message }); }
+    }
+    this.done(w, 'creator');
+    if (out.length) this.record(w.chain, 'creator', 'ok', { tokens: out });
+  }
+
+  async creatorStep(w, hook, index, t, vault) {
+    if ((await vault.token()) === ZeroAddress) await (await vault.bind(t.address)).wait();
+    const [mode, feeAsset, threshold, minimum] = await Promise.all([vault.mode(), vault.feeAsset(), vault.threshold(), vault.minimumHolding()]);
+    const vested = await this.creatorVesting(w, vault);
+    let fees = await vault.available(feeAsset);
+    if (fees < threshold && (await hook.ledgers(t.address)).owed[0] > 0n) { await (await hook.withdrawFees(t.address)).wait(); fees = await vault.available(feeAsset); }
+    if (fees < threshold) return { token: t.address, status: 'gathering', fees: fees.toString(), threshold: threshold.toString(), vested };
+    if (Number(mode) !== 0) {
+      const expected = await vault.swap.staticCall(fees, 1n);
+      await (await vault.swap(fees, expected * 97n / 100n)).wait();
+    }
+    const asset = await vault.payoutAsset(), pool = await vault.available(asset);
+    const balances = new Map();
+    for (const x of index.transfersOf(t.address)) for (const [a, d] of [[x.from, -x.amount], [x.to, x.amount]]) balances.set(a, (balances.get(a) ?? 0n) + d);
+    const excluded = [ZeroAddress, DEAD, vault.target, w.deployment.poolManager, w.deployment.hook, w.deployment.router, w.deployment.factory, w.deployment.airdrop, w.deployment.holder, w.deployment.flywheel].filter(Boolean);
+    const rows = holderDistribution(pool, [...balances].filter(([, balance]) => balance > 0n).map(([address, balance]) => ({ address, balance })), minimum, excluded);
+    if (!rows.length) return { token: t.address, status: 'waiting for eligible holders' };
+    const round = Number(await vault.roundCount());
+    const m = buildRound({ chainId: w.net.chainId, distributor: vault.target, round, asset }, rows.map(r => [r.address, r.amount]));
+    await (await vault.postRound(m.root, m.total, m.recipients, this.publish(w, vault.target, m))).wait();
+    for (let i = 0; i < m.entries.length; i += BATCH) await (await vault.claimMany(round, m.entries.slice(i, i + BATCH).map(e => [e.account, e.amount, e.proof]))).wait();
+    if (Number(mode) === 2) this.set(`${w.chain}:creator:vesting:${lower(vault.target)}`, [...this.get(`${w.chain}:creator:vesting:${lower(vault.target)}`, []), round]);
+    return { token: t.address, status: 'paid', round, asset, total: m.total.toString(), holders: m.recipients };
+  }
+
+  /** Buyback rounds: pushes what has vested since the last push, daily, until each round has fully vested. */
+  async creatorVesting(w, vault) {
+    const key = `${w.chain}:creator:vesting:${lower(vault.target)}`, open = this.get(key, []);
+    if (!open.length || !this.due(w, `creator-vest:${lower(vault.target)}`, DAY)) return 0;
+    const left = [];
+    for (const round of open) {
+      const r = await vault.rounds(round), m = this.manifest(w.net.chainId, vault.target, round, r.asset);
+      if (!m) continue;
+      for (let i = 0; i < m.entries.length; i += BATCH) await (await vault.claimMany(round, m.entries.slice(i, i + BATCH).map(e => [e.account, e.amount, e.proof]))).wait();
+      if (this.now() < Number(r.postedAt) + Number(r.vesting)) left.push(round);
+    }
+    this.set(key, left); this.done(w, `creator-vest:${lower(vault.target)}`);
+    return open.length;
   }
 
   /** Monthly: each finished trader-airdrop round, per pool asset. */

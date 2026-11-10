@@ -209,9 +209,9 @@ export async function launchV2(w, body) {
   if (!Number.isInteger(feeBps) || feeBps < minFee || feeBps > V2.maxFeeBps) throw new Error(`Choose a fee from ${(minFee / 100).toFixed(2)}% to 4.00%.`);
   const pair = body.pair ?? 'native';
   if (!['native', 'usdc', 'xstock'].includes(pair)) throw new Error('V2 test launches pair with the native coin, USDC or a test stock approved for V2.');
-  const split = body.rewardSplit?.length ? creatorSplitTerms(body.rewardSplit) : null;
-  let reward = split ? null : body.reward || w.address;
-  if (!split && (!isAddress(reward) || reward === ZeroAddress)) throw new Error('Enter a valid creator reward wallet.');
+  const split = body.rewardSplit?.length ? creatorSplitTerms(body.rewardSplit) : null, strategy = body.rewardStrategy ?? null;
+  let reward = split || strategy ? null : body.reward || w.address;
+  if (!split && !strategy && (!isAddress(reward) || reward === ZeroAddress)) throw new Error('Enter a valid creator reward wallet.');
   const asset = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? getAddress(testStock(w, body.quoteAsset)?.address ?? ZeroAddress) : ZeroAddress;
   if (pair === 'xstock') {
     if (asset === ZeroAddress) throw new Error('Choose a test stock that is approved on this network.');
@@ -247,6 +247,7 @@ export async function launchV2(w, body) {
   }
   // Creator split: an ownerless contract that receives the creator's 30% and lets each wallet claim its fixed share.
   if (split) reward = await creatorSplit(w, split);
+  if (strategy) reward = await creatorStrategyVault(w, d, { ...strategy, feeAsset: asset, feeDecimals: decimals });
   w.onProgress('Preparing public token details for the launch transaction…');
   const payload = JSON.stringify({ network: w.net.key, name, symbol, ...normalizeMetadata(body) }), proof = await prepareUploadProof(payload);
   const response = await fetch('/api/metadata/stage', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': w.config.csrf, ...proof }, body: payload });
@@ -258,6 +259,47 @@ export async function launchV2(w, body) {
   const event = result.receipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(e => e?.name === 'Launched');
   return { hash: result.tx.hash, token: event?.args.token, feeBps, metadataSaved: true, metadataPublished: true, metadataStorage: published.storage,
     message: `Your token is live on ${w.net.name} (ELPIDA V2, liquidity locked from launch, ${(feeBps / 100).toFixed(2)}% fee for good). ${d.pinned ? '' : 'This launchpad is not pinned yet, so the site lists the token once it is.'}`.trim() };
+}
+
+const STRATEGY_MODES = { holders: 0, paired: 1, buyback: 2 };
+const V3_FACTORY = ['function getPool(address,address,uint24) view returns(address)'];
+/**
+ * A holder strategy's vault (ElpidaV2CreatorRewards), run by the server's V2 keeper: the strategy and its settings are
+ * fixed in it for good. "Buy a reward token" swaps on the network's Uniswap v3 pool between the pair asset and the
+ * reward asset, so that pool must hold liquidity now; its fee tier is fixed in the vault.
+ */
+async function creatorStrategyVault(w, d, { mode, threshold, minimumHolding, vestingDays, rewardAsset, feeAsset, feeDecimals }) {
+  const m = STRATEGY_MODES[mode];
+  if (m === undefined) throw new Error('Choose a holder strategy. Nothing was submitted.');
+  const keeper = w.config.v2Keeper;
+  if (!keeper?.address || !keeper.active) throw new Error('Holder strategies need the Elpida V2 keeper, which is not running on this server. Nothing was submitted.');
+  const thresholdRaw = parseUnits(String(threshold), feeDecimals), minimumRaw = parseUnits(String(minimumHolding || '0'), 18);
+  if (thresholdRaw <= 0n) throw new Error('Set a distribution threshold above zero. Nothing was submitted.');
+  const vesting = m === 2 ? BigInt(Math.round(Number(vestingDays) * 86400)) : 0n;
+  if (m === 2 && (vesting < 86400n || vesting > 3650n * 86400n)) throw new Error('Vesting must be between 1 and 3,650 days. Nothing was submitted.');
+  let reward = ZeroAddress, poolFee = 0;
+  if (m === 1) {
+    if (!w.dex?.router || !w.dex?.factory || !w.dex?.weth) throw new Error(`There is no Uniswap v3 market on ${w.net.name} for the reward swap. Choose another strategy. Nothing was submitted.`);
+    reward = getAddress(rewardAsset ?? ZeroAddress);
+    if (reward.toLowerCase() === feeAsset.toLowerCase()) throw new Error('The reward asset is the trading pair itself: choose "Share fees with holders" instead. Nothing was submitted.');
+    const a = feeAsset === ZeroAddress ? w.dex.weth : feeAsset, b = reward === ZeroAddress ? w.dex.weth : reward, factory = new Contract(w.dex.factory, V3_FACTORY, w.provider);
+    let best = 0n;
+    for (const fee of [100, 500, 3000, 10000]) {
+      const pool = await factory.getPool(a, b, fee); if (/^0x0{40}$/i.test(pool)) continue;
+      const liquidity = await new Contract(pool, ['function liquidity() view returns(uint128)'], w.provider).liquidity();
+      if (liquidity > best) { best = liquidity; poolFee = fee; }
+    }
+    if (!poolFee) throw new Error('There is no funded Uniswap v3 pool between the trading pair and that reward asset yet, so fees could not be swapped. Choose another reward asset or strategy. Nothing was submitted.');
+  }
+  const response = await fetch('/api/v4-artifacts');
+  const art = response.ok ? (await response.json()).v2?.creatorRewards : null;
+  if (!art?.bytecode) throw new Error('The holder strategy contract is unavailable on this server. Nothing was submitted.');
+  const deployed = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(keeper.address, d.hook, d.router, w.dex?.router ?? ZeroAddress, w.dex?.weth ?? ZeroAddress, poolFee, m, reward, thresholdRaw, minimumRaw, vesting);
+  const r = await w.wait(Promise.resolve(deployed.deploymentTransaction()), 'Deploy your holder strategy vault. Its strategy and settings are fixed for good; the Elpida keeper runs it…');
+  await walletCaughtUp(w, r?.tx?.nonce);
+  const address = await deployed.getAddress();
+  if (!await hasCode(w.provider, address, { wait: true })) throw new Error('The strategy vault is not visible on the network yet. Try again; nothing else was submitted.');
+  return address;
 }
 
 /** Checks a creator split: 2 to 8 distinct wallets whose shares (basis points) add up to exactly 100%. */
@@ -297,6 +339,26 @@ export async function creatorSplitState({ provider, net, token }) {
     r.claimable = (await c.claimable(asset, r.wallet)) + part;
   }
   return { vault: l.creatorVault, asset, rows };
+}
+
+const STRATEGY_ABI = ['function CREATOR_REWARDS_VERSION() view returns(uint256)', 'function mode() view returns(uint8)', 'function threshold() view returns(uint256)', 'function minimumHolding() view returns(uint256)', 'function vesting() view returns(uint64)',
+  'function rewardAsset() view returns(address)', 'function feeAsset() view returns(address)', 'function token() view returns(address)', 'function available(address) view returns(uint256)', 'function roundCount() view returns(uint256)',
+  'function rounds(uint256) view returns(address asset,bytes32 root,uint128 total,uint128 claimed,uint32 recipients,uint64 postedAt,uint64 vesting)'];
+/**
+ * A V2 token's holder strategy, if its creator vault is an ElpidaV2CreatorRewards: the fixed settings, what has
+ * gathered toward the threshold (in the vault, plus the creator share still in the pool) and the rounds paid so far.
+ */
+export async function creatorStrategyState({ provider, net, token }) {
+  const d = v2Deployment(net); if (!d?.hook) return null;
+  const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
+  if (!l.creatorVault || l.creatorVault === ZeroAddress || (await provider.getCode(l.creatorVault)) === '0x') return null;
+  const v = new Contract(l.creatorVault, STRATEGY_ABI, provider);
+  try { if ((await v.CREATOR_REWARDS_VERSION()) !== 1n) return null; } catch { return null; }
+  const [mode, threshold, minimumHolding, vesting, rewardAsset, count] = await Promise.all([v.mode(), v.threshold(), v.minimumHolding(), v.vesting(), v.rewardAsset(), v.roundCount()]);
+  let pending = 0n; try { pending = (await new Contract(d.hook, ['function ledgers(address) view returns(uint256[5] owed,uint128[5] paid)'], provider).ledgers(token)).owed[0]; } catch { pending = 0n; }
+  const rounds = [];
+  for (let i = Number(count) - 1; i >= 0 && rounds.length < 5; i--) { const r = await v.rounds(i); rounds.push({ round: i, asset: r.asset, total: r.total, claimed: r.claimed, recipients: Number(r.recipients), postedAt: Number(r.postedAt), vesting: Number(r.vesting) }); }
+  return { vault: l.creatorVault, mode: ['holders', 'paired', 'buyback'][Number(mode)], threshold, minimumHolding, vesting: Number(vesting), rewardAsset, gathered: (await v.available(l.quote)) + pending, rounds, roundCount: Number(count) };
 }
 
 /** Collects the token's fees from the pool (permissionless) and pays one split wallet its share, in one go when the wallet batches. */
