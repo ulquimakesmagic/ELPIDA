@@ -75,8 +75,9 @@ export class SolanaV2Keeper {
   async tick() {
     if (this.busy) return; this.busy = true;
     try {
-      for (const job of ['fees', 'harvest', 'sweep', 'snapshot', 'flywheel']) { if (!this.due(job)) continue; try { await this[job](); } catch (e) { this.record(job, 'failed', { error: e.message }); } }
-      for (const job of ['airdrop', 'holder']) { try { await this[job](); } catch (e) { this.record(job, 'failed', { error: e.message }); } }
+      const clean = job => { (this.checked ??= {})[job] = this.now(); };
+      for (const job of ['fees', 'harvest', 'sweep', 'snapshot', 'flywheel']) { if (!this.due(job)) continue; try { await this[job](); clean(job); } catch (e) { this.record(job, 'failed', { error: e.message }); } }
+      for (const job of ['airdrop', 'holder']) { try { await this[job](); clean(job); } catch (e) { this.record(job, 'failed', { error: e.message }); } }
     }
     finally { this.busy = false; }
   }
@@ -280,7 +281,7 @@ export class SolanaV2Keeper {
   }
 
   status() {
-    return { chain: this.deployment.cluster ?? 'solana', keeper: this.payer.publicKey.toBase58(), airdropNext: this.get('airdrop:next', 0), holderNext: this.get('holder:next', 0), runs: this.db.prepare('SELECT job,at,status FROM sv2_runs ORDER BY id DESC LIMIT 8').all(), jobs: latestJobs(this.db.prepare('SELECT job,at,status,detail FROM sv2_runs WHERE id IN (SELECT MAX(id) FROM sv2_runs GROUP BY job) ORDER BY job').all()) };
+    return { chain: this.deployment.cluster ?? 'solana', keeper: this.payer.publicKey.toBase58(), airdropNext: this.get('airdrop:next', 0), holderNext: this.get('holder:next', 0), runs: this.db.prepare('SELECT job,at,status FROM sv2_runs ORDER BY id DESC LIMIT 8').all(), jobs: latestJobs(this.db.prepare('SELECT job,at,status,detail FROM sv2_runs WHERE id IN (SELECT MAX(id) FROM sv2_runs GROUP BY job) ORDER BY job').all(), this.checked ?? {}) };
   }
 }
 

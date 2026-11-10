@@ -21,7 +21,7 @@ export function renderRewards(ctx) {
   const treasuries = h('section.section', { 'aria-labelledby': 'treasury-title' });
   root.append(treasuries);
   if (ctx.mode !== 'local') {
-    treasuries.append(h('h2#treasury-title', 'Reward treasuries'), callout('', 'info', 'Holder distributions, reward-token purchases, buybacks with vesting and X or website allocations run in the local simulation. Standard public launches use one creator wallet. Tax launches support fixed wallet allocations when a verified tax deployment is configured.'));
+    treasuries.append(h('h2#treasury-title', 'Reward treasuries'), callout('', 'info', ctx.config?.v2Keeper?.active ? 'This list shows local-simulation treasuries. On test networks, ELPIDA V2 launches (EVM) can split the creator share between wallets, pay holders (fees, a reward token, or buybacks that vest) or hold shares for X accounts and websites: each token\'s page shows its creator split, creator rewards or allocations, with payout and verification buttons.' : 'Holder distributions, reward-token purchases, buybacks with vesting and X or website allocations run in the local simulation. Standard public launches use one creator wallet. Tax launches support fixed wallet allocations when a verified tax deployment is configured.'));
     return root;
   }
   treasuries.append(h('div.page-head', h('div', h('h2#treasury-title', 'Reward treasuries'), h('p', 'Each treasury holds the creator share of fees and follows the strategy fixed at launch.')),
@@ -49,7 +49,8 @@ function feesSection(ctx, mine) {
     table.append(h('div.fee-row',
       h('a.token-card-head', { href: `#/token/${token.address}` }, avatar(token), h('div', h('h3', token.name), h('span.sym.muted.small', token.tax?'Fixed creator allocations':token.rewardVault ? 'Reward treasury' : `Creator wallet ${short(token.reward)}`))),
       h('div.figure', h('span', token.tax?'Your creator allocation':'Creator share'), h('strong', token.tax?`${amount(token.creatorAllocationFees,q)} + ${amount(token.creatorTokenFees,token.symbol)}`:amount(token.creatorFees, q))),
-      harvest ? h('div.figure', h('span', `Your ${token.venue ?? 'DEX'} LP fees ready`), h('strong', `${number(Number(token.harvestableQuote) / 2, 4)} ${q} + ${number(Number(token.harvestableTokens) / 2, 0)} ${token.symbol}`)) : null,
+      harvest ? (token.v2 ? h('div.figure', h('span', `${token.venue ?? 'DEX'} LP fees ready (your 30%; token side is burned)`), h('strong', `${number(Number(token.harvestableQuote) * 0.3, 4)} ${q}`))
+        : h('div.figure', h('span', `Your ${token.venue ?? 'DEX'} LP fees ready`), h('strong', `${number(Number(token.harvestableQuote) / 2, 4)} ${q} + ${number(Number(token.harvestableTokens) / 2, 0)} ${token.symbol}`))) : null,
       h('div', h('button.btn.btn-secondary.btn-sm', { type: 'button', 'data-busy-disable': '', disabled: nothing, on: { click: async () => { error.textContent = ''; try { await ctx.run('withdraw', { token: token.address }); } catch (e) { error.textContent = errorText(e); } } } }, 'Claim fees'), error)));
   }
   section.append(table);

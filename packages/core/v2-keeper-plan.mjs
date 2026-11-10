@@ -191,6 +191,11 @@ export function flywheelOrders({ trades, now, balances, links = [], creatorLinke
 }
 
 /** Each job's latest run, with the error text when it failed (for the admin page). */
-export function latestJobs(rows) {
-  return rows.map(r => { let error = null; try { error = r.detail ? JSON.parse(r.detail).error ?? null : null; } catch { error = null; } return { job: r.job, at: r.at, status: r.status, error: error ? String(error).slice(0, 240) : null }; });
+export function latestJobs(rows, checked = {}) {
+  return rows.map(r => {
+    // A job that failed and has since run cleanly (with nothing to record, e.g. no round due) is shown as ok again.
+    if (r.status === 'failed' && checked[r.job] > r.at) return { job: r.job, at: checked[r.job], status: 'ok', error: null };
+    let error = null; try { error = r.detail ? JSON.parse(r.detail).error ?? null : null; } catch { error = null; }
+    return { job: r.job, at: r.at, status: r.status, error: error ? String(error).slice(0, 240) : null };
+  });
 }
