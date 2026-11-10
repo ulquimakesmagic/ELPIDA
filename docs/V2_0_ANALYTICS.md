@@ -37,3 +37,15 @@ Tests: `tests/v2-rewards-indexer.test.mjs` checks:
 Still to do in step 5: the V2 trading indexer, so V2 tokens list and trade on the site; the launch form's fee selector
 and split preview; operator-panel deployment of V2 and its vaults; and the keepers that post rounds and run the
 flywheel.
+
+## Headline (Malik, 10 November)
+
+The top of the analytics page now leads with where the fees go (`apps/web/analytics-headline.mjs`): **Paid to holders**
+(holder rounds paid, plus what is waiting in the holder vault), **Earned by creators** (the creators' 30% of every V2
+fee, from the hook's fee ledger on EVM and each pool's ledger on Solana), **Flywheel buybacks** (spent, and how many
+coins were bought and burned, with a link to every burn) and the **Airdrop vault** (with a link to every airdrop round);
+then V2 fees collected, coins launched, graduated and stock pairs in use. Sources: `/api/public/v2-rewards` (each chain
+now carries `fees: [{asset, total, creator}]`) and `/api/public/analytics` (all chains). Tiles whose source is not
+deployed are left out, never shown as zero; dollars only with a fresh price. Fees for Model 10 tokens are not in the
+fee tile: their trades carry no fee field, so they would have to be estimated. Tests: `tests/analytics-headline.test.mjs`
+and the creator-share check in `tests/v2-rewards-indexer.test.mjs`.

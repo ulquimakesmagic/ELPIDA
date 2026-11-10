@@ -279,3 +279,20 @@
 @media (prefers-reduced-motion: reduce) { .rw-donut-seg { transition: none; } }
 @media (max-width: 760px) { .rw-breakdown { grid-template-columns: 1fr; justify-items: center; } .rw-breakdown > .analytics-table-scroll { width: 100%; } }
 @media (max-width: 760px) { .rw-vaults { grid-template-columns: 1fr; } .rw-band { grid-template-columns: 96px 1fr 44px; } }
+
+/* Analytics headline (analytics-headline.mjs): where the fees go, above the rest of the page. */
+.an-headline { display: grid; gap: 12px; margin: 0 0 22px; }
+.an-headline-large { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.an-headline-tile { display: grid; align-content: start; gap: 8px; padding: 22px; border: .67px solid var(--line-soft); border-radius: 20px; background: linear-gradient(180deg, var(--panel-hi), var(--panel-lo)); min-width: 0; }
+.an-headline-tile strong { font: 650 clamp(28px, 3.2vw, 40px)/1.05 var(--font-sans); letter-spacing: -1.2px; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.an-headline-tile p { margin: 0; }
+.an-headline-detail { overflow-wrap: anywhere; }
+.an-headline-link { justify-self: start; padding: 0; border: 0; background: none; color: var(--ink); font: 600 13px/1.4 var(--font-sans); text-decoration: underline; text-underline-offset: 3px; cursor: pointer; }
+.an-headline-link:hover, .an-headline-link:focus-visible { color: var(--accent-text); }
+.an-headline-small { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.an-headline-stat { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 16px 20px; border: .67px solid var(--line-soft); border-radius: 16px; background: var(--panel-2); min-width: 0; }
+.an-headline-stat span { color: var(--ink-3); font-size: 14px; }
+.an-headline-stat strong { font: 650 22px/1.1 var(--font-sans); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.an-headline-note { margin: 0; }
+@media (max-width: 1000px) { .an-headline-large, .an-headline-small { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
+@media (max-width: 560px) { .an-headline-large, .an-headline-small { grid-template-columns: 1fr; } .an-headline-tile { padding: 18px; } }

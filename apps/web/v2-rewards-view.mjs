@@ -33,6 +33,8 @@ function holding(chain, address, value) {
   return { n, symbol: a.symbol, text: `${number(n, n < 1 ? 6 : 4)} ${a.symbol}`, usd: a.usd ? n * a.usd : null };
 }
 
+export const holdingOf = holding;
+
 /**
  * Adds up holdings from several chains: dollars for priced assets, and per-symbol amounts for everything (so ETH on
  * Base Sepolia and on Ethereum Sepolia read as one ETH figure). Returns the headline and its detail line.
@@ -53,7 +55,8 @@ export function combine(items) {
   return { headline: '$0', detail: '', usd: 0, extra: [] };
 }
 
-export function rewardsSection({ api }) {
+/** `onData(summary | null)`: called after each load, for the page headline. */
+export function rewardsSection({ api, onData = () => {} }) {
   const root = h('section.panel.rw-section', { hidden: true, 'aria-labelledby': 'rw-title' });
   let data = null, ticker = null, timer = null;
 
@@ -263,9 +266,9 @@ export function rewardsSection({ api }) {
       vaultTiles(),
       h('div.rw-block', h('h3', 'Reward pool by chain'), h('p.small.muted', 'One pool across every chain. Each chain\'s share of what the trader airdrop, holder rewards and flywheel vaults hold now, in dollars at today\'s prices.'), breakdown()),
       h('div.rw-block', h('h3', 'Vault sizes by day'), h('p.small.muted', 'Earned from fees so far on every chain, less what has been paid out or burned, in dollars at today\'s prices. Updated as trades confirm.'), sizeChart()),
-      h('div.rw-block', h('h3', 'How the last airdrop was shared'), h('p.small.muted', 'Each month: 20% of the pool equally among qualifying traders, 40% by the square root of fees paid, 40% in proportion to fees paid; no trader above 1% of the pool. Linked wallets count as one trader; creator-linked wallets are excluded.'), distribution(), keeperGas()),
+      h('div.rw-block', { id: 'rw-distribution' }, h('h3', 'How the last airdrop was shared'), h('p.small.muted', 'Each month: 20% of the pool equally among qualifying traders, 40% by the square root of fees paid, 40% in proportion to fees paid; no trader above 1% of the pool. Linked wallets count as one trader; creator-linked wallets are excluded.'), distribution(), keeperGas()),
       h('div.rw-block', h('h3', 'Check your payouts'), lookup()),
-      h('div.rw-block', h('h3', 'Flywheel buy-and-burn'), h('p.small.muted', 'The flywheel vault can only buy Elpida V2 tokens and burn them. The treasury never holds its funds.'), flywheel()));
+      h('div.rw-block', { id: 'rw-flywheel' }, h('h3', 'Flywheel buy-and-burn'), h('p.small.muted', 'The flywheel vault can only buy Elpida V2 tokens and burn them. The treasury never holds its funds.'), flywheel()));
     root.hidden = false;
     tick();
   }
@@ -273,9 +276,9 @@ export function rewardsSection({ api }) {
   async function load() {
     try {
       const next = await api('public/v2-rewards');
-      if (!next?.deployed || !next.chains?.length) { root.hidden = true; root.replaceChildren(); return; }
-      data = next; draw();
-    } catch { if (!data) root.hidden = true; }
+      if (!next?.deployed || !next.chains?.length) { root.hidden = true; root.replaceChildren(); onData(null); return; }
+      data = next; draw(); onData(data);
+    } catch { if (!data) { root.hidden = true; onData(null); } }
   }
 
   load();
