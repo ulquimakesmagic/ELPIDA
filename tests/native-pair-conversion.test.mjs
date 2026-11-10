@@ -118,7 +118,7 @@ test('V2 pair-asset token: buy with the native coin and sell back to it through 
   assert.equal(buyQuote.execution, 'v4');
   assert.ok(BigInt(buyQuote.pairAmount) > 0n && BigInt(buyQuote.minimum) === BigInt(buyQuote.pairAmount) * 1000n * 9900n / 10000n);
   const usdcBefore = await f.usdc.balanceOf(owner);
-  await wallet.tradeNativePair(buyQuote);
+  await wallet.transact('trade-native-pair', buyQuote); // through the token page's action, as the Buy button does
   assert.deepEqual(steps, ['Convert ETH to USDC…', 'Approve USDC for this buy…', 'Buy HOPE…']);
   const bought = await coin.balanceOf(owner);
   assert.equal(bought, BigInt(buyQuote.pairAmount) * 1000n, 'buys with the conversion\'s guaranteed USDC');

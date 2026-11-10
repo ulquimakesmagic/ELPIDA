@@ -1047,7 +1047,9 @@ export class TestnetWallet {
       if(v4item&&isV4Token(v4item)){
         if(action==='buy'||action==='sell'){const r=await v4Trade(this,v4item,action,body);return {hash:r.tx.hash,message:`Trade confirmed on ${this.net.name} (Uniswap v4).`};}
         if(action==='withdraw'){const r=await v4WithdrawFees(this,v4item);return {hash:r.tx.hash,message:'Fees distributed to their recipient wallets.'};}
-        throw new Error('This action is not available for Model 11 tokens.');
+        // Paying or receiving the native coin on a pair-asset V2 or Model 11 token (v4NativeTrade).
+        if(action==='trade-native-pair')return this.tradeNativePair(body);
+        throw new Error('This action is not available for ELPIDA V2 or Model 11 tokens.');
       }}
     const factory = (await this.verifyFactory()).connect(this.signer);
     let result;
