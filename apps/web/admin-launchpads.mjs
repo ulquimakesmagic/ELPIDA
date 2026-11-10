@@ -2,7 +2,7 @@ import { h, short, errorText } from './ui.mjs';
 import { chainIcon } from './chain-ui.mjs';
 import { downloadSafeBatch } from './admin-pairs.mjs';
 import { v4Available, v4Deployment, v4PoolManager, savedTestPoolManager, v4StockPairs, v2Deployment } from './v4-launchpad.mjs';
-import { v2Available, v2StockPairs, v2StockListState } from './v2-launchpad.mjs';
+import { v2Available, v2StockPairs, v2StockListState, v2UsdcDistributors } from './v2-launchpad.mjs';
 
 // Operator panel, Launchpads tab (#/monkey?tab=launchpads, 6 November 2026). Setting up a network is an operator job,
 // so every deployment lives here and only here (Malik, 6 November 2026: "limited to admin panel only and not everyone"):
@@ -96,6 +96,16 @@ export function renderLaunchpads(ctx, { connect }) {
     return box;
   }
 
+  /** USDC payouts: the trader airdrop and holder rewards convert to USDC and pay only USDC once these are pinned. */
+  function v2UsdcBlock(net) {
+    const u = v2UsdcDistributors(net), box = h('div.stack', h('h3.small', 'USDC payouts'));
+    if (u?.pinned) box.append(h('p.small.muted', 'Trader airdrop and holder rewards pay in USDC: airdrop ', h('span.mono', short(u.airdrop)), ', holders ', h('span.mono', short(u.holder)), '.'));
+    else if (u) box.append(h('p.small', 'Deployed from this browser. Send these to be pinned in networks.mjs (v2.shared); until then rewards pay in the pair asset:'), h('pre.small.selectable', JSON.stringify({ usdcAirdrop: u.airdrop, usdcHolder: u.holder }, null, 2)));
+    else box.append(h('p.small.muted', 'Rewards pay in each pair asset. Deploy two USDC distributors (2 confirmations) to convert each finished round to USDC on Uniswap v3 and pay only USDC. The flywheel is unchanged.'),
+      button('Deploy USDC payout distributors', 'deploy-v2-usdc', {}));
+    return box;
+  }
+
   /** ELPIDA V2 test launchpad: the factory, the hook, the router and the three reward contracts the hook pays. */
   function v2Card(net) {
     if (!v2Available(net) || net.mainnet) return null;
@@ -107,6 +117,7 @@ export function renderLaunchpads(ctx, { connect }) {
       v2?.pinned ? h('p.small.muted', 'Shared team launchpad: factory ', h('span.mono', short(v2.factory)), ', router ', h('span.mono', short(v2.router)), '.') : null,
       v2 ? v2StockList() : null,
       v2 ? v2VerifiedStocks() : null,
+      v2?.pinned ? v2UsdcBlock(net) : null,
       v2 && !v2.pinned ? h('div.stack', h('p.small', 'Deployed from this browser. Send these addresses to be pinned in networks.mjs (v2.shared) so the site lists its tokens and shows its Rewards analytics:'),
         h('pre.small.selectable', JSON.stringify({ factory: v2.factory, hook: v2.hook, router: v2.router, airdrop: v2.airdrop, holder: v2.holder, flywheel: v2.flywheel, keeper: v2.keeper, block: v2.block, minFeeBps: v2.minFeeBps }, null, 2))) : null,
       minFee ? h('label.field', h('span.small.muted', 'Minimum trading fee a creator may choose (percent). Fixed for this launchpad; 1.00% is the recommendation until a mainnet value is approved.'), minFee) : null,
