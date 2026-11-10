@@ -51,6 +51,7 @@ import { isDexModel } from '../../packages/core/curve-model.mjs';
 import { V2RewardsService } from './v2-rewards-service.mjs';
 import { configuredV2Keeper } from './v2-keeper.mjs';
 import { configuredSolanaV2Keeper } from './v2-keeper-solana.mjs';
+import { V2Identities } from './v2-identities.mjs';
 import { SolanaV2Rewards } from './v2-rewards-solana.mjs';
 import { toJson } from '../../packages/indexer/v2-rewards.mjs';
 
@@ -299,6 +300,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     let evm;try{evm=v2Keeper.status();}catch(error){evm={enabled:false,state:'error',error:String(error.message).slice(0,160)};}
     return {evm,solana:{network:solanaNet.key,name:solanaNet.name,state:solanaV2Keeper.enabled?'running':sol.state,address,balance,runs:solanaV2Keeper.enabled?sol.runs:[],jobs:solanaV2Keeper.enabled?sol.jobs??[]:[],airdropNext:sol.airdropNext??null,holderNext:sol.holderNext??null}};
   };
+  // V2 X and website allocations: ownership checks, then the network's V2 keeper (the verifier) binds the payout wallet.
+  const v2Identities=new V2Identities({signerFor:key=>{const w=v2Keeper.workers?.find(x=>x.chain===key);return w?{signer:w.signer,chainId:w.net.chainId}:null;}});
   let v2Keeper={enabled:false,status:()=>({enabled:false,state:'not_configured'}),manifest:()=>null,close:async()=>{}};
   queueMicrotask(()=>{if(port===0)return;try{v2Keeper=configuredV2Keeper({env:process.env,networks:evmTestnets,indexFor:key=>publicIndex.v2Index(key),prices:()=>priceSnapshot(),path:dataFile('v2-keeper.sqlite'),publicUrl:process.env.ELPIDA_PUBLIC_URL||'https://elpida.fun',log:e=>console.log(JSON.stringify(e))});if(v2Keeper.enabled){v2Keeper.start();console.log(JSON.stringify({event:'v2_keeper_started',keeper:v2Keeper.address}));}}catch(error){console.log(JSON.stringify({event:'subsystem_unavailable',subsystem:'v2Keeper',degraded:true,message:String(error.message).slice(0,120)}));}});
   const flywheelKeeper=port===0?{summary:()=>({enabled:false,state:'not_configured'}),close:async()=>{}}:soft('flywheelKeeper',()=>configuredFlywheelKeeper({env:process.env,publicIndex,dexes:testnetDexes,path:dataFile('flywheel-keeper.sqlite'),log:e=>console.log(JSON.stringify(e))}),()=>({summary:()=>({enabled:false,state:'unavailable'}),close:async()=>{}}));
@@ -445,6 +448,12 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           if(!/^[a-f0-9]{64}$/.test(client??'')){client=randomBytes(32).toString('hex');res.setHeader('Set-Cookie',`elpida_upload=${client}; HttpOnly; SameSite=Strict; Path=/api/metadata; Max-Age=86400${cookieSecurity}`);}
           return send(200,uploadAdmission.issue({digest:url.searchParams.get('digest'),client,transport:req.socket.remoteAddress??'unknown'}));
         }
+        if(url.pathname==='/api/rewards/x/callback'&&v2Identities.owns(url.searchParams.get('state'))){
+          const cookie=String(req.headers.cookie??'').split(';').map(x=>x.trim()).find(x=>x.startsWith('elpida_x='))?.slice(9);let text;
+          try{text=(await v2Identities.finishX({state:url.searchParams.get('state'),code:url.searchParams.get('code'),cookie})).message;}catch(error){text=String(error.message).slice(0,200);}
+          res.writeHead(200,{'Content-Type':'text/html','Set-Cookie':`elpida_x=; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=0${cookieSecurity}`});
+          return res.end(`<!doctype html><title>X verification</title><h1>X verification</h1><p>${text.replace(/[&<>"']/g,c=>`&#${c.charCodeAt(0)};`)}</p><p><a href="/">Back to Elpida</a></p>`);
+        }
         if(url.pathname==='/api/rewards/x/callback'){
           try{const cookie=String(req.headers.cookie??'').split(';').map(x=>x.trim()).find(x=>x.startsWith('elpida_x='))?.slice(9);await runtime.transact('reward-x-finish',{state:url.searchParams.get('state'),code:url.searchParams.get('code'),cookie});res.writeHead(200,{'Content-Type':'text/html','Set-Cookie':`elpida_x=; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=0${cookieSecurity}`});return res.end('<!doctype html><title>X verified</title><h1>X profile verified</h1><p>Your rewards are bound to the signed payout wallet. Return to Creator rewards and refresh to claim.</p><a href="/">Return to Elpida</a>');}catch{ return send(400,{error:'X verification failed or expired. Return to the dashboard and try again.'});}
         }
@@ -507,7 +516,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         // Bytecode for the labelled test DEX and relay feed, fetched only when the launchpad owner deploys them.
         if (url.pathname === '/api/test-dex-artifacts') return send(200, testDexArtifacts());
         if (url.pathname === '/api/v4-artifacts') return send(200, v4Artifacts());
-        if (url.pathname === '/api/config') return send(200, { ...runtime.config, serverTime: Date.now()/1000, vanity: vanity.status(), circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), relay: feedRelay.publicConfig(), v2Keeper: v2Keeper.address?{address:v2Keeper.address,active:Boolean(v2Keeper.enabled)}:null, consent: consentConfig, csrf });
+        if (url.pathname === '/api/config') return send(200, { ...runtime.config, serverTime: Date.now()/1000, vanity: vanity.status(), circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), relay: feedRelay.publicConfig(), v2Keeper: v2Keeper.address?{address:v2Keeper.address,active:Boolean(v2Keeper.enabled)}:null,v2Identities:{x:v2Identities.xEnabled}, consent: consentConfig, csrf });
         if(url.pathname==='/api/metadata/resolve')return send(200,await metadataStore.resolve(url.searchParams.get('uri')));
         if(url.pathname.startsWith('/api/content/')){const record=metadataStore.get(url.pathname.slice('/api/content/'.length));if(!record)return send(404,{error:'Content not found.'});res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}
         if (url.pathname === '/api/indexer/status') { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); return send(200,runtime.indexer.status()); }
@@ -623,6 +632,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       }
       if(action==='solana/vanity-mint')return send(200,vanity.reserve({wallet:String(body.wallet??''),address:clientAddress(req)}));
       if(action==='solana/vanity-sign')return send(200,vanity.sign({id:String(body.id??''),wallet:String(body.wallet??''),message:body.message}));
+      if(action==='v2-identity/challenge')return send(200,await v2Identities.challenge(body));
+      if(action==='v2-identity/verify-domain')return send(200,await v2Identities.verifyDomain(body));
+      if(action==='v2-identity/x-start'){const result=v2Identities.startX(body);res.setHeader('Set-Cookie',`elpida_x=${result.cookie}; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=600${cookieSecurity}`);return send(200,{url:result.url});}
       if(action==='reward-x-start'){const result=await runtime.transact(action,body);res.setHeader('Set-Cookie',`elpida_x=${result.cookie}; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=600${cookieSecurity}`);return send(200,{url:result.url});}
       if (action === 'quote') return send(200, await runtime.getQuote(body));
       if (action === 'conversion-quote') return send(200, await runtime.getConversionQuote(body));

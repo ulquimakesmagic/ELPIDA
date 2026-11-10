@@ -10,7 +10,7 @@ import { v4Artifacts } from '../apps/api/v4-artifacts.mjs';
 import { V2Indexer } from '../packages/indexer/v2-indexer.mjs';
 import { V2_MODEL, splitFee } from '../packages/core/v2-economics.mjs';
 
-const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom, v2StockPairs, approveV2Stock, claimCreatorSplit, creatorSplitState, creatorStrategyState } = await import('../apps/web/v2-launchpad.mjs');
+const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom, v2StockPairs, approveV2Stock, claimCreatorSplit, creatorSplitState, creatorStrategyState, identityAllocationState, claimIdentityRow } = await import('../apps/web/v2-launchpad.mjs');
 const { v2Deployment, v4Quote, v4Trade, isV4Token, isV2Token, v4WithdrawFees } = await import('../apps/web/v4-launchpad.mjs');
 
 function browser(t) {
@@ -138,6 +138,51 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   const s = await creatorStrategyState({ provider: f.provider, net, token: strat.token });
   assert.equal(s.mode, 'buyback'); assert.equal(s.threshold, parseEther('0.01')); assert.equal(s.minimumHolding, parseEther('1000')); assert.equal(s.vesting, 30 * 86_400); assert.equal(s.roundCount, 0);
   assert.equal(await creatorSplitState({ provider: f.provider, net, token: strat.token }), null, 'a strategy vault is not a split');
+
+  // Wallet, X and website allocations: X and website shares are held until the owner proves control and the keeper
+  // (the verifier) binds the wallet they signed for; then anyone can pay them out.
+  const { V2Identities } = await import('../apps/api/v2-identities.mjs');
+  const verifierSigner = f.signers[3], idOwner = f.signers[1], ownerAddr = await idOwner.getAddress();
+  await assert.rejects(launchV2(cw, { name: 'Ids', symbol: 'IDS', feeBps: 300, rewardIdentities: [{ kind: 'wallet', target: '', bps: 5000 }, { kind: 'domain', target: 'not a domain', bps: 5000 }] }), /website domain/);
+  const ids = await launchV2(cw, { name: 'Ids', symbol: 'IDS', feeBps: 300, description: '', image: '',
+    rewardIdentities: [{ kind: 'wallet', target: '', bps: 5000 }, { kind: 'domain', target: 'Community.org', bps: 3000 }, { kind: 'x', target: '@Elpida_Fun', bps: 2000 }] });
+  await index.sync();
+  const idsItem = { ...index.listings().find(x => x.address.toLowerCase() === ids.token.toLowerCase()), deploymentModel: V2_MODEL, factory: record.factory };
+  await f.advance(120);
+  await v4Trade(bw, idsItem, 'buy', { amount: '0.05', slippage: '1' });
+  let st = await identityAllocationState({ provider: f.provider, net, token: ids.token });
+  assert.deepEqual(st.rows.map(r => [r.kind, r.target, r.bps, r.wallet]), [['wallet', null, 5000, cw.address], ['domain', 'community.org', 3000, null], ['x', 'elpida_fun', 2000, null]]);
+  await assert.rejects(claimIdentityRow(bw, { token: ids.token, index: 1 }), /held until its owner verifies/);
+  await claimIdentityRow(bw, { token: ids.token, index: 0 });
+  // The website owner: a signed claim plus the TXT record.
+  let dns = [];
+  const xSessions = new Map();
+  const x = { enabled: true, sessions: xSessions, begin: claim => { xSessions.set('state-1', claim); return { url: 'https://x.com/i/oauth2/authorize?state=state-1', cookie: 'c' }; },
+    complete: async ({ state }) => { const c = xSessions.get(state); xSessions.delete(state); return c; } };
+  const service = new V2Identities({ signerFor: key => (key === net.key ? { signer: verifierSigner, chainId: 31337 } : null), x, dnsResolver: async () => dns });
+  const vaultAddr = st.vault;
+  await assert.rejects(service.challenge({ network: net.key, vault: vaultAddr, index: 0, wallet: ownerAddr }), /need no verification/);
+  const c1 = await service.challenge({ network: net.key, vault: vaultAddr, index: 1, wallet: ownerAddr });
+  assert.equal(c1.name, '_elpida.community.org');
+  await assert.rejects(service.verifyDomain({ nonce: c1.nonce, signature: await f.signers[2].signMessage(c1.message) }), /does not match/);
+  await assert.rejects(service.verifyDomain({ nonce: c1.nonce, signature: await idOwner.signMessage(c1.message) }), /not visible yet/);
+  dns = [[c1.txt]];
+  await service.verifyDomain({ nonce: c1.nonce, signature: await idOwner.signMessage(c1.message) });
+  await assert.rejects(service.challenge({ network: net.key, vault: vaultAddr, index: 1, wallet: ownerAddr }), /already pays a verified wallet/);
+  // The X owner: a signed claim, then X sign-in (stubbed here) as that handle.
+  const c2 = await service.challenge({ network: net.key, vault: vaultAddr, index: 2, wallet: ownerAddr });
+  const start = service.startX({ nonce: c2.nonce, signature: await idOwner.signMessage(c2.message) });
+  assert.match(start.url, /x\.com/); assert.ok(service.owns('state-1'));
+  await service.finishX({ state: 'state-1', code: 'ok', cookie: 'c' });
+  st = await identityAllocationState({ provider: f.provider, net, token: ids.token });
+  assert.deepEqual(st.rows.map(r => r.wallet), [cw.address, ownerAddr, ownerAddr]);
+  const beforeOwner = await f.provider.getBalance(ownerAddr);
+  await claimIdentityRow(cw, { token: ids.token, index: 1 });
+  assert.ok(await f.provider.getBalance(ownerAddr) > beforeOwner, 'the verified website owner was paid');
+  // Only the verifier can bind; an allocation verified by another server is refused.
+  await assert.rejects(new Contract(vaultAddr, v4Art('ElpidaV2IdentityAllocation').abi, bw.signer).bind(2, bw.address));
+  const other = new V2Identities({ signerFor: () => ({ signer: f.signers[0], chainId: 31337 }), x, dnsResolver: async () => [] });
+  await assert.rejects(other.challenge({ network: net.key, vault: vaultAddr, index: 2, wallet: ownerAddr }), /another server/);
 });
 
 test('V2 deploy: a lagging wallet’s reused nonce is asked again; a resumed deploy replaces reward contracts run by the wrong operator; test stocks become V2 pairs', async t => {

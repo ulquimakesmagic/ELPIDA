@@ -114,3 +114,5 @@ V2 replaces Model 11.
 - **Holder strategies on V2 (EVM test networks).** "Share fees with holders", "Buy a reward token for holders" and
   "Buy back and vest to holders" are selectable in the launch form when the server's V2 keeper is running; see
   docs/V2_0_KEEPERS.md (Creator holder strategies). X and website allocations are the next phase.
+- **X and website allocations on V2 (EVM test networks).** "Wallet, X and website allocations" is selectable when the
+  V2 keeper is running. Owners verify on the token page's Allocations card; see docs/V2_0_KEEPERS.md.
