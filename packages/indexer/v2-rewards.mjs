@@ -168,7 +168,11 @@ export class V2RewardsIndexer {
     };
     const burned = new Map(), spent = new Map();
     for (const b of this.burns) { burned.set(b.token, (burned.get(b.token) ?? 0n) + b.burned); spent.set(b.asset, (spent.get(b.asset) ?? 0n) + b.spent); }
+    // Every V2 fee so far, per pair asset, and the creators' 30% of it (splitAccrued, as the hook computes it).
+    const fees = new Map();
+    for (const t of this.tokens.values()) { const f = fees.get(t.quote) ?? { asset: t.quote, total: 0n, creator: 0n, tokens: 0 }; f.total += t.accrued; f.creator += splitAccrued(t.accrued).creator; f.tokens++; fees.set(t.quote, f); }
     return {
+      fees: [...fees.values()],
       airdrop: this.addresses.airdrop ? distributor('airdrop') : null,
       holder: this.addresses.holder ? distributor('holder') : null,
       flywheel: this.addresses.flywheel ? { ...vault('flywheel'), burns: [...this.burns].reverse().slice(0, 50), burnedByToken: [...burned].map(([token, amount]) => ({ token, amount })), spentByAsset: [...spent].map(([asset, amount]) => ({ asset, amount })), cycles: new Set(this.burns.map(b => b.cycle)).size } : null,

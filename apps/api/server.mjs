@@ -96,6 +96,7 @@ resources.set('/payment-errors.mjs', ['payment-errors.mjs','text/javascript']);
 resources.set('/analytics', ['index.html', 'text/html']);
 resources.set('/analytics-view.mjs', ['analytics-view.mjs', 'text/javascript']);
 resources.set('/v2-rewards-view.mjs', ['v2-rewards-view.mjs', 'text/javascript']);
+resources.set('/analytics-headline.mjs', ['analytics-headline.mjs', 'text/javascript']);
 resources.set('/v2-launchpad.mjs', ['v2-launchpad.mjs', 'text/javascript']);
 resources.set('/metadata-cache.mjs', ['metadata-cache.mjs', 'text/javascript']);
 resources.set('/wallet-batch.mjs', ['wallet-batch.mjs', 'text/javascript']);

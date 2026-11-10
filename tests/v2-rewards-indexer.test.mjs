@@ -38,6 +38,10 @@ test('vault sizes by day, rounds, countdown and flywheel burns match the chain',
   assert.equal(native(s.airdrop).size, owed[1] + await f.provider.getBalance(airdrop.target));
   assert.equal(native(s.holder).size, owed[3] + await f.provider.getBalance(holder.target));
   assert.equal(native(s.flywheel).size, owed[2] + await f.provider.getBalance(flywheel.target));
+  // The analytics headline: every V2 fee so far and the creators' 30% of it, exactly as the hook books them.
+  const ledger = await f.hook.ledgers(l.token.target), fee = s.fees.find(x => x.asset === ZeroAddress.toLowerCase());
+  assert.equal(fee.creator, ledger.owed[0] + ledger.paid[0], 'creator share = what the hook owes the creator + what it paid');
+  assert.ok(fee.total >= fee.creator * 10n / 3n && fee.total <= fee.creator * 10n / 3n + 10n, 'creators get 30% of the total');
   // One point per UTC day, growing while traders trade.
   const series = native(s.airdrop).series;
   assert.ok(series.length >= 4);

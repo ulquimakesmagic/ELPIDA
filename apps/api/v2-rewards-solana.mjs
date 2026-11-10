@@ -62,7 +62,9 @@ export class SolanaV2Rewards {
     const day = this.now() - this.now() % DAY;
     for (const [kind, size] of Object.entries(sizes)) this.db.prepare('INSERT OR REPLACE INTO sr_series VALUES(?,?,?)').run(day, kind, (size > 0n ? size : 0n).toString());
     const schedules = distInfos.map(info => (info ? c.decodeV2Distributor(info.data) : null));
-    this.state = { pools: pools.length, rounds, orders, sizes, schedules };
+    // Every V2 fee so far (SOL) and the creators' share (index 0 of the split), for the analytics headline.
+    const fees = { total: pools.reduce((t, p) => t + BigInt(p.v2.accrued), 0n), creator: pools.reduce((t, p) => t + share(p.v2.accrued, 0), 0n), tokens: pools.length };
+    this.state = { pools: pools.length, rounds, orders, sizes, schedules, fees };
     this.lastSync = Date.now(); this.error = null;
   }
 
@@ -93,6 +95,7 @@ export class SolanaV2Rewards {
     return {
       key: this.net.key, name: this.net.name, explorer: null, testnet: !this.net.mainnet,
       assets: { [WSOL_MINT]: { symbol: 'SOL', decimals: 9, usd: fresh ? p.usd : null } },
+      fees: this.state.fees ? [{ asset: WSOL_MINT, ...this.state.fees }] : [],
       airdrop: distributor('airdrop', V2_DIST.airdrop), holder: distributor('holder', V2_DIST.holder),
       flywheel: { ...vault('flywheel'), burns: [], burnedByToken: [...burned].map(([token, amount]) => ({ token, amount })), spentByAsset: [{ asset: WSOL_MINT, amount: this.state.orders.reduce((t, o) => t + o.spent, 0n) }], cycles: this.state.orders.reduce((t, o) => t + o.orders, 0) },
       status: { lastSync: this.lastSync, error: this.error, pools: this.state.pools },
