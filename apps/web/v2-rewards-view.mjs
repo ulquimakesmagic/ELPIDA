@@ -191,6 +191,14 @@ export function rewardsSection({ api }) {
     return h('div.analytics-plot', svg, h('div.analytics-axis', h('span', dateOf(first)), h('span', `Peak ${usdText(max)}`), h('span', dateOf(days.at(-1)))), legend);
   }
 
+  /** Keeper gas taken from the reward vaults (published in the same round lists as the moves to USDC). */
+  function keeperGas() {
+    const items = chains().flatMap(chain => ['airdrop', 'holder'].flatMap(kind => (chain[kind]?.keeperGas ?? []).map(g => holding(chain, g.asset, g.amount))));
+    if (!items.length) return null;
+    const total = combine(items);
+    return h('p.small.muted', `Keeper gas taken from the reward vaults: ${total.headline}${total.detail ? ` (${total.detail})` : ''}. It is listed in each round's published payout list, before the rest is converted to USDC.`);
+  }
+
   function distribution() {
     const rounds = chains().flatMap(chain => (chain.airdrop?.rounds ?? []).map(r => ({ ...r, chain }))).sort((a, b) => b.postedAt - a.postedAt);
     if (!rounds.length) return h('div.rw-empty', h('p', 'No airdrop round has been paid yet.'), h('p.small.muted', 'The first payouts are posted on chain when the current round ends.'));
@@ -255,7 +263,7 @@ export function rewardsSection({ api }) {
       vaultTiles(),
       h('div.rw-block', h('h3', 'Reward pool by chain'), h('p.small.muted', 'One pool across every chain. Each chain\'s share of what the trader airdrop, holder rewards and flywheel vaults hold now, in dollars at today\'s prices.'), breakdown()),
       h('div.rw-block', h('h3', 'Vault sizes by day'), h('p.small.muted', 'Earned from fees so far on every chain, less what has been paid out or burned, in dollars at today\'s prices. Updated as trades confirm.'), sizeChart()),
-      h('div.rw-block', h('h3', 'How the last airdrop was shared'), h('p.small.muted', 'Each month: 20% of the pool equally among qualifying traders, 40% by the square root of fees paid, 40% in proportion to fees paid; no trader above 1% of the pool. Linked wallets count as one trader; creator-linked wallets are excluded.'), distribution()),
+      h('div.rw-block', h('h3', 'How the last airdrop was shared'), h('p.small.muted', 'Each month: 20% of the pool equally among qualifying traders, 40% by the square root of fees paid, 40% in proportion to fees paid; no trader above 1% of the pool. Linked wallets count as one trader; creator-linked wallets are excluded.'), distribution(), keeperGas()),
       h('div.rw-block', h('h3', 'Check your payouts'), lookup()),
       h('div.rw-block', h('h3', 'Flywheel buy-and-burn'), h('p.small.muted', 'The flywheel vault can only buy Elpida V2 tokens and burn them. The treasury never holds its funds.'), flywheel()));
     root.hidden = false;

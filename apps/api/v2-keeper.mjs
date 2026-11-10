@@ -7,7 +7,7 @@
 // with the plans in packages/core/v2-keeper-plan.mjs, so every list and order can be recomputed from public data.
 // Payout lists are published at /api/public/v2-rewards/manifest/… and linked from the on-chain root.
 import { DatabaseSync } from 'node:sqlite';
-import { Contract, JsonRpcProvider, NonceManager, Wallet, ZeroAddress, getAddress, solidityPacked } from 'ethers';
+import { Contract, JsonRpcProvider, NonceManager, Wallet, ZeroAddress, getAddress, parseEther, solidityPacked } from 'ethers';
 import { buildRound } from '../../packages/core/v2-rounds.mjs';
 import { airdropRound, holderRound, flywheelOrders, personalFunder, boundedFunderLinks, HOLDER_RULES, FLYWHEEL_RULES, latestJobs } from '../../packages/core/v2-keeper-plan.mjs';
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
@@ -26,6 +26,10 @@ const USDC_DISTRIBUTOR = [...DISTRIBUTOR, 'function usdc() view returns(address)
 const QUOTER = ['function quoteExactInput(bytes,uint256) returns(uint256,uint160[],uint32[],uint256)'];
 const FEE_TIERS = [500, 3000, 10000];
 const ZERO_ROOT = '0x' + '0'.repeat(64);
+// Keeper gas (Malik, 10 November): when a round's native coin moves to the USDC distributor, the keeper tops its own
+// wallet up to GAS_TARGET from it (never more than GAS_SHARE_BPS of that move), as a second recipient of the same
+// published round. The rest is converted. Railway: ELPIDA_V2_KEEPER_GAS_TARGET (native coin), ELPIDA_V2_KEEPER_GAS_SHARE_BPS.
+const GAS_TARGET = 5n * 10n ** 16n, GAS_SHARE_BPS = 1000n;
 // Creator strategy vaults (contracts/evm/v2/ElpidaV2CreatorRewards.sol): the keeper is their operator.
 const CREATOR = ['function CREATOR_REWARDS_VERSION() view returns(uint256)', 'function operator() view returns(address)', 'function token() view returns(address)', 'function feeAsset() view returns(address)',
   'function mode() view returns(uint8)', 'function threshold() view returns(uint256)', 'function minimumHolding() view returns(uint256)', 'function vesting() view returns(uint64)', 'function bind(address)',
@@ -43,7 +47,8 @@ export class V2Keeper {
    * `workers`: [{ chain, net, signer, provider, deployment: { hook, airdrop, holder, flywheel, poolManager, router, factory },
    * index: () => V2Indexer | null, usdPerUnit: asset => dollars | null, funderOf?: wallet => Promise<address | null> }].
    */
-  constructor({ workers, path = ':memory:', publicUrl = 'https://elpida.fun', now = () => Math.floor(Date.now() / 1000), log = () => {}, tickMs = 300_000, network = 'testnet' }) {
+  constructor({ workers, path = ':memory:', publicUrl = 'https://elpida.fun', now = () => Math.floor(Date.now() / 1000), log = () => {}, tickMs = 300_000, network = 'testnet', gasTarget = GAS_TARGET, gasShareBps = GAS_SHARE_BPS }) {
+    this.gasTarget = gasTarget; this.gasShareBps = gasShareBps;
     Object.assign(this, { workers, publicUrl, now, log, tickMs, network });
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL;
@@ -226,8 +231,17 @@ export class V2Keeper {
    */
   async sweep(w, source, target, round, asset, amount) {
     if (amount <= 0n || (await source.rounds(round, asset)).root !== ZERO_ROOT) return false;
-    await this.post(w, source, round, asset, new Map([[lower(target.target), amount]]));
-    return true;
+    const payouts = new Map(), gas = lower(asset) === lower(ZeroAddress) ? await this.gasRefill(w, amount) : 0n;
+    if (amount > gas) payouts.set(lower(target.target), amount - gas);
+    if (gas > 0n) payouts.set(lower(w.signer.address), gas);
+    await this.post(w, source, round, asset, payouts);
+    return { moved: amount - gas, gas };
+  }
+
+  /** What the keeper takes for gas from `amount` of native coin: up to its target balance, at most its share. */
+  async gasRefill(w, amount) {
+    const balance = await w.provider.getBalance(w.signer.address), need = this.gasTarget > balance ? this.gasTarget - balance : 0n, cap = amount * BigInt(this.gasShareBps) / 10_000n;
+    return need < cap ? need : cap;
   }
 
   /** The best Uniswap v3 route from `asset` to USDC for `amount`: direct, or through the wrapped native coin. */
@@ -291,11 +305,13 @@ export class V2Keeper {
       const [start, end] = (await Promise.all([drop.roundStart(round), drop.roundEnd(round)])).map(Number);
       await this.fees(w, { force: true });
       const assets = [...new Set([lower(ZeroAddress), usdc, ...index.listings().map(t => lower(t.quoteAddress ?? ZeroAddress))])], moved = {}, converted = {}, skipped = {};
+      let gas = 0n;
       for (const a of assets) {
         const avail = await drop.available(a); if (avail <= 0n) continue;
         const route = a === usdc ? null : await this.usdcRoute(w, a, avail);
         if (a !== usdc && !route) { skipped[a] = 'no USDC route yet: held for a later round'; continue; }
-        if (await this.sweep(w, drop, target, round, a, avail)) moved[a] = avail.toString();
+        const s = await this.sweep(w, drop, target, round, a, avail);
+        if (s) { moved[a] = s.moved.toString(); gas += s.gas; }
       }
       // Everything of a non-USDC asset the USDC distributor holds (this round's, and any earlier conversion that failed).
       for (const a of assets) {
@@ -318,7 +334,7 @@ export class V2Keeper {
         if (p.payouts.size && (await target.rounds(round, usdc)).root === ZERO_ROOT) result = await this.post(w, target, round, usdc, p.payouts);
       }
       this.set(`${w.chain}:airdrop:next`, round + 1);
-      this.record(w.chain, 'airdrop', 'ok', { round, usdc: true, moved, converted, skipped, qualified: plan.qualified.length, result });
+      this.record(w.chain, 'airdrop', 'ok', { round, usdc: true, moved, converted, skipped, keeperGas: gas.toString(), qualified: plan.qualified.length, result });
     }
   }
 
@@ -345,16 +361,19 @@ export class V2Keeper {
         byAsset.get(a).push({ token: lower(t.address), pending });
       }
       const moved = {}, skipped = {}, pools = new Map(bank);
+      let gas = 0n;
       for (const [asset, list] of byAsset) {
         const total = list.reduce((x, d) => x + d.pending, 0n), route = asset === usdc ? { quoted: total } : await this.usdcRoute(w, asset, total);
         if (!route) { skipped[asset] = 'no USDC route yet: held for a later round'; continue; }
         const due = list.filter(d => route.quoted * d.pending / total + (bank.get(d.token) ?? 0n) >= threshold);
         let amount = due.reduce((x, d) => x + d.pending, 0n);
         const avail = await dist.available(asset); if (amount > avail) amount = avail;
-        if (amount <= 0n || !await this.sweep(w, dist, target, round, asset, amount)) continue;
-        moved[asset] = amount.toString();
-        let out = amount;
-        if (asset !== usdc) { try { out = await this.toUsdc(w, target, asset, amount, route); } catch (e) { skipped[asset] = e.shortMessage ?? e.message; out = 0n; } }
+        const s = amount > 0n ? await this.sweep(w, dist, target, round, asset, amount) : false;
+        if (!s) continue;
+        moved[asset] = s.moved.toString(); gas += s.gas;
+        // The keeper's gas comes out of the moved native coin; the rest is converted and shared out.
+        let out = s.moved;
+        if (asset !== usdc && s.moved > 0n) { try { out = await this.toUsdc(w, target, asset, s.moved, route); } catch (e) { skipped[asset] = e.shortMessage ?? e.message; out = 0n; } }
         // The moved amount is no longer pending in the holder distributor; its USDC goes to the tokens pro rata.
         const dueTotal = due.reduce((x, d) => x + d.pending, 0n);
         let given = 0n;
@@ -380,7 +399,7 @@ export class V2Keeper {
       this.set(`${w.chain}:holder:distributed`, done);
       this.set(`${w.chain}:holder:usdcBank`, Object.fromEntries([...left].map(([k, v]) => [k, v.toString()])));
       this.set(`${w.chain}:holder:next`, round + 1);
-      this.record(w.chain, 'holder', 'ok', { round, usdc: true, moved, skipped, tokens: stats, result });
+      this.record(w.chain, 'holder', 'ok', { round, usdc: true, moved, skipped, keeperGas: gas.toString(), tokens: stats, result });
     }
   }
 
@@ -493,7 +512,9 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
       index: () => indexFor(net.key), funderOf: env.ELPIDA_EXPLORER_API_KEY ? etherscanFunder(net.chainId, env.ELPIDA_EXPLORER_API_KEY) : null, ignoredFunders,
       usdPerUnit: asset => { if (lower(asset) === lower(ZeroAddress)) { const p = prices()[net.key]; return p?.status === 'fresh' ? p.usd : null; } const usdc = oracles[net.key]?.usdc; return usdc && lower(asset) === lower(usdc) ? 1 : null; } };
   });
-  const keeper = new V2Keeper({ workers, path, publicUrl, log });
+  const gasTarget = /^\d+(\.\d{1,18})?$/.test(String(env.ELPIDA_V2_KEEPER_GAS_TARGET ?? '')) ? parseEther(env.ELPIDA_V2_KEEPER_GAS_TARGET) : undefined;
+  const share = Number(env.ELPIDA_V2_KEEPER_GAS_SHARE_BPS), gasShareBps = Number.isInteger(share) && share >= 0 && share <= 5000 ? share : undefined;
+  const keeper = new V2Keeper({ workers, path, publicUrl, log, gasTarget, gasShareBps });
   keeper.enabled = true; keeper.address = getAddress(address);
   return keeper;
 }

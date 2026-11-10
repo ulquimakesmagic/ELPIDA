@@ -126,6 +126,10 @@ The flywheel is unchanged. Solana is a later phase (it needs a program upgrade a
 - **No route, no move.** An asset with no Uniswap v3 path to USDC (an unseeded test stock, a chain whose router is not
   SwapRouter02, e.g. BNB Chain testnet's PancakeSwap router) stays in the old distributor until a route exists. The
   operator panel's keeper card names what was not converted and why.
+- **Keeper gas:** when native coin moves to USDC, the keeper tops its own wallet up to `ELPIDA_V2_KEEPER_GAS_TARGET`
+  (default 0.05 of the native coin) from it, never more than `ELPIDA_V2_KEEPER_GAS_SHARE_BPS` (default 1000 = 10%) of
+  that move, as a second recipient of the same published round. Analytics show it as keeper gas, not as a payout.
+  USDC-paired fees cannot pay gas, so a chain with little native-coin volume still needs the keeper funded by hand.
 - **Already-posted rounds** keep paying from the old distributors as before; only unpromised balances move.
 - **Analytics:** the moves are internal (not payouts) and hidden; a conversion takes the asset out of the vault and adds
   its USDC; payouts show in USDC.

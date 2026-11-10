@@ -11,7 +11,7 @@ export class V2RewardsService {
     this.log = log; this.entries = [];
     for (const net of networks.filter(n => !n.mainnet && n.v2?.shared?.hook)) {
       const d = net.v2.shared;
-      this.entries.push({ net, index: new V2RewardsIndexer({ provider: providerFactory(net.rpcUrl), contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel, usdcAirdrop: d.usdcAirdrop, usdcHolder: d.usdcHolder }, fromBlock: d.block, batchSize: 100 }), busy: false });
+      this.entries.push({ net, index: new V2RewardsIndexer({ provider: providerFactory(net.rpcUrl), contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel, usdcAirdrop: d.usdcAirdrop, usdcHolder: d.usdcHolder }, keeper: d.keeper, fromBlock: d.block, batchSize: 100 }), busy: false });
     }
   }
   get deployed() { return this.entries.length > 0; }

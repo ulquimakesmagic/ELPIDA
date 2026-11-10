@@ -35,7 +35,9 @@ const lower = a => String(a).toLowerCase();
 
 export class V2RewardsIndexer {
   /** `contracts`: { hook, airdrop, holder, flywheel, usdcAirdrop?, usdcHolder? } addresses; `fromBlock`: the deployment block. */
-  constructor({ provider, contracts, fromBlock = 0, confirmations = 0, batchSize = 2000 }) {
+  /** `keeper`: the V2 keeper's address; its gas top-ups from the reward vaults are shown apart from payouts. */
+  constructor({ provider, contracts, keeper = null, fromBlock = 0, confirmations = 0, batchSize = 2000 }) {
+    this.keeper = keeper ? lower(getAddress(keeper)) : null;
     this.provider = provider; this.fromBlock = fromBlock; this.confirmations = confirmations; this.batchSize = batchSize;
     this.addresses = Object.fromEntries(Object.entries(contracts).filter(([, v]) => v).map(([k, v]) => [k, lower(getAddress(v))]));
     this.kinds = new Map(Object.entries(this.addresses).map(([k, v]) => [v, k]));
@@ -50,6 +52,7 @@ export class V2RewardsIndexer {
     this.rounds = { airdrop: new Map(), holder: new Map() };
     this.burns = [];
     this.claims = [];
+    this.gas = [];                  // { kind, asset, amount, time, tx } keeper gas taken from a reward vault
     this.schedules = {};
     this.lastSync = null; this.lastError = null;
   }
@@ -107,6 +110,13 @@ export class V2RewardsIndexer {
       this.rounds[kind].delete(key(a));
       return;
     }
+    if ((kind === 'airdrop' || kind === 'holder') && ev.name === 'Claimed' && this.keeper && lower(a.account) === this.keeper && this.addresses[USDC_OF[kind]]) {
+      // The keeper's gas, taken in the same published round as a move to USDC: it leaves the vault, but is not a payout.
+      this.rounds[kind].delete(key(a));
+      this.events.push({ time, kind, asset: lower(a.asset), delta: -a.amount });
+      this.gas.push({ kind, asset: lower(a.asset), amount: a.amount, time, tx });
+      return;
+    }
     if ((kind === 'airdrop' || kind === 'holder') && ev.name === 'Converted') {
       this.events.push({ time, kind, asset: lower(a.asset), delta: -a.amountIn }, { time, kind, asset: this.usdcAsset ?? (this.usdcAsset = lower(await new Contract(at, ['function usdc() view returns(address)'], this.provider).usdc())), delta: a.usdcOut });
       return;
@@ -153,7 +163,8 @@ export class V2RewardsIndexer {
         return { round: r.round, asset: r.asset, total: r.total, recipients: r.recipients, paidRecipients: r.paid.length, claimed, unclaimed: r.total - claimed - (r.returnedToPool ?? 0n), failed: r.failed, expired: r.expired,
           postedAt: r.postedAt, postTx: r.postTx, manifestURI: r.manifestURI, start: s ? schedule(s).start(r.round) : null, end: s ? schedule(s).end(r.round) : null, stats: roundStats(r.paid) };
       });
-      return { schedule: s ?? null, countdown: s ? countdown(schedule(s), now) : null, ...vault(kind), rounds };
+      const gas = new Map(); for (const g of this.gas) if (g.kind === kind) gas.set(g.asset, (gas.get(g.asset) ?? 0n) + g.amount);
+      return { schedule: s ?? null, countdown: s ? countdown(schedule(s), now) : null, ...vault(kind), rounds, keeperGas: [...gas].map(([asset, amount]) => ({ asset, amount })) };
     };
     const burned = new Map(), spent = new Map();
     for (const b of this.burns) { burned.set(b.token, (burned.get(b.token) ?? 0n) + b.burned); spent.set(b.asset, (spent.get(b.asset) ?? 0n) + b.spent); }

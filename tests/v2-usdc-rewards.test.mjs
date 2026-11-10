@@ -48,7 +48,8 @@ test('with USDC distributors pinned, the keeper converts every vault asset and p
   const tick = async () => { chainTime = (await f.provider.getBlock('latest')).timestamp; await index.sync(); };
   const deployment = { hook: f.hook.target, airdrop: airdrop.target, holder: holder.target, flywheel: flywheel.target, usdcAirdrop: usdcAirdrop.target, usdcHolder: usdcHolder.target,
     poolManager: f.manager.target, router: f.router.target, factory: f.factory.target };
-  const keeper = new V2Keeper({ workers: [{ chain: 'local', net: { chainId: 31337, key: 'local' }, provider: f.provider, signer: f.signers[4], deployment,
+  // A gas target far above the keeper's balance: it takes its full 10% share of each native move.
+  const keeper = new V2Keeper({ gasTarget: parseEther('1000000'), workers: [{ chain: 'local', net: { chainId: 31337, key: 'local' }, provider: f.provider, signer: f.signers[4], deployment,
     dex: v3.config, usdc: f.usdc.target,
     index: () => index, usdPerUnit: a => (a === ZeroAddress.toLowerCase() ? 2500 : a === f.usdc.target.toLowerCase() ? 1 : null) }], now: () => chainTime, publicUrl: 'https://elpida.test' });
   // Three tokens: native-paired, USDC-paired and paired with an unpriced test stock that has no USDC route.
@@ -75,7 +76,11 @@ test('with USDC distributors pinned, the keeper converts every vault asset and p
   const hr = Number(await holder.currentRound()), nativeInHolder = await f.provider.getBalance(holder.target);
   await jump(Number(await holder.roundEnd(hr))); await tick();
   await keeper.holder(w);
-  assert.equal((await holder.rounds(hr, ZeroAddress)).recipients, 1n, 'the native share moved to the USDC distributor as a one-recipient round');
+  const sweep = keeper.manifest(31337, holder.target, hr, ZeroAddress), toKeeper = sweep.entries.find(e => e.account.toLowerCase() === f.addresses[4].toLowerCase());
+  const toUsdcDist = sweep.entries.find(e => e.account.toLowerCase() === usdcHolder.target.toLowerCase());
+  assert.equal(sweep.recipients, 2, 'the native share moved to the USDC distributor, with the keeper\'s gas in the same published round');
+  assert.equal(BigInt(toKeeper.amount), BigInt(sweep.total) / 10n, 'the keeper took its 10% cap for gas');
+  assert.equal(BigInt(toUsdcDist.amount), BigInt(sweep.total) - BigInt(toKeeper.amount));
   assert.ok(await f.provider.getBalance(holder.target) < nativeInHolder);
   assert.equal(await f.provider.getBalance(usdcHolder.target), 0n, 'all of it converted');
   assert.equal(await f.stock.balanceOf(holder.target), stockInHolder, 'the stock share has no USDC route, so it stays');
@@ -94,7 +99,8 @@ test('with USDC distributors pinned, the keeper converts every vault asset and p
   const ar = Number(await airdrop.currentRound()), stockInDrop = await f.stock.balanceOf(airdrop.target);
   await jump(Number(await airdrop.roundEnd(ar))); await tick();
   await keeper.airdrop(w);
-  for (const asset of [ZeroAddress, f.usdc.target]) assert.equal((await airdrop.rounds(ar, asset)).recipients, 1n, `${asset} moved to the USDC distributor`);
+  assert.equal((await airdrop.rounds(ar, ZeroAddress)).recipients, 2n, 'native: to the USDC distributor and the keeper\'s gas');
+  assert.equal((await airdrop.rounds(ar, f.usdc.target)).recipients, 1n, 'USDC needs no gas share');
   assert.equal((await airdrop.rounds(ar, f.stock.target)).root, ZERO_ROOT);
   assert.equal(await f.stock.balanceOf(airdrop.target), stockInDrop);
   const m = keeper.manifest(31337, usdcAirdrop.target, ar, f.usdc.target);
@@ -106,9 +112,14 @@ test('with USDC distributors pinned, the keeper converts every vault asset and p
   assert.equal(st.airdropNext, ar + 1); assert.equal(st.holderNext, hr + 1);
   assert.ok(st.runs.every(r => r.status === 'ok'), JSON.stringify(st.runs));
   assert.match(st.jobs.find(j => j.job === 'airdrop').note ?? '', /no USDC route/, 'the operator panel says why the stock stayed');
+  // A keeper already above its target takes nothing.
+  const full = new V2Keeper({ gasTarget: 1n, workers: [] });
+  assert.equal(await full.gasRefill(w, parseEther('1')), 0n);
+  const low = new V2Keeper({ gasTarget: (await f.provider.getBalance(f.addresses[4])) + 1000n, workers: [] });
+  assert.equal(await low.gasRefill(w, parseEther('1')), 1000n, 'only what is missing');
 
   // Analytics: payouts show in USDC only; the moves into the USDC distributors are not payouts.
-  const rewards = new V2RewardsIndexer({ provider: f.provider, contracts: { hook: f.hook.target, airdrop: airdrop.target, holder: holder.target, flywheel: flywheel.target, usdcAirdrop: usdcAirdrop.target, usdcHolder: usdcHolder.target } });
+  const rewards = new V2RewardsIndexer({ provider: f.provider, keeper: f.addresses[4], contracts: { hook: f.hook.target, airdrop: airdrop.target, holder: holder.target, flywheel: flywheel.target, usdcAirdrop: usdcAirdrop.target, usdcHolder: usdcHolder.target } });
   await rewards.sync();
   const s = rewards.summary(Number((await f.provider.getBlock('latest')).timestamp));
   for (const kind of ['airdrop', 'holder']) {
@@ -117,7 +128,8 @@ test('with USDC distributors pinned, the keeper converts every vault asset and p
     assert.ok(!native || native.size <= 1n, `${kind}: the converted native share left the vault (${native?.size})`);
   }
   assert.ok(rewards.claims.every(c => c.asset === f.usdc.target.toLowerCase()), 'every payout was USDC');
-  assert.ok(!rewards.claims.some(c => [usdcAirdrop.target, usdcHolder.target].map(a => a.toLowerCase()).includes(c.account)));
+  assert.ok(!rewards.claims.some(c => [usdcAirdrop.target, usdcHolder.target, f.addresses[4]].map(a => a.toLowerCase()).includes(c.account)), 'moves and keeper gas are not payouts');
+  for (const kind of ['airdrop', 'holder']) assert.ok(s[kind].keeperGas.find(g => g.asset === ZeroAddress.toLowerCase())?.amount > 0n, `${kind}: keeper gas shown`);
   assert.ok(s.airdrop.assets.find(a => a.asset === f.stock.target.toLowerCase()).size > 0n, 'the stock still shows in the airdrop vault');
 });
 
