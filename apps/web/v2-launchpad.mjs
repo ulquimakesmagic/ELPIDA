@@ -8,6 +8,8 @@ import { quoteNativePairConversion } from './usdc-conversion.mjs';
 import { V2, V2_MODEL, V2_FEE_SPLIT, V2_PROPOSED_MIN_FEE_BPS, V2_TESTNET_START_FDV_USD_E6, maxFirstBuyGross, firstBuyCapTokens, virtualToken, splitFee, feeOn } from '/v2-economics.mjs';
 import { v4Available, v4PoolManager, v2Deployment, saveV2Deployment, mineHookSalt, hasCode, walletCaughtUp, V4_ROUTER_ABI } from './v4-launchpad.mjs';
 import { normalizeMetadata } from './metadata.mjs';
+import { checkStockList, stockApprovalGroups } from '/stock-list.mjs';
+import { safeBatch } from './safe-batch.mjs';
 import { prepareUploadProof } from './upload-proof.mjs';
 
 const LABEL = 'ELPIDA V2 test launchpad (Uniswap v4 hook). Not audited; test networks only.';
@@ -16,6 +18,8 @@ export const V2_FACTORY_ABI = ['function launch(string name,string symbol,addres
   'function launchFee() view returns(uint256)', 'function nativeVirtualQuote() view returns(uint256)', 'function approvedQuotes(address) view returns(uint256)', 'function treasury() view returns(address)', 'function hook() view returns(address)',
   'function feeUsdc() view returns(address)', 'function usdFeed() view returns(address)', 'function requiresMetadata() view returns(bool)', 'function MODEL_VERSION() view returns(uint256)', 'function startMcapUsd() view returns(uint256)',
   'function setHook(address)', 'function configureUsdPricing(address,uint256,address)', 'function approveQuote(address,uint256)',
+  // Stocks priced at launch (STOCK_FEEDS_VERSION 1; launchpads deployed after 10 November 2026).
+  'function STOCK_FEEDS_VERSION() view returns(uint256)', 'function quoteVirtual(address) view returns(uint256)', 'function quoteFeeds(address) view returns(address feed,uint64 maxAge,uint8 feedDecimals,uint8 assetDecimals)', 'function approvePricedQuote(address,address,uint256)',
   'event Launched(address indexed creator,address indexed token,address indexed quote,uint256 feeBps,uint256 firstBuy,uint256 bought)'];
 const HOOK_ABI = ['function factory() view returns(address)', 'function protocolTreasury() view returns(address)', 'function minFeeBps() view returns(uint256)', 'function traderAirdropVault() view returns(address)', 'function flywheelVault() view returns(address)', 'function holderRewardVault() view returns(address)'];
 const ERC20 = ['function approve(address,uint256) returns(bool)', 'function allowance(address,address) view returns(uint256)', 'function balanceOf(address) view returns(uint256)', 'function decimals() view returns(uint8)', 'function symbol() view returns(string)'];
@@ -137,6 +141,28 @@ export async function deployV2(w, body = {}) {
   return { record, message: `The ${net.name} V2 test launchpad is deployed with its reward contracts, from block ${record.block}. Send the addresses to be pinned in networks.mjs (v2.shared) so the site lists its tokens and shows its Rewards analytics.` };
 }
 
+/** 1 when this V2 factory prices stocks at launch from their feeds, 0 for launchpads deployed before that. */
+async function stockFeedsVersion(factory) { try { return Number(await factory.STOCK_FEEDS_VERSION()); } catch { return 0; } }
+const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+/** Whether `asset` is a V2 pair on this factory: a fixed approval, or (newer factories) a feed-priced one. */
+export async function v2PairApproved(factory, asset) {
+  if ((await factory.approvedQuotes(asset)) > 0n) return true;
+  return (await stockFeedsVersion(factory)) > 0 && (await factory.quoteFeeds(asset)).feed !== ZERO_ADDRESS;
+}
+/** Feed-priced stock pairs: launches wait while the stock's price is older than its limit (market closed, feed paused). */
+export const STOCK_PRICE_WAIT = 'The stock\'s price is older than its limit: its market is closed or its price feed is paused. Launches on it open again when the price updates. Nothing was submitted.';
+/** The virtual quote a launch with `asset` gets now (the native coin, a fixed approval, or a stock at its feed price). */
+export async function v2VirtualQuote(factory, asset) {
+  if (asset === ZeroAddress) return factory.nativeVirtualQuote();
+  if (!(await stockFeedsVersion(factory))) return factory.approvedQuotes(asset);
+  try { return await factory.quoteVirtual(asset); } catch (e) {
+    const text = [e.reason, e.shortMessage, e.message].filter(Boolean).join(' ');
+    if (/stale/.test(text)) throw new Error(STOCK_PRICE_WAIT);
+    if (/stock price/.test(text)) throw new Error('The stock\'s price feed has no valid price right now, so launches on it are paused. Nothing was submitted.');
+    throw e;
+  }
+}
+
 const usdcKey = chainId => `elpida:v2:usdc-distributors:${chainId}`;
 /** The network's USDC payout distributors: pinned in networks.mjs (v2.shared.usdcAirdrop / usdcHolder), else deployed from this browser. */
 export function v2UsdcDistributors(net) {
@@ -187,7 +213,7 @@ export async function v2StockPairs(w) {
   const d = v2Deployment(w.net);
   if (!d) return [];
   const factory = new Contract(d.factory, V2_FACTORY_ABI, w.provider);
-  return Promise.all([...new Map((w.approvedQuotes ?? []).filter(a => a.kind === 'xstock' && a.test).map(a => [a.address.toLowerCase(), a])).values()].map(async s => ({ address: s.address, symbol: s.symbol, approved: (await factory.approvedQuotes(s.address)) > 0n })));
+  return Promise.all([...new Map((w.approvedQuotes ?? []).filter(a => a.kind === 'xstock' && a.test).map(a => [a.address.toLowerCase(), a])).values()].map(async s => ({ address: s.address, symbol: s.symbol, approved: await v2PairApproved(factory, s.address) })));
 }
 
 /**
@@ -201,9 +227,51 @@ export async function approveV2Stock(w, { asset } = {}) {
   if (!record?.virtualQuote) throw new Error('Only a test stock approved on this network\'s Model 10 launchpad (Pairs tab) can be approved for V2.');
   const factory = new Contract(d.factory, V2_FACTORY_ABI, w.signer);
   if ((await factory.treasury()).toLowerCase() !== w.address.toLowerCase()) throw new Error('Only the V2 launchpad\'s treasury wallet can approve its pairs. Connect that wallet.');
-  if ((await factory.approvedQuotes(record.address)) > 0n) return { message: `${record.symbol} is already a V2 pair.` };
-  const result = await step(w, factory.approveQuote(record.address, BigInt(record.virtualQuote) * 9n / 8n), `Approve ${record.symbol} as a V2 test pair (same starting market cap as on Model 10)…`);
+  if (await v2PairApproved(factory, record.address)) return { message: `${record.symbol} is already a V2 pair.` };
+  // Newer launchpads price each stock launch from its feed (the same dollar start every time); older ones take a fixed amount.
+  const feed = record.stock?.feed && (await stockFeedsVersion(factory)) ? getAddress(record.stock.feed) : null;
+  const result = feed
+    ? await step(w, factory.approvePricedQuote(record.address, feed, 4 * 86_400), `Approve ${record.symbol} as a V2 test pair, priced at each launch by its feed…`)
+    : await step(w, factory.approveQuote(record.address, BigInt(record.virtualQuote) * 9n / 8n), `Approve ${record.symbol} as a V2 test pair (same starting market cap as on Model 10)…`);
   return { hash: result.tx.hash, message: `${record.symbol} is now a V2 test pair on ${w.net.name}. Its holders are paid in ${record.symbol}.` };
+}
+
+/**
+ * The verified stock list for this network (config/stocks/<network>.json) against the V2 launchpad: how many stocks are
+ * listed, how many are approved, and the approval groups still to sign. Reads only.
+ */
+export async function v2StockListState(w) {
+  const d = v2Deployment(w.net); if (!d?.factory) return null;
+  const response = await fetch(`/api/public/stock-list?network=${encodeURIComponent(w.net.key)}`);
+  if (response.status === 404) return { listed: 0, approved: 0, groups: [], feeds: false };
+  if (!response.ok) throw new Error('The stock list is unavailable right now.');
+  const list = checkStockList(await response.json(), w.net.chainId), factory = new Contract(d.factory, V2_FACTORY_ABI, w.provider);
+  const feeds = (await stockFeedsVersion(factory)) > 0, approved = new Set();
+  for (const s of list.stocks) if (await v2PairApproved(factory, s.address)) approved.add(s.address.toLowerCase());
+  const groups = feeds ? stockApprovalGroups({ iface: factory.interface, factory: d.factory, list, approved }) : [];
+  return { listed: list.stocks.length, approved: approved.size, groups, feeds, treasury: await factory.treasury(), checkedAt: list.checkedAt, source: list.source };
+}
+
+/**
+ * Operator: approves every listed stock not yet approved, priced at each launch by its feed. A treasury that is the
+ * connected wallet (test networks) signs each call here; a Safe treasury gets one Transaction Builder file per group
+ * of 25, to drag into Safe{Wallet}.
+ */
+export async function approveV2StockList(w) {
+  await w.checkNetwork();
+  const state = await v2StockListState(w);
+  if (!state?.listed) throw new Error(`There is no verified stock list for ${w.net.name} yet. Build it with scripts/stock-list.mjs. Nothing was submitted.`);
+  if (!state.feeds) throw new Error('This V2 launchpad was deployed before stocks were priced at launch, so it cannot take the stock list. Nothing was submitted.');
+  if (!state.groups.length) return { message: `All ${state.listed} listed stocks are already approved on ${w.net.name}.` };
+  if (state.treasury.toLowerCase() === w.address.toLowerCase()) {
+    if (w.net.mainnet) throw new Error('On mainnet the treasury is a Safe; connect a wallet that is not the treasury to download the batches. Nothing was submitted.');
+    let n = 0;
+    for (const group of state.groups) for (const c of group) { await step(w, w.signer.sendTransaction({ to: c.to, data: c.data }), `Approve ${c.symbol} (${++n} of ${state.groups.flat().length}), priced at each launch by its feed…`); }
+    return { message: `${n} stocks approved on ${w.net.name}.` };
+  }
+  const batches = state.groups.map((group, i) => safeBatch({ chainId: w.net.chainId, safe: state.treasury, name: `Elpida V2 stock approvals ${i + 1} of ${state.groups.length}`,
+    description: `Approve ${group.map(c => c.symbol).join(', ')} as V2 pairs, each priced at launch by its verified feed (config/stocks/${w.net.key}.json, checked ${state.checkedAt}).`, transactions: group }));
+  return { safeBatches: batches, message: `${batches.length} Safe ${batches.length === 1 ? 'batch' : 'batches'} for ${state.groups.flat().length} stocks downloaded. Drag each into Safe{Wallet} → Transaction Builder, check it, then sign and execute.` };
 }
 
 /** Whole basis points from a percentage typed in the launch form ("1.25" → 125). */
@@ -226,7 +294,7 @@ export async function v2LaunchTerms(w, { pair = 'native', feeBps = V2.defaultFee
   const asset = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? testStock(w, quoteAsset)?.address : ZeroAddress;
   if (!asset) throw new Error('Choose a test stock approved for V2.');
   const decimals = asset === ZeroAddress ? 18 : Number(await new Contract(asset, ERC20, w.provider).decimals());
-  const [vQ, minFee, launchFee] = await Promise.all([asset === ZeroAddress ? factory.nativeVirtualQuote() : factory.approvedQuotes(asset), hook.minFeeBps(), factory.launchFee()]);
+  const [vQ, minFee, launchFee] = await Promise.all([v2VirtualQuote(factory, asset), hook.minFeeBps(), factory.launchFee()]);
   if (vQ === 0n) throw new Error('This pair is not approved for V2.');
   return { minFeeBps: Number(minFee), maxFeeBps: V2.maxFeeBps, defaultFeeBps: V2.defaultFeeBps, decimals,
     maxFirstBuy: formatUnits(maxFirstBuyGross({ feeBps, vQ }), decimals), firstBuyCapTokens: formatUnits(firstBuyCapTokens(), 18), launchFee: formatUnits(launchFee, 18) };
@@ -258,11 +326,11 @@ export async function launchV2(w, body) {
   const asset = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? getAddress(testStock(w, body.quoteAsset)?.address ?? ZeroAddress) : ZeroAddress;
   if (pair === 'xstock') {
     if (asset === ZeroAddress) throw new Error('Choose a test stock that is approved on this network.');
-    if ((await factory.approvedQuotes(asset)) === 0n) throw new Error(`${testStock(w, asset)?.symbol ?? 'This stock'} is not a V2 pair yet: the operator approves it in the operator panel (Launchpads, V2 card). Pair with the native coin or USDC instead.`);
+    if (!(await v2PairApproved(factory, asset))) throw new Error(`${testStock(w, asset)?.symbol ?? 'This stock'} is not a V2 pair yet: the operator approves it in the operator panel (Launchpads, V2 card). Pair with the native coin or USDC instead.`);
     await w.stockPreflight?.({ pair: 'xstock', quoteAddress: asset }, 'launch');
   }
   const quote = asset === ZeroAddress ? null : new Contract(asset, ERC20, w.signer), decimals = quote ? Number(await quote.decimals()) : 18;
-  const vQ = quote ? await factory.approvedQuotes(asset) : await factory.nativeVirtualQuote();
+  const vQ = await v2VirtualQuote(factory, asset);
   if (vQ === 0n) throw new Error('This pair is not approved on this V2 launchpad. Launch with the native coin.');
   // First buy paid in the native coin on a pair-asset launch: a separate swap into the pair asset just before the launch
   // (at most 1% below the quote); the launch then buys with the swap's guaranteed minimum. Any extra stays in the wallet.

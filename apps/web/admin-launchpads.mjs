@@ -2,7 +2,7 @@ import { h, short, errorText } from './ui.mjs';
 import { chainIcon } from './chain-ui.mjs';
 import { downloadSafeBatch } from './admin-pairs.mjs';
 import { v4Available, v4Deployment, v4PoolManager, savedTestPoolManager, v4StockPairs, v2Deployment } from './v4-launchpad.mjs';
-import { v2Available, v2StockPairs, v2UsdcDistributors } from './v2-launchpad.mjs';
+import { v2Available, v2StockPairs, v2StockListState, v2UsdcDistributors } from './v2-launchpad.mjs';
 
 // Operator panel, Launchpads tab (#/monkey?tab=launchpads, 6 November 2026). Setting up a network is an operator job,
 // so every deployment lives here and only here (Malik, 6 November 2026: "limited to admin panel only and not everyone"):
@@ -82,6 +82,20 @@ export function renderLaunchpads(ctx, { connect }) {
     return box;
   }
 
+  /** The verified stock list (config/stocks/<network>.json): how many are approved, and the approvals still to sign. */
+  function v2VerifiedStocks() {
+    const box = h('div.stack', h('p.small.muted', 'Checking the verified stock list…'));
+    v2StockListState(ctx.wallet).then(s => {
+      if (!s?.listed) { box.replaceChildren(h('h3.small', 'Verified stock list'), h('p.small.muted', 'No verified stock list for this network yet. It is built from the issuer\'s and the oracle\'s published lists with scripts/stock-list.mjs, which checks every stock on chain.')); return; }
+      const left = s.groups.flat().length;
+      box.replaceChildren(h('h3.small', 'Verified stock list'),
+        h('p.small.muted', `${s.listed} stocks checked on chain (${new Date(s.checkedAt).toLocaleDateString()}); ${s.approved} approved on this launchpad.`),
+        !s.feeds ? h('p.small.muted', 'This launchpad was deployed before stocks were priced at launch from their feeds; a new V2 deployment can take the list.')
+          : left ? button(`Approve ${left} more ${left === 1 ? 'stock' : 'stocks'} (${s.groups.length} ${s.groups.length === 1 ? 'batch' : 'batches'} of up to 25)`, 'approve-v2-stock-list', {}) : h('p.small.muted', 'Every listed stock is approved.'));
+    }).catch(e => { box.replaceChildren(h('h3.small', 'Verified stock list'), h('p.small.muted', errorText(e))); });
+    return box;
+  }
+
   /** USDC payouts: the trader airdrop and holder rewards convert to USDC and pay only USDC once these are pinned. */
   function v2UsdcBlock(net) {
     const u = v2UsdcDistributors(net), box = h('div.stack', h('h3.small', 'USDC payouts'));
@@ -102,6 +116,7 @@ export function renderLaunchpads(ctx, { connect }) {
       h('p.small.muted', 'V2: $50 test starting market cap, graduation at ×5, each creator picks a fee from the minimum to 4% (1.25% default) for good, and every fee splits 30% creator / 30% trader airdrop / 10% flywheel / 10% holder rewards / 20% treasury, paid straight to their contracts. First buys are capped at 3% of supply. Not audited: test networks only.'),
       v2?.pinned ? h('p.small.muted', 'Shared team launchpad: factory ', h('span.mono', short(v2.factory)), ', router ', h('span.mono', short(v2.router)), '.') : null,
       v2 ? v2StockList() : null,
+      v2 ? v2VerifiedStocks() : null,
       v2?.pinned ? v2UsdcBlock(net) : null,
       v2 && !v2.pinned ? h('div.stack', h('p.small', 'Deployed from this browser. Send these addresses to be pinned in networks.mjs (v2.shared) so the site lists its tokens and shows its Rewards analytics:'),
         h('pre.small.selectable', JSON.stringify({ factory: v2.factory, hook: v2.hook, router: v2.router, airdrop: v2.airdrop, holder: v2.holder, flywheel: v2.flywheel, keeper: v2.keeper, block: v2.block, minFeeBps: v2.minFeeBps }, null, 2))) : null,

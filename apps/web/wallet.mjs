@@ -5,7 +5,7 @@ import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './
 import { isV4Token, v4Available, v4Deployment, deployTestPoolManager, v4Quote, v4Trade, v4WithdrawFees, v4TokenState, v4RouterFor } from './v4-launchpad.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
 import { V2_MODEL } from '/v2-economics.mjs';
-import { deployV2, deployV2UsdcDistributors, launchV2, approveV2Stock, claimCreatorSplit, claimIdentityRow } from './v2-launchpad.mjs';
+import { deployV2, deployV2UsdcDistributors, approveV2StockList, launchV2, approveV2Stock, claimCreatorSplit, claimIdentityRow } from './v2-launchpad.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress } from '/vendor/ethers.js';
 import { routerAbi, swapCalldata } from '/dex-router.mjs';
@@ -1041,6 +1041,7 @@ export class TestnetWallet {
     if(action==='deploy-v2')return deployV2(this,body??{});
     if(action==='deploy-v2-usdc')return deployV2UsdcDistributors(this);
     if(action==='approve-v2-stock')return approveV2Stock(this,body??{});
+    if(action==='approve-v2-stock-list')return approveV2StockList(this);
     if(action==='launch'&&body?.model===V2_MODEL)return launchV2(this,body);
     if(action==='claim-creator-split')return claimCreatorSplit(this,body??{});
     if(action==='claim-identity-row')return claimIdentityRow(this,body??{});

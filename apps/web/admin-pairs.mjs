@@ -10,9 +10,11 @@ import { stockApprovalGate } from './stock-approval.mjs';
 // treasury, otherwise downloaded as a Safe Transaction Builder file. The public account panel no longer shows any of it.
 
 export function downloadSafeBatch(result) {
+  // Several batches (e.g. 100+ stock approvals, 25 per transaction): one file each, numbered.
+  if (result?.safeBatches?.length) { result.safeBatches.forEach((b, i) => setTimeout(() => downloadSafeBatch({ safeBatch: b, part: i + 1 }), i * 400)); return result; }
   if (!result?.safeBatch) return result;
   const url = URL.createObjectURL(new Blob([JSON.stringify(result.safeBatch, null, 2)], { type: 'application/json' }));
-  const link = h('a', { href: url, download: `elpida-treasury-${result.safeBatch.chainId}-${Date.now()}.json` });
+  const link = h('a', { href: url, download: `elpida-treasury-${result.safeBatch.chainId}-${Date.now()}${result.part ? `-part${result.part}` : ''}.json` });
   document.body.append(link); link.click(); link.remove(); setTimeout(() => URL.revokeObjectURL(url), 10000);
   return result;
 }
