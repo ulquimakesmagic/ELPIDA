@@ -92,3 +92,19 @@ test('the client selects Raydium mainnet accounts only for the mainnet build', (
   }
   assert.equal(raydiumQuote(1_000_000n, 10n ** 9n, 10n ** 9n).fee, 10_000n, '1% fee, rounded up');
 });
+
+test('claiming fees of a graduated ELPIDA V2 token signs withdraw_v2_fees and the V2 Raydium harvest, never the old ones', async () => {
+  const { w, log, client } = wallet();
+  const config = { address: web3.Keypair.generate().publicKey, quoteDecimals: 9, wsol: true, symbol: 'SOL', treasury: web3.Keypair.generate().publicKey, quoteMint: new web3.PublicKey('So11111111111111111111111111111111111111112'), quoteTokenProgram: new web3.PublicKey('TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA') };
+  const v2Pool = { status: STATUS_MIGRATED, symbol: 'SHIB', mint, reward: web3.Keypair.generate().publicKey, protocolFees: 0n, creatorFees: 0n, v2: { feeBps: 125, accrued: 1_000_000n, paid: [0n, 0n, 0n, 0n, 0n] } };
+  Object.assign(w, { loadConfig: async () => config, configOf: () => config, refsOf: c => c, freshPool: async () => ({ mint, pool: v2Pool }),
+    pumpStates: async () => new Map([['x', { venue: 'Raydium', harvestable: 10n ** 9n, migration: { pendingBuyback: 5n * 10n ** 9n }, state: { lpSupply: 10n ** 12n, base: 200_000_000n * 10n ** 6n, quote: 10n ** 10n } }]]),
+    fitsOneTransaction: async () => true });
+  const r = await w.transact('withdraw', { token: mint.toBase58() });
+  assert.match(r.message, /Fees claimed/);
+  const ixs = log.sent[0].instructions, has = name => ixs.some(ix => Buffer.from(ix.data.subarray(0, 8)).equals(Buffer.from(DISCRIMINATORS[name])));
+  assert.ok(has('withdrawV2Fees') && !has('withdrawFees'), 'the V2 fee ledger');
+  const harvest = ixs.find(ix => Buffer.from(ix.data.subarray(0, 8)).equals(Buffer.from(DISCRIMINATORS.harvestRaydiumFees)));
+  assert.equal(harvest.keys.length, client.harvestRaydiumFees({ payer: w.publicKey, config, mint, reward: v2Pool.reward, v2: true }).at(-1).keys.length, 'the V2 harvest (with the pool\'s SOL account)');
+  assert.ok(!has('raydiumBuyback'), 'no partner buyback for V2 pools');
+});

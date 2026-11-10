@@ -157,3 +157,9 @@ test('keeper status: each job\'s latest run, with the error text when it failed'
   ]);
   assert.deepEqual(jobs.map(j => [j.job, j.status, j.error]), [['fees', 'ok', null], ['holder', 'failed', '429 Too Many Requests: max usage reached'], ['snapshot', 'ok', null]]);
 });
+
+test('keeper status: a failed job that has since run cleanly (nothing due) shows as ok again', async () => {
+  const { latestJobs } = await import('../packages/core/v2-keeper-plan.mjs');
+  const rows = [{ job: 'airdrop', at: 100, status: 'failed', detail: JSON.stringify({ error: '429 Too Many Requests' }) }, { job: 'holder', at: 100, status: 'failed', detail: JSON.stringify({ error: '503' }) }];
+  assert.deepEqual(latestJobs(rows, { airdrop: 200, holder: 50 }).map(j => [j.job, j.status, j.at, j.error]), [['airdrop', 'ok', 200, null], ['holder', 'failed', 100, '503']]);
+});

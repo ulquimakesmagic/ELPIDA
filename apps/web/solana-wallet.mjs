@@ -1,5 +1,5 @@
 import { nowSeconds } from './clock.mjs';
-import { createElpidaSolana, ownFeeBps, validV2Symbol, V2, quoteBuy, quoteSell, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, tradeFeeBps, lockedPoolVenue, mintControls, testConversionOut, decodeTestConversion, STATUS_TRADING, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut, VENUE_RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, raydiumQuote, raydiumCreationCost, raydiumBuybackAmount } from '/elpida-solana.mjs';
+import { createElpidaSolana, v2Owed, ownFeeBps, validV2Symbol, V2, quoteBuy, quoteSell, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, tradeFeeBps, lockedPoolVenue, mintControls, testConversionOut, decodeTestConversion, STATUS_TRADING, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut, VENUE_RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, raydiumQuote, raydiumCreationCost, raydiumBuybackAmount } from '/elpida-solana.mjs';
 import {normalizeMetadata,withSavedMetadata} from './metadata.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 import { PAIR_LIMITS, SOLANA_LAUNCH_KINDS, usdReferenceFor } from '/pairs.mjs';
@@ -304,7 +304,9 @@ export class SolanaWallet {
         launchedAt: Number(pool.createdAt), feeSchedule: { base: Number(ownFeeBps(config, pool)), start: Number(config.snipeStartBps), window: Number(config.snipeWindowSecs) },
         // `complete`: the curve sold out; `graduated`: its liquidity is now in the locked PumpSwap pool.
         complete, graduated: pool.status === STATUS_MIGRATED || pool.status === STATUS_LOCKED, lockedPool: pool.status === STATUS_LOCKED, completedAt: Number(pool.graduatedAt),
-        protocolFees: formatAmount(pool.protocolFees, d), creatorFees: formatAmount(pool.creatorFees, d), liquidityLocked: true,
+        // ELPIDA V2 pools keep a five-way fee ledger instead: the creator's 30% owed, and everything else owed.
+        ...(pool.v2 ? (() => { const owed = v2Owed(pool.v2).map(x => (x > 0n ? x : 0n)); return { v2: true, creatorFees: formatAmount(owed[0], d), protocolFees: formatAmount(owed.slice(1).reduce((a, b) => a + b, 0n), d) }; })()
+          : { protocolFees: formatAmount(pool.protocolFees, d), creatorFees: formatAmount(pool.creatorFees, d) }), liquidityLocked: true,
         // Early-partner tier fixed at launch, and tokens its buybacks burned on the curve (LP-fee burns added below).
         buybackBps: pool.buybackBps, burned: formatAmount(pool.buybackBurned, TOKEN_DECIMALS),
       };
@@ -750,16 +752,19 @@ export class SolanaWallet {
       // Curve fees and PumpSwap LP fee growth (both permissionless). When both are due they go in ONE transaction if it
       // fits and simulates; otherwise two, exactly as before. The check signs nothing.
       const hashes = [];
-      const curveFees = pool.protocolFees + pool.creatorFees > 0n ? [this.client.withdrawFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward })] : [];
+      // ELPIDA V2 pools: the five-way ledger (withdraw_v2_fees) and the V2 harvest (token side burned, SOL side shared).
+      const v2 = !!pool.v2, v2Due = v2 && v2Owed(pool.v2).some(x => x > 0n);
+      const curveFees = v2 ? (v2Due ? [this.client.withdrawV2Fees({ payer: this.publicKey, config: refs, mint, reward: pool.reward })] : [])
+        : pool.protocolFees + pool.creatorFees > 0n ? [this.client.withdrawFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward })] : [];
       let harvest = [], venue = 'PumpSwap';
       if (pool.status === STATUS_MIGRATED) {
         const [state] = (await this.pumpStates([pool])).values();
         venue = state?.venue ?? venue;
         const raydium = venue === 'Raydium';
-        if (state?.harvestable > 0n) harvest = raydium ? this.client.harvestRaydiumFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward }) : this.client.harvestLpFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward });
+        if (state?.harvestable > 0n) harvest = raydium ? this.client.harvestRaydiumFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward, v2 }) : this.client.harvestLpFees({ payer: this.publicKey, config: refs, mint, reward: pool.reward, v2 });
         // Partner pools on Raydium: spend queued SOL (and what this harvest queues) on a buyback and burn, capped at 1% of depth.
-        const queued = state ? state.migration.pendingBuyback + (harvest.length ? withdrawOut(state.harvestable, state.state).quote * BigInt(pool.buybackBps) / 10_000n : 0n) : 0n;
-        if (raydium && raydiumBuybackAmount(queued, state.state.quote) > 0n) harvest = [...harvest, this.client.raydiumBuyback({ mint })];
+        const queued = !v2 && state ? state.migration.pendingBuyback + (harvest.length ? withdrawOut(state.harvestable, state.state).quote * BigInt(pool.buybackBps) / 10_000n : 0n) : 0n;
+        if (!v2 && raydium && raydiumBuybackAmount(queued, state.state.quote) > 0n) harvest = [...harvest, this.client.raydiumBuyback({ mint })];
       }
       const combined = curveFees.length && harvest.length ? [this.client.computeBudget(HARVEST_COMPUTE_UNITS + 100_000), ...curveFees, ...harvest] : null;
       if (combined && await this.fitsOneTransaction(combined)) {

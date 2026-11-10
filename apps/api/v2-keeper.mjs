@@ -56,7 +56,7 @@ export class V2Keeper {
 
   async tick() {
     if (this.busy) return; this.busy = true;
-    try { for (const w of this.workers) for (const job of ['fees', 'airdrop', 'holder', 'creator', 'flywheel']) { try { await this[job](w); } catch (e) { this.record(w.chain, job, 'failed', { error: e.shortMessage ?? e.message }); } } }
+    try { for (const w of this.workers) for (const job of ['fees', 'airdrop', 'holder', 'creator', 'flywheel']) { try { await this[job](w); (this.checked ??= {})[`${w.chain}:${job}`] = this.now(); } catch (e) { this.record(w.chain, job, 'failed', { error: e.shortMessage ?? e.message }); } } }
     finally { this.busy = false; }
   }
 
@@ -304,7 +304,7 @@ export class V2Keeper {
   status() {
     return { enabled: true, chains: this.workers.map(w => ({ chain: w.chain, keeper: w.signer.address ?? null, airdropNext: this.get(`${w.chain}:airdrop:next`, 0), holderNext: this.get(`${w.chain}:holder:next`, 0),
       runs: this.db.prepare('SELECT job,at,status FROM v2k_runs WHERE chain=? ORDER BY id DESC LIMIT 8').all(w.chain),
-      jobs: latestJobs(this.db.prepare('SELECT job,at,status,detail FROM v2k_runs WHERE id IN (SELECT MAX(id) FROM v2k_runs WHERE chain=? GROUP BY job) ORDER BY job').all(w.chain)) })) };
+      jobs: latestJobs(this.db.prepare('SELECT job,at,status,detail FROM v2k_runs WHERE id IN (SELECT MAX(id) FROM v2k_runs WHERE chain=? GROUP BY job) ORDER BY job').all(w.chain), Object.fromEntries(Object.entries(this.checked ?? {}).filter(([k]) => k.startsWith(`${w.chain}:`)).map(([k, v]) => [k.slice(w.chain.length + 1), v]))) })) };
   }
 }
 
