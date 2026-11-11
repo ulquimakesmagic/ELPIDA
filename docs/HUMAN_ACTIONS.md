@@ -1,5 +1,10 @@
 # Actions that need Malik
 
+## Holder sharing in dollars, and conversion pools on every test network, 11 November 2026
+
+- **Wallet + X + website allocations** no longer fail with "Every allocation share must be above zero": the shares were read from a field the form no longer fills. Nothing to do.
+- **Share fees with holders** now asks for dollars: a distribution threshold (default $20) and a minimum holding value (default $20), both editable. The threshold is converted to the pair asset at the launch-time price and fixed in the vault; the vault also records both dollar figures (ElpidaV2CreatorRewards version 2). The keeper applies the minimum holding value at the token's last trade price each round, and waits rather than guess when there is no fresh price. Earlier vaults keep working.
+- **Conversion pools** (native coin ↔ test stock) can now be funded on Ethereum Sepolia, Base Sepolia, BNB testnet and Robinhood testnet: Operator panel → Pairs → "conversion liquidity", with the stock's controller wallet (at most 0.1 test coin per setup; PancakeSwap uses its 1% tier). Do this on Robinhood for tTSLAon (0xc6df…af87) so the token page can take ETH.
 ## Solana devnet: USDC payouts (program upgrade), 11 November 2026
 
 After the Solana USDC payouts PR is merged:

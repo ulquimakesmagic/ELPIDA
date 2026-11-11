@@ -481,12 +481,41 @@ const V3_FACTORY = ['function getPool(address,address,uint24) view returns(addre
  * fixed in it for good. "Buy a reward token" swaps on the network's Uniswap v3 pool between the pair asset and the
  * reward asset, so that pool must hold liquidity now; its fee tier is fixed in the vault.
  */
-async function creatorStrategyVault(w, d, { mode, threshold, minimumHolding, vestingDays, rewardAsset, feeAsset, feeDecimals }) {
+/**
+ * USD per whole unit of a pair asset now, or null: the native coin from the oracle, the network's USDC at $1, a stock
+ * from its price feed (a feed-priced V2 approval or a test stock's reference feed), at most 4 days old.
+ */
+export async function pairUsd(w, asset) {
+  if (asset === ZeroAddress) { try { const p = await w.oraclePrice(); return p?.usd > 0 ? p.usd : null; } catch { return null; } }
+  if (w.oracle?.usdc && asset.toLowerCase() === String(w.oracle.usdc).toLowerCase()) return 1;
+  const FEED = ['function decimals() view returns(uint8)', 'function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)'];
+  let feed = (w.approvedQuotes ?? []).find(a => a.address?.toLowerCase() === asset.toLowerCase())?.stock?.feed ?? null;
+  const d = v2Deployment(w.net);
+  if (!feed && d?.factory) { try { const q = await new Contract(d.factory, V2_FACTORY_ABI, w.provider).quoteFeeds(asset); if (q.feed !== ZeroAddress) feed = q.feed; } catch { /* older factory */ } }
+  if (!feed) return null;
+  try {
+    const f = new Contract(feed, FEED, w.provider), [round, decimals, block] = await Promise.all([f.latestRoundData(), f.decimals(), w.provider.getBlock('latest')]);
+    if (round[1] <= 0n || Number(block.timestamp) - Number(round[3]) > 4 * 86_400) return null;
+    return Number(round[1]) / 10 ** Number(decimals);
+  } catch { return null; }
+}
+
+async function creatorStrategyVault(w, d, { mode, threshold, thresholdUsd, minimumHolding, minimumHoldingUsd, vestingDays, rewardAsset, feeAsset, feeDecimals }) {
   const m = STRATEGY_MODES[mode];
   if (m === undefined) throw new Error('Choose a holder strategy. Nothing was submitted.');
   const keeper = w.config.v2Keeper;
   if (!keeper?.address || !keeper.active) throw new Error('Holder strategies need the Elpida V2 keeper, which is not running on this server. Nothing was submitted.');
-  const thresholdRaw = parseUnits(String(threshold), feeDecimals), minimumRaw = parseUnits(String(minimumHolding || '0'), 18);
+  // The threshold is set in USD (Malik, 11 November: "$20 by default, editable"); the contract keeps it in the pair asset
+  // at today's price, fixed at launch, and records the USD values. The USD minimum holding is applied at each distribution.
+  const usdE6 = v => { const n = Number(v || 0); if (!Number.isFinite(n) || n < 0 || n > 1_000_000) throw new Error('USD amounts are from $0 to $1,000,000. Nothing was submitted.'); return BigInt(Math.round(n * 1e6)); };
+  const thresholdUsdE6 = thresholdUsd != null && thresholdUsd !== '' ? usdE6(thresholdUsd) : 0n, minimumHoldingUsdE6 = usdE6(minimumHoldingUsd);
+  let thresholdRaw;
+  if (thresholdUsdE6 > 0n) {
+    const usd = await pairUsd(w, feeAsset);
+    if (!usd) throw new Error('There is no fresh USD price for the trading pair right now, so a USD threshold cannot be set. Try again shortly. Nothing was submitted.');
+    thresholdRaw = parseUnits((Number(thresholdUsdE6) / 1e6 / usd).toFixed(Math.min(feeDecimals, 12)), feeDecimals);
+  } else thresholdRaw = parseUnits(String(threshold), feeDecimals);
+  const minimumRaw = parseUnits(String(minimumHolding || '0'), 18);
   if (thresholdRaw <= 0n) throw new Error('Set a distribution threshold above zero. Nothing was submitted.');
   const vesting = m === 2 ? BigInt(Math.round(Number(vestingDays) * 86400)) : 0n;
   if (m === 2 && (vesting < 86400n || vesting > 3650n * 86400n)) throw new Error('Vesting must be between 1 and 3,650 days. Nothing was submitted.');
@@ -507,7 +536,7 @@ async function creatorStrategyVault(w, d, { mode, threshold, minimumHolding, ves
   const response = await fetch('/api/v4-artifacts');
   const art = response.ok ? (await response.json()).v2?.creatorRewards : null;
   if (!art?.bytecode) throw new Error('The holder strategy contract is unavailable on this server. Nothing was submitted.');
-  const deployed = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(keeper.address, d.hook, d.router, w.dex?.router ?? ZeroAddress, w.dex?.weth ?? ZeroAddress, poolFee, m, reward, thresholdRaw, minimumRaw, vesting);
+  const deployed = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(keeper.address, d.hook, d.router, w.dex?.router ?? ZeroAddress, w.dex?.weth ?? ZeroAddress, poolFee, m, reward, thresholdRaw, minimumRaw, vesting, thresholdUsdE6, minimumHoldingUsdE6);
   const r = await w.wait(Promise.resolve(deployed.deploymentTransaction()), 'Deploy your holder strategy vault. Its strategy and settings are fixed for good; the Elpida keeper runs it…');
   await walletCaughtUp(w, r?.tx?.nonce);
   const address = await deployed.getAddress();
@@ -566,12 +595,15 @@ export async function creatorStrategyState({ provider, net, token }) {
   const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
   if (!l.creatorVault || l.creatorVault === ZeroAddress || (await provider.getCode(l.creatorVault)) === '0x') return null;
   const v = new Contract(l.creatorVault, STRATEGY_ABI, provider);
-  try { if ((await v.CREATOR_REWARDS_VERSION()) !== 1n) return null; } catch { return null; }
+  let version; try { version = await v.CREATOR_REWARDS_VERSION(); if (version !== 1n && version !== 2n) return null; } catch { return null; }
+  // Version 2 also records the creator's dollar figures: the threshold as chosen, and the minimum holding value.
+  let thresholdUsd = null, minimumHoldingUsd = null;
+  if (version === 2n) { const u = new Contract(l.creatorVault, ['function thresholdUsdE6() view returns(uint256)', 'function minimumHoldingUsdE6() view returns(uint256)'], provider); const [a, b] = await Promise.all([u.thresholdUsdE6(), u.minimumHoldingUsdE6()]); thresholdUsd = a > 0n ? Number(a) / 1e6 : null; minimumHoldingUsd = b > 0n ? Number(b) / 1e6 : null; }
   const [mode, threshold, minimumHolding, vesting, rewardAsset, count] = await Promise.all([v.mode(), v.threshold(), v.minimumHolding(), v.vesting(), v.rewardAsset(), v.roundCount()]);
   let pending = 0n; try { pending = (await new Contract(d.hook, ['function ledgers(address) view returns(uint256[5] owed,uint128[5] paid)'], provider).ledgers(token)).owed[0]; } catch { pending = 0n; }
   const rounds = [];
   for (let i = Number(count) - 1; i >= 0 && rounds.length < 5; i--) { const r = await v.rounds(i); rounds.push({ round: i, asset: r.asset, total: r.total, claimed: r.claimed, recipients: Number(r.recipients), postedAt: Number(r.postedAt), vesting: Number(r.vesting) }); }
-  return { vault: l.creatorVault, mode: ['holders', 'paired', 'buyback'][Number(mode)], threshold, minimumHolding, vesting: Number(vesting), rewardAsset, gathered: (await v.available(l.quote)) + pending, rounds, roundCount: Number(count) };
+  return { vault: l.creatorVault, mode: ['holders', 'paired', 'buyback'][Number(mode)], threshold, minimumHolding, thresholdUsd, minimumHoldingUsd, vesting: Number(vesting), rewardAsset, gathered: (await v.available(l.quote)) + pending, rounds, roundCount: Number(count) };
 }
 
 const IDENTITY_ABI = ['function IDENTITY_ALLOCATION_VERSION() view returns(uint256)', 'function rowCount() view returns(uint256)', 'function row(uint256) view returns(string label,address wallet,uint16 share)',

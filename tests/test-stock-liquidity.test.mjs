@@ -1,7 +1,7 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Contract as EthersContract,Interface,parseEther,parseUnits} from 'ethers';
-import {prepareTestLiquidity,testLiquidityAmounts,testLiquidityCalls,TEST_MANAGER_ABI,TEST_LIQUIDITY_CAP} from '../apps/web/test-stock-liquidity.mjs';
+import {prepareTestLiquidity,testLiquidityChain,testLiquidityAmounts,testLiquidityCalls,TEST_MANAGER_ABI,TEST_LIQUIDITY_CAP} from '../apps/web/test-stock-liquidity.mjs';
 import {quoteNativePairConversion} from '../apps/web/usdc-conversion.mjs';
 import {dexFixture,mined,compiled} from './helpers/dex-fixture.mjs';
 const asset='0x0000000000000000000000000000000000000001',weth='0x0000000000000000000000000000000000000002';
@@ -12,6 +12,11 @@ test('liquidity budget and initial price use integer units in either token order
  for(const nativeAmount of [0n,TEST_LIQUIDITY_CAP+1n])assert.throws(()=>testLiquidityAmounts({...args,nativeAmount}),/budget/);
 });
 test('mainnet is rejected before contract access',async()=>{await assert.rejects(prepareTestLiquidity({chainId:1}),/restricted/);});
+test('every EVM test network with a conversion DEX can fund one; no mainnet can',async()=>{
+ for(const id of [11155111,84532,97,46630])assert.equal(testLiquidityChain(id),true,String(id));
+ for(const id of [1,56,8453,4663,31337])assert.equal(testLiquidityChain(id),false,String(id));
+ await assert.rejects(prepareTestLiquidity({chainId:56}),/restricted/);
+});
 test('real test stock liquidity enables native quotes and rejects unsafe setup',async t=>{
  const f=await dexFixture(t),owner=f.addresses[0],signer=f.signers[0],d=f.dex;
  const testArt=name=>compiled['contracts/evm/testnet/'+name+'.sol'][name];
