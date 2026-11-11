@@ -13,6 +13,14 @@ const ALLOCATION = ['function IDENTITY_ALLOCATION_VERSION() view returns(uint256
 const TEN_MINUTES = 600_000;
 
 /** Where an owner lands after X sign-in: the token's claim page on the rewards screen (safe characters only). */
+/**
+ * The claim page with the X sign-in result for the page to show (Malik, 11 Nov: a proper page, not plain text):
+ * `x=verified&handle=…&wallet=…` or `x=failed&reason=…`. Everything is URL-encoded; the page renders it as text.
+ */
+export const xResultLink = (back, result) => `${back}${back.includes('?') ? '&' : '?'}${new URLSearchParams(result.ok
+  ? { x: 'verified', handle: String(result.handle ?? ''), wallet: String(result.wallet ?? '') }
+  : { x: 'failed', reason: String(result.reason ?? 'X verification failed.').slice(0, 200) })}`;
+
 export const claimLink = c => (c?.token && /^[a-z0-9-]{1,40}$/.test(String(c.network)) && isAddress(c.token) ? { back: `/#/rewards?claim=${getAddress(c.token)}&network=${c.network}` } : { back: '/#/rewards' });
 
 export class V2Identities {
@@ -83,11 +91,13 @@ export class V2Identities {
   }
 
   owns(state) { return !!state && this.x.sessions?.has?.(state); }
+  /** The claim page this X sign-in started from, read before finishing (so a failure still returns there). */
+  backFor(state) { const s = this.x.sessions?.get?.(state); return claimLink(s?.claim ?? s).back; }
 
   async finishX(params) {
     const c = await this.x.complete(params);
     await this.bind(c);
-    return { message: `@${c.target} verified. Its share now pays ${c.wallet}.`, ...claimLink(c) };
+    return { message: `@${c.target} verified. Its share now pays ${c.wallet}.`, handle: c.target, wallet: c.wallet, ...claimLink(c) };
   }
 
   async bind(c) {

@@ -137,7 +137,7 @@ export function claimFeesTag(ctx, token) {
  * recipient claims. A wallet recipient connects that wallet and collects; an X account or website owner connects the
  * wallet to be paid, signs, and proves ownership (X sign-in, or a DNS TXT record); after that anyone can pay it out.
  */
-export function allocationClaimView(ctx, { address, network }) {
+export function allocationClaimView(ctx, { address, network, xResult = null }) {
   const token = (ctx.state?.tokens ?? []).find(t => t.address.toLowerCase() === String(address).toLowerCase() && (!network || !t.network || t.network === network));
   if (!token) return h('section.panel.claim-view', h('h1', 'Claim creator fees'), h('p.muted', 'That token is not in the list yet. Check the link, or open it from the token page.'), h('a.btn.btn-secondary', { href: '#/' }, 'Explore tokens'));
   const net = v2Evm(ctx, token);
@@ -148,6 +148,7 @@ export function allocationClaimView(ctx, { address, network }) {
     ['globe', 'A website', 'Connect the wallet you want paid, press Verify ownership, and add the TXT record it shows to the website\'s DNS. Once verified, the share pays that wallet for good.'],
   ];
   return h('section.stack.claim-view',
+    xResult ? xResultBanner(xResult) : null,
     h('a.back-link', { href: `#/token/${token.address}?network=${encodeURIComponent(token.network ?? '')}` }, icon('arrow-left', 'icon-sm'), `$${token.symbol}`),
     h('div.panel.stack',
       h('h1', `Claim $${token.symbol} creator fees`),
@@ -167,4 +168,26 @@ export function claimableUsd(token, amount, decimals, symbol) {
   if (rate === null || !Number.isFinite(rate)) return h('span.split-amount.muted', { title: detail }, units > 0 ? 'Awaiting a price' : '$0');
   const usd = units * rate;
   return h('span.split-amount', { title: detail }, usd > 0 && usd < 0.01 ? '<$0.01' : `$${number(usd, 2)}`);
+}
+
+/**
+ * The X sign-in result, in the app (Malik, 11 Nov: a proper page instead of plain text). Verified: the handle, the
+ * wallet its share now pays, and the blue tick. Failed: X's reason and what to try. All text, never markup.
+ */
+export function xResultBanner(r) {
+  return r.ok
+    ? h('div.x-result.x-result-ok', { role: 'status' },
+      h('span.x-result-icon', icon('brand-x', 'icon-sm')),
+      h('div', h('strong', `@${r.handle} verified`, h('span.verified-tick', { 'aria-label': 'Verified' }, icon('badge-check', 'icon-xs'))),
+        h('p.small.muted', r.wallet ? `Its share of the creator fees now pays ${short(r.wallet)}, for good. Press Collect and pay out below to send what it has earned so far.` : 'Its share now pays the wallet you signed with.')))
+    : h('div.x-result.x-result-failed', { role: 'alert' },
+      h('span.x-result-icon', icon('brand-x', 'icon-sm')),
+      h('div', h('strong', 'X verification did not finish'), h('p.small.muted', r.reason || 'X did not confirm the account.'),
+        h('p.small.muted', 'Sign in to X as the account named in the allocation, then press Verify ownership again.')));
+}
+
+/** The result page when the sign-in did not start from a token's claim page. */
+export function xResultView(r) {
+  return h('section.stack.claim-view', h('div.panel.stack', h('h1', 'X verification'), xResultBanner(r),
+    h('div.row', h('a.btn.btn-primary', { href: '#/rewards' }, 'Go to Rewards'), h('a.btn.btn-secondary', { href: '#/' }, 'Explore tokens'))));
 }
