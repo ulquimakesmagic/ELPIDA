@@ -51,3 +51,6 @@ export function holderDistribution(budget, holdings, minimum, excluded = []) {
   for(let i=0;dust>0n;i++,dust--)rows[i].amount++;
   return rows.filter(r=>r.amount>0n).map(({address,amount})=>({address,amount}));
 }
+
+/** A normalized recipient's share in basis points (normalizeRewardPolicy returns `bps`; drafts carry `percent`). */
+export const recipientBps = r => (r.bps != null ? Number(r.bps) : Math.round(Number(r.percent) * 100));

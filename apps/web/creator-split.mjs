@@ -50,9 +50,9 @@ export function creatorStrategyCard(ctx, token) {
     const assetLabel = a => (a === '0x0000000000000000000000000000000000000000' ? net.nativeCurrency?.symbol ?? 'ETH' : a.toLowerCase() === token.address.toLowerCase() ? token.symbol : short(a));
     body.replaceChildren(
       h('dl.kv', h('dt', 'Strategy'), h('dd', STRATEGY_NAMES[s.mode] ?? s.mode),
-        h('dt', 'Threshold'), h('dd', `${fmt(s.threshold)} ${symbol}`),
+        h('dt', 'Threshold'), h('dd', s.thresholdUsd ? `$${number(s.thresholdUsd, 2)} at launch (${fmt(s.threshold)} ${symbol})` : `${fmt(s.threshold)} ${symbol}`),
         h('dt', 'Gathered'), h('dd', `${fmt(s.gathered)} ${symbol}`),
-        h('dt', 'Minimum holding'), h('dd', `${number(Number(formatUnits(s.minimumHolding, 18)), 2)} ${token.symbol}`),
+        h('dt', 'Minimum holding'), h('dd', s.minimumHoldingUsd ? `$${number(s.minimumHoldingUsd, 2)} of ${token.symbol} at the current price${s.minimumHolding > 0n ? ` and at least ${number(Number(formatUnits(s.minimumHolding, 18)), 2)}` : ''}` : `${number(Number(formatUnits(s.minimumHolding, 18)), 2)} ${token.symbol}`),
         ...(s.mode === 'paired' ? [h('dt', 'Paid in'), h('dd', assetLabel(s.rewardAsset))] : []),
         ...(s.mode === 'buyback' ? [h('dt', 'Vesting'), h('dd', `${number(s.vesting / 86400, 2)} days`)] : []),
         h('dt', 'Rounds paid'), h('dd', String(s.roundCount))),

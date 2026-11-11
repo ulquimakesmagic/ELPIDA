@@ -32,7 +32,7 @@ const ZERO_ROOT = '0x' + '0'.repeat(64);
 const GAS_TARGET = 5n * 10n ** 16n, GAS_SHARE_BPS = 1000n;
 // Creator strategy vaults (contracts/evm/v2/ElpidaV2CreatorRewards.sol): the keeper is their operator.
 const CREATOR = ['function CREATOR_REWARDS_VERSION() view returns(uint256)', 'function operator() view returns(address)', 'function token() view returns(address)', 'function feeAsset() view returns(address)',
-  'function mode() view returns(uint8)', 'function threshold() view returns(uint256)', 'function minimumHolding() view returns(uint256)', 'function vesting() view returns(uint64)', 'function bind(address)',
+  'function mode() view returns(uint8)', 'function threshold() view returns(uint256)', 'function minimumHolding() view returns(uint256)', 'function minimumHoldingUsdE6() view returns(uint256)', 'function vesting() view returns(uint64)', 'function bind(address)',
   'function payoutAsset() view returns(address)', 'function available(address) view returns(uint256)', 'function roundCount() view returns(uint256)', 'function swap(uint256,uint256) returns(uint256)',
   'function postRound(bytes32,uint256,uint32,string) returns(uint256)', 'function claimMany(uint256,(address account,uint256 amount,bytes32[] proof)[]) returns(uint256)', 'function rounds(uint256) view returns(address asset,bytes32 root,uint128 total,uint128 claimed,uint32 recipients,uint64 postedAt,uint64 vesting)'];
 const DEAD = '0x000000000000000000000000000000000000dead';
@@ -167,7 +167,7 @@ export class V2Keeper {
       if (!known) {
         const vault = (await hook.launchOf(t.address)).creatorVault;
         let ours = false;
-        try { const c = new Contract(vault, CREATOR, w.provider); ours = (await c.CREATOR_REWARDS_VERSION()) === 1n && lower(await c.operator()) === me; } catch { ours = false; }
+        try { const c = new Contract(vault, CREATOR, w.provider); ours = [1n, 2n].includes(await c.CREATOR_REWARDS_VERSION()) && lower(await c.operator()) === me; } catch { ours = false; }
         this.set(key, ours ? { vault } : false);
         if (!ours) continue;
         known = { vault };
@@ -194,7 +194,16 @@ export class V2Keeper {
     const balances = new Map();
     for (const x of index.transfersOf(t.address)) for (const [a, d] of [[x.from, -x.amount], [x.to, x.amount]]) balances.set(a, (balances.get(a) ?? 0n) + d);
     const excluded = [ZeroAddress, DEAD, vault.target, w.deployment.poolManager, w.deployment.hook, w.deployment.router, w.deployment.factory, w.deployment.airdrop, w.deployment.holder, w.deployment.flywheel].filter(Boolean);
-    const rows = holderDistribution(pool, [...balances].filter(([, balance]) => balance > 0n).map(([address, balance]) => ({ address, balance })), minimum, excluded);
+    // The creator's USD minimum (vaults of version 2): converted to tokens now with a fresh price, or the round waits.
+    let floor = minimum, usdMinimum = 0n;
+    try { usdMinimum = await vault.minimumHoldingUsdE6(); } catch { usdMinimum = 0n; }
+    if (usdMinimum > 0n) {
+      const tokenUsd = await this.tokenUsd(w, index, t);
+      if (!tokenUsd) return { token: t.address, status: 'waiting for a fresh USD price for the minimum holding' };
+      const tokens = BigInt(Math.ceil(Number(usdMinimum) / 1e6 / tokenUsd * 1e6)) * 10n ** 12n;
+      if (tokens > floor) floor = tokens;
+    }
+    const rows = holderDistribution(pool, [...balances].filter(([, balance]) => balance > 0n).map(([address, balance]) => ({ address, balance })), floor, excluded);
     if (!rows.length) return { token: t.address, status: 'waiting for eligible holders' };
     const round = Number(await vault.roundCount());
     const m = buildRound({ chainId: w.net.chainId, distributor: vault.target, round, asset }, rows.map(r => [r.address, r.amount]));
@@ -202,6 +211,30 @@ export class V2Keeper {
     for (let i = 0; i < m.entries.length; i += BATCH) await (await vault.claimMany(round, m.entries.slice(i, i + BATCH).map(e => [e.account, e.amount, e.proof]))).wait();
     if (Number(mode) === 2) this.set(`${w.chain}:creator:vesting:${lower(vault.target)}`, [...this.get(`${w.chain}:creator:vesting:${lower(vault.target)}`, []), round]);
     return { token: t.address, status: 'paid', round, asset, total: m.total.toString(), holders: m.recipients };
+  }
+
+  /** USD per whole token now: its last trade's price × its pair asset's USD price; null without both. */
+  async tokenUsd(w, index, t) {
+    const trades = index.tradesBetween(0, this.now()).filter(x => lower(x.token) === lower(t.address) && BigInt(x.tokenRaw ?? 0) > 0n);
+    const last = trades[trades.length - 1]; if (!last) return null;
+    const asset = lower(t.quoteAddress ?? ZeroAddress), usd = await this.assetUsd(w, asset); if (!usd) return null;
+    return Number(last.quoteAmount) / Number(last.tokenAmount) * usd;
+  }
+
+  /** USD per whole unit of a pair asset: the configured price, else a stock's feed (V2 factory or test stock), at most 4 days old. */
+  async assetUsd(w, asset) {
+    const known = w.usdPerUnit(asset); if (known) return known;
+    if (w.usdc && asset === lower(w.usdc)) return 1;
+    const FEED = ['function decimals() view returns(uint8)', 'function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)'];
+    let feed = null;
+    try { const q = await new Contract(w.deployment.factory, ['function quoteFeeds(address) view returns(address,uint64,uint8,uint8)'], w.provider).quoteFeeds(asset); if (q[0] !== ZeroAddress) feed = q[0]; } catch { /* older factory */ }
+    if (!feed) { try { feed = await new Contract(asset, ['function referenceFeed() view returns(address)'], w.provider).referenceFeed(); } catch { feed = null; } }
+    if (!feed) return null;
+    try {
+      const f = new Contract(feed, FEED, w.provider), [round, decimals] = await Promise.all([f.latestRoundData(), f.decimals()]);
+      if (round[1] <= 0n || this.now() - Number(round[3]) > 4 * 86_400) return null;
+      return Number(round[1]) / 10 ** Number(decimals);
+    } catch { return null; }
   }
 
   /** Buyback rounds: pushes what has vested since the last push, daily, until each round has fully vested. */

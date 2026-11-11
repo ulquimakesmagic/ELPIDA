@@ -18,7 +18,7 @@ const reverts = (promise, ...names) => assert.rejects(promise, e => names.some(n
 
 test('creator holder strategies: share with holders, buy a reward token, buy back and vest; the keeper runs them and can do nothing else', async t => {
   const f = await v2Fixture(t, { vaults: true, convert: true }), keeperAddr = f.addresses[4], art = v4Art('ElpidaV2CreatorRewards');
-  const vaultOf = (...args) => f.deploy(art, keeperAddr, f.hook.target, f.router.target, f.contracts.v3.router.target, f.contracts.v3.weth.target, ...args);
+  const vaultOf = (...args) => f.deploy(art, keeperAddr, f.hook.target, f.router.target, f.contracts.v3.router.target, f.contracts.v3.weth.target, ...args, ...(args.length === 6 ? [0n, 0n] : []));
   // Settings are checked at deployment.
   await reverts(vaultOf(0, 2, ZeroAddress, parseEther('0.001'), 0n, 0n), 'BadTerms');
   await reverts(vaultOf(0, 0, ZeroAddress, 0n, 0n, 0n), 'BadTerms');
@@ -26,8 +26,11 @@ test('creator holder strategies: share with holders, buy a reward token, buy bac
   const holders = await vaultOf(0, 0, ZeroAddress, parseEther('0.002'), parseEther('100000'), 0n);
   const paired = await vaultOf(3000, 1, f.usdc.target, parseEther('0.002'), 0n, 0n);
   const buyback = await vaultOf(0, 2, ZeroAddress, parseEther('0.002'), 0n, BigInt(10 * DAY));
+  // A USD minimum holding of $100 (version 2): applied by the keeper at the token's last trade price.
+  const usdMin = await vaultOf(0, 0, ZeroAddress, parseEther('0.002'), 0n, 0n, 20_000_000n, 100_000_000n);
+  assert.equal(await usdMin.CREATOR_REWARDS_VERSION(), 2n); assert.equal(await usdMin.thresholdUsdE6(), 20_000_000n);
   const tokens = {};
-  for (const [name, vault] of [['HOLD', holders], ['PAIR', paired], ['BACK', buyback]]) tokens[name] = await launchV2(f, { feeBps: 300, symbol: name, reward: vault.target });
+  for (const [name, vault] of [['HOLD', holders], ['PAIR', paired], ['BACK', buyback], ['USDM', usdMin]]) tokens[name] = await launchV2(f, { feeBps: 300, symbol: name, reward: vault.target });
 
   // Only the token whose creator vault it is can be bound, once; only the keeper can swap or post.
   await reverts(holders.bind(tokens.PAIR.token.target), 'BadTerms');
@@ -38,7 +41,7 @@ test('creator holder strategies: share with holders, buy a reward token, buy bac
   let chainTime = (await f.provider.getBlock('latest')).timestamp;
   const keeper = new V2Keeper({ workers: [{ chain: 'local', net: { chainId: 31337, key: 'local' }, provider: f.provider, signer: f.signers[4],
     deployment: { hook: f.hook.target, airdrop: f.contracts.airdrop.target, holder: f.contracts.holder.target, flywheel: f.contracts.flywheel.target, poolManager: f.manager.target, router: f.router.target, factory: f.factory.target },
-    index: () => index, usdPerUnit: () => null }], now: () => chainTime, publicUrl: 'https://elpida.test' });
+    index: () => index, usdPerUnit: a => (a === ZeroAddress.toLowerCase() ? 2500 : null) }], now: () => chainTime, publicUrl: 'https://elpida.test' });
   const w = keeper.workers[0];
   const run = async () => { chainTime = (await f.provider.getBlock('latest')).timestamp; await index.sync(); keeper.set('local:creator:last', 0); await keeper.creator(w); };
 
@@ -65,6 +68,11 @@ test('creator holder strategies: share with holders, buy a reward token, buy bac
   const share1 = hRound.total * b1 / (b1 + b2 + await tokens.HOLD.token.balanceOf(f.addresses[0]));
   assert.ok(got[0] >= share1 - 2n, 'by balance');
   assert.equal(await holders.reserved(ZeroAddress), 0n);
+
+  // USDM: the dust holder (~$0.02 of tokens) is below the $100 minimum; the two real holders are paid.
+  assert.equal(await usdMin.roundCount(), 1n);
+  const uRound = await usdMin.rounds(0);
+  assert.ok(uRound.total > 0n && uRound.recipients === 2n, `two holders above $100 (${uRound.recipients})`);
 
   // PAIR: the native fees became USDC on Uniswap v3; holders were paid in USDC.
   const [pRound] = [await paired.rounds(0)];

@@ -1,5 +1,8 @@
 // Operator rehearsal only. No real issuer assets or mainnet configuration are accepted.
+// Test networks with a conversion DEX (Malik, 11 November: Robinhood needed one too). Never a mainnet chain id.
+export const TEST_LIQUIDITY_CHAINS = { 11155111: 'Ethereum Sepolia', 84532: 'Base Sepolia', 97: 'BNB testnet', 46630: 'Robinhood Chain testnet' };
 export const TEST_LIQUIDITY_CHAIN = 11155111;
+export const testLiquidityChain = id => Object.hasOwn(TEST_LIQUIDITY_CHAINS, Number(id));
 export const TEST_LIQUIDITY_CAP = 100000000000000000n; // 0.1 test ETH
 export const TEST_MANAGER_ABI = [
  'function factory() view returns(address)','function WETH9() view returns(address)',
@@ -19,7 +22,7 @@ export function testLiquidityAmounts({nativeAmount,nativeUsd8,stockUsd8,asset,we
  return {token0,token1,amount0,amount1,stockAmount,sqrtPriceX96:sqrtInteger((amount1<<192n)/amount0)};
 }
 export async function prepareTestLiquidity({Contract,provider,dex,chainId,asset,account,nativeAmount,nativeUsd8}){
- if(chainId!==TEST_LIQUIDITY_CHAIN||Number((await provider.getNetwork()).chainId)!==TEST_LIQUIDITY_CHAIN)throw Error('Test liquidity setup is restricted to Ethereum Sepolia.');
+ if(!testLiquidityChain(chainId)||Number((await provider.getNetwork()).chainId)!==Number(chainId))throw Error('Test liquidity setup is restricted to test networks (Ethereum Sepolia, Base Sepolia, BNB testnet, Robinhood testnet).');
  if(!dex?.manager||same(asset,dex.weth))throw Error('Invalid conversion deployment.');
  const manager=new Contract(dex.manager,TEST_MANAGER_ABI,provider);
  if(!same(await manager.factory(),dex.factory)||!same(await manager.WETH9(),dex.weth))throw Error('Liquidity manager does not match the configured DEX.');
@@ -30,7 +33,9 @@ export async function prepareTestLiquidity({Contract,provider,dex,chainId,asset,
  if(Number(decimals)!==8||round[1]<=0n||round[0]<=0n||round[4]<round[0]||round[3]<=0n||round[3]>BigInt(block.timestamp)||BigInt(block.timestamp)-round[3]>172800n||Number(status)>1||paused||blocked.some(Boolean))throw Error('Test stock feed or issuer controls do not permit liquidity setup.');
  const plan=testLiquidityAmounts({nativeAmount,nativeUsd8,stockUsd8:round[1],asset,weth:dex.weth});
  const factory=new Contract(dex.factory,['function getPool(address,address,uint24) view returns(address)','function feeAmountTickSpacing(uint24) view returns(int24)'],provider);
- const fee=3000,spacing=Number(await factory.feeAmountTickSpacing(fee));if(spacing!==60)throw Error('Expected 0.3% V3 conversion tier is unavailable.');
+ // 0.3% where the DEX has it (Uniswap); otherwise its 1% tier (PancakeSwap v3 has no 0.3%).
+ let fee=3000,spacing=Number(await factory.feeAmountTickSpacing(fee));
+ if(spacing!==60){fee=10000;spacing=Number(await factory.feeAmountTickSpacing(fee));if(spacing<=0)throw Error('No 0.3% or 1% V3 conversion tier is available.');}
  const pool=await factory.getPool(plan.token0,plan.token1,fee);let funded=false;
  if(BigInt(pool)!==0n){
   const p=new Contract(pool,['function slot0() view returns(uint160,int24,uint16,uint16,uint16,uint8,bool)','function liquidity() view returns(uint128)','function token0() view returns(address)','function token1() view returns(address)','function factory() view returns(address)','function fee() view returns(uint24)'],provider);
@@ -41,7 +46,8 @@ export async function prepareTestLiquidity({Contract,provider,dex,chainId,asset,
   if(!funded&&price>0n&&delta*10000n>plan.sqrtPriceX96*50n)throw Error('Existing conversion pool price differs from the test reference. No liquidity sent.');
  }
  if(!funded&&(await stock.balanceOf(account)<plan.stockAmount||await provider.getBalance(account)<nativeAmount+500000000000000n))throw Error('Insufficient test stock or test ETH; leave ETH for network gas.');
- return {...plan,asset,account,nativeAmount,fee,tickLower:-887220,tickUpper:887220,pool,funded,quotedAt:Date.now(),deadline:BigInt(block.timestamp+300)};
+ const edge=Math.floor(887272/spacing)*spacing;
+ return {...plan,asset,account,nativeAmount,fee,tickLower:-edge,tickUpper:edge,pool,funded,quotedAt:Date.now(),deadline:BigInt(block.timestamp+300)};
 }
 export function testLiquidityCalls(Interface,plan){
  const i=new Interface(TEST_MANAGER_ABI);

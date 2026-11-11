@@ -1,4 +1,4 @@
-import {prepareTestLiquidity,testLiquidityCalls,TEST_MANAGER_ABI} from './test-stock-liquidity.mjs';
+import {prepareTestLiquidity,testLiquidityCalls,testLiquidityChain,TEST_MANAGER_ABI} from './test-stock-liquidity.mjs';
 import {verifyNativeRouter,findCurveNonce} from './native-trade-router.mjs';
 import { nowSeconds } from './clock.mjs';
 import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
@@ -576,7 +576,7 @@ export class TestnetWallet {
   }
   async getTestStockLiquidityQuote({asset,nativeAmount='0.05'}={}) {
     await this.checkNetwork();await this.verifyFactory();
-    if(this.net.chainId!==11155111||this.net.mainnet)throw Error('This rehearsal is restricted to Ethereum Sepolia.');
+    if(!testLiquidityChain(this.net.chainId)||this.net.mainnet||!this.dex?.manager)throw Error('This rehearsal needs a test network with a conversion DEX.');
     const approved=(this.approvedQuotes??[]).find(a=>a.address.toLowerCase()===String(asset).toLowerCase()&&a.test&&a.stock?.provider==='ondo-test');
     if(!approved)throw Error('Choose an approved simulated Ondo-style test stock.');
     const nativeWei=parseUnits(String(nativeAmount),18),price=await this.oraclePrice();
@@ -584,7 +584,7 @@ export class TestnetWallet {
     return {asset,nativeAmount:String(nativeAmount),stockAmount:formatUnits(plan.stockAmount,18),quotedAt:plan.quotedAt,funded:plan.funded,pool:plan.pool,symbol:approved.symbol,account:this.address,factory:this.deployment.factory,pending:localStorage.getItem(`elpida:test-conversion:${this.net.chainId}:${String(asset).toLowerCase()}:${this.address.toLowerCase()}`)};
   }
   async setupTestStockLiquidity(body) {
-    await this.checkNetwork();if(this.net.chainId!==11155111||this.net.mainnet)throw Error('This rehearsal is restricted to Ethereum Sepolia.');
+    await this.checkNetwork();if(!testLiquidityChain(this.net.chainId)||this.net.mainnet||!this.dex?.manager)throw Error('This rehearsal needs a test network with a conversion DEX.');
     if(!Number.isFinite(body.quotedAt)||Date.now()-body.quotedAt>60000||body.quotedAt>Date.now()||String(body.account).toLowerCase()!==this.address.toLowerCase()||String(body.factory).toLowerCase()!==this.deployment.factory.toLowerCase())throw Error('Liquidity quote expired or wallet changed. Get a fresh quote.');
     const key=`elpida:test-conversion:${this.net.chainId}:${String(body.asset).toLowerCase()}:${this.address.toLowerCase()}`;
     const pending=localStorage.getItem(key);
@@ -601,7 +601,7 @@ export class TestnetWallet {
     if(plan.stockAmount>maximum)throw Error('Price moved while approval was pending. Get a new funding quote.');
     const manager=new Contract(this.dex.manager,TEST_MANAGER_ABI,this.signer);
     const tx=await manager.multicall(testLiquidityCalls(Interface,plan),{value:plan.nativeAmount});localStorage.setItem(key,tx.hash);
-    const result=await this.wait(Promise.resolve(tx),'Fund the ETH/test-stock conversion pool…');
+    const result=await this.wait(Promise.resolve(tx),`Fund the ${this.net.nativeCurrency?.symbol??'ETH'}/test-stock conversion pool…`);
     if(await stock.allowance(this.address,this.dex.manager)>0n)await this.wait(stock.approve(this.dex.manager,0n),'Clear unused test stock liquidity approval…');
     localStorage.removeItem(key);return {hash:result.tx.hash,message:'Test conversion liquidity confirmed. The LP position stays in your wallet; underlying token pairs are unchanged.'};
   }

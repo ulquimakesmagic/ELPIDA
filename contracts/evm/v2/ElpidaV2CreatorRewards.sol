@@ -28,7 +28,8 @@ interface ICreatorRewardsWrapped { function deposit() external payable; function
 /// It cannot send money anywhere else. Anyone may pay any listed wallet with its proof. `minimumHolding` is the
 /// snapshot rule the keeper applies (published here so anyone can check a round).
 contract ElpidaV2CreatorRewards {
-    uint256 public constant CREATOR_REWARDS_VERSION = 1;
+    /// 2: the creator's USD settings are recorded (thresholdUsdE6, minimumHoldingUsdE6); the keeper applies the USD minimum.
+    uint256 public constant CREATOR_REWARDS_VERSION = 2;
     uint8 public constant HOLDERS = 0;
     uint8 public constant REWARD_TOKEN = 1;
     uint8 public constant BUYBACK = 2;
@@ -46,6 +47,12 @@ contract ElpidaV2CreatorRewards {
     uint256 public immutable threshold;
     /// Token base units a wallet must hold at the snapshot to be paid.
     uint256 public immutable minimumHolding;
+    /// The creator's distribution threshold in USD (6 decimals), as set at launch; `threshold` is it in the pair asset at
+    /// the launch-time price. For display.
+    uint256 public immutable thresholdUsdE6;
+    /// A wallet must also hold this much in USD (6 decimals), converted to tokens at each distribution with a fresh price
+    /// (the keeper applies it; with no fresh price the distribution waits). Zero: no USD minimum.
+    uint256 public immutable minimumHoldingUsdE6;
     /// BUYBACK only: how long each round's tokens take to vest.
     uint64 public immutable vesting;
 
@@ -76,13 +83,15 @@ contract ElpidaV2CreatorRewards {
     modifier nonReentrant() { if (entered) revert Reentrancy(); entered = true; _; entered = false; }
     modifier onlyOperator() { if (msg.sender != operator) revert OnlyOperator(); _; }
 
-    constructor(address operator_, address hook_, address router_, address swapRouter_, address wrappedNative_, uint24 poolFee_, uint8 mode_, address rewardAsset_, uint256 threshold_, uint256 minimumHolding_, uint64 vesting_) {
+    constructor(address operator_, address hook_, address router_, address swapRouter_, address wrappedNative_, uint24 poolFee_, uint8 mode_, address rewardAsset_, uint256 threshold_, uint256 minimumHolding_, uint64 vesting_, uint256 thresholdUsdE6_, uint256 minimumHoldingUsdE6_) {
         if (operator_ == address(0) || hook_ == address(0) || mode_ > BUYBACK || threshold_ == 0) revert BadTerms();
         if (mode_ == BUYBACK && (router_ == address(0) || vesting_ == 0 || vesting_ > 3650 days)) revert BadTerms();
         if (mode_ == REWARD_TOKEN && (swapRouter_ == address(0) || wrappedNative_ == address(0) || poolFee_ == 0)) revert BadTerms();
         if (mode_ != BUYBACK && vesting_ != 0) revert BadTerms();
         operator = operator_; hook = hook_; router = router_; swapRouter = swapRouter_; wrappedNative = wrappedNative_; poolFee = poolFee_;
         mode = mode_; rewardAsset = rewardAsset_; threshold = threshold_; minimumHolding = minimumHolding_; vesting = vesting_;
+        if (minimumHoldingUsdE6_ > 1_000_000_000_000 || thresholdUsdE6_ > 1_000_000_000_000) revert BadTerms();
+        thresholdUsdE6 = thresholdUsdE6_; minimumHoldingUsdE6 = minimumHoldingUsdE6_;
     }
 
     receive() external payable {}
