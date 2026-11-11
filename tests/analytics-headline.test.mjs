@@ -22,7 +22,7 @@ test('the headline adds every chain together, in dollars where priced', () => {
   assert.deepEqual(f.large.map(x => x.key), ['holders', 'creators', 'flywheel', 'airdrop']);
   assert.equal(by('holders').value, '$60'); assert.match(by('holders').note, /^\$40 more waiting/);
   assert.equal(by('creators').value, '$1.05K', '0.3 ETH at $2,500 + 300 USDC');
-  assert.match(by('creators').detail, /0\.6 SOL/, 'unpriced SOL is listed in SOL, not converted');
+  assert.match(by('creators').detail, /until priced: SOL/, 'unpriced SOL is named, not shown in SOL');
   assert.equal(by('flywheel').value, '$50'); assert.match(by('flywheel').note, /^2 coins bought and burned/);
   assert.equal(by('airdrop').value, '$250'); assert.equal(by('airdrop').note, 'USDC for qualifying traders');
   assert.equal(by('fees').value, '$3.5K');

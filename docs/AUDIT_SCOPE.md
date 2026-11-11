@@ -1,5 +1,8 @@
 # Audit brief: Elpida mainnet launchpad (checklist C1, 23 October 2026)
 
+> **Superseded for mainnet by [`AUDIT_SCOPE_V2.md`](AUDIT_SCOPE_V2.md) (11 November 2026).** ELPIDA V2 is what goes to
+> mainnet; this brief covers the earlier Model 10 contracts and is kept for the tokens launched on them.
+
 Elpida is a multichain memecoin launchpad. This brief is for auditors quoting and reviewing the EVM contracts that
 will run on mainnet. **Nothing here is audited yet.** Commit to audit: the `main` commit that merges this file
 (record the hash at engagement).

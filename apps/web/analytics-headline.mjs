@@ -10,7 +10,8 @@ import { combine, holdingOf } from './v2-rewards-view.mjs';
 /** The headline's figures from /api/public/v2-rewards (`rewards`, or null) and /api/public/analytics (`analytics`). */
 export function headlineFigures(rewards, analytics) {
   const chains = rewards?.deployed ? rewards.chains ?? [] : [];
-  const sum = pick => combine(chains.flatMap(c => pick(c).map(([asset, value]) => holdingOf(c, asset, value))));
+  // Dollars only; an asset with no fresh price is named under the figure instead of being shown in its own units.
+  const sum = pick => { const c = combine(chains.flatMap(ch => pick(ch).map(([asset, value]) => holdingOf(ch, asset, value)))); return { ...c, detail: c.extra.length ? `Not in the total until priced: ${c.extra.join(', ')}` : '' }; };
   const out = { large: [], small: [] };
   if (chains.length) {
     const paid = sum(c => (c.holder?.rounds ?? []).map(r => [r.asset, r.claimed])), waiting = sum(c => (c.holder?.assets ?? []).map(a => [a.asset, a.size]));
