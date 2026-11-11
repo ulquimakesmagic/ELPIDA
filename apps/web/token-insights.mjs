@@ -112,7 +112,7 @@ export function safetyChecks(token, { holders, dex } = {}) {
   const checks = [{ ok: true, text: 'Fixed supply of 1B. No mint and no owner after launch.' }];
   const venue = dex && dex !== 'test' ? dex : 'the DEX pool', v2 = isV2(token);
   // The token's own fee, never a fixed 1.25% (audit WEB-03): V2 tokens pick 1–4% at launch.
-  const fee = `${pct((token.feeBps ?? 125) / 100)}`;
+  const fee = `${pct((token.feeBps ?? 125) / 100)}`; // V2 tokens always carry feeBps; 1.25% is V2's default
   checks.push(v2 || isV4(token)
     ? { ok: true, text: 'Liquidity is locked from launch in its Uniswap v4 pool; nobody can add or remove it.' }
     : token.graduated
@@ -120,7 +120,11 @@ export function safetyChecks(token, { holders, dex } = {}) {
       : { ok: true, text: `Liquidity is locked permanently when it graduates to ${venue}.` });
   if (token.tax) checks.push({ ok: false, text: `Buy tax ${pct(token.tax.buyBps / 100)}, sell tax ${pct(token.tax.sellBps / 100)}, fixed at launch.` });
   else if (v2) checks.push({ ok: true, text: `No buy or sell tax. Every trade pays this token's ${fee} fee, before and after graduation; it can never change.` });
-  else checks.push({ ok: true, text: token.graduated ? 'No buy or sell tax.' : `No buy or sell tax. The curve fee is ${fee} per trade.` });
+  else {
+    // Other models: state a fee only when the token declares one (from #231: never invent a fee for a token).
+    const own = Number(token.feeBps ?? token.feeSchedule?.base) > 0 ? `${pct(Number(token.feeBps ?? token.feeSchedule.base) / 100)}` : null;
+    checks.push({ ok: true, text: token.graduated || !own ? 'No buy or sell tax.' : `No buy or sell tax. The curve fee is ${own} per trade.` });
+  }
   const burn = flywheelCheck(token);
   if (burn) checks.push(burn);
   const stock = stockCheck(token);

@@ -77,7 +77,7 @@ test('holder figures count wallets only', () => {
 });
 
 test('the safety checklist states facts and flags large holdings', () => {
-  const base = { ...token, devBoughtPct: 8.63, devHoldingPct: 7.63, metadataURI: 'ipfs://x' };
+  const base = { ...token, feeBps: 125, devBoughtPct: 8.63, devHoldingPct: 7.63, metadataURI: 'ipfs://x' }; // a Model 10 token declares its 1.25%
   const checks = safetyChecks(base, { holders, dex: 'Uniswap v3' });
   const text = checks.map(c => c.text).join('\n');
   assert.match(text, /Fixed supply of 1B/);
@@ -116,4 +116,11 @@ test('the Safety card states the token’s own fee, never a fixed 1.25%', () => 
     assert.match(text, /locked from launch/);
   }
   assert.match(safetyChecks({ feeBps: 400, graduated: true, model: 'v2-hook' }).map(c => c.text).join(' '), /before and after graduation/);
+});
+
+// From #231: a token that declares no fee gets no fee claim at all.
+test('the Safety card makes no fee claim for a token that declares none', () => {
+  const text = safetyChecks({ graduated: false }).map(c => c.text).join(' ');
+  assert.ok(!/fee is/.test(text), text);
+  assert.match(safetyChecks({ graduated: false, feeSchedule: { base: 100 } }).map(c => c.text).join(' '), /curve fee is 1% per trade/);
 });
