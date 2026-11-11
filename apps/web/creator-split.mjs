@@ -104,7 +104,10 @@ export function identityAllocationCard(ctx, token) {
     body.replaceChildren(
       h('p.small.muted', 'The creator\'s 30% share is split between these recipients, fixed for good by contract ', h('span.mono', short(state.vault)), '. X and website shares are held until their owners verify.'),
       h('ul.split-list', state.rows.map(r => h('li',
-        h('span', { title: r.wallet ?? '' }, name(r), r.kind !== 'wallet' ? h('small.muted', r.wallet ? ` · pays ${short(r.wallet)}` : ' · not verified') : null),
+        // A blue tick once the recipient is settled: a wallet row (fixed at launch), or an X account or website whose owner
+        // proved control and bound a payout wallet.
+        h('span', { title: r.wallet ?? '' }, name(r), r.wallet ? h('span.verified-tick', { title: r.kind === 'wallet' ? 'Wallet fixed at launch' : `Verified: pays ${r.wallet}`, 'aria-label': 'Verified' }, icon('badge-check', 'icon-xs')) : null,
+          r.kind !== 'wallet' ? h('small.muted', r.wallet ? ` · pays ${short(r.wallet)}` : ' · not verified') : null),
         h('span.split-share', `${number(r.bps / 100, 2)}%`),
         h('span.split-amount', `${number(Number(formatUnits(r.claimable, decimals)), 6)} ${symbol}`),
         r.wallet ? h('button.btn.btn-secondary.btn-sm', { type: 'button', disabled: ctx.mode !== 'testnet', on: { click: () => act(async () => { await ctx.run('claim-identity-row', { token: token.address, index: r.index }); await load(); }) } }, 'Collect and pay out')
