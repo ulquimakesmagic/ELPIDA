@@ -175,7 +175,7 @@ export function renderLaunch(ctx) {
       h('div.preview-card', h('span.lk-label', h('i'), 'Token preview'),
         h('div.lk-well', draft.image ? avatar({ symbol: draft.symbol || 'NEW', metadata: { image: draft.image } }, 'avatar-xl') : h('span.lk-spark', icon('sparkles'))),
         h('div.lk-name', h('h3', draft.name || 'Your token name'), h('span.sym.muted.small', `$${(draft.symbol || 'SYMBOL').toUpperCase()}`), h('span.lk-paired', 'Paired with ', h('strong', pairSymbol()))),
-        h('dl.lk-facts', h('dt', 'Network'), h('dd', draft.chain ? (draft.chain === 'local' ? 'Local simulation' : net()?.name ?? draft.chain) : 'Not chosen'), h('dt', 'Status'), h('dd', 'Pre-launch'), ...(startCap() ? [h('dt', 'Starts at'), h('dd', startCap())] : [])),
+        h('dl.lk-facts', h('dt', 'Network'), h('dd', draft.chain ? (draft.chain === 'local' ? 'Local simulation' : net()?.name ?? draft.chain) : 'Not chosen'), h('dt', 'Status'), h('dd', phase === 'done' ? 'Live' : phase === 'submitting' ? 'Launching…' : 'Pre-launch'), ...(startCap() ? [h('dt', 'Starts at'), h('dd', startCap())] : [])),
         h('p.desc', draft.description || 'Your description appears here.'), links,
         h('div.chips', { class: 'links' }, h('span.chip',chainIcon(draft.chain), draft.chain ? (draft.chain === 'local' ? 'Local simulation' : net()?.name ?? draft.chain) : 'Network not chosen'), h('span.chip',assetIcon(pairSymbol()), `Pair: ${pairSymbol()}`))),
       h('div.summary-card', h('h4', 'Launch summary'), h('dl.kv',
