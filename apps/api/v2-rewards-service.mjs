@@ -3,12 +3,14 @@
 // hides it rather than showing invented figures. Never takes user RPCs or keys.
 import { JsonRpcProvider, ZeroAddress } from 'ethers';
 import { V2RewardsIndexer, toJson } from '../../packages/indexer/v2-rewards.mjs';
+import { usdOracles } from '../../packages/core/usd-oracles.mjs';
+import { payoutStable } from '../../packages/core/payout-stable.mjs';
 
 const TICK_MS = 60_000;
 
 export class V2RewardsService {
-  constructor({ networks, providerFactory = rpc => new JsonRpcProvider(rpc, undefined, { cacheTimeout: -1, batchMaxCount: 1 }), log = console.log }) {
-    this.log = log; this.entries = [];
+  constructor({ networks, providerFactory = rpc => new JsonRpcProvider(rpc, undefined, { cacheTimeout: -1, batchMaxCount: 1 }), log = console.log, oracles = usdOracles() }) {
+    this.log = log; this.entries = []; this.oracles = oracles;
     for (const net of networks.filter(n => !n.mainnet && n.v2?.shared?.hook)) {
       const d = net.v2.shared;
       this.entries.push({ net, index: new V2RewardsIndexer({ provider: providerFactory(net.rpcUrl), contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel, usdcAirdrop: d.usdcAirdrop, usdcHolder: d.usdcHolder }, keeper: d.keeper, fromBlock: d.block, batchSize: 100 }), busy: false });
@@ -32,6 +34,9 @@ export class V2RewardsService {
     return { deployed: true, updatedAt: now, chains: this.entries.map(({ net, index }) => {
       const p = prices[net.key], fresh = p?.status === 'fresh' && Number.isFinite(p.usd) && p.usd > 0;
       const assets = { [ZeroAddress]: { symbol: net.nativeCurrency.symbol, decimals: 18, usd: fresh ? p.usd : null } };
+      // The payout stablecoin (USDC, USDG or a labelled test dollar) is always known, at $1.
+      const stable = payoutStable(net, this.oracles);
+      if (stable) assets[stable.address.toLowerCase()] = { symbol: stable.symbol, decimals: stable.decimals, usd: 1 };
       for (const t of quotes(net.key) ?? []) if (t?.quoteAddress && t.pair !== 'native' && !assets[t.quoteAddress.toLowerCase()]) assets[t.quoteAddress.toLowerCase()] = { symbol: t.quoteSymbol ?? 'token', decimals: Number(t.quoteDecimals ?? 18), usd: t.pair === 'usdc' ? 1 : null };
       return { key: net.key, name: net.name, explorer: net.explorer ?? null, testnet: true, assets, ...toJson(index.summary(now)) };
     }) };

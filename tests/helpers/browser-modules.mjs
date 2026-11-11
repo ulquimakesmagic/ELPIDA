@@ -11,6 +11,7 @@ const map = {
   '/v4-model.mjs': ${JSON.stringify(new URL('../../packages/core/v4-model.mjs', import.meta.url).href)},
   '/v2-economics.mjs': ${JSON.stringify(new URL('../../packages/core/v2-economics.mjs', import.meta.url).href)},
   '/stock-list.mjs': ${JSON.stringify(new URL('../../packages/core/stock-list.mjs', import.meta.url).href)},
+  '/payout-stable.mjs': ${JSON.stringify(new URL('../../packages/core/payout-stable.mjs', import.meta.url).href)},
   '/dex-router.mjs': ${JSON.stringify(new URL('../../packages/core/dex-router.mjs', import.meta.url).href)},
   '/elpida-solana.mjs': ${JSON.stringify(new URL('../../packages/solana/client.mjs', import.meta.url).href)},
   '/paced-rpc.mjs': ${JSON.stringify(new URL('../../apps/web/paced-rpc.mjs', import.meta.url).href)},

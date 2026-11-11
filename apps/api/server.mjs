@@ -143,6 +143,7 @@ const vendorFiles = new Map([
   ['/v4-model.mjs', fileURLToPath(new URL('../../packages/core/v4-model.mjs', import.meta.url))],
   ['/v2-economics.mjs', fileURLToPath(new URL('../../packages/core/v2-economics.mjs', import.meta.url))],
   ['/stock-list.mjs', fileURLToPath(new URL('../../packages/core/stock-list.mjs', import.meta.url))],
+  ['/payout-stable.mjs', fileURLToPath(new URL('../../packages/core/payout-stable.mjs', import.meta.url))],
 ]);
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const IMMUTABLE = 'public, max-age=31536000, immutable';

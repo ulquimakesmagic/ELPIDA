@@ -21,7 +21,7 @@ export function headlineFigures(rewards, analytics) {
     out.large.push({ key: 'flywheel', title: 'Flywheel buybacks', value: spent.headline, note: `${number(burned, 0)} ${burned === 1 ? 'coin' : 'coins'} bought and burned so far`, detail: spent.detail, glyph: 'flame', link: { label: 'See every burn', target: 'rw-flywheel' } });
     const vault = sum(c => (c.airdrop?.assets ?? []).map(a => [a.asset, a.size]));
     const symbols = new Set(chains.flatMap(c => (c.airdrop?.assets ?? []).filter(a => BigInt(a.size ?? 0) > 0n).map(a => holdingOf(c, a.asset, 0).symbol)));
-    out.large.push({ key: 'airdrop', title: 'Airdrop vault', value: vault.headline, note: symbols.size === 1 && symbols.has('USDC') ? 'USDC for qualifying traders' : 'For qualifying traders, paid monthly', detail: vault.detail, glyph: 'gift', link: { label: 'See every airdrop', target: 'rw-distribution' } });
+    out.large.push({ key: 'airdrop', title: 'Airdrop vault', value: vault.headline, note: symbols.size === 1 && /USD/.test([...symbols][0]) ? `${[...symbols][0]} for qualifying traders` : 'For qualifying traders, paid monthly', detail: vault.detail, glyph: 'gift', link: { label: 'See every airdrop', target: 'rw-distribution' } });
     const fees = sum(c => (c.fees ?? []).map(f => [f.asset, f.total]));
     out.small.push({ key: 'fees', title: 'V2 fees collected', value: fees.headline });
   }

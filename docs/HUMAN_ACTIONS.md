@@ -28,6 +28,14 @@ On 10 November the 27 oldest backup folders were deleted by hand (27 GB → 3 ke
 daily backup deletes the ones its policy no longer keeps (7 daily, 4 weekly, 3 monthly) and leaves out the chain
 indexes, so a copy is a few MB instead of ~1 GB. Optional Railway variables are in `docs/RAILWAY_BACKUPS_AND_MONITORING.md`.
 
+## Stablecoin payouts on BNB Chain testnet (tUSDC) and Robinhood Chain testnet (tUSDG), 11 November 2026
+
+After this change is merged and Railway has redeployed, on each of the two networks (keep ~0.02 test BNB / ETH free):
+1. Operator panel → Launchpads → V2 card → **Set up tUSDC for payouts** (BNB) / **Set up tUSDG for payouts**
+   (Robinhood): 4 confirmations. It deploys Elpida's labelled, no-value test dollar and opens a small pool for it.
+2. Same card → **Deploy tUSDx payout distributors** (2 confirmations).
+3. Send me the JSON the card shows (`payoutStable`, `usdcAirdrop`, `usdcHolder`) to pin.
+
 ## USDC payouts for the trader airdrop and holder rewards (EVM test networks), 10 November 2026
 
 After the USDC payouts PR is merged and Railway has redeployed, on each EVM test network (Base Sepolia, Ethereum
