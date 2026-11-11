@@ -8,7 +8,7 @@
 // Amounts are lamports of SOL (the V2 pair on Solana); USD only with a fresh price. Hidden when V2 is not set up.
 import { DatabaseSync } from 'node:sqlite';
 import * as web3 from '@solana/web3.js';
-import { createElpidaSolana, DISCRIMINATORS, POOL_SIZE_V2, WSOL_MINT, V2, V2_DIST } from '../../packages/solana/client.mjs';
+import { createElpidaSolana, DISCRIMINATORS, POOL_SIZE_V2, WSOL_MINT, V2, V2_DIST, v2Owed } from '../../packages/solana/client.mjs';
 import { schedule, countdown, roundStats } from '../../packages/core/v2-rounds.mjs';
 
 const { PublicKey } = web3;
@@ -38,6 +38,8 @@ export class SolanaV2Rewards {
     this.deployment = net.deployment;
     this.client = createElpidaSolana(web3, this.deployment.programId, { cluster: net.mainnet ? 'mainnet' : 'devnet' });
     this.config = new PublicKey(this.deployment.v2.config);
+    // Stablecoin payouts: rounds in USDC, and each distributor's USDC (converted from its SOL) is part of its vault.
+    this.usdcMint = this.deployment.v2.usdc?.mint ?? null;
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS sr_series(day INTEGER NOT NULL, kind TEXT NOT NULL, size TEXT NOT NULL, PRIMARY KEY(day, kind));`);
     this.state = null; this.error = null; this.lastSync = null;
@@ -53,18 +55,29 @@ export class SolanaV2Rewards {
       this.connection.getMultipleAccountsInfo([c.v2DistPda(V2_DIST.airdrop), c.v2DistPda(V2_DIST.holder)]),
     ]);
     const pools = poolAccounts.map(({ account }) => c.decodePool(account.data)).filter(p => p.v2 && p.config.equals(this.config));
-    const rounds = roundAccounts.map(({ account }) => decodeV2Round(account.data)).filter(r => r.asset === WSOL_MINT);
+    const rounds = roundAccounts.map(({ account }) => decodeV2Round(account.data)).filter(r => r.asset === WSOL_MINT || (this.usdcMint && r.asset === this.usdcMint));
     const flyKeys = pools.map(p => c.v2FlyPda(p.mint)), flyInfos = flyKeys.length ? await this.connection.getMultipleAccountsInfo(flyKeys) : [];
     const orders = pools.map((p, i) => ({ mint: p.mint.toBase58(), ...(flyInfos[i] ? decodeFlywheelOrder(flyInfos[i].data) : { orders: 0, spent: 0n, burned: 0n, lastAt: 0 }) }));
     const earned = Object.fromEntries(Object.entries(SHARE).map(([k, i]) => [k, pools.reduce((t, p) => t + share(p.v2.accrued, i), 0n)]));
-    const paid = kind => rounds.filter(r => r.kind === kind).reduce((t, r) => t + r.claimed, 0n);
+    const paid = kind => rounds.filter(r => r.kind === kind && r.asset === WSOL_MINT).reduce((t, r) => t + r.claimed, 0n);
     const sizes = { airdrop: earned.airdrop - paid(V2_DIST.airdrop), holder: earned.holder - paid(V2_DIST.holder), flywheel: earned.flywheel - orders.reduce((t, o) => t + o.spent, 0n) };
+    const usdcSizes = {};
+    if (this.usdcMint) {
+      // With conversions, a distributor's SOL is what its vault holds plus what pools still owe it; its USDC is its USDC account.
+      const mint = new PublicKey(this.usdcMint), kinds = [['airdrop', V2_DIST.airdrop], ['holder', V2_DIST.holder]];
+      const infos = await this.connection.getMultipleAccountsInfo(kinds.flatMap(([, k]) => [c.distVault(k), c.ata(c.distVault(k), mint)]));
+      for (const [i, [name]] of kinds.entries()) {
+        const owed = pools.reduce((t, p) => t + v2Owed(p.v2)[SHARE[name]], 0n), lamports = BigInt(infos[2 * i]?.lamports ?? 0);
+        sizes[name] = owed + (lamports > 890_880n ? lamports - 890_880n : 0n);
+        usdcSizes[name] = c.tokenAmount(infos[2 * i + 1]?.data);
+      }
+    }
     const day = this.now() - this.now() % DAY;
     for (const [kind, size] of Object.entries(sizes)) this.db.prepare('INSERT OR REPLACE INTO sr_series VALUES(?,?,?)').run(day, kind, (size > 0n ? size : 0n).toString());
     const schedules = distInfos.map(info => (info ? c.decodeV2Distributor(info.data) : null));
     // Every V2 fee so far (SOL) and the creators' share (index 0 of the split), for the analytics headline.
     const fees = { total: pools.reduce((t, p) => t + BigInt(p.v2.accrued), 0n), creator: pools.reduce((t, p) => t + share(p.v2.accrued, 0), 0n), tokens: pools.length };
-    this.state = { pools: pools.length, rounds, orders, sizes, schedules, fees };
+    this.state = { pools: pools.length, rounds, orders, sizes, usdcSizes, schedules, fees };
     this.lastSync = Date.now(); this.error = null;
   }
 
@@ -77,7 +90,8 @@ export class SolanaV2Rewards {
   summary(prices = {}) {
     if (!this.state) return null;
     const now = this.now(), p = prices[this.net.key], fresh = p?.status === 'fresh' && p.usd > 0;
-    const vault = kind => ({ assets: [{ asset: WSOL_MINT, size: this.state.sizes[kind] > 0n ? this.state.sizes[kind] : 0n, series: this.series(kind) }] });
+    const vault = kind => ({ assets: [{ asset: WSOL_MINT, size: this.state.sizes[kind] > 0n ? this.state.sizes[kind] : 0n, series: this.series(kind) },
+      ...(this.usdcMint && kind in (this.state.usdcSizes ?? {}) ? [{ asset: this.usdcMint, size: this.state.usdcSizes[kind], series: [] }] : [])] });
     const distributor = (name, kind) => {
       const d = this.state.schedules[kind];
       const s = d ? { period: d.period, genesis: d.genesis, claimWindowRounds: 12 } : null;
@@ -85,16 +99,16 @@ export class SolanaV2Rewards {
       const rounds = this.state.rounds.filter(r => r.kind === kind).sort((a, b) => b.round - a.round).map(r => {
         const m = this.manifest(kind, r.round), amounts = m ? m.rows.filter(x => r.paid(x.index)).map(x => BigInt(x.amount)) : [];
         const paidRecipients = m ? amounts.length : (r.claimed === r.total ? r.recipients : 0);
-        return { round: r.round, asset: WSOL_MINT, total: r.total, recipients: r.recipients, paidRecipients, claimed: r.claimed, unclaimed: r.expired ? 0n : r.total - r.claimed, failed: 0, expired: r.expired,
+        return { round: r.round, asset: r.asset, total: r.total, recipients: r.recipients, paidRecipients, claimed: r.claimed, unclaimed: r.expired ? 0n : r.total - r.claimed, failed: 0, expired: r.expired,
           postedAt: r.postedAt, postTx: null, manifestURI: m ? `/api/public/v2-rewards/solana-manifest/${kind}/${r.round}` : null,
-          start: sched ? sched.start(r.round) : null, end: sched ? sched.end(r.round) : null, stats: roundStats(amounts, 10n ** 9n) };
+          start: sched ? sched.start(r.round) : null, end: sched ? sched.end(r.round) : null, stats: roundStats(amounts, r.asset === WSOL_MINT ? 10n ** 9n : 10n ** 6n) };
       });
       return { schedule: s, countdown: sched ? countdown(sched, now) : null, ...vault(name), rounds };
     };
     const burned = this.burnedByToken();
     return {
       key: this.net.key, name: this.net.name, explorer: null, testnet: !this.net.mainnet,
-      assets: { [WSOL_MINT]: { symbol: 'SOL', decimals: 9, usd: fresh ? p.usd : null } },
+      assets: { [WSOL_MINT]: { symbol: 'SOL', decimals: 9, usd: fresh ? p.usd : null }, ...(this.usdcMint ? { [this.usdcMint]: { symbol: 'USDC', decimals: 6, usd: 1 } } : {}) },
       fees: this.state.fees ? [{ asset: WSOL_MINT, ...this.state.fees }] : [],
       airdrop: distributor('airdrop', V2_DIST.airdrop), holder: distributor('holder', V2_DIST.holder),
       flywheel: { ...vault('flywheel'), burns: [], burnedByToken: [...burned].map(([token, amount]) => ({ token, amount })), spentByAsset: [{ asset: WSOL_MINT, amount: this.state.orders.reduce((t, o) => t + o.spent, 0n) }], cycles: this.state.orders.reduce((t, o) => t + o.orders, 0) },

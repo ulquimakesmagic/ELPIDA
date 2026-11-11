@@ -10,6 +10,7 @@ import { v4Available, v4PoolManager, v2Deployment, saveV2Deployment, mineHookSal
 import { normalizeMetadata } from './metadata.mjs';
 import { checkStockList, stockApprovalGroups } from '/stock-list.mjs';
 import { safeBatch } from './safe-batch.mjs';
+import { payoutStable, payoutTicker } from '/payout-stable.mjs';
 import { prepareUploadProof } from './upload-proof.mjs';
 
 const LABEL = 'ELPIDA V2 test launchpad (Uniswap v4 hook). Not audited; test networks only.';
@@ -164,6 +165,69 @@ export async function v2VirtualQuote(factory, asset) {
 }
 
 const usdcKey = chainId => `elpida:v2:usdc-distributors:${chainId}`;
+const testDollarKey = chainId => `elpida:v2:test-dollar:${chainId}`;
+/**
+ * The network's payout stablecoin: pinned (`payoutStable`), its configured USDC, or a labelled test dollar deployed
+ * from this browser and not pinned yet ({ …, pinned: false }).
+ */
+export function payoutStableFor(w) {
+  const known = payoutStable(w.net, { [w.net?.key]: { usdc: w.oracle?.usdc && w.oracle.usdc !== ZeroAddress ? w.oracle.usdc : null } });
+  if (known) return { ...known, pinned: true };
+  const saved = read(testDollarKey(w.net?.chainId));
+  return saved?.address ? { ...saved, pinned: false } : null;
+}
+
+const TEST_DOLLAR_LIQUIDITY_CAP = 100_000_000_000_000_000n; // 0.1 of the test native coin
+const POOL_MANAGER = ['function factory() view returns(address)', 'function WETH9() view returns(address)', 'function createAndInitializePoolIfNecessary(address,address,uint24,uint160) payable returns(address)',
+  'function mint((address token0,address token1,uint24 fee,int24 tickLower,int24 tickUpper,uint256 amount0Desired,uint256 amount1Desired,uint256 amount0Min,uint256 amount1Min,address recipient,uint256 deadline)) payable returns(uint256,uint128,uint256,uint256)',
+  'function refundETH() payable', 'function multicall(bytes[]) payable returns(bytes[])'];
+const isqrt = n => { if (n < 2n) return n; let x = n, y = (x + 1n) / 2n; while (y < x) { x = y; y = (x + n / x) / 2n; } return x; };
+/** Full-range pool amounts for `nativeAmount` of the native coin at `nativeUsd8` (USD, 8 decimals) against a 6-decimal dollar. */
+export function testDollarPool({ nativeAmount, nativeUsd8, dollar, weth }) {
+  const dollarAmount = nativeAmount * nativeUsd8 / 10n ** 20n; // 18 + 8 − 6
+  if (dollarAmount <= 0n) throw new Error('The test liquidity is too small.');
+  const dollarFirst = BigInt(dollar) < BigInt(weth), token0 = dollarFirst ? dollar : weth, token1 = dollarFirst ? weth : dollar;
+  const amount0 = dollarFirst ? dollarAmount : nativeAmount, amount1 = dollarFirst ? nativeAmount : dollarAmount;
+  return { token0, token1, amount0, amount1, dollarAmount, fee: 10000, tickLower: -887200, tickUpper: 887200, sqrtPriceX96: isqrt((amount1 << 192n) / amount0) };
+}
+
+/**
+ * Test networks without an official test stablecoin (BNB Chain testnet: no Circle USDC; Robinhood Chain testnet: no
+ * official test USDG): deploys Elpida's labelled, no-value test dollar (tUSDC / tUSDG), takes 1,000 from its faucet, and
+ * opens a full-range native/test-dollar pool (1% tier) with `nativeAmount` of the native coin at the oracle price, so the
+ * keeper can convert rewards into it. The position stays in the operator's wallet.
+ */
+export async function setupTestPayoutStable(w, { nativeAmount = '0.01' } = {}) {
+  const net = w.net;
+  if (net.mainnet) throw new Error('Test stablecoins are never deployed on mainnet. Nothing was deployed.');
+  if (payoutStableFor(w)) throw new Error(`${net.name} already has a payout stablecoin. Nothing was deployed.`);
+  const art = w.config?.contracts?.testDollar, dex = w.dex;
+  if (!art?.bytecode) throw new Error('The test stablecoin contract is unavailable on this server. Nothing was deployed.');
+  if (!dex?.manager || !dex?.weth || !dex?.factory) throw new Error(`There is no Uniswap v3-style DEX configured on ${net.name}. Nothing was deployed.`);
+  const native = parseUnits(String(nativeAmount), 18);
+  if (native <= 0n || native > TEST_DOLLAR_LIQUIDITY_CAP) throw new Error('Choose up to 0.1 of the test coin for the pool. Nothing was deployed.');
+  if (await w.provider.getBalance(w.address) < native + 5_000_000_000_000_000n) throw new Error(`Not enough test ${net.nativeCurrency.symbol}: the pool takes ${nativeAmount} and gas needs a little more. Nothing was deployed.`);
+  const manager = new Contract(dex.manager, POOL_MANAGER, w.signer);
+  if (getAddress(await manager.WETH9()) !== getAddress(dex.weth) || getAddress(await manager.factory()) !== getAddress(dex.factory)) throw new Error('The DEX liquidity manager does not match the configured DEX. Nothing was deployed.');
+  const price = await w.oraclePrice(), ticker = payoutTicker(net);
+  const deployed = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(ticker);
+  const r = await w.wait(Promise.resolve(deployed.deploymentTransaction()), `Step 1 of 4: deploy Elpida Test ${ticker} (no value)…`);
+  await walletCaughtUp(w, r?.tx?.nonce);
+  const dollar = getAddress(await deployed.getAddress()), token = new Contract(dollar, art.abi, w.signer);
+  if (!await hasCode(w.provider, dollar, { wait: true })) throw new Error('The test stablecoin is not visible on the network yet. Try again.');
+  const record = { address: dollar, symbol: `t${ticker}`, decimals: 6, test: true };
+  write(testDollarKey(net.chainId), record);
+  await step(w, token.faucet(1_000_000_000n), `Step 2 of 4: take 1,000 t${ticker} from its faucet for the pool…`);
+  const plan = testDollarPool({ nativeAmount: native, nativeUsd8: parseUnits(price.usd.toFixed(8), 8), dollar, weth: getAddress(dex.weth) });
+  await step(w, token.approve(dex.manager, plan.dollarAmount), `Step 3 of 4: let the DEX take ${formatUnits(plan.dollarAmount, 6)} t${ticker} for the pool…`);
+  const deadline = BigInt((await w.provider.getBlock('latest')).timestamp + 600);
+  const calls = [manager.interface.encodeFunctionData('createAndInitializePoolIfNecessary', [plan.token0, plan.token1, plan.fee, plan.sqrtPriceX96]),
+    manager.interface.encodeFunctionData('mint', [{ token0: plan.token0, token1: plan.token1, fee: plan.fee, tickLower: plan.tickLower, tickUpper: plan.tickUpper, amount0Desired: plan.amount0, amount1Desired: plan.amount1, amount0Min: 0n, amount1Min: 0n, recipient: w.address, deadline }]),
+    manager.interface.encodeFunctionData('refundETH', [])];
+  await step(w, manager.multicall(calls, { value: native }), `Step 4 of 4: open the ${net.nativeCurrency.symbol}/t${ticker} pool with ${nativeAmount} ${net.nativeCurrency.symbol}…`);
+  record.pool = true; write(testDollarKey(net.chainId), record);
+  return { record, message: `Elpida Test ${ticker} (t${ticker}, no value) is deployed with a ${net.nativeCurrency.symbol} pool. Next: deploy the payout distributors, and send the token to be pinned as payoutStable in networks.mjs.` };
+}
 /** The network's USDC payout distributors: pinned in networks.mjs (v2.shared.usdcAirdrop / usdcHolder), else deployed from this browser. */
 export function v2UsdcDistributors(net) {
   const d = net?.v2?.shared;
@@ -182,12 +246,13 @@ export async function deployV2UsdcDistributors(w) {
   const net = w.net, d = v2Deployment(net);
   if (net.mainnet) throw new Error('USDC payouts are not approved for mainnet. Nothing was deployed.');
   if (!d?.pinned || !d.airdrop || !d.holder) throw new Error(`Pin the ${net.name} V2 launchpad first. Nothing was deployed.`);
-  if (v2UsdcDistributors(net)) throw new Error(`The ${net.name} USDC payout distributors already exist. Nothing was deployed.`);
+  if (v2UsdcDistributors(net)) throw new Error(`The ${net.name} stablecoin payout distributors already exist. Nothing was deployed.`);
   const keeper = w.config?.v2Keeper;
-  if (!keeper?.address || !keeper.active) throw new Error('USDC payouts need the Elpida V2 keeper, which is not running on this server. Nothing was deployed.');
-  const usdc = w.oracle?.usdc && w.oracle.usdc !== ZeroAddress ? getAddress(w.oracle.usdc) : null, dex = w.dex;
-  if (!usdc) throw new Error(`${net.name} has no USDC configured. Nothing was deployed.`);
-  if (!dex?.router || !dex?.weth || (dex.routerVersion ?? 2) !== 2) throw new Error(`There is no Uniswap v3 router (SwapRouter02) on ${net.name} to convert rewards to USDC. Nothing was deployed.`);
+  if (!keeper?.address || !keeper.active) throw new Error('Stablecoin payouts need the Elpida V2 keeper, which is not running on this server. Nothing was deployed.');
+  const stable = payoutStableFor(w), dex = w.dex;
+  if (!stable) throw new Error(`${net.name} has no ${payoutTicker(net)} for payouts yet. Set up its test payout stablecoin first. Nothing was deployed.`);
+  const usdc = getAddress(stable.address), version = dex?.routerVersion ?? 2;
+  if (!dex?.router || !dex?.weth || ![1, 2].includes(version)) throw new Error(`There is no Uniswap v3-style router on ${net.name} to convert rewards to ${stable.symbol}. Nothing was deployed.`);
   const response = await fetch('/api/v4-artifacts');
   const art = response.ok ? (await response.json()).v2?.usdcDistributor : null;
   if (!art?.bytecode) throw new Error('The USDC distributor contract is unavailable on this server. Nothing was deployed.');
@@ -195,15 +260,15 @@ export async function deployV2UsdcDistributors(w) {
   const record = { source: d.airdrop, holderSource: d.holder, usdc, swapRouter: getAddress(dex.router) };
   for (const [kind, source, purpose, n] of [['airdrop', d.airdrop, 'trader-airdrop-usdc', 1], ['holder', d.holder, 'holder-rewards-usdc', 2]]) {
     const c = new Contract(source, SCHEDULE, w.provider), [period, genesis] = await Promise.all([c.period(), c.genesis()]);
-    const deployed = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(keeper.address, period, genesis, purpose, usdc, getAddress(dex.router), getAddress(dex.weth), source);
-    const r = await w.wait(Promise.resolve(deployed.deploymentTransaction()), `Step ${n} of 2: confirm the ${kind === 'airdrop' ? 'trader-airdrop' : 'holder-reward'} USDC distributor…`);
+    const deployed = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(keeper.address, period, genesis, purpose, usdc, getAddress(dex.router), getAddress(dex.weth), source, version === 1);
+    const r = await w.wait(Promise.resolve(deployed.deploymentTransaction()), `Step ${n} of 2: confirm the ${kind === 'airdrop' ? 'trader-airdrop' : 'holder-reward'} ${stable.symbol} distributor…`);
     await walletCaughtUp(w, r?.tx?.nonce);
     record[kind] = await deployed.getAddress();
-    if (!await hasCode(w.provider, record[kind], { wait: true })) throw new Error('The USDC distributor is not visible on the network yet. Try again.');
+    if (!await hasCode(w.provider, record[kind], { wait: true })) throw new Error('The payout distributor is not visible on the network yet. Try again.');
     if (kind === 'airdrop' && r?.receipt?.blockNumber) record.block = r.receipt.blockNumber;
   }
   if (!write(usdcKey(net.chainId), record)) throw new Error(`Deployed, but this browser blocks storage. Save these addresses: ${JSON.stringify({ usdcAirdrop: record.airdrop, usdcHolder: record.holder })}.`);
-  return { record, message: `The ${net.name} USDC payout distributors are deployed. Send them to be pinned in networks.mjs (v2.shared.usdcAirdrop and usdcHolder); from then on the keeper pays the trader airdrop and holder rewards in USDC.` };
+  return { record, message: `The ${net.name} ${stable.symbol} payout distributors are deployed. Send them to be pinned in networks.mjs (v2.shared.usdcAirdrop and usdcHolder); from then on the keeper pays the trader airdrop and holder rewards in ${stable.symbol}.` };
 }
 
 const testStock = (w, address) => (w.approvedQuotes ?? []).find(a => a.kind === 'xstock' && a.test && a.address.toLowerCase() === String(address ?? '').toLowerCase()) ?? null;

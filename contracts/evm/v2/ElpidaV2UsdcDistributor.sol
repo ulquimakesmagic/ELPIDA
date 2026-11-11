@@ -8,6 +8,12 @@ interface IUsdcSwapRouter {
     function exactInput(ExactInputParams calldata) external payable returns (uint256);
 }
 
+/// The original Uniswap v3 SwapRouter shape, with a deadline (PancakeSwap v3's SwapRouter on BNB Chain).
+interface IUsdcSwapRouterDeadline {
+    struct ExactInputParams { bytes path; address recipient; uint256 deadline; uint256 amountIn; uint256 amountOutMinimum; }
+    function exactInput(ExactInputParams calldata) external payable returns (uint256);
+}
+
 interface IUsdcWrappedNative { function deposit() external payable; }
 
 /// @notice ELPIDA V2 USDC reward distributor (NOT AUDITED; local chains and test networks only). Malik, 10 November:
@@ -20,7 +26,8 @@ interface IUsdcWrappedNative { function deposit() external payable; }
 /// wallet with its proof; a failed payment stays claimable; what a round leaves unclaimed for CLAIM_WINDOW_ROUNDS
 /// rounds returns to the pool. The operator cannot move funds anywhere but to the wallets of a posted USDC round.
 contract ElpidaV2UsdcDistributor {
-    uint256 public constant VERSION = 2;
+    /// 3: also PancakeSwap-style routers (`routerDeadline`), and any USD stablecoin as the payout asset (USDC, USDG).
+    uint256 public constant VERSION = 3;
     uint256 public constant CLAIM_WINDOW_ROUNDS = 12;
     address public immutable operator;
     /// 0: calendar months (UTC). Otherwise the round length in seconds.
@@ -34,6 +41,8 @@ contract ElpidaV2UsdcDistributor {
     /// distributor this one takes over payouts for.
     address public immutable usdc;
     address public immutable swapRouter;
+    /// True for a router whose exactInput takes a deadline (Uniswap's original SwapRouter, PancakeSwap v3).
+    bool public immutable routerDeadline;
     address public immutable wrappedNative;
     address public immutable source;
 
@@ -72,10 +81,10 @@ contract ElpidaV2UsdcDistributor {
 
     modifier nonReentrant() { if (entered) revert Reentrancy(); entered = true; _; entered = false; }
 
-    constructor(address operator_, uint256 period_, uint256 genesis_, string memory purpose_, address usdc_, address swapRouter_, address wrappedNative_, address source_) {
+    constructor(address operator_, uint256 period_, uint256 genesis_, string memory purpose_, address usdc_, address swapRouter_, address wrappedNative_, address source_, bool routerDeadline_) {
         if (operator_ == address(0) || genesis_ % 1 days != 0 || bytes(purpose_).length == 0) revert BadTerms();
         if (usdc_ == address(0) || swapRouter_ == address(0) || wrappedNative_ == address(0) || source_ == address(0)) revert BadTerms();
-        usdc = usdc_; swapRouter = swapRouter_; wrappedNative = wrappedNative_; source = source_;
+        usdc = usdc_; swapRouter = swapRouter_; wrappedNative = wrappedNative_; source = source_; routerDeadline = routerDeadline_;
         if (period_ == 0) {
             (uint256 y, uint256 m, uint256 d) = _civil(genesis_ / 1 days);
             if (d != 1) revert BadTerms();
@@ -153,7 +162,8 @@ contract ElpidaV2UsdcDistributor {
         if (asset == address(0)) IUsdcWrappedNative(wrappedNative).deposit{value: amountIn}();
         if (!_approve(tokenIn, swapRouter, amountIn)) revert BadTerms();
         uint256 before = _balance(usdc);
-        IUsdcSwapRouter(swapRouter).exactInput(IUsdcSwapRouter.ExactInputParams(path, address(this), amountIn, minOut));
+        if (routerDeadline) IUsdcSwapRouterDeadline(swapRouter).exactInput(IUsdcSwapRouterDeadline.ExactInputParams(path, address(this), block.timestamp, amountIn, minOut));
+        else IUsdcSwapRouter(swapRouter).exactInput(IUsdcSwapRouter.ExactInputParams(path, address(this), amountIn, minOut));
         _approve(tokenIn, swapRouter, 0);
         out = _balance(usdc) - before;
         if (out < minOut) revert BadTerms();

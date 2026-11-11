@@ -12,6 +12,7 @@ import { buildRound } from '../../packages/core/v2-rounds.mjs';
 import { airdropRound, holderRound, flywheelOrders, personalFunder, boundedFunderLinks, HOLDER_RULES, FLYWHEEL_RULES, latestJobs } from '../../packages/core/v2-keeper-plan.mjs';
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { testnetDexes } from '../../packages/core/uniswap.mjs';
+import { payoutStable } from '../../packages/core/payout-stable.mjs';
 import { holderDistribution } from '../web/reward-policy.mjs';
 
 const DAY = 86_400, BATCH = 80;
@@ -24,7 +25,8 @@ const DISTRIBUTOR = ['function currentRound() view returns(uint256)', 'function 
 // published round with that contract as the one recipient), is converted there to USDC, and is paid out in USDC.
 const USDC_DISTRIBUTOR = [...DISTRIBUTOR, 'function usdc() view returns(address)', 'function source() view returns(address)', 'function convert(address,uint256,uint256,bytes) returns(uint256)'];
 const QUOTER = ['function quoteExactInput(bytes,uint256) returns(uint256,uint160[],uint32[],uint256)'];
-const FEE_TIERS = [500, 3000, 10000];
+// Uniswap's tiers and PancakeSwap's (0.25%); a quote on a tier a DEX lacks simply fails and is skipped.
+const FEE_TIERS = [100, 500, 2500, 3000, 10000];
 const ZERO_ROOT = '0x' + '0'.repeat(64);
 // Keeper gas (Malik, 10 November): when a round's native coin moves to the USDC distributor, the keeper tops its own
 // wallet up to GAS_TARGET from it (never more than GAS_SHARE_BPS of that move), as a second recipient of the same
@@ -541,7 +543,7 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
   const workers = nets.map(net => {
     const provider = new JsonRpcProvider(net.rpcUrl, undefined, { cacheTimeout: -1, batchMaxCount: 1 }), d = net.v2.shared;
     return { chain: net.key, net, provider, signer: Object.assign(new NonceManager(new Wallet(key, provider)), { address }), deployment: { ...d, poolManager: net.v4?.poolManager },
-      dex: testnetDexes[net.key]?.enabled ? testnetDexes[net.key] : null, usdc: oracles[net.key]?.usdc ?? null,
+      dex: testnetDexes[net.key]?.enabled ? testnetDexes[net.key] : null, usdc: payoutStable(net, oracles)?.address ?? null,
       index: () => indexFor(net.key), funderOf: env.ELPIDA_EXPLORER_API_KEY ? etherscanFunder(net.chainId, env.ELPIDA_EXPLORER_API_KEY) : null, ignoredFunders,
       usdPerUnit: asset => { if (lower(asset) === lower(ZeroAddress)) { const p = prices()[net.key]; return p?.status === 'fresh' ? p.usd : null; } const usdc = oracles[net.key]?.usdc; return usdc && lower(asset) === lower(usdc) ? 1 : null; } };
   });

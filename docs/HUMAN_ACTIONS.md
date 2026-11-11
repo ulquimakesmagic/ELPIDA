@@ -5,6 +5,16 @@
 - **Wallet + X + website allocations** no longer fail with "Every allocation share must be above zero": the shares were read from a field the form no longer fills. Nothing to do.
 - **Share fees with holders** now asks for dollars: a distribution threshold (default $20) and a minimum holding value (default $20), both editable. The threshold is converted to the pair asset at the launch-time price and fixed in the vault; the vault also records both dollar figures (ElpidaV2CreatorRewards version 2). The keeper applies the minimum holding value at the token's last trade price each round, and waits rather than guess when there is no fresh price. Earlier vaults keep working.
 - **Conversion pools** (native coin ↔ test stock) can now be funded on Ethereum Sepolia, Base Sepolia, BNB testnet and Robinhood testnet: Operator panel → Pairs → "conversion liquidity", with the stock's controller wallet (at most 0.1 test coin per setup; PancakeSwap uses its 1% tier). Do this on Robinhood for tTSLAon (0xc6df…af87) so the token page can take ETH.
+## Solana devnet: USDC payouts (program upgrade), 11 November 2026
+
+After the Solana USDC payouts PR is merged:
+1. Upgrade the devnet program as before (`solana-upgrade.cmd`, which uses `contracts/solana/build/elpida_launchpad.so`).
+   SHA256 (Solana CLI 2.3.13): test build
+   `2855f86096ddca5b495f8ec0dcb7b5d3e28fcfc9add024a6d2f6e5238511b875`. (Mainnet build, not deployed:
+   `059be4a6c727f277704a41975d66c245e08c9941331f67a855cdc8f9a47bdf03`.)
+2. Get devnet USDC for the deployer `FeUWFps7…KaH8` at https://faucet.circle.com (Solana Devnet), at least 7.5.
+3. `node scripts/solana-usdc-payouts.mjs` (defaults: 0.05 SOL + 7.5 USDC, plus ~0.25 SOL for Raydium's fee and
+   rent). It prints a `usdc` block: send it to me to pin. From then on the Solana keeper pays rewards in USDC.
 
 ## Stock list for mainnet (100+ stocks), 10 November 2026 — when Ondo and Chainlink answer
 
@@ -23,6 +33,14 @@ On 10 November the 27 oldest backup folders were deleted by hand (27 GB → 3 ke
 daily backup deletes the ones its policy no longer keeps (7 daily, 4 weekly, 3 monthly) and leaves out the chain
 indexes, so a copy is a few MB instead of ~1 GB. Optional Railway variables are in `docs/RAILWAY_BACKUPS_AND_MONITORING.md`.
 
+## Stablecoin payouts on BNB Chain testnet (tUSDC) and Robinhood Chain testnet (tUSDG), 11 November 2026
+
+After this change is merged and Railway has redeployed, on each of the two networks (keep ~0.02 test BNB / ETH free):
+1. Operator panel → Launchpads → V2 card → **Set up tUSDC for payouts** (BNB) / **Set up tUSDG for payouts**
+   (Robinhood): 4 confirmations. It deploys Elpida's labelled, no-value test dollar and opens a small pool for it.
+2. Same card → **Deploy tUSDx payout distributors** (2 confirmations).
+3. Send me the JSON the card shows (`payoutStable`, `usdcAirdrop`, `usdcHolder`) to pin.
+
 ## USDC payouts for the trader airdrop and holder rewards (EVM test networks), 10 November 2026
 
 After the USDC payouts PR is merged and Railway has redeployed, on each EVM test network (Base Sepolia, Ethereum
@@ -31,6 +49,7 @@ Sepolia, Robinhood Chain testnet; BNB Chain testnet has no SwapRouter02, so it k
 2. Send me the two addresses it shows (`usdcAirdrop`, `usdcHolder`) to pin in `networks.mjs`.
 3. For assets you want converted, make sure a Uniswap v3 pool to USDC (or to WETH) has liquidity, e.g. the test stock
    tNVDAon. Without one, that asset stays in its vault and the keeper card says so; nothing is lost.
+**Ethereum Sepolia: done** (deployed by Malik 11 November: airdrop `0x86E79d3f…D3b`, holders `0x572D4044…1e75`; checked on chain: sources are the pinned distributors, operator the V2 keeper, Sepolia USDC, Uniswap SwapRouter02; pinned). **Base Sepolia: done** (11 November: airdrop `0xC745acDA…D31f`, holders `0xa0545230…3781`; same checks: pinned sources, keeper operator, Base Sepolia USDC, Uniswap SwapRouter02; pinned). BNB Chain testnet (no Circle USDC; PancakeSwap router) and Robinhood Chain testnet (pays in USDG, no official test USDG) need their own payout stablecoin first: in progress.
 Rounds already posted keep paying as before. The flywheel is unchanged. The keeper refills its own gas from each
 round's native coin (up to 0.05, at most 10% of it); optional Railway overrides: `ELPIDA_V2_KEEPER_GAS_TARGET` (e.g.
 `0.1`) and `ELPIDA_V2_KEEPER_GAS_SHARE_BPS` (e.g. `500` for 5%). Keep some native coin in the keeper wallet anyway.

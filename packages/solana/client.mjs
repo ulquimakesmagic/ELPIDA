@@ -171,6 +171,8 @@ export const DISCRIMINATORS = {
   claimV2: [229, 87, 46, 162, 21, 157, 231, 114],
   expireV2: [68, 80, 219, 161, 198, 255, 228, 51],
   sweepV2Sol: [214, 100, 209, 232, 40, 180, 166, 8],
+  v2ConvertUsdc: [141, 90, 61, 248, 49, 175, 219, 100],
+  raydiumInitialize: [175, 175, 109, 31, 13, 152, 155, 237],
   v2FlywheelCurve: [22, 29, 103, 158, 14, 53, 184, 66],
   v2FlywheelRaydium: [65, 198, 186, 145, 35, 211, 156, 35],
   V2Distributor: [238, 195, 74, 246, 18, 130, 232, 0],
@@ -220,6 +222,7 @@ export const EVENTS = {
   V2Claimed: { discriminator: [166, 110, 210, 85, 83, 77, 50, 232], fields: [['kind', 'u8'], ['round', 'u32'], ['asset', 'key'], ['index', 'u32'], ['account', 'key'], ['amount', 'u64']] },
   V2Expired: { discriminator: [223, 3, 47, 31, 191, 214, 216, 65], fields: [['kind', 'u8'], ['round', 'u32'], ['asset', 'key'], ['returnedToPool', 'u64']] },
   V2SolSwept: { discriminator: [235, 8, 48, 143, 127, 5, 110, 112], fields: [['kind', 'u8'], ['lamports', 'u64']] },
+  V2ConvertedToUsdc: { discriminator: [106, 246, 164, 159, 73, 241, 117, 125], fields: [['kind', 'u8'], ['solIn', 'u64'], ['usdcOut', 'u64']] },
   V2BoughtAndBurned: { discriminator: [39, 203, 6, 135, 126, 128, 108, 99], fields: [['pool', 'key'], ['mint', 'key'], ['asset', 'key'], ['spent', 'u64'], ['burned', 'u64'], ['supplyAfter', 'u64'], ['venue', 'u8']] },
   V2FeesPaid: { discriminator: [225, 206, 2, 3, 203, 216, 255, 104], fields: [['pool', 'key'], ['recipient', 'u8'], ['to', 'key'], ['amount', 'u64']] },
 };
@@ -622,6 +625,17 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
       authorityBase: ata(authority, m), authorityQuote: ata(authority, wsol), authorityLp: ata(authority, lpMint),
     };
   };
+  /**
+   * A Raydium CPMM WSOL/USDC pool at `pool` (a keypair address, as Raydium allows) on the 1% config the program uses:
+   * the accounts its swaps and `initialize` need. Raydium orders the mints by address (token 0 < token 1).
+   */
+  const raydiumStablePool = (pool, usdcMint) => {
+    const p = key(pool), u = key(usdcMint), a = u.toBytes(), b = wsol.toBytes(), diff = a.findIndex((byte, i) => byte !== b[i]);
+    const usdcIs0 = diff >= 0 && a[diff] < b[diff], [mint0, mint1] = usdcIs0 ? [u, wsol] : [wsol, u];
+    return { program: rayProgram, ammConfig: new PublicKey(ray.ammConfig), authority: new PublicKey(ray.authority), createPoolFee: new PublicKey(ray.createPoolFee),
+      pool: p, usdcIs0, mint0, mint1, lpMint: rayPda(enc('pool_lp_mint'), p.toBytes()), vault0: rayPda(enc('pool_vault'), p.toBytes(), mint0.toBytes()),
+      vault1: rayPda(enc('pool_vault'), p.toBytes(), mint1.toBytes()), observation: rayPda(enc('observation'), p.toBytes()) };
+  };
   const pumpFixed = [meta(PUMP_EVENT_AUTHORITY), meta(pumpProgram)];
   const trade = (trader, config, mint, bytes) => {
     const pool = poolPda(mint);
@@ -706,6 +720,32 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
     sweepV2Sol({ kind }) {
       const vault = distVault(kind);
       return ix([meta(vault, true), meta(ata(vault, wsol), true), meta(tokenProgram)], concat(DISCRIMINATORS.sweepV2Sol, [kind]));
+    },
+    raydiumStablePool,
+    /**
+     * Test networks: opens the Raydium CPMM WSOL/USDC pool the V2 distributors convert through (1% config): wraps
+     * `solAmount` lamports and deposits them with `usdcAmount` of the creator's USDC. `pool` is a fresh keypair (signer).
+     */
+    createStablePool({ creator, pool, usdcMint, solAmount, usdcAmount }) {
+      const r = raydiumStablePool(pool, usdcMint), [amount0, amount1] = r.usdcIs0 ? [usdcAmount, solAmount] : [solAmount, usdcAmount];
+      return [...this.wrapSol(creator, solAmount), new TransactionInstruction({ programId: r.program, keys: [
+        meta(creator, true, true), meta(r.ammConfig), meta(r.authority), meta(r.pool, true, true), meta(r.mint0), meta(r.mint1), meta(r.lpMint, true),
+        meta(ata(creator, r.mint0), true), meta(ata(creator, r.mint1), true), meta(ata(creator, r.lpMint), true), meta(r.vault0, true), meta(r.vault1, true),
+        meta(r.createPoolFee, true), meta(r.observation, true), meta(tokenProgram), meta(tokenProgram), meta(tokenProgram), meta(ataProgram), meta(SystemProgram.programId), meta(SYSVAR_RENT),
+      ], data: concat(DISCRIMINATORS.raydiumInitialize, u64(amount0), u64(amount1), u64(0n)) })];
+    },
+    /**
+     * Stablecoin payouts, operator: converts `amountIn` lamports of distributor `kind`'s unpromised SOL into USDC through
+     * the WSOL/USDC pool `pool`; the USDC stays in the vault's USDC account for USDC rounds. `config`: the curve config
+     * whose pricing names USDC.
+     */
+    v2ConvertUsdc({ operator, kind, config, usdcMint, pool, amountIn, minOut }) {
+      const vault = distVault(kind), r = raydiumStablePool(pool, usdcMint);
+      return [this.createAtaIdempotent(operator, vault, wsol), this.createAtaIdempotent(operator, vault, usdcMint), ix([
+        meta(operator, true, true), meta(v2DistPda(kind)), meta(pricingPda(config)), meta(vault, true), meta(v2LedgerPda(kind, wsol)), meta(ata(vault, wsol), true), meta(ata(vault, usdcMint), true),
+        meta(wsol), meta(usdcMint), meta(r.pool, true), meta(r.authority), meta(r.ammConfig), meta(r.vault0, true), meta(r.vault1, true), meta(r.observation, true), meta(r.program),
+        meta(tokenProgram), meta(SystemProgram.programId),
+      ], concat(DISCRIMINATORS.v2ConvertUsdc, [kind], u64(amountIn), u64(minOut)))];
     },
     /** S3 flywheel, operator: buys on the curve with the flywheel vault and burns the tokens bought. */
     v2FlywheelCurve({ operator, config, mint, amountIn, minOut }) {

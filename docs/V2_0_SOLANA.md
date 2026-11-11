@@ -131,6 +131,25 @@ special case. The "Not live yet" Solana row disappears as soon as that chain is 
   on Explore get the same "bought and burned" tag as EVM tokens.
 - Amounts are SOL; USD only with a fresh price. Nothing shows until V2 is set up on the served cluster.
 
+## S5: stablecoin payouts (11 November)
+
+Malik, 10 November: trader airdrop and holder rewards pay only USDC, on every chain. On Solana:
+- **Program** (`v2_convert_usdc(kind, amount_in, min_out)`, operator only): wraps `amount_in` lamports of the
+  distributor's SOL that no posted round still owes and swaps them through a Raydium CPMM WSOL/USDC pool on the 1%
+  config (`raydium::AMM_CONFIG`), at least `min_out`; the USDC lands in the vault's USDC account (ATA). USDC must be
+  the mint the pricing config names. The other side of the pool must be wrapped SOL. Emits `V2ConvertedToUsdc`.
+  USDC rounds then use the existing `post_v2_root` / `claim_v2` with the USDC mint (claims create the recipient's ATA).
+- **Pool** (`scripts/solana-usdc-payouts.mjs`): opens that WSOL/USDC pool on devnet from the deployer's SOL and devnet
+  USDC and prints `v2.usdc` ({ mint, pool }) to pin in `deployments/solana-devnet.json`.
+- **Keeper** (`apps/api/v2-keeper-solana.mjs`): with `v2.usdc` pinned, the airdrop converts the round's free SOL and
+  splits the USDC (same rules, $ minimum carried in USDC); holder rewards convert exactly what is due and scale each
+  holder's amount to the USDC received. At least 97% of the pool's quote. A conversion that fails leaves the SOL for
+  the next round. Without `v2.usdc` nothing changes.
+- **Analytics**: USDC rounds and each distributor's USDC are shown; its SOL is then what the vault holds plus what pools
+  still owe it.
+- Tests: `tests/solana.test.mjs` → "Solana V2 stablecoin payouts" (operator only, never more than the free SOL, minimum
+  out, a USDC round paid, the pricing config's USDC only).
+
 ## Errors added
 
 | Code | Name | Meaning |

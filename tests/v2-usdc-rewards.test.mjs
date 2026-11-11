@@ -18,7 +18,7 @@ const DAY = 86_400, ZERO_ROOT = '0x' + '0'.repeat(64);
 
 test('the USDC distributor: only the operator converts, only into USDC, and it posts USDC rounds only', async t => {
   const f = await v2Fixture(t, { vaults: true, convert: true, usdcPayouts: true }), d = f.contracts.usdcAirdrop, keeper = f.signers[4], v3 = f.contracts.v3;
-  assert.equal(await d.VERSION(), 2n);
+  assert.equal(await d.VERSION(), 3n);
   assert.equal((await d.source()).toLowerCase(), f.contracts.airdrop.target.toLowerCase());
   await mined(f.signers[0].sendTransaction({ to: d.target, value: parseEther('0.1') }));
   const good = solidityPacked(['address', 'uint24', 'address'], [v3.weth.target, 3000, f.usdc.target]);
@@ -145,7 +145,8 @@ test('the operator deploys the two USDC distributors from the admin page; they c
     oracle: { usdc: f.usdc.target }, dex: v3.config, async wait(pending) { const tx = await pending; return { tx, receipt: await tx.wait() }; }, ...over });
   assert.equal(v2UsdcDistributors(net), null);
   await assert.rejects(deployV2UsdcDistributors(wallet({ config: {} })), /keeper, which is not running/);
-  await assert.rejects(deployV2UsdcDistributors(wallet({ dex: { ...v3.config, routerVersion: 1 } })), /no Uniswap v3 router \(SwapRouter02\)/);
+  await assert.rejects(deployV2UsdcDistributors(wallet({ dex: { ...v3.config, routerVersion: 3 } })), /no Uniswap v3-style router/);
+  await assert.rejects(deployV2UsdcDistributors(wallet({ oracle: { usdc: null } })), /no USDC for payouts yet/);
   await assert.rejects(deployV2UsdcDistributors(wallet({ net: { ...net, mainnet: true } })), /not approved for mainnet/);
   const { record, message } = await deployV2UsdcDistributors(wallet());
   assert.match(message, /usdcAirdrop and usdcHolder/);
