@@ -96,7 +96,12 @@ export const testnets = [
     // ELPIDA V2 test launchpad on that PoolManager, deployed by Malik from the operator panel, 9 Nov 2026 (factory from
     // block 150924467; treasury 0xf5B0…639D; reward contracts run by the server keeper 0x95d3…5124). USD pricing from the
     // relay feed below.
-    v2: { shared: { factory: '0xDDCc87C34eD8D8bEB6D5fAFc6C14e7cE8578fd41', hook: '0x74f2f46A45fCAc130252552880402b57aF3328Cc', router: '0xD8D64a0835BAF274077Ce92dc25F7a09984fEb59', airdrop: '0x3a4B7128b400CF2502E77341AE444B08F926a57d', holder: '0x3ED5280488e335f3eF70f7F78F4Fb78Cc0910CE9', flywheel: '0x1798C56A217A37f13D4a36001608Ae9773E9f37A', keeper: '0x95d3fAea73006C4557b02aC81593d8312ff25124', block: 150924467, minFeeBps: 100 } },
+    v2: { shared: { factory: '0xDDCc87C34eD8D8bEB6D5fAFc6C14e7cE8578fd41', hook: '0x74f2f46A45fCAc130252552880402b57aF3328Cc', router: '0xD8D64a0835BAF274077Ce92dc25F7a09984fEb59', airdrop: '0x3a4B7128b400CF2502E77341AE444B08F926a57d', holder: '0x3ED5280488e335f3eF70f7F78F4Fb78Cc0910CE9', flywheel: '0x1798C56A217A37f13D4a36001608Ae9773E9f37A', keeper: '0x95d3fAea73006C4557b02aC81593d8312ff25124', block: 150924467, minFeeBps: 100,
+      // tUSDG payout distributors, deployed by Malik from the operator panel, 11 Nov 2026.
+      usdcAirdrop: '0xAD5eb8Ac5e603D7dc7d8aE9B5a854b2559316955', usdcHolder: '0xd54bcE6b4Ea06d8bAfB9cfDe9C179bB98aD1775D' } },
+    // Robinhood Chain pays in USDG; Circle's USDG has no code on this testnet, so a labelled Elpida test dollar (no value),
+    // deployed by Malik from the operator panel, 11 Nov 2026, with a 1% ETH/tUSDG pool for the keeper's conversions.
+    payoutStable: { address: '0xa7697599Dee1fD8903Ee72472eB319272cAEEe6a', symbol: 'tUSDG', decimals: 6, test: true },
     // This testnet has neither Uniswap v3 nor a Chainlink feed (24 Oct 2026). The launchpad owner deploys a labelled
     // Elpida test deployment of Uniswap v3 and an ElpidaRelayFeed from the site; the server relay (apps/api/feed-relay.mjs)
     // copies Chainlink ETH / USD from Base Sepolia into it, keeping Chainlink's timestamps. Mainnet uses the real ones.
