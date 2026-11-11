@@ -43,7 +43,7 @@ const GAS_TARGET = 5n * 10n ** 16n, GAS_SHARE_BPS = 1000n;
 const CREATOR = ['function CREATOR_REWARDS_VERSION() view returns(uint256)', 'function operator() view returns(address)', 'function token() view returns(address)', 'function feeAsset() view returns(address)',
   'function mode() view returns(uint8)', 'function threshold() view returns(uint256)', 'function minimumHolding() view returns(uint256)', 'function minimumHoldingUsdE6() view returns(uint256)', 'function vesting() view returns(uint64)', 'function bind(address)',
   'function payoutAsset() view returns(address)', 'function available(address) view returns(uint256)', 'function roundCount() view returns(uint256)', 'function swap(uint256,uint256) returns(uint256)',
-  'function postRound(bytes32,uint256,uint32,string) returns(uint256)', 'function claimMany(uint256,(address account,uint256 amount,bytes32[] proof)[]) returns(uint256)', 'function rounds(uint256) view returns(address asset,bytes32 root,uint128 total,uint128 claimed,uint32 recipients,uint64 postedAt,uint64 vesting)'];
+  'function postRound(bytes32,uint256,uint32,string) returns(uint256)', 'function claim(uint256,address,uint256,bytes32[]) returns(uint256)', 'function claimMany(uint256,(address account,uint256 amount,bytes32[] proof)[]) returns(uint256)', 'function rounds(uint256) view returns(address asset,bytes32 root,uint128 total,uint128 claimed,uint32 recipients,uint64 postedAt,uint64 vesting)'];
 const DEAD = '0x000000000000000000000000000000000000dead';
 const FLYWHEEL = ['function buyAndBurn(address,uint256,uint256,uint256) returns(uint256)', 'function lastBuy(address) view returns(uint64)'];
 const ROUTER = ['function quote(address token,bool buy,uint256 amountIn) returns(uint256 fee,uint256 out)'];
@@ -108,7 +108,8 @@ export class V2Keeper {
   }
 
   start() { if (!this.timer) { this.timer = setInterval(() => this.tick().catch(() => {}), this.tickMs); this.timer.unref?.(); setTimeout(() => this.tick().catch(() => {}), 10_000).unref?.(); } return this; }
-  async close() { clearInterval(this.timer); this.timer = null; if (!this.busy) this.lease.release(); }
+  /** Stops the timer, gives the lease back and closes the database (from #232), unless a tick is still running. */
+  async close() { clearInterval(this.timer); this.timer = null; if (!this.busy) { this.lease.release(); try { this.db.close(); } catch { /* already closed */ } } }
 
   /** The jobs this keeper runs: creator rewards and fee collection always; the rest only with distributions on. */
   jobs() { return this.distributions ? ['fees', 'airdrop', 'holder', 'creator', 'flywheel'] : ['fees', 'creator']; }
@@ -229,8 +230,8 @@ export class V2Keeper {
       const slice = m.entries.slice(next, next + BATCH), batch = slice.map(e => [e.account, e.amount, e.proof]);
       try { await this.send(w, () => kind === 'vault' ? contract.claimMany(m.round, batch) : contract.claimMany(m.round, m.asset, batch)); }
       catch (e) {
-        if (kind === 'vault' || e.code === 'lease_lost' || e.code === 'budget_reached') throw e;
-        for (const x of slice) { try { await this.send(w, () => contract.claim(m.round, m.asset, x.account, x.amount, x.proof)); } catch (err) { if (err.code === 'lease_lost' || err.code === 'budget_reached') throw err; } }
+        if (e.code === 'lease_lost' || e.code === 'budget_reached') throw e;
+        for (const x of slice) { try { await this.send(w, () => kind === 'vault' ? contract.claim(m.round, x.account, x.amount, x.proof) : contract.claim(m.round, m.asset, x.account, x.amount, x.proof)); } catch (err) { if (err.code === 'lease_lost' || err.code === 'budget_reached') throw err; } }
       }
       pushed += slice.length;
       this.db.prepare('UPDATE v2k_pushes SET next=? WHERE chain=? AND distributor=? AND round=? AND asset=?').run(next + BATCH, ...key);
