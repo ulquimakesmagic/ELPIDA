@@ -23,3 +23,5 @@ node_modules
 *.keystore
 id.json
 *keypair*.json
+deployments/*.rehearsal.json
+deployments/*.rehearsal-safe-batch.json

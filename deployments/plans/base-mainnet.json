@@ -1,0 +1,19 @@
+{
+  "key": "base-mainnet",
+  "name": "Base",
+  "chainId": 8453,
+  "startMcapUsd": 20000,
+  "minFeeBps": 100,
+  "dailyLaunchCap": 50,
+  "treasury": null,
+  "keeper": null,
+  "guardian": null,
+  "minSafeThreshold": 2,
+  "poolManager": "0x498581fF718922c3f8e6A244956aF099B2652b2b",
+  "usdFeed": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+  "feedMaxAge": 86400,
+  "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+  "confirmations": 2,
+  "minDeployerBalance": "0.01",
+  "notes": "Fill treasury (the Base Safe), keeper (a fresh keeper wallet) and guardian (the launch-stop wallet). PoolManager: Uniswap's v4 deployment on Base. usdFeed and usdc are checked on chain by `check` (description ETH / USD, fresh answer; 6-decimal USDC). minFeeBps 100 and dailyLaunchCap 50 are proposals for Malik to confirm."
+}
