@@ -1862,7 +1862,8 @@ test('Solana V2 stablecoin payouts: a distributor converts unpromised SOL to USD
   assert.equal(ev.solIn, 500_000_000n); assert.ok(ev.usdcOut >= quoted * 99n / 100n && ev.usdcOut <= quoted);
   const held = await balance(f.client.ata(vault, usdc.publicKey));
   assert.equal(held, ev.usdcOut, 'the USDC stays in the distributor vault');
-  assert.ok(held > 60_000_000n && held < 75_000_000n, `about $70 for 0.5 SOL at ~$150 less 1% and impact (${held})`);
+  // 0.5 SOL into a 2 SOL : 300 USDC pool, 1% fee: 300 × 0.495 / 2.495 ≈ $59.5 (a quarter of the pool's SOL moves the price).
+  assert.ok(held > 59_000_000n && held < 60_000_000n, `about $59.5 for 0.5 SOL (${held})`);
   // A USDC round is posted and paid from it.
   const payee = Keypair.generate().publicKey, ctx = { programId: f.programId, kind, round: 3, asset: usdc.publicKey };
   const list = buildSolanaRound(ctx, [[payee, 10_000_000n]]);
