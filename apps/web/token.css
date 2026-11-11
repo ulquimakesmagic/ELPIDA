@@ -463,3 +463,10 @@ a#tv-attr-logo svg { display: block; width: 100%; height: 100%; }
 .tk-alloc-head .tk-h { display: inline-flex; align-items: center; gap: 6px; }
 /* Blue tick on a verified allocation (X blue, readable on both themes). */
 .verified-tick { display: inline-flex; vertical-align: -2px; margin-left: 4px; color: #1d9bf0; }
+/* X sign-in result on the claim page. */
+.x-result { display: flex; gap: 14px; align-items: flex-start; padding: 16px 18px; border-radius: var(--r-lg, 16px); border: .67px solid var(--line-soft); background: var(--surface-2, transparent); }
+.x-result strong { display: inline-flex; align-items: center; gap: 4px; font-size: 1.05rem; }
+.x-result p { margin: 4px 0 0; }
+.x-result-icon { display: inline-flex; padding: 10px; border-radius: 999px; background: var(--accent-tint); color: var(--text); }
+.x-result-ok { border-color: #1d9bf0; }
+.x-result-failed { border-color: var(--down, #ef5a5a); }

@@ -93,7 +93,7 @@ test('the public service: hidden without a pinned V2 deployment, live with one, 
   const usdcAddr = f.usdc.target, stockAddr = f.stock.target;
   const priced = service.summary({}, undefined, () => [{ pair: 'usdc', quoteAddress: usdcAddr, quoteSymbol: 'USDC', quoteDecimals: 6 }, { pair: 'xstock', quoteAddress: stockAddr, quoteSymbol: 'tNVDAon', quoteDecimals: 18 }, { pair: 'native', quoteAddress: ZeroAddress }]);
   assert.deepEqual(priced.chains[0].assets[usdcAddr.toLowerCase()], { symbol: 'USDC', decimals: 6, usd: 1 });
-  assert.deepEqual(priced.chains[0].assets[stockAddr.toLowerCase()], { symbol: 'tNVDAon', decimals: 18, usd: null });
+  assert.deepEqual(priced.chains[0].assets[stockAddr.toLowerCase()], { symbol: 'tNVDAon', decimals: 18, usd: 180 }, 'no feed: the round test price, as on the token page');
   // Once its feed has answered, the stock is priced in dollars (refreshPrices fills this from the feed).
   service.entries[0].prices.set(stockAddr.toLowerCase(), { usd: 180, at: Date.now() });
   assert.equal(service.summary({}, undefined, () => [{ pair: 'xstock', quoteAddress: stockAddr, quoteSymbol: 'tNVDAon', quoteDecimals: 18 }]).chains[0].assets[stockAddr.toLowerCase()].usd, 180);
@@ -137,4 +137,21 @@ test('stock pair assets are priced from the factory feed, else the test stock\'s
   // A stale answer (older than four days) is refused.
   await (await feed.set(250n * 10n ** 8n, Math.floor(Date.now() / 1000) - 5 * 86_400, 2, 2)).wait();
   assert.equal(await stockUsd(f.provider, f.factory.target, stock.target), null);
+});
+
+test('rewards service: a failing RPC is swapped for the next one; a test stock without a feed uses its round test price', () => {
+  const made = [], net = { key: 'base-sepolia', name: 'Base Sepolia', chainId: 84532, nativeCurrency: { symbol: 'ETH' }, rpcUrl: 'https://a.example', rpcFallbacks: ['https://b.example'],
+    v2: { shared: { hook: '0x' + '1'.repeat(40), airdrop: '0x' + '2'.repeat(40), holder: '0x' + '3'.repeat(40), flywheel: '0x' + '4'.repeat(40), block: 1 } } };
+  const logs = [], service = new V2RewardsService({ networks: [net], providerFactory: url => { made.push(url); return { url }; }, log: l => logs.push(l), oracles: {} });
+  const e = service.entries[0];
+  assert.deepEqual([made, e.index.provider.url], [['https://a.example'], 'https://a.example']);
+  service.failover(e); service.failover(e);
+  assert.equal(e.index.provider.url, 'https://a.example', 'two failures: still the first RPC');
+  service.failover(e);
+  assert.equal(e.index.provider.url, 'https://b.example'); assert.match(logs.at(-1), /v2_rewards_rpc_failover/);
+  const stock = '0x' + '5'.repeat(40);
+  const assets = service.summary({}, undefined, () => [{ pair: 'xstock', quoteAddress: stock, quoteSymbol: 'tNVDAon', quoteDecimals: 18 }]).chains[0].assets;
+  assert.equal(assets[stock].usd, 180, 'the round test price');
+  service.entries[0].prices.set(stock, { usd: 200, at: Date.now() });
+  assert.equal(service.summary({}, undefined, () => [{ pair: 'xstock', quoteAddress: stock, quoteSymbol: 'tNVDAon', quoteDecimals: 18 }]).chains[0].assets[stock].usd, 200, 'a live feed wins');
 });

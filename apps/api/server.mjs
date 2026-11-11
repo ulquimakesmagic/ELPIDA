@@ -51,7 +51,7 @@ import { isDexModel } from '../../packages/core/curve-model.mjs';
 import { V2RewardsService } from './v2-rewards-service.mjs';
 import { configuredV2Keeper } from './v2-keeper.mjs';
 import { configuredSolanaV2Keeper } from './v2-keeper-solana.mjs';
-import { V2Identities } from './v2-identities.mjs';
+import { V2Identities, xResultLink } from './v2-identities.mjs';
 import { SolanaV2Rewards } from './v2-rewards-solana.mjs';
 import { toJson } from '../../packages/indexer/v2-rewards.mjs';
 
@@ -452,10 +452,12 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           return send(200,uploadAdmission.issue({digest:url.searchParams.get('digest'),client,transport:req.socket.remoteAddress??'unknown'}));
         }
         if(url.pathname==='/api/rewards/x/callback'&&v2Identities.owns(url.searchParams.get('state'))){
-          const cookie=String(req.headers.cookie??'').split(';').map(x=>x.trim()).find(x=>x.startsWith('elpida_x='))?.slice(9);let text;
-          let back='/#/rewards';try{const done=await v2Identities.finishX({state:url.searchParams.get('state'),code:url.searchParams.get('code'),cookie});text=done.message;back=done.back??back;}catch(error){text=String(error.message).slice(0,200);}
-          res.writeHead(200,{'Content-Type':'text/html','Set-Cookie':`elpida_x=; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=0${cookieSecurity}`});
-          return res.end(`<!doctype html><title>X verification</title><h1>X verification</h1><p>${text.replace(/[&<>"']/g,c=>`&#${c.charCodeAt(0)};`)}</p><p><a href="${back.replace(/[&<>"']/g,c=>`&#${c.charCodeAt(0)};`)}">Back to your claim on Elpida</a></p>`);
+          // Back to the token's claim page in the app, which shows the result (verified with the blue tick, or why not).
+          const cookie=String(req.headers.cookie??'').split(';').map(x=>x.trim()).find(x=>x.startsWith('elpida_x='))?.slice(9),state=url.searchParams.get('state');
+          const back=v2Identities.backFor(state);let result;
+          try{const done=await v2Identities.finishX({state,code:url.searchParams.get('code'),cookie});result={ok:true,handle:done.handle,wallet:done.wallet};}catch(error){result={ok:false,reason:String(error.message)};}
+          res.writeHead(303,{Location:xResultLink(back,result),'Cache-Control':'no-store','Set-Cookie':`elpida_x=; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=0${cookieSecurity}`});
+          return res.end();
         }
         if(url.pathname==='/api/rewards/x/callback'){
           try{const cookie=String(req.headers.cookie??'').split(';').map(x=>x.trim()).find(x=>x.startsWith('elpida_x='))?.slice(9);await runtime.transact('reward-x-finish',{state:url.searchParams.get('state'),code:url.searchParams.get('code'),cookie});res.writeHead(200,{'Content-Type':'text/html','Set-Cookie':`elpida_x=; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=0${cookieSecurity}`});return res.end('<!doctype html><title>X verified</title><h1>X profile verified</h1><p>Your rewards are bound to the signed payout wallet. Return to Creator rewards and refresh to claim.</p><a href="/">Return to Elpida</a>');}catch{ return send(400,{error:'X verification failed or expired. Return to the dashboard and try again.'});}

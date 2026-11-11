@@ -176,8 +176,13 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   const c2 = await service.challenge({ network: net.key, vault: vaultAddr, index: 2, wallet: ownerAddr, token: ids.token });
   const start = service.startX({ nonce: c2.nonce, signature: await idOwner.signMessage(c2.message) });
   assert.match(start.url, /x\.com/); assert.ok(service.owns('state-1'));
+  assert.equal(service.backFor('state-1'), `/#/rewards?claim=${getAddress(ids.token)}&network=${net.key}`, 'a failed sign-in still returns to the claim page');
   const done = await service.finishX({ state: 'state-1', code: 'ok', cookie: 'c' });
   assert.equal(done.back, `/#/rewards?claim=${getAddress(ids.token)}&network=${net.key}`, 'X sign-in returns to the claim page');
+  assert.equal(done.handle, 'elpida_fun'); assert.equal(getAddress(done.wallet), ownerAddr);
+  const { xResultLink } = await import('../apps/api/v2-identities.mjs');
+  assert.equal(xResultLink(done.back, { ok: true, handle: done.handle, wallet: done.wallet }), `${done.back}&x=verified&handle=elpida_fun&wallet=${done.wallet}`);
+  assert.equal(xResultLink('/#/rewards', { ok: false, reason: 'Sign in to the X profile named <here> & retry' }), '/#/rewards?x=failed&reason=Sign+in+to+the+X+profile+named+%3Chere%3E+%26+retry', 'the reason is encoded, never markup');
   st = await identityAllocationState({ provider: f.provider, net, token: ids.token });
   assert.deepEqual(st.rows.map(r => r.wallet), [cw.address, ownerAddr, ownerAddr]);
   assert.equal(await allocationKind({ provider: f.provider, net, token: ids.token }), 'identity');
