@@ -36,8 +36,8 @@ function holding(chain, address, value) {
 export const holdingOf = holding;
 
 /**
- * Adds up holdings from several chains: dollars for priced assets, and per-symbol amounts for everything (so ETH on
- * Base Sepolia and on Ethereum Sepolia read as one ETH figure). Returns the headline and its detail line.
+ * Adds up holdings from several chains in dollars (Malik, 11 Nov: every reward figure in USD, never in the native coin
+ * or the stock pair). Assets with no fresh price are left out of the total and named in `extra`, never shown as units.
  */
 export function combine(items) {
   let usd = 0, priced = 0;
@@ -48,10 +48,9 @@ export function combine(items) {
     const s = bySymbol.get(m.symbol) ?? { n: 0, unpriced: false };
     s.n += m.n; s.unpriced ||= m.usd === null; bySymbol.set(m.symbol, s);
   }
-  const amounts = [...bySymbol].map(([symbol, s]) => `${number(s.n, s.n < 1 ? 6 : 4)} ${symbol}`);
-  const unpriced = [...bySymbol].filter(([, s]) => s.unpriced).map(([symbol, s]) => `${number(s.n, s.n < 1 ? 6 : 4)} ${symbol}`);
-  if (priced) return { headline: usdText(usd), detail: amounts.join(' · '), usd, extra: priced < items.filter(m => m.n > 0).length ? unpriced : [] };
-  if (amounts.length) return { headline: amounts[0], detail: amounts.slice(1).join(' · '), usd: null, extra: [] };
+  const unpriced = [...bySymbol].filter(([, s]) => s.unpriced).map(([symbol]) => symbol);
+  if (priced) return { headline: usdText(usd), detail: '', usd, extra: unpriced };
+  if (unpriced.length) return { headline: 'Awaiting a price', detail: '', usd: null, extra: unpriced };
   return { headline: '$0', detail: '', usd: 0, extra: [] };
 }
 
@@ -64,7 +63,7 @@ export function rewardsSection({ api, onData = () => {} }) {
   const chainOf = key => data.chains.find(c => c.key === key) ?? { assets: {}, name: key };
   const money = (chain, address, value) => {
     const m = holding(chain, address, value);
-    return m.usd === null ? h('span', m.text) : h('span', h('span', usdText(m.usd)), h('span.small.muted', ` · ${m.text}`));
+    return m.usd === null ? h('span.muted', { title: m.text }, 'Awaiting a price') : h('span', { title: m.text }, usdText(m.usd));
   };
   const chainTag = chain => h('span.badge.rw-chain', chain.name);
 
@@ -116,7 +115,7 @@ export function rewardsSection({ api, onData = () => {} }) {
         h('strong', now.headline),
         now.detail ? h('p.small', now.detail) : null,
         h('p.small.muted', `${v.share}${growth}`),
-        now.extra.length ? h('p.small.muted', `Not priced: ${now.extra.join(' · ')}`) : null);
+        now.extra.length ? h('p.small.muted', `Not in the total until its price feed answers: ${now.extra.join(', ')}`) : null);
     }));
   }
 
@@ -209,7 +208,7 @@ export function rewardsSection({ api, onData = () => {} }) {
     const latest = rounds.filter(r => r.round === rounds[0].round), lead = [...latest].sort((a, b) => b.recipients - a.recipients)[0];
     const s = lead.stats, chain = lead.chain, maxBand = Math.max(1, ...s.bands.map(b => b.count));
     const pool = combine(latest.map(r => holding(r.chain, r.asset, r.total)));
-    const one = (value) => { const m = holding(chain, lead.asset, value); return m.usd === null ? m.text : usdText(m.usd); };
+    const one = (value) => { const m = holding(chain, lead.asset, value); return m.usd === null ? '—' : usdText(m.usd); };
     return h('div.rw-distribution',
       h('div.analytics-summary',
         tile('Traders paid', `${number(latest.reduce((n, r) => n + r.paidRecipients, 0), 0)} of ${number(latest.reduce((n, r) => n + r.recipients, 0), 0)}`, `Round ${lead.round + 1} · ${dateOf(lead.start)}–${dateOf(lead.end - 1)} · pool ${pool.headline}`, 'users'),

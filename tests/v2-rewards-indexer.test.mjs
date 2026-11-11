@@ -5,7 +5,8 @@ import { parseEther, ZeroAddress } from 'ethers';
 import { v2Fixture, launchV2, trade, mined } from './helpers/v2-fixture.mjs';
 import { buildRound } from '../packages/core/v2-rounds.mjs';
 import { V2RewardsIndexer, toJson } from '../packages/indexer/v2-rewards.mjs';
-import { V2RewardsService } from '../apps/api/v2-rewards-service.mjs';
+import { V2RewardsService, stockUsd } from '../apps/api/v2-rewards-service.mjs';
+import { v4Art } from './helpers/v2-fixture.mjs';
 
 const DAY = 86_400;
 const chainNow = async f => (await f.provider.getBlock('latest')).timestamp;
@@ -93,6 +94,9 @@ test('the public service: hidden without a pinned V2 deployment, live with one, 
   const priced = service.summary({}, undefined, () => [{ pair: 'usdc', quoteAddress: usdcAddr, quoteSymbol: 'USDC', quoteDecimals: 6 }, { pair: 'xstock', quoteAddress: stockAddr, quoteSymbol: 'tNVDAon', quoteDecimals: 18 }, { pair: 'native', quoteAddress: ZeroAddress }]);
   assert.deepEqual(priced.chains[0].assets[usdcAddr.toLowerCase()], { symbol: 'USDC', decimals: 6, usd: 1 });
   assert.deepEqual(priced.chains[0].assets[stockAddr.toLowerCase()], { symbol: 'tNVDAon', decimals: 18, usd: null });
+  // Once its feed has answered, the stock is priced in dollars (refreshPrices fills this from the feed).
+  service.entries[0].prices.set(stockAddr.toLowerCase(), { usd: 180, at: Date.now() });
+  assert.equal(service.summary({}, undefined, () => [{ pair: 'xstock', quoteAddress: stockAddr, quoteSymbol: 'tNVDAon', quoteDecimals: 18 }]).chains[0].assets[stockAddr.toLowerCase()].usd, 180);
   assert.throws(() => service.payouts('nope'), /wallet address/);
   assert.deepEqual(service.payouts(f.addresses[1]).chains[0].payouts, []);
 });
@@ -120,4 +124,17 @@ test('public RPCs that cap eth_getLogs ranges: the index halves its range and ca
   const broken = new V2RewardsIndexer({ provider: new Proxy(f.provider, { get(target, prop) { if (prop === 'getLogs') return async () => { throw new Error('connection reset'); }; const v = target[prop]; return typeof v === 'function' ? v.bind(target) : v; } }), contracts: { hook: f.hook.target, airdrop: airdrop.target, holder: holder.target, flywheel: flywheel.target }, batchSize: 100 });
   await assert.rejects(broken.sync(), /connection reset/);
   assert.equal(broken.batchSize, 100);
+});
+
+test('stock pair assets are priced from the factory feed, else the test stock\'s own reference feed', async t => {
+  const f = await v2Fixture(t);
+  // The factory's launch feed (approvePricedQuote), for a stock with no fixed approval.
+  const stock = await f.deploy(v4Art('MockIssuerStock')), feed = await f.deploy(v4Art('MockUsdFeed'), 250n * 10n ** 8n);
+  await (await f.factory.connect(f.owner).approvePricedQuote(stock.target, feed.target, 4 * 86_400)).wait();
+  assert.equal(await stockUsd(f.provider, f.factory.target, stock.target), 250);
+  // No feed anywhere: no price, never a guess.
+  assert.equal(await stockUsd(f.provider, f.factory.target, f.usdc.target), null);
+  // A stale answer (older than four days) is refused.
+  await (await feed.set(250n * 10n ** 8n, Math.floor(Date.now() / 1000) - 5 * 86_400, 2, 2)).wait();
+  assert.equal(await stockUsd(f.provider, f.factory.target, stock.target), null);
 });
