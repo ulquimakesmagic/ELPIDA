@@ -138,8 +138,14 @@ contract ElpidaV2Distributor {
     struct Payout { address account; uint256 amount; bytes32[] proof; }
 
     /// Pays many wallets of one round and asset; a failed transfer is skipped and stays claimable.
+    /// Pays a batch, skipping recipients who already claimed. Claiming is permissionless, so a recipient may take
+    /// its share before the operator's push; without the skip, that one leaf reverted _claim and the whole batch with
+    /// it, stalling every other recipient in the round.
     function claimMany(uint256 round, address asset, Payout[] calldata payouts) external nonReentrant returns (uint256 ok) {
-        for (uint256 i = 0; i < payouts.length; i++) if (_claim(round, asset, payouts[i].account, payouts[i].amount, payouts[i].proof)) ok++;
+        for (uint256 i = 0; i < payouts.length; i++) {
+            if (paid[leaf(round, asset, payouts[i].account, payouts[i].amount)]) continue;
+            if (_claim(round, asset, payouts[i].account, payouts[i].amount, payouts[i].proof)) ok++;
+        }
     }
 
     /// Converts `amountIn` of unpromised USDC into the native coin (Uniswap v3, pool fee `poolFee`), at least `minOut`.
