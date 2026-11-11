@@ -14,12 +14,19 @@ import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { testnetDexes } from '../../packages/core/uniswap.mjs';
 import { payoutStable } from '../../packages/core/payout-stable.mjs';
 import { holderDistribution } from '../web/reward-policy.mjs';
+import { KeeperLease, safeError } from '../../packages/core/keeper-lease.mjs';
 
 const DAY = 86_400, BATCH = 80;
-const HOOK = ['function ledgers(address) view returns(uint256[5] owed,uint128[5] paid)', 'function withdrawFees(address)', 'function launchOf(address) view returns(address quote,address creatorVault,uint64 launchedAt,uint16 feeBps,bool graduated,int24 upperTick,int24 lowerTick,uint128 liquidityBonus,uint128 accrued)'];
+// Audit of 11 November 2026 (docs/AUDIT_TRIAGE_2026-11-11.md): every transaction goes through send(), which holds the
+// signing lease (BE-01), stays inside a rolling 24-hour gas budget per chain (BE-07), waits for CONFIRMATIONS blocks and
+// checks the receipt's block is still canonical (BE-02). At most MAX_ROUNDS_PER_TICK rounds per job are worked through
+// per tick, so a fresh cursor never replays a whole history in one go (BE-07).
+const CONFIRMATIONS = 2, MAX_ROUNDS_PER_TICK = 3, DAILY_GAS = 25n * 10n ** 16n;
+const HOOK = ['function ledgers(address) view returns(uint256[5] owed,uint128[5] paid)', 'function withdrawFees(address)', 'function claim(address,uint8) returns(bool)', 'function launchOf(address) view returns(address quote,address creatorVault,uint64 launchedAt,uint16 feeBps,bool graduated,int24 upperTick,int24 lowerTick,uint128 liquidityBonus,uint128 accrued)'];
 const DISTRIBUTOR = ['function currentRound() view returns(uint256)', 'function roundStart(uint256) view returns(uint256)', 'function roundEnd(uint256) view returns(uint256)', 'function available(address) view returns(uint256)',
   'function rounds(uint256,address) view returns(bytes32 root,uint128 total,uint128 claimed,uint32 recipients,uint64 postedAt,bool expired)', 'function postRoot(uint256,address,bytes32,uint256,uint32,string)',
-  'function claimMany(uint256,address,(address account,uint256 amount,bytes32[] proof)[]) returns(uint256)', 'function convertToNative(uint256,uint256,uint24) returns(uint256)', 'function convertible() view returns(address)'];
+  'function claimMany(uint256,address,(address account,uint256 amount,bytes32[] proof)[]) returns(uint256)', 'function convertToNative(uint256,uint256,uint24) returns(uint256)', 'function convertible() view returns(address)',
+  'function claim(uint256,address,address,uint256,bytes32[]) returns(bool)'];
 // USDC payouts (contracts/evm/v2/ElpidaV2UsdcDistributor.sol; Malik, 10 November): the trader airdrop and holder
 // rewards pay only USDC. Each finished round's balance moves from the hook's distributor into its USDC distributor (a
 // published round with that contract as the one recipient), is converted there to USDC, and is paid out in USDC.
@@ -49,29 +56,77 @@ export class V2Keeper {
    * `workers`: [{ chain, net, signer, provider, deployment: { hook, airdrop, holder, flywheel, poolManager, router, factory },
    * index: () => V2Indexer | null, usdPerUnit: asset => dollars | null, funderOf?: wallet => Promise<address | null> }].
    */
-  constructor({ workers, path = ':memory:', publicUrl = 'https://elpida.fun', now = () => Math.floor(Date.now() / 1000), log = () => {}, tickMs = 300_000, network = 'testnet', gasTarget = GAS_TARGET, gasShareBps = GAS_SHARE_BPS }) {
+  /**
+   * `distributions`: whether the trader airdrop, holder rewards and flywheel run. Off by default on mainnet: the first
+   * mainnet release pays creator rewards only, the other shares accrue in their contracts (Malik, 11 November).
+   * `dailyGas`: native coin the keeper may spend per chain per rolling 24 hours. `confirmations`: blocks to wait for.
+   */
+  constructor({ workers, path = ':memory:', publicUrl = 'https://elpida.fun', now = () => Math.floor(Date.now() / 1000), log = () => {}, tickMs = 300_000, network = 'testnet', gasTarget = GAS_TARGET, gasShareBps = GAS_SHARE_BPS,
+    confirmations = CONFIRMATIONS, distributions = network !== 'mainnet', dailyGas = DAILY_GAS, maxRoundsPerTick = MAX_ROUNDS_PER_TICK, leaseTtl = 15 * 60 }) {
     this.gasTarget = gasTarget; this.gasShareBps = gasShareBps;
-    Object.assign(this, { workers, publicUrl, now, log, tickMs, network });
+    Object.assign(this, { workers, publicUrl, now, log, tickMs, network, confirmations, distributions, dailyGas: BigInt(dailyGas), maxRoundsPerTick });
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS v2k_state(key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS v2k_runs(id INTEGER PRIMARY KEY, chain TEXT NOT NULL, job TEXT NOT NULL, at INTEGER NOT NULL, status TEXT NOT NULL, detail TEXT);
       CREATE TABLE IF NOT EXISTS v2k_manifests(chain_id INTEGER NOT NULL, distributor TEXT NOT NULL, round INTEGER NOT NULL, asset TEXT NOT NULL, data TEXT NOT NULL, PRIMARY KEY(chain_id, distributor, round, asset));
       CREATE TABLE IF NOT EXISTS v2k_funders(wallet TEXT PRIMARY KEY, funder TEXT);
-      CREATE TABLE IF NOT EXISTS v2k_sources(address TEXT PRIMARY KEY, personal INTEGER NOT NULL, checked INTEGER NOT NULL);`);
+      CREATE TABLE IF NOT EXISTS v2k_sources(address TEXT PRIMARY KEY, personal INTEGER NOT NULL, checked INTEGER NOT NULL);
+      CREATE TABLE IF NOT EXISTS v2k_pushes(chain TEXT NOT NULL, distributor TEXT NOT NULL, round INTEGER NOT NULL, asset TEXT NOT NULL, kind TEXT NOT NULL, next INTEGER NOT NULL, PRIMARY KEY(chain, distributor, round, asset));
+      CREATE TABLE IF NOT EXISTS v2k_spend(id INTEGER PRIMARY KEY, chain TEXT NOT NULL, at INTEGER NOT NULL, wei TEXT NOT NULL);`);
+    // A manifest is public only once its root is on chain and matches (audit BE-04); rows from before are published.
+    try { this.db.exec("ALTER TABLE v2k_manifests ADD COLUMN status TEXT NOT NULL DEFAULT 'published'"); } catch { /* already there */ }
+    this.lease = new KeeperLease(this.db, 'v2k_lock', { now, ttl: leaseTtl });
     this.busy = false;
   }
 
   get(key, fallback) { const r = this.db.prepare('SELECT value FROM v2k_state WHERE key=?').get(key); return r ? JSON.parse(r.value) : fallback; }
   set(key, value) { this.db.prepare('INSERT OR REPLACE INTO v2k_state VALUES(?,?)').run(key, json(value)); }
-  record(chain, job, status, detail) { this.db.prepare('INSERT INTO v2k_runs(chain,job,at,status,detail) VALUES(?,?,?,?,?)').run(chain, job, this.now(), status, detail ? json(detail).slice(0, 4000) : null); this.log({ event: 'v2_keeper', chain, job, status, ...(detail?.error ? { error: String(detail.error).slice(0, 200) } : {}) }); }
+  record(chain, job, status, detail) {
+    if (detail?.error) detail = { ...detail, error: safeError(detail.error) };
+    this.db.prepare('INSERT INTO v2k_runs(chain,job,at,status,detail) VALUES(?,?,?,?,?)').run(chain, job, this.now(), status, detail ? json(detail).slice(0, 4000) : null); this.log({ event: 'v2_keeper', chain, job, status, ...(detail?.error ? { error: detail.error } : {}) });
+  }
+
+  /** Native coin this keeper spent on `chain` in the last 24 hours. */
+  spent(chain) { return this.db.prepare('SELECT wei FROM v2k_spend WHERE chain=? AND at>?').all(chain, this.now() - DAY).reduce((a, r) => a + BigInt(r.wei), 0n); }
+
+  /**
+   * Sends one transaction: renews the lease first (throws lease_lost when another process took it), refuses once the
+   * chain's 24-hour gas budget is spent, waits for the confirmations (1 on a local test chain, which mines on demand)
+   * and checks the receipt's block is still the canonical one before anything is recorded as done.
+   */
+  async send(w, build) {
+    this.lease.renew();
+    if (this.dailyGas > 0n && this.spent(w.chain) >= this.dailyGas) throw Object.assign(new Error(`budget_reached: the keeper's 24-hour gas budget on ${w.chain} is spent`), { code: 'budget_reached' });
+    const tx = await build(), receipt = await tx.wait(Number(w.net.chainId) === 31337 ? 1 : this.confirmations);
+    if (!receipt || receipt.status !== 1) throw new Error(`transaction ${tx.hash} failed`);
+    const price = receipt.gasPrice ?? receipt.effectiveGasPrice ?? tx.gasPrice ?? 0n;
+    this.db.prepare('INSERT INTO v2k_spend(chain,at,wei) VALUES(?,?,?)').run(w.chain, this.now(), (BigInt(receipt.gasUsed ?? 0n) * BigInt(price)).toString());
+    const block = await w.provider.getBlock(receipt.blockNumber);
+    if (!block || block.hash !== receipt.blockHash) throw new Error(`transaction ${tx.hash} was reorganised out; nothing is recorded as done`);
+    return receipt;
+  }
 
   start() { if (!this.timer) { this.timer = setInterval(() => this.tick().catch(() => {}), this.tickMs); this.timer.unref?.(); setTimeout(() => this.tick().catch(() => {}), 10_000).unref?.(); } return this; }
-  async close() { clearInterval(this.timer); this.timer = null; }
+  async close() { clearInterval(this.timer); this.timer = null; if (!this.busy) this.lease.release(); }
+
+  /** The jobs this keeper runs: creator rewards and fee collection always; the rest only with distributions on. */
+  jobs() { return this.distributions ? ['fees', 'airdrop', 'holder', 'creator', 'flywheel'] : ['fees', 'creator']; }
 
   async tick() {
     if (this.busy) return; this.busy = true;
-    try { for (const w of this.workers) for (const job of ['fees', 'airdrop', 'holder', 'creator', 'flywheel']) { try { await this[job](w); (this.checked ??= {})[`${w.chain}:${job}`] = this.now(); } catch (e) { this.record(w.chain, job, 'failed', { error: e.shortMessage ?? e.message }); } } }
+    try {
+      // Only the process holding the lease works; another one on the same data stays idle (audit BE-01).
+      if (!this.lease.acquire()) { this.idle = 'lease_held_elsewhere'; return; }
+      this.idle = null;
+      for (const w of this.workers) {
+        try { await this.resumePushes(w); } catch (e) { this.record(w.chain, 'push', 'failed', { error: e }); if (e.code === 'lease_lost') return; }
+        for (const job of this.jobs()) {
+          try { await this[job](w); (this.checked ??= {})[`${w.chain}:${job}`] = this.now(); }
+          catch (e) { this.record(w.chain, job, 'failed', { error: e }); if (e.code === 'lease_lost') return; }
+        }
+      }
+    }
     finally { this.busy = false; }
   }
 
@@ -86,9 +141,21 @@ export class V2Keeper {
     for (const t of index.listings()) {
       const { owed } = await hook.ledgers(t.address);
       if (owed.slice(1, 4).every(x => x === 0n)) continue;
-      await (await hook.withdrawFees(t.address)).wait(); paid++;
+      await this.collect(w, hook, t.address); paid++;
     }
     this.done(w, 'fees'); this.record(w.chain, 'fees', 'ok', { tokens: paid });
+  }
+
+  /**
+   * Pays one token's five shares. withdrawFees is one transaction for all five; if it fails (a creator vault that burns
+   * all the gas it is sent can make the batch revert, audit EVM-01), each share is claimed on its own, so one bad
+   * recipient never holds back the other four.
+   */
+  async collect(w, hook, token) {
+    try { await this.send(w, () => hook.withdrawFees(token)); return; }
+    catch (e) { if (e.code === 'lease_lost' || e.code === 'budget_reached') throw e; }
+    const { owed } = await hook.ledgers(token);
+    for (let i = 0; i < 5; i++) if (owed[i] > 0n) { try { await this.send(w, () => hook.claim(token, i)); } catch (e) { if (e.code === 'lease_lost' || e.code === 'budget_reached') throw e; this.record(w.chain, 'fees', 'recipient-failed', { token, recipient: i, error: e }); } }
   }
 
   /** Wallets linked to each token's creator: the creator, its reward vault, and wallets it sent the token to. */
@@ -131,25 +198,79 @@ export class V2Keeper {
     } catch { return false; }
   }
 
+  /** Stores a round's list as pending (not served yet) and returns the URL its root will point to. A published list is never replaced. */
   publish(w, distributor, m) {
-    this.db.prepare('INSERT OR REPLACE INTO v2k_manifests VALUES(?,?,?,?,?)').run(w.net.chainId, lower(distributor), m.round, lower(m.asset), JSON.stringify(m));
+    this.db.prepare(`INSERT INTO v2k_manifests(chain_id,distributor,round,asset,data,status) VALUES(?,?,?,?,?,'pending')
+      ON CONFLICT(chain_id,distributor,round,asset) DO UPDATE SET data=excluded.data WHERE status='pending'`).run(w.net.chainId, lower(distributor), m.round, lower(m.asset), JSON.stringify(m));
     return `${this.publicUrl}/api/public/v2-rewards/manifest/${w.net.chainId}/${lower(distributor)}/${m.round}/${lower(m.asset)}`;
   }
-  manifest(chainId, distributor, round, asset) {
-    const r = this.db.prepare('SELECT data FROM v2k_manifests WHERE chain_id=? AND distributor=? AND round=? AND asset=?').get(Number(chainId), lower(distributor), Number(round), lower(asset));
+  /** Marks a list public once its root is read back from the chain and matches it (audit BE-04). */
+  confirmPublished(w, distributor, m, onChainRoot) {
+    if (lower(onChainRoot) !== lower(m.root)) throw new Error(`round ${m.round}: the root on chain (${onChainRoot}) is not the list's (${m.root}); the list stays unpublished`);
+    this.db.prepare("UPDATE v2k_manifests SET status='published' WHERE chain_id=? AND distributor=? AND round=? AND asset=?").run(w.net.chainId, lower(distributor), m.round, lower(m.asset));
+  }
+  /** A published list; pending ones (root not confirmed on chain) are not served. */
+  manifest(chainId, distributor, round, asset, { pending = false } = {}) {
+    const r = this.db.prepare(`SELECT data FROM v2k_manifests WHERE chain_id=? AND distributor=? AND round=? AND asset=?${pending ? '' : " AND status='published'"}`).get(Number(chainId), lower(distributor), Number(round), lower(asset));
     return r ? JSON.parse(r.data) : null;
   }
 
-  /** Posts a round's list for one asset and pushes every payout in batches. */
+  /**
+   * Pushes a posted round's payouts in batches, remembering how far it got, so a crash or a failed batch resumes where
+   * it stopped on the next tick (resumePushes) instead of leaving the rest unpaid. `kind`: 'distributor' (claimMany
+   * by round and asset) or 'vault' (a creator vault's claimMany by round). A distributor batch that fails is retried
+   * one wallet at a time, so one stale leaf (on contracts from before audit EVM-02) never blocks the others.
+   */
+  async pushRound(w, contract, kind, m) {
+    const key = [w.chain, lower(contract.target), Number(m.round), lower(m.asset)];
+    this.db.prepare('INSERT OR IGNORE INTO v2k_pushes VALUES(?,?,?,?,?,0)').run(...key, kind);
+    let next = this.db.prepare('SELECT next FROM v2k_pushes WHERE chain=? AND distributor=? AND round=? AND asset=?').get(...key)?.next ?? 0, pushed = 0;
+    for (; next < m.entries.length; next += BATCH) {
+      const slice = m.entries.slice(next, next + BATCH), batch = slice.map(e => [e.account, e.amount, e.proof]);
+      try { await this.send(w, () => kind === 'vault' ? contract.claimMany(m.round, batch) : contract.claimMany(m.round, m.asset, batch)); }
+      catch (e) {
+        if (kind === 'vault' || e.code === 'lease_lost' || e.code === 'budget_reached') throw e;
+        for (const x of slice) { try { await this.send(w, () => contract.claim(m.round, m.asset, x.account, x.amount, x.proof)); } catch (err) { if (err.code === 'lease_lost' || err.code === 'budget_reached') throw err; } }
+      }
+      pushed += slice.length;
+      this.db.prepare('UPDATE v2k_pushes SET next=? WHERE chain=? AND distributor=? AND round=? AND asset=?').run(next + BATCH, ...key);
+    }
+    this.db.prepare('DELETE FROM v2k_pushes WHERE chain=? AND distributor=? AND round=? AND asset=?').run(...key);
+    return pushed;
+  }
+
+  /** Finishes pushes a previous tick or process left half done. */
+  async resumePushes(w) {
+    for (const r of this.db.prepare('SELECT * FROM v2k_pushes WHERE chain=?').all(w.chain)) {
+      const m = this.manifest(w.net.chainId, r.distributor, r.round, r.asset);
+      if (!m) { this.db.prepare('DELETE FROM v2k_pushes WHERE chain=? AND distributor=? AND round=? AND asset=?').run(r.chain, r.distributor, r.round, r.asset); continue; }
+      const contract = new Contract(r.distributor, r.kind === 'vault' ? CREATOR : USDC_DISTRIBUTOR, w.signer);
+      this.record(w.chain, 'push', 'resumed', { distributor: r.distributor, round: r.round, from: r.next, pushed: await this.pushRound(w, contract, r.kind, m) });
+    }
+  }
+
+  /**
+   * Posts a round's list for one asset, confirms the root on chain, publishes the list and pushes every payout. If the
+   * root is not on chain afterwards (a reorg), this throws: the caller's cursor does not move and the next tick posts
+   * again (audit BE-02).
+   */
   async post(w, distributor, round, asset, payouts) {
     const m = buildRound({ chainId: w.net.chainId, distributor: distributor.target, round, asset }, payouts);
-    await (await distributor.postRoot(round, asset, m.root, m.total, m.recipients, this.publish(w, distributor.target, m))).wait();
-    let paid = 0;
-    for (let i = 0; i < m.entries.length; i += BATCH) {
-      const batch = m.entries.slice(i, i + BATCH).map(e => [e.account, e.amount, e.proof]);
-      await (await distributor.claimMany(round, asset, batch)).wait(); paid += batch.length;
-    }
-    return { root: m.root, total: m.total, recipients: m.recipients, pushed: paid };
+    const url = this.publish(w, distributor.target, m);
+    await this.send(w, () => distributor.postRoot(round, asset, m.root, m.total, m.recipients, url));
+    this.confirmPublished(w, distributor.target, m, (await distributor.rounds(round, asset)).root);
+    const pushed = await this.pushRound(w, distributor, 'distributor', m);
+    return { root: m.root, total: m.total, recipients: m.recipients, pushed };
+  }
+
+  /**
+   * Stops a holder round whose payouts the chain already shows (its root is set) while this keeper's cursor has not
+   * moved past it: the local totals are behind the chain (a restored backup, or a crash between posting and saving),
+   * and paying from them could pay the same share twice (audit BE-05). Reconcile by hand, then move the cursor.
+   */
+  async refuseIfBehind(w, round, roots) {
+    for (const [contract, asset] of roots) if ((await contract.rounds(round, asset)).root !== ZERO_ROOT)
+      throw Object.assign(new Error(`state_behind_chain: ${w.chain} holder round ${round} is already posted on chain; reconcile the keeper's holder totals before it continues`), { code: 'state_behind_chain' });
   }
 
   /**
@@ -182,15 +303,15 @@ export class V2Keeper {
   }
 
   async creatorStep(w, hook, index, t, vault) {
-    if ((await vault.token()) === ZeroAddress) await (await vault.bind(t.address)).wait();
+    if ((await vault.token()) === ZeroAddress) await this.send(w, () => vault.bind(t.address));
     const [mode, feeAsset, threshold, minimum] = await Promise.all([vault.mode(), vault.feeAsset(), vault.threshold(), vault.minimumHolding()]);
     const vested = await this.creatorVesting(w, vault);
     let fees = await vault.available(feeAsset);
-    if (fees < threshold && (await hook.ledgers(t.address)).owed[0] > 0n) { await (await hook.withdrawFees(t.address)).wait(); fees = await vault.available(feeAsset); }
+    if (fees < threshold && (await hook.ledgers(t.address)).owed[0] > 0n) { await this.collect(w, hook, t.address); fees = await vault.available(feeAsset); }
     if (fees < threshold) return { token: t.address, status: 'gathering', fees: fees.toString(), threshold: threshold.toString(), vested };
     if (Number(mode) !== 0) {
       const expected = await vault.swap.staticCall(fees, 1n);
-      await (await vault.swap(fees, expected * 97n / 100n)).wait();
+      await this.send(w, () => vault.swap(fees, expected * 97n / 100n));
     }
     const asset = await vault.payoutAsset(), pool = await vault.available(asset);
     const balances = new Map();
@@ -209,8 +330,10 @@ export class V2Keeper {
     if (!rows.length) return { token: t.address, status: 'waiting for eligible holders' };
     const round = Number(await vault.roundCount());
     const m = buildRound({ chainId: w.net.chainId, distributor: vault.target, round, asset }, rows.map(r => [r.address, r.amount]));
-    await (await vault.postRound(m.root, m.total, m.recipients, this.publish(w, vault.target, m))).wait();
-    for (let i = 0; i < m.entries.length; i += BATCH) await (await vault.claimMany(round, m.entries.slice(i, i + BATCH).map(e => [e.account, e.amount, e.proof]))).wait();
+    const url = this.publish(w, vault.target, m);
+    await this.send(w, () => vault.postRound(m.root, m.total, m.recipients, url));
+    this.confirmPublished(w, vault.target, m, (await vault.rounds(round)).root);
+    await this.pushRound(w, vault, 'vault', m);
     if (Number(mode) === 2) this.set(`${w.chain}:creator:vesting:${lower(vault.target)}`, [...this.get(`${w.chain}:creator:vesting:${lower(vault.target)}`, []), round]);
     return { token: t.address, status: 'paid', round, asset, total: m.total.toString(), holders: m.recipients };
   }
@@ -247,7 +370,7 @@ export class V2Keeper {
     for (const round of open) {
       const r = await vault.rounds(round), m = this.manifest(w.net.chainId, vault.target, round, r.asset);
       if (!m) continue;
-      for (let i = 0; i < m.entries.length; i += BATCH) await (await vault.claimMany(round, m.entries.slice(i, i + BATCH).map(e => [e.account, e.amount, e.proof]))).wait();
+      for (let i = 0; i < m.entries.length; i += BATCH) await this.send(w, () => vault.claimMany(round, m.entries.slice(i, i + BATCH).map(e => [e.account, e.amount, e.proof])));
       if (this.now() < Number(r.postedAt) + Number(r.vesting)) left.push(round);
     }
     this.set(key, left); this.done(w, `creator-vest:${lower(vault.target)}`);
@@ -298,7 +421,7 @@ export class V2Keeper {
     const fresh = await this.usdcRoute(w, asset, amount) ?? route;
     if (!fresh) throw new Error('no USDC route');
     const minOut = fresh.quoted * 97n / 100n, out = await target.convert.staticCall(asset, amount, minOut, fresh.path);
-    await (await target.convert(asset, amount, minOut, fresh.path)).wait();
+    await this.send(w, () => target.convert(asset, amount, minOut, fresh.path));
     return out;
   }
 
@@ -307,7 +430,7 @@ export class V2Keeper {
     const index = w.index(); if (!index) return;
     if (this.usdcDistributor(w, 'airdrop')) return this.airdropUsdc(w, index);
     const drop = new Contract(w.deployment.airdrop, DISTRIBUTOR, w.signer), current = Number(await drop.currentRound());
-    for (let round = this.get(`${w.chain}:airdrop:next`, 0); round < current; round++) {
+    for (let round = this.get(`${w.chain}:airdrop:next`, 0), stop = round + this.maxRoundsPerTick; round < current && round < stop; round++) {
       const [start, end] = (await Promise.all([drop.roundStart(round), drop.roundEnd(round)])).map(Number);
       await this.fees(w, { force: true });
       const linked = this.creatorLinked(index);
@@ -336,7 +459,7 @@ export class V2Keeper {
    */
   async airdropUsdc(w, index) {
     const drop = new Contract(w.deployment.airdrop, DISTRIBUTOR, w.signer), target = this.usdcDistributor(w, 'airdrop'), usdc = lower(w.usdc), current = Number(await drop.currentRound());
-    for (let round = this.get(`${w.chain}:airdrop:next`, 0); round < current; round++) {
+    for (let round = this.get(`${w.chain}:airdrop:next`, 0), stop = round + this.maxRoundsPerTick; round < current && round < stop; round++) {
       const [start, end] = (await Promise.all([drop.roundStart(round), drop.roundEnd(round)])).map(Number);
       await this.fees(w, { force: true });
       const assets = [...new Set([lower(ZeroAddress), usdc, ...index.listings().map(t => lower(t.quoteAddress ?? ZeroAddress))])], moved = {}, converted = {}, skipped = {};
@@ -383,9 +506,10 @@ export class V2Keeper {
   async holderUsdc(w, index) {
     const dist = new Contract(w.deployment.holder, DISTRIBUTOR, w.signer), target = this.usdcDistributor(w, 'holder'), usdc = lower(w.usdc), current = Number(await dist.currentRound());
     const hook = new Contract(w.deployment.hook, HOOK, w.provider), threshold = BigInt(Math.round(HOLDER_RULES.thresholdUsd[this.network] * 1e6));
-    for (let round = this.get(`${w.chain}:holder:next`, 0); round < current; round++) {
+    for (let round = this.get(`${w.chain}:holder:next`, 0), stop = round + this.maxRoundsPerTick; round < current && round < stop; round++) {
       const [start, end] = (await Promise.all([dist.roundStart(round), dist.roundEnd(round)])).map(Number);
       await this.fees(w, { force: true });
+      await this.refuseIfBehind(w, round, [[target, usdc], ...[...new Set(index.listings().map(t => lower(t.quoteAddress ?? ZeroAddress)))].map(a => [dist, a])]);
       const done = this.get(`${w.chain}:holder:distributed`, {}), bank = new Map(Object.entries(this.get(`${w.chain}:holder:usdcBank`, {})).map(([k, v]) => [k, BigInt(v)]));
       const byAsset = new Map();
       for (const t of index.listings()) {
@@ -443,9 +567,10 @@ export class V2Keeper {
     const index = w.index(); if (!index) return;
     if (this.usdcDistributor(w, 'holder')) return this.holderUsdc(w, index);
     const dist = new Contract(w.deployment.holder, DISTRIBUTOR, w.signer), current = Number(await dist.currentRound()), hook = new Contract(w.deployment.hook, HOOK, w.provider);
-    for (let round = this.get(`${w.chain}:holder:next`, 0); round < current; round++) {
+    for (let round = this.get(`${w.chain}:holder:next`, 0), stop = round + this.maxRoundsPerTick; round < current && round < stop; round++) {
       const [start, end] = (await Promise.all([dist.roundStart(round), dist.roundEnd(round)])).map(Number);
       await this.fees(w, { force: true });
+      await this.refuseIfBehind(w, round, [...new Set([lower(ZeroAddress), ...index.listings().map(t => lower(t.quoteAddress ?? ZeroAddress))])].map(a => [dist, a]));
       const linked = this.creatorLinked(index), done = this.get(`${w.chain}:holder:distributed`, {}), convertible = lower(await dist.convertible());
       const threshold = HOLDER_RULES.thresholdUsd[this.network], due = [];
       for (const t of index.listings()) {
@@ -461,7 +586,7 @@ export class V2Keeper {
         try {
           const minOut = BigInt(Math.floor(Number(amount) / 10 ** usdcDue[0].decimals / native * 0.97 * 1e18));
           out = await dist.convertToNative.staticCall(amount, minOut, 3000);
-          await (await dist.convertToNative(amount, minOut, 3000)).wait();
+          await this.send(w, () => dist.convertToNative(amount, minOut, 3000));
         } catch (e) { this.record(w.chain, 'holder', 'conversion-skipped', { error: e.shortMessage ?? e.message }); usdcDue.length = 0; }
         for (const d of usdcDue) { d.convertedFrom = d.pending; d.pool = out * d.pending / amount; d.payAsset = lower(ZeroAddress); }
       }
@@ -501,15 +626,15 @@ export class V2Keeper {
         const [, live] = await router.quote.staticCall(o.token, true, o.amountIn);
         if (live < o.minOut) { done.push({ token: o.token, skipped: 'price more than 10% above the recent average' }); continue; }
         const minOut = live * BigInt(10_000 - FLYWHEEL_RULES.slippageBps) / 10_000n;
-        await (await fw.buyAndBurn(o.token, o.amountIn, minOut, cycle)).wait(); done.push({ token: o.token, spent: o.amountIn });
+        await this.send(w, () => fw.buyAndBurn(o.token, o.amountIn, minOut, cycle)); done.push({ token: o.token, spent: o.amountIn });
       }
-      catch (e) { done.push({ token: o.token, skipped: e.shortMessage ?? e.message }); }
+      catch (e) { if (e.code === 'lease_lost' || e.code === 'budget_reached') throw e; done.push({ token: o.token, skipped: safeError(e) }); }
     }
     this.done(w, 'flywheel'); this.record(w.chain, 'flywheel', 'ok', { cycle, orders: done });
   }
 
   status() {
-    return { enabled: true, chains: this.workers.map(w => ({ chain: w.chain, keeper: w.signer.address ?? null, airdropNext: this.get(`${w.chain}:airdrop:next`, 0), holderNext: this.get(`${w.chain}:holder:next`, 0),
+    return { enabled: true, distributions: this.distributions, idle: this.idle ?? null, chains: this.workers.map(w => ({ spent24h: this.spent(w.chain).toString(), chain: w.chain, keeper: w.signer.address ?? null, airdropNext: this.get(`${w.chain}:airdrop:next`, 0), holderNext: this.get(`${w.chain}:holder:next`, 0),
       runs: this.db.prepare('SELECT job,at,status FROM v2k_runs WHERE chain=? ORDER BY id DESC LIMIT 8').all(w.chain),
       jobs: latestJobs(this.db.prepare('SELECT job,at,status,detail FROM v2k_runs WHERE id IN (SELECT MAX(id) FROM v2k_runs WHERE chain=? GROUP BY job) ORDER BY job').all(w.chain), Object.fromEntries(Object.entries(this.checked ?? {}).filter(([k]) => k.startsWith(`${w.chain}:`)).map(([k, v]) => [k.slice(w.chain.length + 1), v]))) })) };
   }
@@ -549,7 +674,12 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
   });
   const gasTarget = /^\d+(\.\d{1,18})?$/.test(String(env.ELPIDA_V2_KEEPER_GAS_TARGET ?? '')) ? parseEther(env.ELPIDA_V2_KEEPER_GAS_TARGET) : undefined;
   const share = Number(env.ELPIDA_V2_KEEPER_GAS_SHARE_BPS), gasShareBps = Number.isInteger(share) && share >= 0 && share <= 5000 ? share : undefined;
-  const keeper = new V2Keeper({ workers, path, publicUrl, log, gasTarget, gasShareBps });
+  // Audit of 11 November: confirmations (default 2), a rolling 24-hour gas budget per chain in native coin (default 0.25),
+  // and the distributions switch (default on for test networks; the first mainnet release keeps them off).
+  const conf = Number(env.ELPIDA_KEEPER_CONFIRMATIONS), confirmations = Number.isInteger(conf) && conf >= 1 && conf <= 64 ? conf : undefined;
+  const dailyGas = /^\d+(\.\d{1,18})?$/.test(String(env.ELPIDA_V2_KEEPER_DAILY_GAS ?? '')) ? parseEther(env.ELPIDA_V2_KEEPER_DAILY_GAS) : undefined;
+  const distributions = env.ELPIDA_V2_DISTRIBUTIONS === 'off' ? false : env.ELPIDA_V2_DISTRIBUTIONS === 'on' ? true : undefined;
+  const keeper = new V2Keeper({ workers, path, publicUrl, log, gasTarget, gasShareBps, confirmations, dailyGas, ...(distributions === undefined ? {} : { distributions }) });
   keeper.enabled = true; keeper.address = getAddress(address);
   return keeper;
 }
