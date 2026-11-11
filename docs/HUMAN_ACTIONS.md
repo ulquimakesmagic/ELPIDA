@@ -1,5 +1,16 @@
 # Actions that need Malik
 
+## Solana devnet: USDC payouts (program upgrade), 11 November 2026
+
+After the Solana USDC payouts PR is merged:
+1. Upgrade the devnet program as before (`solana-upgrade.cmd`, which uses `contracts/solana/build/elpida_launchpad.so`).
+   SHA256 (Solana CLI 2.3.13): test build
+   `2855f86096ddca5b495f8ec0dcb7b5d3e28fcfc9add024a6d2f6e5238511b875`. (Mainnet build, not deployed:
+   `059be4a6c727f277704a41975d66c245e08c9941331f67a855cdc8f9a47bdf03`.)
+2. Get devnet USDC for the deployer `FeUWFps7…KaH8` at https://faucet.circle.com (Solana Devnet), at least 7.5.
+3. `node scripts/solana-usdc-payouts.mjs` (defaults: 0.05 SOL + 7.5 USDC, plus ~0.25 SOL for Raydium's fee and
+   rent). It prints a `usdc` block: send it to me to pin. From then on the Solana keeper pays rewards in USDC.
+
 ## Stock list for mainnet (100+ stocks), 10 November 2026 — when Ondo and Chainlink answer
 
 1. Collect, per chain, each stock's token address (Ondo's addresses page / GM API) and its Chainlink Ondo GM feed

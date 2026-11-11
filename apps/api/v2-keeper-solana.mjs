@@ -51,6 +51,10 @@ export class SolanaV2Keeper {
     Object.assign(this, { connection, payer, deployment, now, log, tickMs, sendTx, index, solUsd, publicUrl, network });
     this.client = createElpidaSolana(web3, deployment.programId, { cluster });
     this.config = new PublicKey(deployment.v2.config);
+    // Stablecoin payouts (Malik, 10 November): with `v2.usdc` ({ mint, pool }) recorded, each round's SOL is converted
+    // to USDC through that Raydium WSOL/USDC pool and the rounds pay USDC.
+    const u = deployment.v2.usdc;
+    this.usdc = u?.mint && u?.pool ? { mint: new PublicKey(u.mint), pool: new PublicKey(u.pool) } : null;
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL;
       CREATE TABLE IF NOT EXISTS sv2_state(key TEXT PRIMARY KEY, value TEXT NOT NULL);
@@ -193,12 +197,35 @@ export class SolanaV2Keeper {
     return index.tokens().filter(t => t.config === this.config.toBase58());
   }
 
-  /** Posts one round's list, publishes it, then pays every leaf. `payouts`: Map wallet (base58) → lamports. */
-  async post(kind, round, payouts) {
-    const wsol = new PublicKey(WSOL_MINT), rows = [...payouts].filter(([, v]) => v > 0n).map(([w, v]) => [new PublicKey(w), v]);
+  /** USDC a distributor can still promise: its vault's USDC less what posted USDC rounds owe. */
+  async usdcAvailable(kind) {
+    const vault = this.client.distVault(kind), [account, ledger] = await this.connection.getMultipleAccountsInfo([this.client.ata(vault, this.usdc.mint), this.client.v2LedgerPda(kind, this.usdc.mint)]);
+    const free = this.client.tokenAmount(account?.data) - this.client.decodeV2Ledger(ledger?.data).reserved;
+    return free > 0n ? free : 0n;
+  }
+
+  /**
+   * Converts `lamports` of distributor `kind`'s unpromised SOL into USDC (at least 97% of the pool's quote). Returns the
+   * USDC received, or 0 when the amount is too small to matter or the pool cannot take it (the SOL then stays).
+   */
+  async toUsdc(kind, lamports) {
+    if (lamports < 1_000_000n) return 0n;
+    const r = this.client.raydiumStablePool(this.usdc.pool, this.usdc.mint), [v0, v1] = await this.connection.getMultipleAccountsInfo([r.vault0, r.vault1]);
+    const [a0, a1] = [this.client.tokenAmount(v0?.data), this.client.tokenAmount(v1?.data)], [usdcReserve, solReserve] = r.usdcIs0 ? [a0, a1] : [a1, a0];
+    if (usdcReserve <= 0n || solReserve <= 0n) return 0n;
+    const quoted = raydiumQuote(lamports, solReserve, usdcReserve).out, minOut = quoted * 97n / 100n;
+    if (minOut <= 0n) return 0n;
+    const before = await this.usdcAvailable(kind);
+    await this.sendTx(this.connection, this.payer, [this.client.computeBudget(400_000), ...this.client.v2ConvertUsdc({ operator: this.payer.publicKey, kind, config: this.config, usdcMint: this.usdc.mint, pool: this.usdc.pool, amountIn: lamports, minOut })]);
+    return (await this.usdcAvailable(kind)) - before;
+  }
+
+  /** Posts one round's list, publishes it, then pays every leaf. `payouts`: Map wallet (base58) → base units of `asset` (SOL by default). */
+  async post(kind, round, payouts, asset = new PublicKey(WSOL_MINT)) {
+    const wsol = asset, rows = [...payouts].filter(([, v]) => v > 0n).map(([w, v]) => [new PublicKey(w), v]);
     if (!rows.length) return { posted: false };
     const list = buildSolanaRound({ programId: this.client.programId, kind, round, asset: wsol }, rows);
-    const manifest = { program: this.client.programId.toBase58(), kind, round, asset: WSOL_MINT, root: Buffer.from(list.root).toString('hex'), total: list.total.toString(),
+    const manifest = { program: this.client.programId.toBase58(), kind, round, asset: wsol.toBase58(), root: Buffer.from(list.root).toString('hex'), total: list.total.toString(),
       rows: list.rows.map(r => ({ index: r.index, account: r.account.toBase58(), amount: r.amount.toString(), proof: r.proof.map(p => Buffer.from(p).toString('hex')) })) };
     this.db.prepare('INSERT OR REPLACE INTO sv2_manifests VALUES(?,?,?)').run(kind, round, JSON.stringify(manifest));
     const uri = `${this.publicUrl}/api/public/v2-rewards/solana-manifest/${kind}/${round}`;
@@ -226,10 +253,15 @@ export class SolanaV2Keeper {
       const tokens = this.v2Tokens(), mints = new Set(tokens.map(t => t.address)), creatorLinked = tokens.flatMap(t => [t.creator, t.reward]).filter(Boolean);
       const trades = index.tradesBetween(start, end).filter(t => mints.has(t.token) && t.account).map(t => ({ ...t, asset: WSOL_MINT, quoteDecimals: 9, quoteUsd: Number(t.quoteAmount ?? 0) * usd }));
       const carried = Object.fromEntries(Object.entries(this.get('airdrop:carried', {})).map(([a, m]) => [a, new Map(Object.entries(m).map(([k, v]) => [k, BigInt(v)]))]));
-      const held = [...(carried[WSOL_MINT]?.values() ?? [])].reduce((x, y) => x + y, 0n), avail = await this.solAvailable(kind);
-      const plan = airdropRound({ trades, start, end, usdPerUnit: () => usd, firstSeen: a => index.firstSeen(a), pools: avail > held ? { [WSOL_MINT]: avail - held } : {}, carried, creatorLinked });
-      const p = plan.byAsset[WSOL_MINT], result = p ? await this.post(kind, round, p.payouts) : { posted: false };
-      if (p) this.set('airdrop:carried', { [WSOL_MINT]: Object.fromEntries([...p.carried].map(([k, v]) => [k, v.toString()])) });
+      // Paid in USDC when configured: the round's free SOL is converted first; carried amounts are then USDC.
+      const asset = this.usdc ? this.usdc.mint.toBase58() : WSOL_MINT;
+      let converted = 0n;
+      if (this.usdc) { try { converted = await this.toUsdc(kind, await this.solAvailable(kind)); } catch (e) { this.record('airdrop', 'warning', { round, error: `USDC conversion: ${e.message}` }); } }
+      const held = [...(carried[asset]?.values() ?? [])].reduce((x, y) => x + y, 0n), avail = this.usdc ? await this.usdcAvailable(kind) : await this.solAvailable(kind);
+      const plan = airdropRound({ trades, start, end, usdPerUnit: a => (a === asset && this.usdc ? 1 : usd), firstSeen: a => index.firstSeen(a), pools: avail > held ? { [asset]: avail - held } : {}, carried, creatorLinked, decimals: this.usdc ? { [asset]: 6 } : {} });
+      const p = plan.byAsset[asset], result = p ? await this.post(kind, round, p.payouts, new PublicKey(asset)) : { posted: false };
+      if (p) this.set('airdrop:carried', { [asset]: Object.fromEntries([...p.carried].map(([k, v]) => [k, v.toString()])) });
+      if (this.usdc) result.usdcConverted = converted;
       this.set('airdrop:next', round + 1);
       this.record('airdrop', 'ok', { round, qualified: plan.qualified.length, ...result });
     }
@@ -269,7 +301,18 @@ export class SolanaV2Keeper {
         done[t.address] = (BigInt(done[t.address] ?? 0) + pending).toString(); budget -= pending;
         stats.push({ token: t.address, holders: plan.holders });
       }
-      const result = merged.size ? await this.post(kind, round, merged) : { posted: false };
+      let result;
+      if (this.usdc && merged.size) {
+        // Convert exactly what is due, then scale each holder's SOL amount to the USDC received.
+        const due = [...merged.values()].reduce((x, y) => x + y, 0n);
+        let got = 0n;
+        try { got = await this.toUsdc(kind, due); } catch (e) { this.record('holder', 'warning', { round, error: `USDC conversion: ${e.message}` }); }
+        if (got > 0n) {
+          const usdcPayouts = new Map(); let given = 0n; const entries = [...merged];
+          for (const [i, [w, v]] of entries.entries()) { const part = i + 1 === entries.length ? got - given : got * v / due; given += part; if (part > 0n) usdcPayouts.set(w, part); }
+          result = { ...(await this.post(kind, round, usdcPayouts, this.usdc.mint)), usdcConverted: got };
+        } else { this.record('holder', 'waiting', { round, reason: 'USDC conversion did not go through; the SOL stays for the next round' }); return; }
+      } else result = merged.size ? await this.post(kind, round, merged) : { posted: false };
       this.set('holder:distributed', done); this.set('holder:next', round + 1);
       this.record('holder', 'ok', { round, tokens: stats, ...result });
     }
