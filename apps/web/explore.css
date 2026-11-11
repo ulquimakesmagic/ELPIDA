@@ -388,3 +388,6 @@
 .lc-cap-row { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
 .lc-change:empty { display: none; }
 .lc-change .pct-pill { padding: 3px 7px; font-size: 10px; }
+
+/* Trending glides on its own (explore-view.mjs autoScroll): no snapping while it moves, or each frame snaps back. */
+.trend-track.auto-scroll { scroll-snap-type: none; }
