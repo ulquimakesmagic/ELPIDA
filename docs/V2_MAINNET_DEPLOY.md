@@ -4,6 +4,11 @@ Script: `scripts/v2-mainnet-deploy.mjs` (audit DEP-01). Release gate and scope: 
 The first release is **Base only, creator rewards only** (airdrop, holder and flywheel shares accrue unpaid), with a
 daily launch cap and a guardian who can stop new launches. Nothing here runs without Malik's approval file.
 
+This deployer applies the rules of the deployment gate from #234 (`packages/core/v2-deploy-gate.mjs`): the $20,000
+start, an approval no older than 14 days, a contract treasury, and `verifyDeployment` of the deployed factory and hook
+against a gate plan built from what was deployed (kept in the record as `gate`). `scripts/deploy-v2.mjs` (#234) checks a
+plan whose vaults already exist; this script deploys the vaults itself, so its approval pins the plan file instead.
+
 ## 1. Fill the plan (Malik)
 
 `deployments/plans/base-mainnet.json`: `treasury` (a Base Safe, 2-of-N or stricter), `keeper` (a fresh wallet used

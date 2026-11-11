@@ -23,7 +23,8 @@ test('the Base plan is incomplete until Malik fills the wallets, and nothing dep
   writeFileSync(file, JSON.stringify({ planSha256: hash, approvedBy: 'Malik', date: '2026-11-20', statement: 'ok' }));
   assert.throws(() => approvalFor('base-mainnet', hash, dir), /incomplete/);
   writeFileSync(file, JSON.stringify({ planSha256: hash, approvedBy: 'Malik', date: '2026-11-20', statement: APPROVAL_STATEMENT }));
-  assert.equal(approvalFor('base-mainnet', hash, dir).approvedBy, 'Malik');
+  assert.equal(approvalFor('base-mainnet', hash, dir, Date.parse('2026-11-21')).approvedBy, 'Malik');
+  assert.throws(() => approvalFor('base-mainnet', hash, dir, Date.parse('2026-12-10')), /older than 14 days/, 'the gate\'s 14-day limit (#234)');
 });
 
 test('rehearsal: preflight, deploy at $20,000, constructor read-back, Safe batch, verify, a $20,000 launch and the guardian stop', async t => {
@@ -33,6 +34,8 @@ test('rehearsal: preflight, deploy at $20,000, constructor read-back, Safe batch
   assert.equal(r.checks.failed.length, 0, JSON.stringify(r.checks.failed));
   assert.ok(r.record.constructorChecks.length >= 18 && r.record.constructorChecks.every(c => c.ok), JSON.stringify(r.record.constructorChecks.filter(c => !c.ok)));
   assert.ok(r.verified.every(c => c.ok)); assert.equal(r.record.status, 'ready');
+  assert.ok(r.record.constructorChecks.some(c => /gate \(#234\)/.test(c.check) && c.ok), 'the #234 gate comparison ran and passed');
+  assert.equal(r.record.gate.plan.startMcapUsd, 20_000);
   assert.ok(r.launch.startMcapUsd >= 20_000 * 0.999 && r.launch.startMcapUsd <= 20_000 * 1.002, `starts at $${r.launch.startMcapUsd}`);
   assert.equal(r.guardianPaused, true);
   const saved = JSON.parse(readFileSync(recordPath, 'utf8'));

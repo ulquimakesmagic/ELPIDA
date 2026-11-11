@@ -25,6 +25,8 @@ import { execSync } from 'node:child_process';
 import { AbiCoder, Contract, ContractFactory, Interface, JsonRpcProvider, Wallet, ZeroAddress, concat, getAddress, getBytes, isAddress, keccak256, toBeHex, zeroPadValue, formatEther, parseEther } from 'ethers';
 import { compileV4, uniswapV4Artifact } from './compile-v4.mjs';
 import { V4_HOOK_FLAGS, V4_FLAG_MASK } from '../packages/core/v4-model.mjs';
+// One set of rules (#234): the start cap, the approval's age limit and the plan-versus-chain comparison come from the gate.
+import { MAINNET_START_MCAP_USD, APPROVAL_MAX_AGE_DAYS, buildPlan, verifyDeployment as gateVerify, deploymentRecord } from '../packages/core/v2-deploy-gate.mjs';
 
 /** A CREATE2 salt that gives the hook an address whose low bits are its Uniswap v4 permissions (as the panel does). */
 export function mineHookSalt(deployer, initCode, maxTries = 4_000_000) {
@@ -38,7 +40,7 @@ export function mineHookSalt(deployer, initCode, maxTries = 4_000_000) {
 }
 
 const root = fileURLToPath(new URL('../', import.meta.url));
-export const MAINNET_START_MCAP_USD = 20_000;
+export { MAINNET_START_MCAP_USD };
 export const APPROVAL_STATEMENT = 'I approve deploying exactly this plan to mainnet with real funds.';
 const DAY = 86_400, Z = ZeroAddress;
 
@@ -67,12 +69,14 @@ export function readPlan(path, { local = false } = {}) {
 }
 
 /** The approval for this exact plan, or an error saying what is missing. */
-export function approvalFor(key, hash, dir = join(root, 'deployments', 'approvals')) {
+export function approvalFor(key, hash, dir = join(root, 'deployments', 'approvals'), now = Date.now()) {
   const file = join(dir, `${key}-${hash.slice(0, 16)}.json`);
   if (!existsSync(file)) throw new Error(`No approval for this plan. Malik merges ${join('deployments/approvals', basename(file))} with {"planSha256":"${hash}","approvedBy":"…","date":"YYYY-MM-DD","statement":"${APPROVAL_STATEMENT}"}. Nothing was deployed.`);
   const a = JSON.parse(readFileSync(file, 'utf8'));
   if (a.planSha256 !== hash) throw new Error('The approval names a different plan. Nothing was deployed.');
   if (!a.approvedBy || !/^\d{4}-\d{2}-\d{2}$/.test(a.date ?? '') || a.statement !== APPROVAL_STATEMENT) throw new Error('The approval is incomplete (approvedBy, date and the exact statement). Nothing was deployed.');
+  const ageDays = (now - Date.parse(`${a.date}T00:00:00Z`)) / 86_400_000;
+  if (!(ageDays >= -1 && ageDays <= APPROVAL_MAX_AGE_DAYS)) throw new Error(`The approval is dated ${a.date}: older than ${APPROVAL_MAX_AGE_DAYS} days (or in the future). Re-approve before deploying. Nothing was deployed.`);
   return { ...a, file };
 }
 
@@ -159,8 +163,14 @@ export async function deployPlan({ provider, signer, plan, hash, approval, recor
     record.contracts.hook = address; record.hookSalt = salt; save();
   }
   await deploy('router', art.router, [plan.poolManager, record.contracts.hook]);
-  // Read every constructor argument back before handing over to the Safe.
+  // Read every constructor argument back before handing over to the Safe: this script's checks, then #234's gate
+  // comparison of the deployed factory and hook against a gate plan built from what was deployed.
   const checks = await constructorChecks({ provider, plan, record });
+  const gatePlan = buildPlan({ chainId: Number(plan.chainId), chainName: plan.name, mainnet: true, treasury: plan.treasury, recipients: [record.contracts.airdrop, record.contracts.flywheel, record.contracts.holder], minFeeBps: plan.minFeeBps, metadataRequired: true, approver: approval?.approvedBy ?? null, approvedAt: approval ? Date.parse(`${approval.date}T00:00:00Z`) : null });
+  const f = new Contract(record.contracts.factory, FACTORY_READ, provider), h = new Contract(record.contracts.hook, HOOK_READ, provider);
+  const mismatches = gateVerify(gatePlan, { treasury: await f.treasury(), startMcapUsd: await f.startMcapUsd(), metadataRequired: await f.requiresMetadata(), recipients: [await h.traderAirdropVault(), await h.flywheelVault(), await h.holderRewardVault()], minFeeBps: await h.minFeeBps() });
+  checks.push({ check: 'gate (#234) verifyDeployment: no mismatches', ok: mismatches.length === 0, detail: mismatches.map(m => m.field).join(', ') });
+  record.gate = deploymentRecord(gatePlan, { factory: record.contracts.factory, hook: record.contracts.hook, router: record.contracts.router, blockNumber: record.block, transactions: Object.values(record.txs).map(t => t.hash) });
   record.constructorChecks = checks; save();
   if (checks.some(c => !c.ok)) throw new Error(`Deployed, but a constructor check failed: ${checks.filter(c => !c.ok).map(c => c.check).join('; ')}. Do not execute the Safe batch.`);
   record.safeBatch = basename(safeBatchPath(recordPath)); record.status = 'awaiting_safe';
