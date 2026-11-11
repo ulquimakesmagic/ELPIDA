@@ -2,6 +2,20 @@
 // tests. Every claim here comes from the repo's own docs (MODEL_10.md, DEX_DESTINATIONS_AND_FEES.md, README status):
 // testnet labels stay, no partnership is claimed, and tokenized stocks are described as not live.
 
+// The public pages describe the V2 release. Numbers are interpolated from the approved economics module so the
+// copy cannot drift from the contracts; a test asserts the served strings match these constants.
+import { V2, V2_FEE_SPLIT, V2_PROPOSED_MIN_FEE_BPS } from './v2-economics.mjs';
+
+/** $20,000 from 20_000_000_000n (six decimals). */
+const usd = value => `$${Number(value / 1_000_000n).toLocaleString('en-US')}`;
+/** 125 bps -> '1.25%', 100 bps -> '1%'. */
+const pct = bps => `${Number((bps / 100).toFixed(2))}%`;
+const START = usd(V2.startFdvUsdE6), END = usd(V2.graduationFdvUsdE6);
+const MIN_TOTAL_FEE = V2_PROPOSED_MIN_FEE_BPS + 0, DEFAULT_FEE = pct(V2.defaultFeeBps), MAX_FEE = pct(V2.maxFeeBps);
+const MIN_FEE = pct(Math.min(V2_PROPOSED_MIN_FEE_BPS, V2.defaultFeeBps));
+const SPLIT = `${pct(V2_FEE_SPLIT.creator)} creator / ${pct(V2_FEE_SPLIT.traderAirdrop)} trader rewards / ${pct(V2_FEE_SPLIT.flywheel)} flywheel / ${pct(V2_FEE_SPLIT.holderRewards)} holder rewards / ${pct(V2_FEE_SPLIT.treasury)} treasury`;
+const CAP = pct(V2.firstBuyCapBps);
+
 export const SITE_NAME = 'Elpida';
 export const DEFAULT_ORIGIN = 'https://elpida.fun';
 export const SITE_TAGLINE = 'Launch tokens with hope on every chain';
@@ -27,28 +41,28 @@ export const FAQ = [
   ['Which networks does Elpida support?', `Elpida currently runs on a local simulation and on public testnets: ${NETWORKS}. Mainnet is not open to the public.`],
   ['Is Elpida live with real money?', 'No. Elpida is in testnet. Its contracts have not been audited. Do not treat any testnet token as having value, and do not send funds you cannot afford to lose to any contract that has not been audited.'],
   ['How much does it cost to launch a token?', 'The launch fee is $10, paid at the on-chain price in the network\'s native coin, or 10 USDC. Network gas is paid separately in the native coin. On testnets the amounts use test funds.'],
-  ['How does the bonding curve work?', 'Every token has a fixed supply of one billion and starts on a curve that begins at a $5,000 fully diluted value and completes at $50,000, a tenfold rise. The price moves with every buy and sell, there is no private allocation, and anyone can sell back into the curve while it is open.'],
-  ['What happens when the curve completes?', 'The curve\'s liquidity moves to a decentralized exchange. On EVM networks it becomes a Uniswap v3 full-range position that is locked permanently, and its trading fees are split between the protocol and the creator. On Solana, SOL pairs move to a Raydium CPMM pool (1% fee tier) and other pairs to PumpSwap, with the liquidity locked in a program-controlled account.'],
+  ['How does the bonding curve work?', `Every token has a fixed supply of one billion and starts at a ${START} fully diluted value. Price rises with each buy and falls with each sell; the sale range ends at ${END}, a fivefold rise. Tokens launched before the V2 release used the earlier $5,000-to-$50,000 curve and keep it.`],
+  ['What happens when the curve completes?', 'Under V2 the liquidity is locked in a Uniswap v4 pool from launch, so there is no migration step and nothing to graduate: the same pool keeps trading. Tokens launched on the earlier model keep their graduation behaviour, where liquidity moves to a Uniswap v3 full-range position that is locked permanently.'],
   ['What if graduation fails?', 'If a completed curve has not moved to its pool within 24 hours, anyone can reopen it for trading. Every holder can then sell, and completing the curve restarts the timer.'],
-  ['What are the trading fees?', 'The curve charges 1.25% per trade, split evenly between the protocol and the creator. For the first minute after launch an anti-snipe fee starts at 90% and falls to 1.25%; the surplus above 1.25% is locked into the graduation liquidity and is never paid out as revenue.'],
+  ['What are the trading fees?', `The creator chooses the fee at launch, from ${MIN_FEE} to ${MAX_FEE} (the default is ${DEFAULT_FEE}), and it never changes — before or after the sale range ends. Every fee is split ${SPLIT}. For the first minute after launch an anti-snipe fee starts at 90% and falls linearly to the token's own fee over 60 seconds; the surplus joins the locked liquidity and is never paid out as a fee.`],
   ['Can anyone change a token after launch?', 'No. Supply is fixed, the token metadata is set once in the launch transaction and has no setter, and the curve parameters are immutable.'],
   ['Can I trade tokenized stocks on Elpida?', 'Not yet. Tokenized stocks from Robinhood, Coinbase, Binance and xStocks are being evaluated, and every live capability is switched off until it has been verified. Elpida has no partnership with any of these providers. Issuers of tokenized stocks can block, pause or burn tokens, which would affect any curve or pool holding them.'],
   ['Is this financial advice?', 'No. Elpida is software. Tokens launched on any launchpad are highly volatile and can lose all of their value. Nothing on this site is investment, legal or tax advice.'],
 ];
 
-const HOW_STEPS = [
+export const HOW_STEPS = [
   ['Pick a network and a trading pair', `Choose where the token lives (${NETWORKS}) and what buyers pay with: the native coin or USDC, plus approved pairs where available.`],
   ['Describe the token and set rewards', 'Add a name, symbol, image and links. Metadata is written once in the launch transaction. Creators choose where their share of trading fees goes.'],
   ['Launch in one transaction', 'Pay the $10 launch fee (native coin at the on-chain price, or 10 USDC). A creator can make an optional first buy in the same transaction, charged only the base fee and shown publicly as "Dev" on the token page.'],
-  ['Trade on the bonding curve', 'The token starts at a $5,000 fully diluted value. Price rises with each buy and falls with each sell along a fixed curve that finishes at $50,000. On testnets the sizes are scaled down to $50 and $500 with the same shape.'],
-  ['Graduate to a decentralized exchange', 'When the supply for sale is gone, liquidity moves to Uniswap v3 on EVM networks or Raydium (SOL pairs) and PumpSwap on Solana, with the position locked permanently.'],
+  ['Trade on the bonding curve', `The token starts at a ${START} fully diluted value. Price rises with each buy and falls with each sell along a fixed curve that finishes at ${END}. On test networks a test-sized $50 start is used instead, and it is labelled as such.`],
+  ['Graduate to a decentralized exchange', 'Under V2 there is no graduation: the Uniswap v4 pool and its liquidity are locked from the launch transaction, so the token trades in that pool for its whole life. Tokens launched on the earlier model still graduate to Uniswap v3 on EVM networks, or to Raydium (SOL pairs) and PumpSwap on Solana, with the position locked.'],
 ];
 
-const FEE_ROWS = [
+export const FEE_ROWS = [
   ['Launch fee', '$10 in the native coin at the on-chain price, or 10 USDC.'],
-  ['Curve trading fee', '1.25% of each trade, split 50% protocol and 50% creator.'],
-  ['First-minute protection', 'Fee starts at 90% and falls linearly to 1.25% over 60 seconds. The surplus above 1.25% is locked into graduation liquidity.'],
-  ['Pool fees after graduation', 'The exchange pool\'s own fee applies (1% on the Base Sepolia test pool). Fees earned by the locked position are split 50/50 between the protocol and the creator side.'],
+  ['Curve trading fee', `${MIN_FEE} to ${MAX_FEE} of each trade, chosen by the creator at launch and fixed for life. The split is ${SPLIT}.`],
+  ['First-minute protection', "Fee starts at 90% and falls linearly to the token's own fee over 60 seconds. The surplus above that fee is locked into liquidity."],
+  ['Pool fees after graduation', 'Under V2 the token fee continues unchanged in the locked Uniswap v4 pool, so there is no second rate. Tokens on the earlier model pay the exchange pool fee after graduation, and the fees earned by the locked position are split between the protocol and the creator.'],
   ['Network gas', 'Always paid in the network\'s native coin.'],
 ];
 

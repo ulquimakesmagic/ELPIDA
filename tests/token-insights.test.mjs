@@ -82,7 +82,12 @@ test('the safety checklist states facts and flags large holdings', () => {
   const text = checks.map(c => c.text).join('\n');
   assert.match(text, /Fixed supply of 1B/);
   assert.match(text, /locked permanently when it graduates to Uniswap v3/);
-  assert.match(text, /No buy or sell tax\. The curve fee is 1\.25%/);
+  // The fee is the token's own. The fixture declares none, so the card must state the tax fact without inventing a
+  // rate (it used to print a hardcoded 1.25%, which was wrong for any V2 token launched above the default).
+  assert.match(text, /No buy or sell tax\./);
+  assert.equal(/per trade/.test(text), false, 'no fee claim without a declared fee');
+  const withFee = safetyChecks({ ...base, feeBps: 400 }, { holders, dex: 'Uniswap v3' });
+  assert.match(withFee.map(c => c.text).join('\n'), /The fee is 4% per trade, fixed at launch\./);
   assert.match(text, /cannot be edited/);
   assert.equal(checks.find(c => c.text.startsWith('Dev bought')).ok, false, '7.63% is above the 5% flag');
   assert.equal(checks.find(c => c.text.startsWith('Dev bought')).text, 'Dev bought 8.63% at launch and holds 7.63% now.');

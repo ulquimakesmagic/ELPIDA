@@ -5,6 +5,9 @@
 import { flywheelCheck } from './burn-labels.mjs';
 import { testStockStatus, TEST_STOCK_PROVIDERS } from './test-stock.mjs';
 
+/** A V2 token carries the hook model; the token page and the indexers agree on this value. */
+const isV2Token = token => String(token?.model ?? token?.deploymentModel ?? '') === 'v2-hook';
+
 const lower = value => String(value ?? '').toLowerCase();
 const amountOf = row => { const v = Number(row?.quoteAmount); return Number.isFinite(v) && v > 0 ? v : 0; };
 
@@ -109,11 +112,17 @@ export function stockCheck(token, now) {
 export function safetyChecks(token, { holders, dex } = {}) {
   const checks = [{ ok: true, text: 'Fixed supply of 1B. No mint and no owner after launch.' }];
   const venue = dex && dex !== 'test' ? dex : 'the DEX pool';
-  checks.push(token.graduated
+  // V2 locks the pool from the launch transaction; there is no graduation to wait for. Legacy tokens still
+  // graduate, so the card must not promise the V2 behaviour for them.
+  checks.push(token.graduated || isV2Token(token)
     ? { ok: true, text: `Liquidity on ${venue} is locked permanently.` }
     : { ok: true, text: `Liquidity is locked permanently when it graduates to ${venue}.` });
   if (token.tax) checks.push({ ok: false, text: `Buy tax ${pct(token.tax.buyBps / 100)}, sell tax ${pct(token.tax.sellBps / 100)}, fixed at launch.` });
-  else checks.push({ ok: true, text: token.graduated ? 'No buy or sell tax.' : 'No buy or sell tax. The curve fee is 1.25% per trade.' });
+  else {
+    // The fee is the token's own; a V2 creator may pick anything from the minimum to 4%, so a fixed 1.25% is wrong.
+    const fee = Number(token.feeBps) > 0 ? pct(Number(token.feeBps) / 100) : null;
+    checks.push({ ok: true, text: `No buy or sell tax.${token.graduated || !fee ? '' : ` The fee is ${fee} per trade, fixed at launch.`}` });
+  }
   const burn = flywheelCheck(token);
   if (burn) checks.push(burn);
   const stock = stockCheck(token);
