@@ -34,6 +34,17 @@ test('vault sizes by day, rounds, countdown and flywheel burns match the chain',
 
   await index.sync();
   const now = await chainNow(f), s = index.summary(now), [owed] = await f.hook.ledgers(l.token.target);
+  // A restart resumes from the snapshot: same state, same next block, nothing re-read. Another deployment is refused.
+  const contracts = { hook: f.hook.target, airdrop: airdrop.target, holder: holder.target, flywheel: flywheel.target };
+  const resumed = new V2RewardsIndexer({ provider: f.provider, contracts });
+  assert.equal(resumed.restore(index.snapshot()), true);
+  assert.equal(resumed.next, index.next);
+  assert.equal(JSON.stringify(resumed.summary(now), (k, v) => (k === 'lastSync' ? undefined : typeof v === 'bigint' ? String(v) : v)), JSON.stringify(s, (k, v) => (k === 'lastSync' ? undefined : typeof v === 'bigint' ? String(v) : v)));
+  assert.equal(new V2RewardsIndexer({ provider: f.provider, contracts, fromBlock: 5 }).restore(index.snapshot()), false, 'another deployment block');
+  // Small ranges fetched four at a time reach the same state as one big range.
+  const parallel = new V2RewardsIndexer({ provider: f.provider, contracts, batchSize: 3, maxBatch: 3, parallel: 4 });
+  await parallel.sync();
+  assert.equal(JSON.stringify(parallel.summary(now), (k, v) => (k === 'lastSync' ? undefined : typeof v === 'bigint' ? String(v) : v)), JSON.stringify(s, (k, v) => (k === 'lastSync' ? undefined : typeof v === 'bigint' ? String(v) : v)));
   // Size = what the hook still owes the vault + what the vault holds (including amounts promised to a round).
   const native = v => v.assets.find(a => a.asset === ZeroAddress.toLowerCase());
   assert.equal(native(s.airdrop).size, owed[1] + await f.provider.getBalance(airdrop.target));

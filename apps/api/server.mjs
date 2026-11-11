@@ -280,7 +280,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // their own; a test server (port 0) never fetches.
   const stockCatalog=injectedStockCatalog??createStockCatalog({dataDir:port===0?null:resolve(dataDir,dataPrefix+'stock-catalog'),autoRefresh:port!==0,log:e=>console.log(JSON.stringify(e))}).start();
   // ELPIDA V2.0 rewards (vault sizes, rounds, countdowns, flywheel burns): only networks with a pinned V2 deployment.
-  const v2Rewards=new V2RewardsService({networks:port===0?[]:evmTestnets}).start();
+  const v2Rewards=new V2RewardsService({networks:port===0?[]:evmTestnets,dataDir:port===0?null:resolve(dataDir,dataPrefix+'v2-rewards')}).start();
   // Tokens the flywheels bought and burned on a network (V2 vault burns on chain, plus the Model 10 keeper's burns),
   // keyed by lowercase token address, in base units. Explore cards and token pages show it as a share of supply.
   const flywheelBurns=key=>{const total=new Map();for(const m of [v2Rewards.burnedByToken(key),flywheelKeeper.burnedByToken?.(key)])for(const [token,amount] of m??[])total.set(token,(total.get(token)??0n)+amount);return total;};

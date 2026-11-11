@@ -2,6 +2,8 @@
 // deployment in networks.mjs (`v2.shared`: hook, airdrop, holder, flywheel, block). No deployment, no section: the page
 // hides it rather than showing invented figures. Never takes user RPCs or keys.
 import { JsonRpcProvider, ZeroAddress, Contract } from 'ethers';
+import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { V2RewardsIndexer, toJson } from '../../packages/indexer/v2-rewards.mjs';
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { payoutStable } from '../../packages/core/payout-stable.mjs';
@@ -30,32 +32,48 @@ export async function stockUsd(provider, factory, asset) {
 }
 
 export class V2RewardsService {
-  constructor({ networks, providerFactory = rpc => new JsonRpcProvider(rpc, undefined, { cacheTimeout: -1, batchMaxCount: 1 }), log = console.log, oracles = usdOracles() }) {
-    this.log = log; this.entries = []; this.oracles = oracles;
+  /** `dataDir`: where each network's index snapshot is kept, so a deploy resumes instead of re-reading from deployment. */
+  constructor({ networks, providerFactory = rpc => new JsonRpcProvider(rpc, undefined, { cacheTimeout: -1, batchMaxCount: 1 }), log = console.log, oracles = usdOracles(), dataDir = null }) {
+    this.log = log; this.entries = []; this.oracles = oracles; this.dataDir = dataDir;
     for (const net of networks.filter(n => !n.mainnet && n.v2?.shared?.hook)) {
       const d = net.v2.shared;
       // Every configured RPC, in order: a node that keeps failing (pruned history after a restart re-sync, rate limits)
       // is swapped for the next one, as the trading indexer does (Malik, 11 Nov: Sepolia's vaults read $0 after a deploy).
       const rpcs = [...new Set([net.rpcUrl, ...(net.rpcFallbacks ?? [])].filter(Boolean))], provider = providerFactory(rpcs[0]);
       this.providerFactory = providerFactory;
-      this.entries.push({ net, provider, rpcs, rpc: 0, failures: 0, prices: new Map(), index: new V2RewardsIndexer({ provider, contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel, usdcAirdrop: d.usdcAirdrop, usdcHolder: d.usdcHolder }, keeper: d.keeper, fromBlock: d.block, batchSize: 100 }), busy: false });
+      this.entries.push({ net, provider, rpcs, rpc: 0, failures: 0, prices: new Map(), index: new V2RewardsIndexer({ provider, contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel, usdcAirdrop: d.usdcAirdrop, usdcHolder: d.usdcHolder }, keeper: d.keeper, fromBlock: d.block, batchSize: 100, maxBatch: 5000, parallel: 4, onProgress: ix => this.save(net.key, ix) }), busy: false });
+      this.load(net.key, this.entries.at(-1).index);
     }
   }
   get deployed() { return this.entries.length > 0; }
   start() {
     if (!this.deployed) return this;
-    const run = () => { for (const e of this.entries) if (!e.busy) { e.busy = true; e.index.sync().then(() => { e.failures = 0; return this.refreshPrices(e); }).catch(err => { this.log(`[v2-rewards] ${e.net.key}: ${err.message}`); this.failover(e); }).finally(() => { e.busy = false; }); } };
+    const run = () => { for (const e of this.entries) if (!e.busy) { e.busy = true; e.index.sync().then(() => { e.failures = 0; this.save(e.net.key, e.index); return this.refreshPrices(e); }).catch(err => { this.log(`[v2-rewards] ${e.net.key}: ${err.message}`); this.failover(e); }).finally(() => { e.busy = false; }); } };
     run(); this.timer = setInterval(run, TICK_MS); this.timer.unref?.();
     return this;
   }
   stop() { clearInterval(this.timer); }
+
+  snapshotPath(key) { return this.dataDir ? resolve(this.dataDir, `v2-rewards-${key}.json`) : null; }
+  /** Resume from the last snapshot of the same contracts (a different deployment starts over). */
+  load(key, index) {
+    const path = this.snapshotPath(key); if (!path) return;
+    try { if (index.restore(readFileSync(path, 'utf8'))) this.log(JSON.stringify({ event: 'v2_rewards_resumed', network: key, nextBlock: index.next })); }
+    catch (e) { if (e.code !== 'ENOENT') this.log(`[v2-rewards] ${key}: snapshot not used (${e.message})`); }
+  }
+  /** Written atomically (temporary file, then rename) after each sync and every few batches of a catch-up. */
+  save(key, index) {
+    const path = this.snapshotPath(key); if (!path) return;
+    try { mkdirSync(this.dataDir, { recursive: true }); writeFileSync(`${path}.tmp`, index.snapshot()); renameSync(`${path}.tmp`, path); }
+    catch (e) { this.log(`[v2-rewards] ${key}: snapshot not saved (${e.message})`); }
+  }
 
   /** After three failed syncs in a row, read from the network's next RPC (reads only; the index keeps its progress). */
   failover(e) {
     e.failures += 1;
     if (e.failures < 3 || e.rpcs.length < 2) return;
     const from = e.rpcs[e.rpc]; e.rpc = (e.rpc + 1) % e.rpcs.length; e.failures = 0;
-    const old = e.provider; e.provider = this.providerFactory(e.rpcs[e.rpc]); e.index.provider = e.provider; old?.destroy?.();
+    const old = e.provider; e.provider = this.providerFactory(e.rpcs[e.rpc]); e.index.provider = e.provider; e.index.maxBatch = e.index.ceiling; old?.destroy?.();
     this.log(JSON.stringify({ event: 'v2_rewards_rpc_failover', network: e.net.key, from: hostOf(from), to: hostOf(e.rpcs[e.rpc]) }));
   }
 

@@ -164,6 +164,49 @@ function trendCard(token, rank, ctx) {
 }
 
 /** Re-uses cards whose identity is unchanged, so their numbers roll instead of re-rendering. */
+/**
+ * Trending glides sideways on its own, without end (Malik, 11 Nov): the cards are followed by a copy of themselves and
+ * the strip wraps back by one set's width, so it never reaches an edge. The copies are hidden from assistive tech and
+ * keyboard focus. Paused while the pointer, a finger or keyboard focus is on it, while the tab is hidden, and never
+ * started for people who ask for reduced motion. The arrows still move it by hand.
+ */
+function loopCopies(track) {
+  track.querySelectorAll(':scope > .trend-copy').forEach(n => n.remove());
+  const originals = [...track.children];
+  // Only when the cards overflow the strip; a short list stays still.
+  if (originals.length < 2 || track.scrollWidth <= track.clientWidth + 4) { track.classList.remove('auto-scroll'); return; }
+  for (const node of originals) {
+    const copy = node.cloneNode(true);
+    copy.classList.add('trend-copy'); copy.classList.remove('card-enter'); copy.removeAttribute('data-key'); copy.setAttribute('aria-hidden', 'true');
+    copy.querySelectorAll('a, button, [tabindex]').forEach(el => el.setAttribute('tabindex', '-1'));
+    track.append(copy);
+  }
+  track.classList.add('auto-scroll');
+}
+function autoScroll(track, pxPerSecond = 28) {
+  const reduce = matchMedia('(prefers-reduced-motion: reduce)');
+  let held = 0, last = 0, carry = 0, resumeTimer = null;
+  const hold = () => { held++; }, release = () => { held = Math.max(0, held - 1); last = 0; };
+  const pauseFor = ms => { clearTimeout(resumeTimer); hold(); resumeTimer = setTimeout(release, ms); };
+  track.addEventListener('pointerenter', hold); track.addEventListener('pointerleave', release);
+  track.addEventListener('focusin', hold); track.addEventListener('focusout', release);
+  track.addEventListener('touchstart', () => pauseFor(4000), { passive: true });
+  track.addEventListener('wheel', () => pauseFor(2500), { passive: true });
+  const frame = time => {
+    if (!track.isConnected) return; // the view was replaced: stop for good
+    requestAnimationFrame(frame);
+    const first = track.querySelector(':scope > .trend-copy');
+    if (held || reduce.matches || document.hidden || !first) { last = 0; return; }
+    if (!last) { last = time; return; }
+    carry += Math.min(64, time - last) * pxPerSecond / 1000; last = time;
+    const step = Math.floor(carry); if (!step) return;
+    carry -= step; track.scrollLeft += step;
+    const span = first.offsetLeft - track.firstElementChild.offsetLeft;
+    if (span > 0 && track.scrollLeft >= span) track.scrollLeft -= span;
+  };
+  requestAnimationFrame(frame);
+}
+
 function reconcile(container, items, cache, build, update) {
   const seen = new Set(), nodes = [];
   items.forEach((token, i) => {
@@ -234,6 +277,7 @@ export function createExplore(source) {
       h('div.section-actions', h('button.btn.btn-secondary.btn-sm.view-all', { type: 'button', on: { click: () => { set({ tab: 'trending', page: 1 }); jumpToList(); } } }, 'View all', icon('arrow-right', 'icon-sm accent-icon')), trendPrev, trendNext)),
     h('div.scroll-fade', trendTrack));
   const syncTrend = scroller(trendTrack, trendPrev, trendNext);
+  autoScroll(trendTrack);
 
   /* Explore list */
   const launched = h('span.launched');
@@ -277,7 +321,7 @@ export function createExplore(source) {
     trending.hidden = !list.length;
     if (!list.length) { trendTrack.replaceChildren(); trendCache.clear(); return; }
     reconcile(trendTrack, list, trendCache, (t, i) => trendCard(t, i + 1, ctx), (node, t, i) => node._update(t, i + 1));
-    requestAnimationFrame(syncTrend);
+    requestAnimationFrame(() => { loopCopies(trendTrack); syncTrend(); });
   }
   function drawChips(counts) {
     const nets = source.networks();

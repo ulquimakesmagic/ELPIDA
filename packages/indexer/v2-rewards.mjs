@@ -36,9 +36,12 @@ const lower = a => String(a).toLowerCase();
 export class V2RewardsIndexer {
   /** `contracts`: { hook, airdrop, holder, flywheel, usdcAirdrop?, usdcHolder? } addresses; `fromBlock`: the deployment block. */
   /** `keeper`: the V2 keeper's address; its gas top-ups from the reward vaults are shown apart from payouts. */
-  constructor({ provider, contracts, keeper = null, fromBlock = 0, confirmations = 0, batchSize = 2000 }) {
+  /** `maxBatch` and `parallel`: how far the block range per eth_getLogs may grow, and how many ranges are fetched at once. */
+  /** `onProgress(indexer)`: called every few batches during a long catch-up (the service saves a snapshot there). */
+  constructor({ provider, contracts, keeper = null, fromBlock = 0, confirmations = 0, batchSize = 2000, maxBatch = 10_000, parallel = 4, onProgress = null }) {
     this.keeper = keeper ? lower(getAddress(keeper)) : null;
     this.provider = provider; this.fromBlock = fromBlock; this.confirmations = confirmations; this.batchSize = batchSize;
+    this.maxBatch = this.ceiling = Math.max(batchSize, maxBatch); this.parallel = Math.max(1, parallel); this.onProgress = onProgress; this.streak = 0;
     this.addresses = Object.fromEntries(Object.entries(contracts).filter(([, v]) => v).map(([k, v]) => [k, lower(getAddress(v))]));
     this.kinds = new Map(Object.entries(this.addresses).map(([k, v]) => [v, k]));
     this.iface = { hook: new Interface(V2_REWARD_ABIS.hook), airdrop: new Interface(V2_REWARD_ABIS.distributor), holder: new Interface(V2_REWARD_ABIS.distributor), flywheel: new Interface(V2_REWARD_ABIS.flywheel) };
@@ -65,18 +68,28 @@ export class V2RewardsIndexer {
         this.schedules[kind] = { period: Number(period), genesis: Number(genesis), claimWindowRounds: Number(window) };
       }
       const head = Number(await this.provider.send('eth_blockNumber', [])) - this.confirmations;
+      // Several ranges are fetched at once and applied in order (Malik, 11 Nov: catching up after a deploy was slow).
+      // A range the RPC refuses as too large halves the batch; a run of clean batches doubles it again, up to maxBatch.
+      let batches = 0;
       while (this.next <= head) {
-        const from = this.next, to = Math.min(head, from + this.batchSize - 1);
-        let logs;
-        try { logs = await this.provider.getLogs({ address: [...this.kinds.keys()], fromBlock: from, toBlock: to }); }
-        catch (e) {
-          // Public RPCs cap eth_getLogs ranges (Base Sepolia: 200 blocks, sometimes less). Halve and retry the range.
-          if (this.batchSize > 1 && RANGE_LIMIT.test(rpcMessage(e))) { this.batchSize = Math.max(1, Math.floor(this.batchSize / 2)); continue; }
-          throw e;
+        const windows = [];
+        for (let from = this.next, i = 0; i < this.parallel && from <= head; i++, from += this.batchSize) windows.push([from, Math.min(head, from + this.batchSize - 1)]);
+        const results = await Promise.allSettled(windows.map(([fromBlock, toBlock]) => this.provider.getLogs({ address: [...this.kinds.keys()], fromBlock, toBlock })));
+        let refused = null;
+        for (let i = 0; i < windows.length; i++) {
+          if (results[i].status === 'rejected') { refused = results[i].reason; break; }
+          const logs = results[i].value.sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index);
+          for (const log of logs) await this.apply(log);
+          this.next = windows[i][1] + 1; batches++;
+          if (++this.streak >= 8 && this.batchSize < this.maxBatch) { this.batchSize = Math.min(this.maxBatch, this.batchSize * 2); this.streak = 0; }
         }
-        logs.sort((a, b) => a.blockNumber - b.blockNumber || a.index - b.index);
-        for (const log of logs) await this.apply(log);
-        this.next = to + 1;
+        if (refused) {
+          // Public RPCs cap eth_getLogs ranges (Base Sepolia: 200 blocks, sometimes less). Halve and retry the range.
+          // The refused size becomes the ceiling for this RPC, so the batch does not keep growing back into the cap.
+          if (this.batchSize > 1 && RANGE_LIMIT.test(rpcMessage(refused))) { this.batchSize = Math.max(1, Math.floor(this.batchSize / 2)); this.maxBatch = this.batchSize; this.streak = 0; continue; }
+          throw refused;
+        }
+        if (this.onProgress && batches >= 50) { batches = 0; await this.onProgress(this); }
       }
       this.lastSync = Date.now(); this.lastError = null;
     } catch (e) { this.lastError = e.message; throw e; }
@@ -84,6 +97,27 @@ export class V2RewardsIndexer {
   }
 
   status() { return { nextBlock: this.next, lastSync: this.lastSync, error: this.lastError }; }
+
+  /**
+   * Everything the index has learned, as JSON (bigints as strings tagged `n:`), so a restart resumes where it was
+   * instead of re-reading every block since deployment. `restore` refuses a snapshot of other contracts.
+   */
+  snapshot() {
+    return JSON.stringify({ version: 1, addresses: this.addresses, fromBlock: this.fromBlock, next: this.next, batchSize: this.batchSize,
+      tokens: [...this.tokens], events: this.events, rounds: { airdrop: [...this.rounds.airdrop], holder: [...this.rounds.holder] },
+      burns: this.burns, claims: this.claims, gas: this.gas, schedules: this.schedules, usdcAsset: this.usdcAsset ?? null },
+    (_, v) => (typeof v === 'bigint' ? `n:${v}` : v));
+  }
+
+  restore(text) {
+    const s = JSON.parse(text, (_, v) => (typeof v === 'string' && /^n:-?\d+$/.test(v) ? BigInt(v.slice(2)) : v));
+    if (s?.version !== 1 || s.fromBlock !== this.fromBlock || JSON.stringify(s.addresses) !== JSON.stringify(this.addresses)) return false;
+    this.next = Math.max(this.fromBlock, Number(s.next)); this.batchSize = Math.max(1, Number(s.batchSize) || this.batchSize);
+    this.tokens = new Map(s.tokens); this.events = s.events; this.rounds = { airdrop: new Map(s.rounds.airdrop), holder: new Map(s.rounds.holder) };
+    this.burns = s.burns; this.claims = s.claims; this.gas = s.gas; this.schedules = s.schedules ?? {};
+    if (s.usdcAsset) this.usdcAsset = s.usdcAsset;
+    return true;
+  }
 
   async time(blockNumber) {
     if (!this.blockTimes.has(blockNumber)) this.blockTimes.set(blockNumber, (await this.provider.getBlock(blockNumber)).timestamp);
