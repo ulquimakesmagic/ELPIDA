@@ -2,7 +2,7 @@
 // to 8 wallets, no owner), this card lists each wallet, its fixed share and what it can claim, with a button that
 // collects the token's fees from the pool and pays that wallet. Anyone may press it; the money only goes to the wallet.
 import { JsonRpcProvider, formatUnits } from '/vendor/ethers.js';
-import { h, short, number, errorText, copyButton, icon } from './ui.mjs';
+import { h, short, number, errorText, copyButton, icon, usdRate } from './ui.mjs';
 import { creatorSplitState, creatorStrategyState, identityAllocationState, allocationKind } from './v2-launchpad.mjs';
 
 export function creatorSplitCard(ctx, token) {
@@ -23,7 +23,7 @@ export function creatorSplitCard(ctx, token) {
       h('p.small.muted', `The creator's 30% share is split between these wallets, fixed for good by contract `, h('span.mono', short(state.vault)), '. Fees still in the pool are collected when a share is paid out.'),
       h('ul.split-list', state.rows.map(r => h('li',
         h('span.mono', { title: r.wallet }, short(r.wallet)), h('span.split-share', `${number(r.bps / 100, 2)}%`),
-        h('span.split-amount', `${number(Number(formatUnits(r.claimable, decimals)), 6)} ${symbol}`),
+        claimableUsd(token, r.claimable, decimals, symbol),
         h('button.btn.btn-secondary.btn-sm', { type: 'button', disabled: ctx.mode !== 'testnet', title: ctx.mode !== 'testnet' ? 'Connect a wallet on this network to pay out.' : undefined, on: { click: async () => {
           if (busy) return; busy = true; error.textContent = '';
           try { await ctx.run('claim-creator-split', { token: token.address, wallet: r.wallet }); await load(); } catch (e) { error.textContent = errorText(e); } finally { busy = false; }
@@ -109,7 +109,7 @@ export function identityAllocationCard(ctx, token) {
         h('span', { title: r.wallet ?? '' }, name(r), r.wallet ? h('span.verified-tick', { title: r.kind === 'wallet' ? 'Wallet fixed at launch' : `Verified: pays ${r.wallet}`, 'aria-label': 'Verified' }, icon('badge-check', 'icon-xs')) : null,
           r.kind !== 'wallet' ? h('small.muted', r.wallet ? ` · pays ${short(r.wallet)}` : ' · not verified') : null),
         h('span.split-share', `${number(r.bps / 100, 2)}%`),
-        h('span.split-amount', `${number(Number(formatUnits(r.claimable, decimals)), 6)} ${symbol}`),
+        claimableUsd(token, r.claimable, decimals, symbol),
         r.wallet ? h('button.btn.btn-secondary.btn-sm', { type: 'button', disabled: ctx.mode !== 'testnet', on: { click: () => act(async () => { await ctx.run('claim-identity-row', { token: token.address, index: r.index }); await load(); }) } }, 'Collect and pay out')
           : h('button.btn.btn-secondary.btn-sm', { type: 'button', disabled: r.kind === 'x' && !ctx.config?.v2Identities?.x, title: r.kind === 'x' && !ctx.config?.v2Identities?.x ? 'X sign-in is not set up on this server yet.' : undefined, on: { click: () => verify(r) } }, 'Verify ownership')))));
   }
@@ -156,4 +156,15 @@ export function allocationClaimView(ctx, { address, network }) {
       h('ul.claim-steps', steps.map(([i, t, d]) => h('li', icon(i, 'icon-sm'), h('div', h('strong', t), h('p.small.muted', d)))))),
     net ? creatorSplitCard(ctx, token) : null,
     net ? identityAllocationCard(ctx, token) : h('p.muted', 'Claims for this token are not available here.'));
+}
+
+/**
+ * What a recipient can claim, in dollars (Malik, 11 Nov: USD, not the pair asset), from the token's price reference.
+ * The amount in the pair asset stays in the tooltip; without a fresh price the cell says so rather than guess.
+ */
+export function claimableUsd(token, amount, decimals, symbol) {
+  const units = Number(formatUnits(amount ?? 0n, decimals)), rate = usdRate(token), detail = `${number(units, 6)} ${symbol}`;
+  if (rate === null || !Number.isFinite(rate)) return h('span.split-amount.muted', { title: detail }, units > 0 ? 'Awaiting a price' : '$0');
+  const usd = units * rate;
+  return h('span.split-amount', { title: detail }, usd > 0 && usd < 0.01 ? '<$0.01' : `$${number(usd, 2)}`);
 }
