@@ -191,8 +191,9 @@ flywheel slot and a large airdrop share. The spec asks for anti-wash filters; th
   Simulated (30,000 traders): median trader 4.3× plain pro-rata; bottom half 18% of the pool instead of 2%; traders of
   $1k / $10k / $100k a month get back about 50% / 23% / 16% of their fees.
 - **Anti-snipe surplus** stays in the locked liquidity, as in Models 10 and 11.
-- **Audit:** done in house with professional tools (static analysis, invariant fuzzing, symbolic checks of the split),
-  with a public bug bounty and a staged mainnet start.
+- **Audit (corrected 11 November 2026):** no independent audit has been done. This document is a phase-0 repository
+  review, not a security audit. An AI-led pre-mainnet review ran on 11 November (`docs/AUDIT_TRIAGE_2026-11-11.md`);
+  Malik chose to launch Base first without an external firm, with the restrictions listed there.
 
 ## 12. Security considerations
 

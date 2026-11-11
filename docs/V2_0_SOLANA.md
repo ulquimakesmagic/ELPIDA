@@ -74,7 +74,7 @@ Not audited. Test networks first; mainnet only with Malik's explicit approval.
 - **Claims.** `claim_v2` (anyone) pays one leaf once: wrapped-SOL rounds in **plain SOL** from the vault PDA (after
   `sweep_v2_sol` closes the vault's wrapped-SOL account into it), other assets to the payee's associated token account
   (created by the payer when missing).
-- **Expiry.** `expire_v2` (anyone) once 12 further rounds have started: what the round left unclaimed is no longer
+- **Expiry.** `expire_v2` (anyone) once round `r + 13` has started (one round later than EVM's 12; audit SOL-09): what the round left unclaimed is no longer
   reserved and pays later rounds.
 - **Holder conversion.** Not on Solana: SOL pairs already pay in SOL; other pairs pay in their own asset.
 - **Flywheel.** `v2_flywheel_curve` and `v2_flywheel_raydium` (the airdrop distributor's operator): buy a V2 token with
@@ -102,8 +102,9 @@ Not audited. Test networks first; mainnet only with Malik's explicit approval.
 harvests of graduated pools (Raydium for SOL, PumpSwap otherwise; "nothing to harvest" is not a failure); `sweep_v2_sol`
 for the airdrop and holder vaults; and flywheel orders: up to ten V2 tokens at least a day old, ranked by reserve, equal
 slices of 10% of the flywheel vault, 1% slippage from a live quote, never a curve-completing buy. The EVM flywheel's
-independent-buyer and price-average filters need the Solana trade index and arrive with step 4b-2; the program's own
-limits (age, 10%, 6 hours, no completion) hold either way. Status at `/api/public/v2-rewards` (`keeper.solana`).
+independent-buyer and price-average filters are **not implemented on Solana yet** (audit SOL-08, 11 November); the
+program's own limits (age, 10%, 6 hours, no completion) hold. Residual risk: the flywheel can be the first or only
+buyer of a young token. It burns what it buys, but a pre-positioned seller can still profit. Status at `/api/public/v2-rewards` (`keeper.solana`).
 
 ## S4b-2: reward rounds
 
@@ -112,8 +113,9 @@ The keeper runs the same plans as EVM (`packages/core/v2-keeper-plan.mjs`): the 
 reward wallets excluded. Trades come from the Solana index, which now records each trade's fee (curve: the token's own
 rate; Raydium 1%; PumpSwap 0.30%). Holder rewards per token once its holder share since the last payout reaches the
 threshold ($0.25 test, $25 mainnet), weighted by daily holder snapshots (a wallet must be in two). Lists are posted
-(`post_v2_root`), published at `/api/public/v2-rewards/solana-manifest/<kind>/<round>`, and every leaf is paid in plain
-SOL. Wallet funding links (exchange-safe, as on EVM) are not applied on Solana yet: each wallet counts on its own.
+(`post_v2_root`), published at `/api/public/v2-rewards/solana-manifest/<kind>/<round>`. Leaves are paid in the round's asset:
+plain SOL for a wrapped-SOL round, USDC once `v2.usdc` is pinned (S5 below; superseded this paragraph's original
+"plain SOL"). Wallet funding links (exchange-safe, as on EVM) are not applied on Solana yet: each wallet counts on its own.
 
 ## S4c: Solana in the Rewards analytics
 
@@ -143,7 +145,8 @@ Malik, 10 November: trader airdrop and holder rewards pay only USDC, on every ch
   USDC and prints `v2.usdc` ({ mint, pool }) to pin in `deployments/solana-devnet.json`.
 - **Keeper** (`apps/api/v2-keeper-solana.mjs`): with `v2.usdc` pinned, the airdrop converts the round's free SOL and
   splits the USDC (same rules, $ minimum carried in USDC); holder rewards convert exactly what is due and scale each
-  holder's amount to the USDC received. At least 97% of the pool's quote. A conversion that fails leaves the SOL for
+  holder's amount to the USDC received. The keeper asks for at least 97% of the pool's quote and at least 95% of
+SOL/USD; **the program itself only checks the keeper's `min_out`** (audit SOL-05). A conversion that fails leaves the SOL for
   the next round. Without `v2.usdc` nothing changes.
 - **Analytics**: USDC rounds and each distributor's USDC are shown; its SOL is then what the vault holds plus what pools
   still owe it.

@@ -336,11 +336,11 @@ export function tradePanel(ctx, token, { dex, solana }) {
   const balance = h('p.hint#trade-balance');
   const shortcuts = h('div.shortcuts', { role: 'group', 'aria-label': 'Amount shortcuts' });
   const out = h('strong', '0.00'), fee = h('strong', '—'), minOut = h('strong', '—'), feeNote = h('p.hint');
-  // Live anti-snipe countdown ("Launch fee window: 47% → 1.25% in 31 s") while the first minute lasts.
+  // Live anti-snipe countdown ("Launch fee window: 47% → 4% in 31 s", ending at the token's own fee) while the first minute lasts.
   const feeWindow = h('p.hint.fee-window', { role: 'status', 'aria-live': 'off' });
   let feeTicks = 0;
   const tickFeeWindow = () => {
-    const label = token.launchedAt && !token.complete && !token.graduated ? snipeLabel(token.launchedAt, nowSeconds(), token.feeSchedule ?? {}) : null;
+    const label = token.launchedAt && !token.complete && !token.graduated ? snipeLabel(token.launchedAt, nowSeconds(), token.feeSchedule ?? (token.feeBps ? { base: Number(token.feeBps) } : {})) : null;
     feeWindow.textContent = label ?? ''; feeWindow.hidden = !label;
     if (label) {
       feeTicks++;
@@ -430,7 +430,7 @@ export function tradePanel(ctx, token, { dex, solana }) {
         out.textContent = compactTradeAmount(routed()?result.output:result.out);out.title=String(routed()?result.output:result.out);
         fee.textContent=routed()?'Included in route':`${compactTradeAmount(result.fee)} ${result.feeSymbol??q}`;
         minOut.textContent = `${compactTradeAmount(Number(routed()?result.output:result.out) * (1 - (routed()?1:Number(slippage.value)) / 100))} ${side === 'buy' ? token.symbol : currency()}`;
-        feeNote.textContent = routed() ? (solana ? `One transaction: SOL converts through ${result.via ?? 'the conversion pool'}, then trades. Each hop keeps a 1% margin; any unused ${q} stays in your wallet.` : (result.execution==='v4'?`${native} converts through the conversion pool, then trades on the Uniswap v4 pool. Each hop keeps a 1% margin. One confirmation if your wallet batches calls, otherwise separate steps; any extra ${q} stays in your wallet.`:'Native routes protect each hop with 1% slippage. Any unused pair asset stays in your wallet. Requires funded conversion liquidity and a verified native router or atomic-capable wallet.')) : result.antiSnipeActive ? `Launch protection is active: the fee is ${number(result.feeBps / 100, 2)}% right now and falls to 1.25% by the end of the first minute. The amount above 1.25% is added to the token's locked liquidity.` : result.completesCurve ? `This purchase completes the curve. Only ${number(result.spend, 4)} ${q} will be charged.` : '';
+        feeNote.textContent = routed() ? (solana ? `One transaction: SOL converts through ${result.via ?? 'the conversion pool'}, then trades. Each hop keeps a 1% margin; any unused ${q} stays in your wallet.` : (result.execution==='v4'?`${native} converts through the conversion pool, then trades on the Uniswap v4 pool. Each hop keeps a 1% margin. One confirmation if your wallet batches calls, otherwise separate steps; any extra ${q} stays in your wallet.`:'Native routes protect each hop with 1% slippage. Any unused pair asset stays in your wallet. Requires funded conversion liquidity and a verified native router or atomic-capable wallet.')) : result.antiSnipeActive ? `Launch protection is active: the fee is ${number(result.feeBps / 100, 2)}% right now and falls to this token's ${number((token.feeBps ?? 125) / 100, 2)}% by the end of the first minute. The amount above ${number((token.feeBps ?? 125) / 100, 2)}% is added to the token's locked liquidity.` : result.completesCurve ? `This purchase completes the curve. Only ${number(result.spend, 4)} ${q} will be charged.` : '';
       } catch (e) { if (rev !== revision) return; out.textContent = '—'; fee.textContent = '—'; minOut.textContent = '—'; error.textContent = errorText(e); }
     }, 300);
   }

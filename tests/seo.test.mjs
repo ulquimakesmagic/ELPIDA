@@ -133,3 +133,23 @@ test('crawler probes: HEAD works on public pages with no body, and stays refused
     assert.notEqual((await fetch(s.url + '/api/tokens', { method: 'HEAD' })).status, 200);
   } finally { await s.close(); }
 });
+
+// Audit WEB-01 (11 November 2026): the crawlable pages described the retired Model 10 ($5,000 → $50,000, 1.25% split
+// 50/50, Uniswap v3). Every number now comes from packages/core/v2-economics.mjs; this keeps it that way.
+test('the public pages state the V2 economics from v2-economics.mjs, never the retired Model 10 numbers', async () => {
+  const { V2, V2_FEE_SPLIT } = await import('../packages/core/v2-economics.mjs');
+  const text = PAGES.map(p => renderPage(p)).join('\n');
+  for (const stale of ['$5,000', '$50,000', '50% protocol', 'split evenly', 'split equally', 'Uniswap v3', 'falls to 1.25%', 'curve fee is 1.25%'])
+    assert.ok(!text.includes(stale), `stale wording: ${stale}`);
+  const usd = e6 => `$${(Number(e6) / 1e6).toLocaleString('en-US')}`;
+  for (const fresh of [usd(V2.startFdvUsdE6), usd(V2.graduationFdvUsdE6), `${V2.maxFeeBps / 100}%`, `${V2_FEE_SPLIT.creator / 100}% to the creator`, `${V2_FEE_SPLIT.treasury / 100}% to the Elpida treasury`, `${V2.firstBuyCapBps / 100}% of the supply`])
+    assert.ok(text.includes(fresh), `missing: ${fresh}`);
+});
+
+// Audit WEB-02: the in-app docs imported only Model 10 constants and promised an uncapped first buy and a 50/50 split.
+test('the in-app docs take their numbers from the V2 economics and drop the retired Model 10 claims', () => {
+  const src = readFileSync(new URL('../apps/web/docs-view.mjs', import.meta.url), 'utf8');
+  assert.match(src, /from '\/v2-economics\.mjs'/);
+  for (const stale of ['split equally', 'Uniswap v3', 'has no cap', 'BASE_FEE_BPS', 'invite-only beta'])
+    assert.ok(!src.includes(stale), `stale wording: ${stale}`);
+});
