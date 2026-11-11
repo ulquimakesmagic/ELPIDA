@@ -7,8 +7,8 @@
 
 - The Solana payout pool is pinned (`deployments/solana-devnet.json` → `v2.usdc`, pool `5QYRTeS…iwo`). It opened at
   0.05 SOL : 2 USDC, about $40 per SOL against ~$83. The keeper now converts only when the pool pays at least 95% of
-  SOL/USD, and at most 2% of the pool's SOL per conversion, so until the pool is rebalanced Solana rewards stay in SOL.
-  To rebalance (needs about 0.9 more devnet USDC on the deployer): `node scripts/solana-usdc-payouts.mjs --rebalance`.
+  SOL/USD, and at most 2% of the pool's SOL per conversion. **Done 11 Nov:** Malik rebalanced it with 0.877 USDC
+  (tx `5GkvvTF8…7UP3`); it now prices SOL at about $82. Run `--rebalance` again whenever it drifts.
 - Conversion liquidity takes missing test stock from the stock's faucet; errors name what is short.
 - `solana-upgrade.cmd` keeps the recorded test stock pairs (the 11 Nov upgrade had dropped tTSLAon from the record).
 
