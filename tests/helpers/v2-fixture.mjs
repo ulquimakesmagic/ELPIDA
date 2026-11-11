@@ -52,7 +52,7 @@ export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN
     contracts.holder = await deploy(v4Art('ElpidaV2Distributor'), addresses[4], 7 * 86_400, today, 'holder-rewards', convert ? usdc.target : Z, convert ? contracts.v3.router.target : Z, convert ? contracts.v3.weth.target : Z);
     contracts.flywheel = await deploy(v4Art('ElpidaV2FlywheelVault'), addresses[4], factory.target);
     if (usdcPayouts) for (const [k, src, purpose] of [['usdcAirdrop', contracts.airdrop, 'trader-airdrop-usdc'], ['usdcHolder', contracts.holder, 'holder-rewards-usdc']])
-      contracts[k] = await deploy(v4Art('ElpidaV2UsdcDistributor'), addresses[4], await src.period(), await src.genesis(), purpose, usdc.target, contracts.v3.router.target, contracts.v3.weth.target, src.target);
+      contracts[k] = await deploy(v4Art('ElpidaV2UsdcDistributor'), addresses[4], await src.period(), await src.genesis(), purpose, usdc.target, contracts.v3.router.target, contracts.v3.weth.target, src.target, false);
     Object.assign(vaults, { traderAirdrop: contracts.airdrop.target, flywheel: contracts.flywheel.target, holderRewards: contracts.holder.target });
   }
   const feed = await deploy(v4Art('MockUsdFeed'), ETH_USD * 10n ** 8n);

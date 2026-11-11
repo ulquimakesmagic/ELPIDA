@@ -2,7 +2,8 @@ import { h, short, errorText } from './ui.mjs';
 import { chainIcon } from './chain-ui.mjs';
 import { downloadSafeBatch } from './admin-pairs.mjs';
 import { v4Available, v4Deployment, v4PoolManager, savedTestPoolManager, v4StockPairs, v2Deployment } from './v4-launchpad.mjs';
-import { v2Available, v2StockPairs, v2StockListState, v2UsdcDistributors } from './v2-launchpad.mjs';
+import { v2Available, v2StockPairs, v2StockListState, v2UsdcDistributors, payoutStableFor } from './v2-launchpad.mjs';
+import { payoutTicker } from '/payout-stable.mjs';
 
 // Operator panel, Launchpads tab (#/monkey?tab=launchpads, 6 November 2026). Setting up a network is an operator job,
 // so every deployment lives here and only here (Malik, 6 November 2026: "limited to admin panel only and not everyone"):
@@ -98,11 +99,15 @@ export function renderLaunchpads(ctx, { connect }) {
 
   /** USDC payouts: the trader airdrop and holder rewards convert to USDC and pay only USDC once these are pinned. */
   function v2UsdcBlock(net) {
-    const u = v2UsdcDistributors(net), box = h('div.stack', h('h3.small', 'USDC payouts'));
-    if (u?.pinned) box.append(h('p.small.muted', 'Trader airdrop and holder rewards pay in USDC: airdrop ', h('span.mono', short(u.airdrop)), ', holders ', h('span.mono', short(u.holder)), '.'));
+    const u = v2UsdcDistributors(net), stable = ctx.wallet?.net?.key === net.key ? payoutStableFor(ctx.wallet) : null, ticker = stable?.symbol ?? payoutTicker(net);
+    const box = h('div.stack', h('h3.small', `${ticker} payouts`));
+    if (u?.pinned) box.append(h('p.small.muted', `Trader airdrop and holder rewards pay in ${ticker}: airdrop `, h('span.mono', short(u.airdrop)), ', holders ', h('span.mono', short(u.holder)), '.'));
     else if (u) box.append(h('p.small', 'Deployed from this browser. Send these to be pinned in networks.mjs (v2.shared); until then rewards pay in the pair asset:'), h('pre.small.selectable', JSON.stringify({ usdcAirdrop: u.airdrop, usdcHolder: u.holder }, null, 2)));
-    else box.append(h('p.small.muted', 'Rewards pay in each pair asset. Deploy two USDC distributors (2 confirmations) to convert each finished round to USDC on Uniswap v3 and pay only USDC. The flywheel is unchanged.'),
-      button('Deploy USDC payout distributors', 'deploy-v2-usdc', {}));
+    else if (!stable) box.append(h('p.small.muted', `${net.name} has no official test ${payoutTicker(net)}. Deploy Elpida's labelled, no-value test ${payoutTicker(net)} (t${payoutTicker(net)}) and open a small ${net.nativeCurrency.symbol} pool for it (4 confirmations, 0.01 ${net.nativeCurrency.symbol}), then deploy the payout distributors.`),
+      button(`Set up t${payoutTicker(net)} for payouts`, 'setup-test-payout-stable', { nativeAmount: '0.01' }));
+    else box.append(h('p.small.muted', `Rewards pay in each pair asset. Deploy two ${ticker} distributors (2 confirmations) to convert each finished round to ${ticker} on the chain's DEX and pay only ${ticker}. The flywheel is unchanged.`),
+      button(`Deploy ${ticker} payout distributors`, 'deploy-v2-usdc', {}));
+    if (stable && !stable.pinned) box.append(h('p.small', `Also send this to be pinned as the network's payoutStable in networks.mjs:`), h('pre.small.selectable', JSON.stringify({ payoutStable: { address: stable.address, symbol: stable.symbol, decimals: stable.decimals, test: true } }, null, 2)));
     return box;
   }
 

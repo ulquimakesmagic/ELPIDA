@@ -138,3 +138,20 @@ The flywheel is unchanged. Solana is a later phase (it needs a program upgrade a
 - **Tests:** `tests/v2-usdc-rewards.test.mjs` (the contract's guards; native, USDC and an unrouted stock through both
   jobs on real contracts; the analytics; the browser deploy).
 
+### Every EVM test chain (11 November)
+
+- **Payout stablecoin per network** (`packages/core/payout-stable.mjs`): a network's pinned `payoutStable`
+  ({ address, symbol, decimals, test }) or else its configured USDC. Robinhood Chain pays **USDG**; test chains with no
+  official test stablecoin (BNB Chain testnet: no Circle USDC; Robinhood Chain testnet: no official test USDG, only
+  unofficial copies) use **Elpida's labelled, no-value test dollar** (`contracts/evm/testnet/ElpidaTestDollar.sol`:
+  "Elpida Test USDC/USDG (no value)", `tUSDC` / `tUSDG`, 6 decimals, public faucet, refuses mainnet chain ids).
+- **Operator panel → V2 card → Set up tUSDx for payouts** (4 confirmations, 0.01 of the native coin): deploys the
+  test dollar, takes 1,000 from its faucet and opens a full-range 1% native/test-dollar pool at the oracle price; the
+  position stays in the operator's wallet. Then *Deploy tUSDx payout distributors* as on Base and Sepolia, and pin
+  both the distributors and `payoutStable`.
+- **PancakeSwap v3** (BNB Chain): `ElpidaV2UsdcDistributor` VERSION 3 takes `routerDeadline` (true for routers whose
+  `exactInput` takes a deadline). The keeper also quotes PancakeSwap's 0.25% and the 0.01% tiers.
+- Analytics label the payout stablecoin by its symbol at $1, whether or not any token pairs with it.
+- Tests: `tests/v2-payout-stables.test.mjs` (per-network choice, a deadline-style router converting, the test-dollar
+  setup with its pool and the distributors deployed on it).
+
