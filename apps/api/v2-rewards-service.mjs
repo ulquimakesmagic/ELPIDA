@@ -5,7 +5,9 @@ import { JsonRpcProvider, ZeroAddress, Contract } from 'ethers';
 import { V2RewardsIndexer, toJson } from '../../packages/indexer/v2-rewards.mjs';
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { payoutStable } from '../../packages/core/payout-stable.mjs';
+import { testPairReference } from '../../packages/core/pairs.mjs';
 
+const hostOf = u => { try { return new URL(u).host; } catch { return 'rpc'; } };
 const TICK_MS = 60_000, FEED_MAX_AGE = 4 * 86_400, PRICE_TTL_MS = 5 * 60_000;
 const FEED_ABI = ['function decimals() view returns(uint8)', 'function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)'];
 
@@ -32,18 +34,30 @@ export class V2RewardsService {
     this.log = log; this.entries = []; this.oracles = oracles;
     for (const net of networks.filter(n => !n.mainnet && n.v2?.shared?.hook)) {
       const d = net.v2.shared;
-      const provider = providerFactory(net.rpcUrl);
-      this.entries.push({ net, provider, prices: new Map(), index: new V2RewardsIndexer({ provider, contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel, usdcAirdrop: d.usdcAirdrop, usdcHolder: d.usdcHolder }, keeper: d.keeper, fromBlock: d.block, batchSize: 100 }), busy: false });
+      // Every configured RPC, in order: a node that keeps failing (pruned history after a restart re-sync, rate limits)
+      // is swapped for the next one, as the trading indexer does (Malik, 11 Nov: Sepolia's vaults read $0 after a deploy).
+      const rpcs = [...new Set([net.rpcUrl, ...(net.rpcFallbacks ?? [])].filter(Boolean))], provider = providerFactory(rpcs[0]);
+      this.providerFactory = providerFactory;
+      this.entries.push({ net, provider, rpcs, rpc: 0, failures: 0, prices: new Map(), index: new V2RewardsIndexer({ provider, contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel, usdcAirdrop: d.usdcAirdrop, usdcHolder: d.usdcHolder }, keeper: d.keeper, fromBlock: d.block, batchSize: 100 }), busy: false });
     }
   }
   get deployed() { return this.entries.length > 0; }
   start() {
     if (!this.deployed) return this;
-    const run = () => { for (const e of this.entries) if (!e.busy) { e.busy = true; e.index.sync().then(() => this.refreshPrices(e)).catch(err => this.log(`[v2-rewards] ${e.net.key}: ${err.message}`)).finally(() => { e.busy = false; }); } };
+    const run = () => { for (const e of this.entries) if (!e.busy) { e.busy = true; e.index.sync().then(() => { e.failures = 0; return this.refreshPrices(e); }).catch(err => { this.log(`[v2-rewards] ${e.net.key}: ${err.message}`); this.failover(e); }).finally(() => { e.busy = false; }); } };
     run(); this.timer = setInterval(run, TICK_MS); this.timer.unref?.();
     return this;
   }
   stop() { clearInterval(this.timer); }
+
+  /** After three failed syncs in a row, read from the network's next RPC (reads only; the index keeps its progress). */
+  failover(e) {
+    e.failures += 1;
+    if (e.failures < 3 || e.rpcs.length < 2) return;
+    const from = e.rpcs[e.rpc]; e.rpc = (e.rpc + 1) % e.rpcs.length; e.failures = 0;
+    const old = e.provider; e.provider = this.providerFactory(e.rpcs[e.rpc]); e.index.provider = e.provider; old?.destroy?.();
+    this.log(JSON.stringify({ event: 'v2_rewards_rpc_failover', network: e.net.key, from: hostOf(from), to: hostOf(e.rpcs[e.rpc]) }));
+  }
 
   /** Prices every non-native, non-stablecoin pair asset seen in the index from its feed (cached five minutes). */
   async refreshPrices(e, nowMs = Date.now()) {
@@ -70,7 +84,9 @@ export class V2RewardsService {
       const stable = payoutStable(net, this.oracles);
       if (stable) assets[stable.address.toLowerCase()] = { symbol: stable.symbol, decimals: stable.decimals, usd: 1 };
       const priced = a => this.entries.find(x => x.net === net)?.prices.get(a)?.usd ?? null;
-      for (const t of quotes(net.key) ?? []) if (t?.quoteAddress && t.pair !== 'native' && !assets[t.quoteAddress.toLowerCase()]) { const a = t.quoteAddress.toLowerCase(); assets[a] = { symbol: t.quoteSymbol ?? 'token', decimals: Number(t.quoteDecimals ?? 18), usd: t.pair === 'usdc' ? 1 : priced(a) }; }
+      // A stock's live feed first; a labelled test stock whose feed is unset falls back to its round test price, as the
+      // token page does (testPairReference: test networks only).
+      for (const t of quotes(net.key) ?? []) if (t?.quoteAddress && t.pair !== 'native' && !assets[t.quoteAddress.toLowerCase()]) { const a = t.quoteAddress.toLowerCase(); assets[a] = { symbol: t.quoteSymbol ?? 'token', decimals: Number(t.quoteDecimals ?? 18), usd: t.pair === 'usdc' ? 1 : priced(a) ?? testPairReference({ ...t, network: net.key })?.usd ?? null }; }
       // Pair assets the index saw that the public listings have not (yet): still priced when their feed answers.
       for (const [a, p] of this.entries.find(x => x.net === net)?.prices ?? []) if (!assets[a] && p.usd) assets[a] = { symbol: 'stock', decimals: 18, usd: p.usd };
       return { key: net.key, name: net.name, explorer: net.explorer ?? null, testnet: true, assets, ...toJson(index.summary(now)) };
