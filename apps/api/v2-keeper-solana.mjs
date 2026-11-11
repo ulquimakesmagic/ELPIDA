@@ -213,7 +213,14 @@ export class SolanaV2Keeper {
     const r = this.client.raydiumStablePool(this.usdc.pool, this.usdc.mint), [v0, v1] = await this.connection.getMultipleAccountsInfo([r.vault0, r.vault1]);
     const [a0, a1] = [this.client.tokenAmount(v0?.data), this.client.tokenAmount(v1?.data)], [usdcReserve, solReserve] = r.usdcIs0 ? [a0, a1] : [a1, a0];
     if (usdcReserve <= 0n || solReserve <= 0n) return 0n;
-    const quoted = raydiumQuote(lamports, solReserve, usdcReserve).out, minOut = quoted * 97n / 100n;
+    // At most 2% of the pool's SOL per conversion, and only at a fair price: the pool must pay at least 95% of SOL/USD.
+    // Otherwise the SOL stays (and is paid out later or as SOL); a thin or off-price pool never eats the rewards.
+    const cap = solReserve / 50n; if (lamports > cap) lamports = cap;
+    if (lamports < 1_000_000n) return 0n;
+    const quoted = raydiumQuote(lamports, solReserve, usdcReserve).out, minOut = quoted * 97n / 100n, usd = this.solUsd?.();
+    if (!(usd > 0)) throw new Error('no fresh SOL/USD price; SOL kept until there is one');
+    const fair = BigInt(Math.floor(Number(lamports) * usd / 1000));
+    if (quoted * 100n < fair * 95n) throw new Error(`the USDC pool pays $${(Number(quoted) * 1000 / Number(lamports)).toFixed(2)} per SOL against SOL/USD $${usd.toFixed(2)}; SOL kept until the pool is rebalanced`);
     if (minOut <= 0n) return 0n;
     const before = await this.usdcAvailable(kind);
     await this.sendTx(this.connection, this.payer, [this.client.computeBudget(400_000), ...this.client.v2ConvertUsdc({ operator: this.payer.publicKey, kind, config: this.config, usdcMint: this.usdc.mint, pool: this.usdc.pool, amountIn: lamports, minOut })]);

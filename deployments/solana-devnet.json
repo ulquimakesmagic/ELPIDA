@@ -126,7 +126,13 @@
       }
     },
     "flywheelVault": "Di2nEuoWepxHR3F8xy1WJyk7sSBuAykozTnjTY5kNqxx",
-    "keeper": "3CcwEu3nSM9Y7UQCgqggiqZrUb361JNRZi9oA7KNQxZW"
+    "keeper": "3CcwEu3nSM9Y7UQCgqggiqZrUb361JNRZi9oA7KNQxZW",
+    "usdc": {
+      "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+      "pool": "5QYRTeSXweZXLRcMocdJcDZ6HCUJCzPgK8HZYvjoMiwo",
+      "wsol": "So11111111111111111111111111111111111111112",
+      "createdTx": "3upJD65HeKE7c6g5nnscR9rfhVv4risQp8vMCQo3cq64Eb35v5ubuQZH8U6bzcFoQ5nWtMzWzB9w6WiXqosp6bSR"
+    }
   },
   "upgradeAuthority": "FeUWFps7CYtrXNXosirwJCfFQM5Na6PamEV6hpFcKaH8"
 }
