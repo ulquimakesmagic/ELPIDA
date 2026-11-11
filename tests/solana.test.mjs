@@ -1828,3 +1828,47 @@ test('Solana V2 rewards analytics (step 4c): vault sizes, posted rounds and flyw
   assert.deepEqual([round.kind, round.round, round.expired, round.paid(0)], [1, 7, false, 0]);
   rewards.stop();
 });
+
+test('Solana V2 stablecoin payouts: a distributor converts unpromised SOL to USDC through Raydium and pays a USDC round', { skip: raySkip }, async () => {
+  const kind = V2_DIST.holder, wsol = new PublicKey(WSOL_MINT), keeper = f.v2Operator ?? Keypair.generate();
+  if (!f.v2Operator) {
+    await airdrop(f.connection, keeper.publicKey, 3 * web3.LAMPORTS_PER_SOL);
+    const today = Math.floor((await f.connection.getBlockTime(await f.connection.getSlot('confirmed'))) / 86_400) * 86_400;
+    await send(f.connection, f.authority, [f.client.initV2Distributor({ authority: f.authority.publicKey, kind, operator: keeper.publicKey, period: 86_400, genesis: today - 20 * 86_400 })], [], 1);
+  }
+  // A 6-decimal USDC named by a pricing config, and a WSOL/USDC Raydium pool at $150 per SOL (2 SOL : 300 USDC).
+  const usdc = Keypair.generate(), config = f.client.configV2For(wsol);
+  await send(f.connection, f.authority, await f.spl.createMintIxs(f.connection, f.authority.publicKey, usdc.publicKey, 6, f.authority.publicKey), [usdc]);
+  await send(f.connection, f.authority, [f.client.createAtaIdempotent(f.authority.publicKey, f.authority.publicKey, usdc.publicKey), f.spl.mintTo(usdc.publicKey, f.client.ata(f.authority.publicKey, usdc.publicKey), f.authority.publicKey, 1_000_000_000n)]);
+  await ensurePricing({ connection: f.connection, payer: f.authority, programId: f.programId, config: config.toBase58(), oracle: { priceAccount: f.oracles.fresh.toBase58(), feedId: SOL_USD_FEED_ID, maxAgeSecs: 3600, maxConfBps: 300, feeUsdE6: '10000000', startFdvUsdE6: '50000000', usdcMint: usdc.publicKey.toBase58() } });
+  const poolKey = Keypair.generate();
+  await send(f.connection, f.authority, [f.client.computeBudget(RAYDIUM_MIGRATE_COMPUTE_UNITS), ...f.client.createStablePool({ creator: f.authority.publicKey, pool: poolKey.publicKey, usdcMint: usdc.publicKey, solAmount: 2_000_000_000n, usdcAmount: 300_000_000n })], [poolKey]);
+  const r = f.client.raydiumStablePool(poolKey.publicKey, usdc.publicKey);
+  // The holder vault gets 1 SOL (anyone may send SOL to it); none of it is promised to a round yet.
+  const vault = f.client.distVault(kind);
+  await send(f.connection, f.authority, [web3.SystemProgram.transfer({ fromPubkey: f.authority.publicKey, toPubkey: vault, lamports: 1_000_000_000 })]);
+  const reserves = async () => { const [a0, a1] = [await balance(r.vault0), await balance(r.vault1)]; return r.usdcIs0 ? { usdc: a0, sol: a1 } : { usdc: a1, sol: a0 }; };
+  const convert = (who, amountIn, minOut, over = {}) => send(f.connection, who, [f.client.computeBudget(400_000), ...f.client.v2ConvertUsdc({ operator: who.publicKey, kind, config, usdcMint: usdc.publicKey, pool: poolKey.publicKey, amountIn, minOut, ...over })], [], 1);
+  await new Promise(res => setTimeout(res, 2_000)); // Raydium opens trading a second after creation
+  const free = BigInt(await f.connection.getBalance(vault)) - 890_880n;
+  await failsWith(convert(f.outsider, 100_000_000n, 1n), /0x1770/);
+  await failsWith(convert(keeper, free + 1n, 1n), /0x179b/);
+  const { usdc: ru, sol: rs } = await reserves(), quoted = raydiumQuote(500_000_000n, rs, ru);
+  await failsWith(convert(keeper, 500_000_000n, quoted + 1n), /0x1777|0x1771|custom program error/);
+  const sig = await convert(keeper, 500_000_000n, quoted * 99n / 100n);
+  const ev = (await eventsOf(sig)).find(e => e.name === 'V2ConvertedToUsdc');
+  assert.equal(ev.solIn, 500_000_000n); assert.ok(ev.usdcOut >= quoted * 99n / 100n && ev.usdcOut <= quoted);
+  const held = await balance(f.client.ata(vault, usdc.publicKey));
+  assert.equal(held, ev.usdcOut, 'the USDC stays in the holder vault');
+  assert.ok(held > 60_000_000n && held < 75_000_000n, `about $70 for 0.5 SOL at ~$150 less 1% and impact (${held})`);
+  // A USDC round is posted and paid from it.
+  const payee = Keypair.generate().publicKey, ctx = { programId: f.programId, kind, round: 3, asset: usdc.publicKey };
+  const list = buildSolanaRound(ctx, [[payee, 10_000_000n]]);
+  await send(f.connection, keeper, [f.client.postV2Root({ operator: keeper.publicKey, kind, round: 3, asset: usdc.publicKey, root: list.root, total: list.total, recipients: list.recipients, manifestUri: 'ipfs://bafkreih6ilp3u4ue7fmqjnxdnq4ejxn6s5e5ld3hoyrdbilzbc6h7uprfa' })], [], 1);
+  await send(f.connection, f.authority, [f.client.claimV2({ payer: f.authority.publicKey, kind, round: 3, asset: usdc.publicKey, index: 0, account: payee, amount: 10_000_000n, proof: list.rows[0].proof })], [], 1);
+  assert.equal(await balance(f.client.ata(payee, usdc.publicKey)), 10_000_000n, 'paid in USDC');
+  // A pricing config naming another mint is refused.
+  const other = Keypair.generate();
+  await send(f.connection, f.authority, await f.spl.createMintIxs(f.connection, f.authority.publicKey, other.publicKey, 6, f.authority.publicKey), [other]);
+  await failsWith(convert(keeper, 10_000_000n, 1n, { usdcMint: other.publicKey }), /0x178d|0x1792|ConstraintAddress|0x7d/);
+});

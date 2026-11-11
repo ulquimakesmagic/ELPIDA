@@ -94,7 +94,14 @@ cp /tmp/sbf-main/elpida_launchpad.so build/elpida_launchpad-mainnet.so
 
 `Cargo.lock` pins dependencies compatible with the Solana toolchain's Rust 1.84 (for example `blake3` 1.5.5). The program ID is fixed by `declare_id!` and `keys/elpida_launchpad-keypair.json` (private, git-ignored).
 
-Release builds (9 November 2026, **ELPIDA V2 S1–S3**: `add_v2_config`, `launch_v2`, the five-way fee ledger, `withdraw_v2_fees`, V2 harvests (token side burned, quote side split five ways), reward rounds (`init_v2_distributor`, `post_v2_root`, `claim_v2`, `expire_v2`, `sweep_v2_sol`) and the flywheel (`v2_flywheel_curve`, `v2_flywheel_raydium`); see `docs/V2_0_SOLANA.md`. The program grows by about 290 KB, so the upgrade extends the program account first, which `upgradeProgram` does; Agave / Solana CLI **2.3.13**):
+Release builds (11 November 2026, **V2 stablecoin payouts**: `v2_convert_usdc`, the operator converts a distributor's SOL that no posted round owes into USDC through a Raydium CPMM WSOL/USDC pool on the 1% config, at least `min_out`; the USDC stays in the vault for USDC rounds):
+
+| File | Build | sha256 |
+|---|---|---|
+| `build/elpida_launchpad.so` | `--features testnet` (devnet, localnet) | `2855f86096ddca5b495f8ec0dcb7b5d3e28fcfc9add024a6d2f6e5238511b875` |
+| `build/elpida_launchpad-mainnet.so` | mainnet (test instructions refused) | `059be4a6c727f277704a41975d66c245e08c9941331f67a855cdc8f9a47bdf03` |
+
+Previous release (9 November 2026, **ELPIDA V2 S1–S3**: `add_v2_config`, `launch_v2`, the five-way fee ledger, `withdraw_v2_fees`, V2 harvests (token side burned, quote side split five ways), reward rounds (`init_v2_distributor`, `post_v2_root`, `claim_v2`, `expire_v2`, `sweep_v2_sol`) and the flywheel (`v2_flywheel_curve`, `v2_flywheel_raydium`); see `docs/V2_0_SOLANA.md`. The program grows by about 290 KB, so the upgrade extends the program account first, which `upgradeProgram` does; Agave / Solana CLI **2.3.13**):
 
 | File | Build | sha256 |
 |---|---|---|

@@ -844,6 +844,58 @@ pub mod elpida_launchpad {
         Ok(())
     }
 
+    /// Stablecoin payouts (Malik, 10 November: "distribution should be in usdc"), operator: converts `amount_in`
+    /// lamports of a distributor's SOL that no posted round still owes into USDC through Raydium's WSOL/USDC CPMM pool
+    /// (the same 1% fee tier the program graduates into), at least `min_out`. The USDC stays in the vault's USDC account
+    /// for USDC rounds (`post_v2_root` with the USDC mint); nothing can go anywhere else. USDC is the pricing config's.
+    pub fn v2_convert_usdc(ctx: Context<V2ConvertUsdc>, kind: u8, amount_in: u64, min_out: u64) -> Result<()> {
+        let a = &ctx.accounts;
+        require!(amount_in > 0 && min_out > 0, ElpidaError::V2Terms);
+        require!(a.pricing.usdc_mint != Pubkey::default() && a.usdc_mint.key() == a.pricing.usdc_mint, ElpidaError::UsdcFeeUnavailable);
+        // SOL not promised to a posted round: the vault's lamports above rent, less the SOL ledger's reserve.
+        let reserved = {
+            let info = a.sol_ledger.to_account_info();
+            if info.data_len() == 0 { 0 } else {
+                require_keys_eq!(*info.owner, crate::ID, ElpidaError::V2Terms);
+                let data = info.try_borrow_data()?;
+                V2AssetLedger::try_deserialize(&mut &data[..])?.reserved
+            }
+        };
+        let free = a.vault.lamports().saturating_sub(EMPTY_ACCOUNT_RENT).saturating_sub(reserved);
+        require!(amount_in <= free, ElpidaError::NotFunded);
+        let (_, usdc_is_0) = read_raydium(&a.ray_pool.to_account_info(), &a.ray_vault_0.to_account_info(), &a.ray_vault_1.to_account_info(), &a.usdc_mint.key())?;
+        {
+            // The other side must be wrapped SOL.
+            let data = a.ray_pool.try_borrow_data()?;
+            let other = if usdc_is_0 { RAY_POOL_MINT_0 + 32 } else { RAY_POOL_MINT_0 };
+            require!(data[other..other + 32] == WSOL_MINT.to_bytes(), ElpidaError::RaydiumAccount);
+        }
+        let seed = v2_vault_seed(kind);
+        let vault_seeds: &[&[u8]] = &[b"v2-vault", seed, &[ctx.bumps.vault]];
+        // Wrap: the vault PDA (system-owned, data-less) sends the lamports to its wrapped-SOL account.
+        invoke_signed(&anchor_lang::solana_program::system_instruction::transfer(&a.vault.key(), &a.vault_wsol.key(), amount_in),
+            &[a.vault.to_account_info(), a.vault_wsol.to_account_info(), a.system_program.to_account_info()], &[vault_seeds])?;
+        token::sync_native(CpiContext::new(a.token_program.to_account_info(), token::SyncNative { account: a.vault_wsol.to_account_info() }))?;
+        let before = token_amount(&a.vault_usdc.to_account_info())?;
+        let mut data = Vec::with_capacity(24);
+        data.extend_from_slice(&RAY_SWAP_BASE_INPUT);
+        data.extend_from_slice(&amount_in.to_le_bytes());
+        data.extend_from_slice(&min_out.to_le_bytes());
+        let (input_vault, output_vault) = if usdc_is_0 { (a.ray_vault_1.to_account_info(), a.ray_vault_0.to_account_info()) } else { (a.ray_vault_0.to_account_info(), a.ray_vault_1.to_account_info()) };
+        let infos = [
+            a.vault.to_account_info(), a.ray_authority.to_account_info(), a.amm_config.to_account_info(), a.ray_pool.to_account_info(),
+            a.vault_wsol.to_account_info(), a.vault_usdc.to_account_info(), input_vault, output_vault,
+            a.token_program.to_account_info(), a.token_program.to_account_info(), a.wsol_mint.to_account_info(), a.usdc_mint.to_account_info(), a.observation.to_account_info(),
+        ];
+        const WRITABLE: [bool; 13] = [false, false, false, true, true, true, true, true, false, false, false, false, true];
+        let accounts = infos.iter().enumerate().map(|(i, info)| AccountMeta { pubkey: *info.key, is_signer: i == 0, is_writable: WRITABLE[i] }).collect();
+        invoke_signed(&Instruction { program_id: raydium::PROGRAM, accounts, data }, &infos, &[vault_seeds])?;
+        let got = token_amount(&a.vault_usdc.to_account_info())?.checked_sub(before).ok_or(ElpidaError::MathOverflow)?;
+        require!(got >= min_out, ElpidaError::Slippage);
+        emit!(V2ConvertedToUsdc { kind, sol_in: amount_in, usdc_out: got });
+        Ok(())
+    }
+
     /// Flywheel, operator: buys a V2 token on its curve with the flywheel vault's `amount_in` of quote and burns what it
     /// buys. The token must be at least a day old, an order at most 10% of the vault, one order per token every 6 hours,
     /// and the order may not complete the curve (graduation stays with traders). It pays the token's fee like any buy.
@@ -2535,6 +2587,58 @@ pub struct SweepV2Sol<'info> {
 }
 
 #[derive(Accounts)]
+#[instruction(kind: u8)]
+pub struct V2ConvertUsdc<'info> {
+    #[account(mut)]
+    pub operator: Signer<'info>,
+    #[account(seeds = [b"v2-dist", &[kind][..]], bump = distributor.bump, constraint = distributor.operator == operator.key() @ ElpidaError::Unauthorized)]
+    pub distributor: Box<Account<'info, V2Distributor>>,
+    /// The pricing config that names USDC (PDA ["pricing", curve config]).
+    #[account(seeds = [b"pricing", pricing.config.as_ref()], bump)]
+    pub pricing: Box<Account<'info, PricingConfig>>,
+    /// CHECK: data-less vault PDA ["v2-vault", kind]; its lamports are the SOL pool; signs the wrap and the swap.
+    #[account(mut, seeds = [b"v2-vault", v2_vault_seed(kind)], bump)]
+    pub vault: UncheckedAccount<'info>,
+    /// CHECK: the SOL ledger PDA ["v2-reserved", kind, wrapped SOL]; may not exist yet (nothing reserved).
+    #[account(seeds = [b"v2-reserved", &[kind][..], WSOL_MINT.as_ref()], bump)]
+    pub sol_ledger: UncheckedAccount<'info>,
+    /// CHECK: ATA(vault, wrapped SOL): must exist (the client creates it); pays the swap.
+    #[account(mut, address = get_associated_token_address_with_program_id(&vault.key(), &WSOL_MINT, &token_program.key()) @ ElpidaError::RaydiumAccount)]
+    pub vault_wsol: UncheckedAccount<'info>,
+    /// CHECK: ATA(vault, USDC): must exist (the client creates it); receives the USDC.
+    #[account(mut, address = get_associated_token_address_with_program_id(&vault.key(), &usdc_mint.key(), &token_program.key()) @ ElpidaError::RaydiumAccount)]
+    pub vault_usdc: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = WSOL_MINT @ ElpidaError::WrongVenue)]
+    pub wsol_mint: UncheckedAccount<'info>,
+    /// CHECK: checked against the pricing config's USDC.
+    pub usdc_mint: UncheckedAccount<'info>,
+    /// CHECK: owner, mints and vaults checked when read.
+    #[account(mut)]
+    pub ray_pool: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = raydium::AUTHORITY @ ElpidaError::RaydiumAccount)]
+    pub ray_authority: UncheckedAccount<'info>,
+    /// CHECK: fixed address; Raydium checks it is the pool's config.
+    #[account(address = raydium::AMM_CONFIG @ ElpidaError::RaydiumAccount)]
+    pub amm_config: UncheckedAccount<'info>,
+    /// CHECK: matched against the Raydium pool's stored vault.
+    #[account(mut)]
+    pub ray_vault_0: UncheckedAccount<'info>,
+    /// CHECK: matched against the Raydium pool's stored vault.
+    #[account(mut)]
+    pub ray_vault_1: UncheckedAccount<'info>,
+    /// CHECK: Raydium checks it is the pool's observation account.
+    #[account(mut)]
+    pub observation: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = raydium::PROGRAM @ ElpidaError::RaydiumAccount)]
+    pub raydium_program: UncheckedAccount<'info>,
+    pub token_program: Program<'info, Token>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
 pub struct V2FlywheelCurve<'info> {
     #[account(mut)]
     pub operator: Signer<'info>,
@@ -3259,6 +3363,8 @@ pub struct V2Claimed { pub kind: u8, pub round: u32, pub asset: Pubkey, pub inde
 pub struct V2Expired { pub kind: u8, pub round: u32, pub asset: Pubkey, pub returned_to_pool: u64 }
 #[event]
 pub struct V2SolSwept { pub kind: u8, pub lamports: u64 }
+#[event]
+pub struct V2ConvertedToUsdc { pub kind: u8, pub sol_in: u64, pub usdc_out: u64 }
 /// `venue`: 0 the curve, 1 Raydium.
 #[event]
 pub struct V2BoughtAndBurned { pub pool: Pubkey, pub mint: Pubkey, pub asset: Pubkey, pub spent: u64, pub burned: u64, pub supply_after: u64, pub venue: u8 }
