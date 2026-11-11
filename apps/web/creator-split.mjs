@@ -2,8 +2,8 @@
 // to 8 wallets, no owner), this card lists each wallet, its fixed share and what it can claim, with a button that
 // collects the token's fees from the pool and pays that wallet. Anyone may press it; the money only goes to the wallet.
 import { JsonRpcProvider, formatUnits } from '/vendor/ethers.js';
-import { h, short, number, errorText, copyButton } from './ui.mjs';
-import { creatorSplitState, creatorStrategyState, identityAllocationState } from './v2-launchpad.mjs';
+import { h, short, number, errorText, copyButton, icon } from './ui.mjs';
+import { creatorSplitState, creatorStrategyState, identityAllocationState, allocationKind } from './v2-launchpad.mjs';
 
 export function creatorSplitCard(ctx, token) {
   if (token?.deploymentModel !== 'v2-hook' || String(token.network ?? '').startsWith('solana')) return null;
@@ -74,7 +74,7 @@ export function identityAllocationCard(ctx, token) {
   if (!net) return null;
   const native = token.pair === 'native', decimals = native ? 18 : Number(token.quoteDecimals ?? 18), symbol = native ? net.nativeCurrency?.symbol ?? 'ETH' : token.quoteSymbol;
   const body = h('div.stack'), flow = h('div.stack'), error = h('p.error-text', { role: 'alert' });
-  const card = h('section.tk-card.tk-split', { hidden: true, 'aria-label': 'Allocations' }, h('h2.tk-h', 'Allocations'), body, flow, error);
+  const card = h('section.tk-card.tk-split.tk-alloc', { hidden: true, id: 'allocations', 'aria-label': 'Allocations' }, h('div.tk-alloc-head', h('h2.tk-h', icon('coins', 'icon-sm'), 'Allocations'), h('a.text-link.small', { href: claimHref(token) }, 'How to claim')), body, flow, error);
   const provider = () => (ctx.wallet?.net?.key === net.key && ctx.wallet?.provider ? ctx.wallet.provider : new JsonRpcProvider(net.rpcUrl, net.chainId, { staticNetwork: true }));
   const connected = () => ctx.mode === 'testnet' && ctx.wallet?.net?.key === net.key && !!ctx.wallet?.address;
   let busy = false, vault = null;
@@ -84,7 +84,7 @@ export function identityAllocationCard(ctx, token) {
     flow.replaceChildren(h('p.small.muted', 'Getting a verification request…'));
     act(async () => {
       if (!connected()) throw new Error(`Connect the wallet that should receive this share, on ${net.name}.`);
-      const c = await ctx.api('v2-identity/challenge', { network: net.key, vault, index: r.index, wallet: ctx.wallet.address });
+      const c = await ctx.api('v2-identity/challenge', { network: net.key, vault, index: r.index, wallet: ctx.wallet.address, token: token.address });
       const sign = async () => ctx.wallet.signer.signMessage(c.message);
       if (c.kind === 'domain') {
         flow.replaceChildren(h('p.small', `Add this TXT record to ${c.target}'s DNS, then check it. It proves you control the website; the share will pay ${short(ctx.wallet.address)}.`),
@@ -112,4 +112,45 @@ export function identityAllocationCard(ctx, token) {
   }
   load();
   return card;
+}
+
+const claimHref = token => `#/rewards?claim=${encodeURIComponent(token.address)}&network=${encodeURIComponent(token.network ?? '')}`;
+const v2Evm = (ctx, token) => token?.deploymentModel === 'v2-hook' && !String(token.network ?? '').startsWith('solana') && (ctx.config?.testnets ?? []).find(n => n.key === token.network);
+
+/**
+ * "Claim fees" beside Share on the token page, for V2 tokens whose creator share goes to other wallets, X accounts or
+ * websites (Malik, 11 Nov). Hidden until the creator vault is read; it leads to the token's claim page in Rewards.
+ */
+export function claimFeesTag(ctx, token) {
+  const net = v2Evm(ctx, token); if (!net) return null;
+  const tag = h('a.tk-tag.tk-tag-claim', { href: claimHref(token), hidden: true, title: 'This token shares its creator fees. Recipients claim here: wallets collect; X accounts and websites verify ownership first.' }, icon('coins', 'icon-xs'), 'Claim fees');
+  const provider = ctx.wallet?.net?.key === net.key && ctx.wallet?.provider ? ctx.wallet.provider : new JsonRpcProvider(net.rpcUrl, net.chainId, { staticNetwork: true });
+  allocationKind({ provider, net, token: token.address }).then(kind => { tag.hidden = !kind; }).catch(() => {});
+  return tag;
+}
+
+/**
+ * The claim page in Rewards (#/rewards?claim=<token>&network=<key>): who shares this token's creator fees and how each
+ * recipient claims. A wallet recipient connects that wallet and collects; an X account or website owner connects the
+ * wallet to be paid, signs, and proves ownership (X sign-in, or a DNS TXT record); after that anyone can pay it out.
+ */
+export function allocationClaimView(ctx, { address, network }) {
+  const token = (ctx.state?.tokens ?? []).find(t => t.address.toLowerCase() === String(address).toLowerCase() && (!network || !t.network || t.network === network));
+  if (!token) return h('section.panel.claim-view', h('h1', 'Claim creator fees'), h('p.muted', 'That token is not in the list yet. Check the link, or open it from the token page.'), h('a.btn.btn-secondary', { href: '#/' }, 'Explore tokens'));
+  const net = v2Evm(ctx, token);
+  const connected = ctx.mode === 'testnet' && ctx.wallet?.address && ctx.wallet?.net?.key === token.network;
+  const steps = [
+    ['wallet', 'A wallet', 'Connect that wallet and press Collect and pay out. Anyone may press it; the money only goes to the wallet named in the allocation.'],
+    ['brand-x', 'An X account', 'Connect the wallet you want paid, press Verify ownership, sign, then sign in to X as that account. Once verified, the share pays that wallet for good.'],
+    ['globe', 'A website', 'Connect the wallet you want paid, press Verify ownership, and add the TXT record it shows to the website\'s DNS. Once verified, the share pays that wallet for good.'],
+  ];
+  return h('section.stack.claim-view',
+    h('a.back-link', { href: `#/token/${token.address}?network=${encodeURIComponent(token.network ?? '')}` }, icon('arrow-left', 'icon-sm'), `$${token.symbol}`),
+    h('div.panel.stack',
+      h('h1', `Claim $${token.symbol} creator fees`),
+      h('p.muted', 'The creator of this token shares their 30% of every trading fee with the recipients below, fixed for good at launch. Find your row and claim.'),
+      !connected ? h('p.small', icon('info', 'icon-xs'), ` Connect your wallet on ${net?.name ?? 'the token\'s network'} to claim or verify.`) : null,
+      h('ul.claim-steps', steps.map(([i, t, d]) => h('li', icon(i, 'icon-sm'), h('div', h('strong', t), h('p.small.muted', d)))))),
+    net ? creatorSplitCard(ctx, token) : null,
+    net ? identityAllocationCard(ctx, token) : h('p.muted', 'Claims for this token are not available here.'));
 }

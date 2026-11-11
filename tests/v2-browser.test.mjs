@@ -3,14 +3,14 @@
 // site calls them, on a local cancun chain with Uniswap's own PoolManager.
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { Contract, ContractFactory, formatUnits, parseEther } from 'ethers';
+import { Contract, ContractFactory, formatUnits, parseEther, getAddress } from 'ethers';
 import './helpers/browser-modules.mjs';
 import { v4Fixture, v4Art, mined, TEST_URI } from './helpers/v4-fixture.mjs';
 import { v4Artifacts } from '../apps/api/v4-artifacts.mjs';
 import { V2Indexer } from '../packages/indexer/v2-indexer.mjs';
 import { V2_MODEL, splitFee } from '../packages/core/v2-economics.mjs';
 
-const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom, v2StockPairs, approveV2Stock, claimCreatorSplit, creatorSplitState, creatorStrategyState, identityAllocationState, claimIdentityRow } = await import('../apps/web/v2-launchpad.mjs');
+const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom, v2StockPairs, approveV2Stock, claimCreatorSplit, creatorSplitState, creatorStrategyState, identityAllocationState, claimIdentityRow, allocationKind } = await import('../apps/web/v2-launchpad.mjs');
 const { v2Deployment, v4Quote, v4Trade, isV4Token, isV2Token, v4WithdrawFees } = await import('../apps/web/v4-launchpad.mjs');
 
 function browser(t) {
@@ -138,6 +138,9 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   const s = await creatorStrategyState({ provider: f.provider, net, token: strat.token });
   assert.equal(s.mode, 'buyback'); assert.equal(s.threshold, parseEther('0.01')); assert.equal(s.minimumHolding, parseEther('1000')); assert.equal(s.vesting, 30 * 86_400); assert.equal(s.roundCount, 0);
   assert.equal(await creatorSplitState({ provider: f.provider, net, token: strat.token }), null, 'a strategy vault is not a split');
+  // "Claim fees" on the token page shows for split and allocation tokens only.
+  assert.equal(await allocationKind({ provider: f.provider, net, token: splitItem.address }), 'split');
+  assert.equal(await allocationKind({ provider: f.provider, net, token: strat.token }), null);
 
   // Wallet, X and website allocations: X and website shares are held until the owner proves control and the keeper
   // (the verifier) binds the wallet they signed for; then anyone can pay them out.
@@ -170,12 +173,14 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   await service.verifyDomain({ nonce: c1.nonce, signature: await idOwner.signMessage(c1.message) });
   await assert.rejects(service.challenge({ network: net.key, vault: vaultAddr, index: 1, wallet: ownerAddr }), /already pays a verified wallet/);
   // The X owner: a signed claim, then X sign-in (stubbed here) as that handle.
-  const c2 = await service.challenge({ network: net.key, vault: vaultAddr, index: 2, wallet: ownerAddr });
+  const c2 = await service.challenge({ network: net.key, vault: vaultAddr, index: 2, wallet: ownerAddr, token: ids.token });
   const start = service.startX({ nonce: c2.nonce, signature: await idOwner.signMessage(c2.message) });
   assert.match(start.url, /x\.com/); assert.ok(service.owns('state-1'));
-  await service.finishX({ state: 'state-1', code: 'ok', cookie: 'c' });
+  const done = await service.finishX({ state: 'state-1', code: 'ok', cookie: 'c' });
+  assert.equal(done.back, `/#/rewards?claim=${getAddress(ids.token)}&network=${net.key}`, 'X sign-in returns to the claim page');
   st = await identityAllocationState({ provider: f.provider, net, token: ids.token });
   assert.deepEqual(st.rows.map(r => r.wallet), [cw.address, ownerAddr, ownerAddr]);
+  assert.equal(await allocationKind({ provider: f.provider, net, token: ids.token }), 'identity');
   const beforeOwner = await f.provider.getBalance(ownerAddr);
   await claimIdentityRow(cw, { token: ids.token, index: 1 });
   assert.ok(await f.provider.getBalance(ownerAddr) > beforeOwner, 'the verified website owner was paid');

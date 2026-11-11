@@ -19,6 +19,7 @@ import { renderLaunch } from './launch-flow.mjs';
 import { renderDocs } from './docs-view.mjs';
 import { renderToken } from './token-page.mjs';
 import { renderRewards } from './rewards-view.mjs';
+import { allocationClaimView } from './creator-split.mjs';
 import { portfolioView } from './portfolio-view.mjs';
 import { renderAdmin } from './admin-view.mjs';
 import { initShell, renderLastSale, syncSearch } from './shell.mjs';
@@ -222,6 +223,8 @@ function parseRoute() {
   if (doc) return { name: 'docs', section: doc[1] };
   const token = hash.match(/^\/token\/([A-Za-z0-9]{32,64})$/);
   if (token) return { name: 'token', address: token[1],network:new URLSearchParams(query).get('network') };
+  // A token's claim page in Rewards (wallet, X and website allocations): #/rewards?claim=<token>&network=<key>.
+  if (hash === '/rewards' && /^0x[0-9a-fA-F]{40}$/.test(new URLSearchParams(query).get('claim') ?? '')) { const p = new URLSearchParams(query); return { name: 'rewards', claim: p.get('claim'), address: p.get('claim'), network: p.get('network') }; }
   return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/docs': 'docs', '/monkey': 'admin', '/terms': 'terms' }[hash] ?? 'notfound' };
 }
 function route() {
@@ -277,7 +280,7 @@ function rerender(reason) {
     return;
   }
   launchView = null;
-  if(r.name==='rewards'&&(mode!=='testnet'||!wallet.address)){view.replaceChildren(h('div.empty',h('h1',r.name==='rewards'?'Rewards':'Portfolio'),h('p','Connect your wallet to see your '+r.name+'.'),h('p.small.muted','Connecting lets you interact—it does not give us access to your funds.'),h('button.btn.btn-primary',{type:'button',on:{click:connectCurrent}},'Connect wallet')));return;}
+  if(r.name==='rewards'&&!r.claim&&(mode!=='testnet'||!wallet.address)){view.replaceChildren(h('div.empty',h('h1',r.name==='rewards'?'Rewards':'Portfolio'),h('p','Connect your wallet to see your '+r.name+'.'),h('p.small.muted','Connecting lets you interact—it does not give us access to your funds.'),h('button.btn.btn-primary',{type:'button',on:{click:connectCurrent}},'Connect wallet')));return;}
   if (!state) { closeExplore(); view.replaceChildren(loadingView()); return; }
   if (r.name === 'token') {
     // Keep the editor and wallet-signing state intact while a holder is writing.
@@ -296,6 +299,7 @@ function rerender(reason) {
     }
   }
   else if (r.name === 'portfolio') view.replaceChildren(portfolioView(ctx, { connect: connectCurrent, rerender: () => rerender('route') }));
+  else if (r.name === 'rewards' && r.claim) view.replaceChildren(allocationClaimView(ctx, { address: r.claim, network: r.network }));
   else if (r.name === 'rewards') view.replaceChildren(renderRewards(ctx));
   else if (r.name === 'docs') view.replaceChildren(renderDocs(ctx, r.section));
   else if (r.name === 'terms') view.replaceChildren(renderTermsPage(ctx));
@@ -433,7 +437,7 @@ async function init() {
   syncClock(config.serverTime, configSent);
   // Background refresh. Also on returning to the tab: timers do not run while it is hidden, and a dollar reference
   // older than 3 minutes is shown as stale (values fall back to the pair's own unit) until prices are re-read.
-  const backgroundRefresh=()=>{if(!busy&&document.visibilityState==='visible'&&!(currentRoute.name==='rewards'&&document.activeElement?.closest('form')))refresh({preserveInput:true}).catch(()=>{});};
+  const backgroundRefresh=()=>{if(!busy&&document.visibilityState==='visible'&&!(currentRoute.name==='rewards'&&(currentRoute.claim||document.activeElement?.closest('form'))))refresh({preserveInput:true}).catch(()=>{});};
   setInterval(backgroundRefresh,60000);
   document.addEventListener('visibilitychange',backgroundRefresh);
   // The trade strip is fed by the live stream. The poll stays as a fallback and slows down while the stream is up,
