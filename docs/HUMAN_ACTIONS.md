@@ -25,7 +25,7 @@ Sepolia, Robinhood Chain testnet; BNB Chain testnet has no SwapRouter02, so it k
 2. Send me the two addresses it shows (`usdcAirdrop`, `usdcHolder`) to pin in `networks.mjs`.
 3. For assets you want converted, make sure a Uniswap v3 pool to USDC (or to WETH) has liquidity, e.g. the test stock
    tNVDAon. Without one, that asset stays in its vault and the keeper card says so; nothing is lost.
-**Ethereum Sepolia: done** (deployed by Malik 11 November: airdrop `0x86E79d3f…D3b`, holders `0x572D4044…1e75`; checked on chain: sources are the pinned distributors, operator the V2 keeper, Sepolia USDC, Uniswap SwapRouter02; pinned). Base Sepolia and Robinhood Chain testnet still to deploy.
+**Ethereum Sepolia: done** (deployed by Malik 11 November: airdrop `0x86E79d3f…D3b`, holders `0x572D4044…1e75`; checked on chain: sources are the pinned distributors, operator the V2 keeper, Sepolia USDC, Uniswap SwapRouter02; pinned). **Base Sepolia: done** (11 November: airdrop `0xC745acDA…D31f`, holders `0xa0545230…3781`; same checks: pinned sources, keeper operator, Base Sepolia USDC, Uniswap SwapRouter02; pinned). BNB Chain testnet and Robinhood Chain testnet need a payout stablecoin first (see below).
 Rounds already posted keep paying as before. The flywheel is unchanged. The keeper refills its own gas from each
 round's native coin (up to 0.05, at most 10% of it); optional Railway overrides: `ELPIDA_V2_KEEPER_GAS_TARGET` (e.g.
 `0.1`) and `ELPIDA_V2_KEEPER_GAS_SHARE_BPS` (e.g. `500` for 5%). Keep some native coin in the keeper wallet anyway.
