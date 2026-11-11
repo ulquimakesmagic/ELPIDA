@@ -81,7 +81,12 @@ export const testnets = [
     // ELPIDA V2 test launchpad on the labelled test PoolManager, deployed by Malik from the operator panel, 9 Nov 2026
     // (factory from block 141724857; treasury 0xf5B0…639D; reward contracts run by the server keeper 0x95d3…5124).
     // PancakeSwap's router is not SwapRouter02, so holder rewards of USDC pairs are paid in USDC here.
-    v2: { shared: { factory: '0x1798C56A217A37f13D4a36001608Ae9773E9f37A', hook: '0x88D6b95377cAF59A641241e7c305AC3ad06728cC', router: '0xE8280f27F785c13cC18268a8823DBD7C69F95659', airdrop: '0xD4342b5C791621453ed83938E4a4f2908372B85f', holder: '0xc46031762364E5dC2b1Cdd36dB6AD2aeb5793F24', flywheel: '0x888eD56692e9B8Acded9Cf8F84B60019fd667E0D', keeper: '0x95d3fAea73006C4557b02aC81593d8312ff25124', block: 141724857, minFeeBps: 100 } },
+    v2: { shared: { factory: '0x1798C56A217A37f13D4a36001608Ae9773E9f37A', hook: '0x88D6b95377cAF59A641241e7c305AC3ad06728cC', router: '0xE8280f27F785c13cC18268a8823DBD7C69F95659', airdrop: '0xD4342b5C791621453ed83938E4a4f2908372B85f', holder: '0xc46031762364E5dC2b1Cdd36dB6AD2aeb5793F24', flywheel: '0x888eD56692e9B8Acded9Cf8F84B60019fd667E0D', keeper: '0x95d3fAea73006C4557b02aC81593d8312ff25124', block: 141724857, minFeeBps: 100,
+      // tUSDC payout distributors (PancakeSwap v3 deadline router), deployed by Malik from the operator panel, 11 Nov 2026.
+      usdcAirdrop: '0x7683870BBa29aF19B0328128748Cd4e5130c423D', usdcHolder: '0x86499Dfd69E1d9727c2086197d3A2706379CE75D' } },
+    // BNB testnet has no official test USDC for the keeper's swaps: a labelled Elpida test dollar (no value), with a 1%
+    // tBNB/tUSDC pool, deployed by Malik from the operator panel, 11 Nov 2026.
+    payoutStable: { address: '0x4Ee2a384744b9B3Bca3Cbce2e30a000bf93A666F', symbol: 'tUSDC', decimals: 6, test: true },
     shared: { factory: '0x4CabA05067171DbA4B840aDae1e652B8279dE499', block: 140398704, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1, reviewFixesVersion: 1 },
     legacy: [{ factory: '0x5795b25C7fA37638eEacd29848522f8Cd48a1156', block: 139102664, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1, partnerTiersVersion: 1 }, { factory: '0x8c48b67E3D541955ec5DCf99629c4270aC6CfBbE', block: 138485798, model: 'curve-dex-v10', metadataVersion: 1, feeAccountingVersion: 1, launchFeaturesVersion: 1 }],
   },
