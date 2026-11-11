@@ -225,7 +225,7 @@ contract ElpidaV2Hook is BaseHook, IUnlockCallback {
         if (quote == address(0) ? msg.value != firstBuy : (msg.value != 0 || IV2Token(quote).balanceOf(address(this)) < firstBuy)) revert BadTerms();
         if (launches[token].launchedAt != 0 || IV2Token(token).balanceOf(address(this)) != TOKEN_SUPPLY) revert BadTerms();
         // Launch price: vT / vQ tokens per quote unit, rounded down to the tick spacing (a price at most 0.1% higher).
-        uint160 start = uint160(_sqrt(FullMath.mulDiv(VIRTUAL_TOKEN, Q96, virtualQuote)) << 48);
+        uint160 start = (_sqrt(FullMath.mulDiv(VIRTUAL_TOKEN, Q96, virtualQuote)) << 48).toUint160(); // reverts, never wraps
         int24 upper = TickMath.getTickAtSqrtPrice(start);
         int24 rem = upper % TICK_SPACING; if (rem < 0) rem += TICK_SPACING; upper -= rem;
         int24 lower = upper - SALE_TICKS;
@@ -343,8 +343,10 @@ contract ElpidaV2Hook is BaseHook, IUnlockCallback {
     }
 
     /// The part of `fee` at the token's own rate; the rest is anti-snipe surplus.
+    /// Outside the first minute the whole fee is at the token's rate: an exact-output fee is rounded up, so working the
+    /// base out again from the gross would send one base unit to the bonus instead of the split (audit EVM-07).
     function _base(uint256 gross, uint256 fee, Launch storage l) private view returns (uint256 base) {
-        if (l.graduated) return fee;
+        if (l.graduated || _feeBps(l) == l.feeBps) return fee;
         base = gross * l.feeBps / 10000;
         if (base > fee) base = fee;
     }
