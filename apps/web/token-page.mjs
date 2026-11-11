@@ -18,7 +18,7 @@ import {filterTrades} from './trade-filter.mjs';
 import {odometer} from './odometer.mjs';
 import {filterByWho,topTraders,safetyChecks,quickAmounts,walletHolders} from './token-insights.mjs';
 import {flywheelChip} from './burn-labels.mjs';
-import { creatorSplitCard, creatorStrategyCard, identityAllocationCard } from './creator-split.mjs';
+import { creatorSplitCard, creatorStrategyCard, identityAllocationCard, claimFeesTag } from './creator-split.mjs';
 export { exceedsRemaining };
 
 const metadataRequests = new Map();
@@ -124,6 +124,7 @@ export function renderToken(ctx, address) {
           token.creator ? h('a.tk-tag.tk-creator', { href: addressUrl(token.creator) ?? '#', target: '_blank', rel: 'noopener noreferrer', title: `Creator: ${token.creator}` }, 'by ', h('span.mono', short(token.creator)), h('span.badge-dev', 'Dev')) : null,
           h('span.tk-tag.tk-addr', { title: token.address }, short(token.address), copyButton(token.address, '')),
           h('span.tk-tag', { title: 'Copy a link that shows a preview card on X, Telegram and Discord' }, 'Share', copyButton(`${location.origin}/token/${encodeURIComponent(token.network ?? ctx.wallet.net.key)}/${token.address}`, '')),
+          claimFeesTag(ctx, token),
           isV2Token(token) ? h('span.tk-tag.tk-tag-test', { title: `ELPIDA V2: ${((token.feeBps ?? 125) / 100).toFixed(2)}% fee for good, shared 30% creator / 30% trader airdrop / 10% flywheel / 10% holders / 20% treasury; liquidity locked from launch in one Uniswap v4 pool. Not audited; test networks only.` }, icon('flask-conical', 'icon-xs'), `V2 test · ${((token.feeBps ?? 125) / 100).toFixed(2)}% fee`) : isV4Token(token) ? h('span.tk-tag.tk-tag-test', { title: 'Model 11: the curve runs inside one Uniswap v4 pool, liquidity locked from launch. Not audited; test networks only.' }, icon('flask-conical', 'icon-xs'), token.graduated ? 'Model 11 test · past the milestone' : 'Model 11 test · Uniswap v4') : token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null,
           (stock => stock ? h('span.tk-tag.tk-tag-stock', { 'data-ok': String(stock.usable), title: stock.reason ?? 'Stock price is fresh; the curve can graduate.' }, icon('chart-candlestick', 'icon-xs'), `${q} · ${STOCK_LABELS[stock.status] ?? stock.status}`) : null)(testStockStatus(token.stock)),
           kothTag(ctx, token),
@@ -195,7 +196,9 @@ export function renderToken(ctx, address) {
   const page=h('div.tk-page', head, strip,
     h('div.tk-layout',
       h('div.tk-top', priceCard),
-      h('aside.tk-rail.stack', trade, desk.position, curve, safety, creatorFeesStat, creatorSplitCard(ctx, token), creatorStrategyCard(ctx, token), identityAllocationCard(ctx, token)),
+      // Allocations and splits sit right under the trade panel so recipients see them (Malik, 11 Nov); they stay hidden
+      // for tokens whose creator share has no other recipients.
+      h('aside.tk-rail.stack', trade, identityAllocationCard(ctx, token), creatorSplitCard(ctx, token), desk.position, curve, safety, creatorFeesStat, creatorStrategyCard(ctx, token)),
       h('div.tk-rest.stack', activity)), mobileBar);
   async function loadCreatorFees(){if(!page.isConnected)return;try{const result=await ctx.api(`creator-fees?network=${encodeURIComponent(token.network??ctx.currentChain())}&token=${encodeURIComponent(token.address)}`);if(!page.isConnected)return;if(result.status==='ready'){creatorFeesTotal.textContent=result.assets.filter(a=>Number(a.amount)>0).map(a=>`${number(a.amount,6)} ${a.symbol}`).join(' + ')||`0 ${q}`;creatorFeesStat.title=`Lifetime creator fees through indexed block ${result.indexedBlock}, including claimed amounts. Token and quote assets are shown separately.`;}else{creatorFeesTotal.textContent=result.status==='loading'?'Loading…':'Unavailable';}}catch{creatorFeesTotal.textContent='Unavailable';}if(page.isConnected)setTimeout(loadCreatorFees,15000);}
   queueMicrotask(loadCreatorFees);

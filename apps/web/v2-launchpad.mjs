@@ -624,6 +624,18 @@ export async function identityAllocationState({ provider, net, token }) {
   return { vault: l.creatorVault, asset, rows };
 }
 
+/**
+ * Whether a V2 token's creator share goes to other people: 'identity' (wallet, X and website rows), 'split' (several
+ * wallets) or null (the creator alone, or a reward strategy). The token page shows "Claim fees" for the first two.
+ */
+export async function allocationKind({ provider, net, token }) {
+  const d = v2Deployment(net); if (!d?.hook) return null;
+  const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
+  if (!l.creatorVault || l.creatorVault === ZeroAddress || (await provider.getCode(l.creatorVault)) === '0x') return null;
+  try { if ((await new Contract(l.creatorVault, IDENTITY_ABI, provider).IDENTITY_ALLOCATION_VERSION()) === 1n) return 'identity'; } catch {}
+  return (await readSplit(provider, l.creatorVault)) ? 'split' : null;
+}
+
 /** Collects the token's fees from the pool and pays one allocation row (a wallet, or a verified X account or website). */
 export async function claimIdentityRow(w, { token, index } = {}) {
   await w.checkNetwork();

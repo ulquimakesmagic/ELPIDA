@@ -12,6 +12,9 @@ const ALLOCATION = ['function IDENTITY_ALLOCATION_VERSION() view returns(uint256
   'function row(uint256) view returns(string label,address wallet,uint16 share)', 'function bind(uint256,address)'];
 const TEN_MINUTES = 600_000;
 
+/** Where an owner lands after X sign-in: the token's claim page on the rewards screen (safe characters only). */
+export const claimLink = c => (c?.token && /^[a-z0-9-]{1,40}$/.test(String(c.network)) && isAddress(c.token) ? { back: `/#/rewards?claim=${getAddress(c.token)}&network=${c.network}` } : { back: '/#/rewards' });
+
 export class V2Identities {
   /** `signerFor(networkKey)`: the V2 keeper on that network as { signer, chainId }, or null. */
   constructor({ signerFor, x = new XVerification(), dnsResolver = resolveTxt, now = () => Date.now() }) {
@@ -36,7 +39,7 @@ export class V2Identities {
   }
 
   /** A signed claim for one X or website allocation: the message to sign and, for a website, the DNS record to add. */
-  async challenge({ network, vault, index, wallet }) {
+  async challenge({ network, vault, index, wallet, token }) {
     index = Number(index);
     if (!isAddress(wallet) || wallet === ZeroAddress) throw new Error('Connect the wallet that should receive this share.');
     const row = await this.row(network, vault, index);
@@ -48,7 +51,8 @@ export class V2Identities {
     const nonce = randomBytes(24).toString('hex'), expires = now + TEN_MINUTES, w = getAddress(wallet).toLowerCase(), v = getAddress(vault).toLowerCase();
     const txt = `elpida-claim=${nonce};wallet=${w};vault=${v}`;
     const message = `Elpida ${row.kind} reward claim\nChain: ${row.chainId}\nVault: ${getAddress(vault)}\nIdentity: ${row.target}\nWallet: ${w}\nNonce: ${nonce}\nExpires: ${expires}`;
-    this.challenges.set(nonce, { network: String(network), vault: getAddress(vault), index, wallet: w, kind: row.kind, target: row.target, expires, txt, message });
+    // The token (optional) only shapes the link back to its claim page after X sign-in.
+    this.challenges.set(nonce, { network: String(network), vault: getAddress(vault), index, wallet: w, kind: row.kind, target: row.target, expires, txt, message, token: isAddress(token) ? getAddress(token) : null });
     return { nonce, expires, message, kind: row.kind, target: row.target, ...(row.kind === 'domain' ? { name: `_elpida.${row.target}`, txt } : {}) };
   }
 
@@ -83,7 +87,7 @@ export class V2Identities {
   async finishX(params) {
     const c = await this.x.complete(params);
     await this.bind(c);
-    return { message: `@${c.target} verified. Its share now pays ${c.wallet}.` };
+    return { message: `@${c.target} verified. Its share now pays ${c.wallet}.`, ...claimLink(c) };
   }
 
   async bind(c) {
