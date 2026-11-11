@@ -21,12 +21,15 @@ test('real test stock liquidity enables native quotes and rejects unsafe setup',
  const f=await dexFixture(t),owner=f.addresses[0],signer=f.signers[0],d=f.dex;
  const testArt=name=>compiled['contracts/evm/testnet/'+name+'.sol'][name];
  const feed=await f.deploy(testArt('ElpidaTestStockFeed'),'Simulated stock',180n*10n**8n),stock=await f.deploy(testArt('ElpidaTestOndoStock'),'Test stock','tNVDAon',25n,feed.target);
- await mined(stock.faucet(parseEther('25')));
  // The fixture executes on localTest; guard behavior is exercised separately above.
  class Contract{constructor(a,abi){return new EthersContract(a,abi,f.provider);}}
  const provider={getNetwork:async()=>({chainId:11155111n}),getBlock:(...a)=>f.provider.getBlock(...a),getBalance:(...a)=>f.provider.getBalance(...a)};
  const args={Contract,provider,dex:d.config,chainId:11155111,asset:stock.target,account:owner,nativeAmount:parseEther('.05'),nativeUsd8:2500n*10n**8n};
- let p=await prepareTestLiquidity(args);assert.equal(p.funded,false);
+ // No test stock yet: the setup reports the shortfall (the wallet takes it from the faucet); too much is refused.
+ let p=await prepareTestLiquidity(args);assert.equal(p.stockShort,p.stockAmount);
+ await assert.rejects(prepareTestLiquidity({...args,nativeUsd8:2_000_000n*10n**8n}),/Not enough test stock/);
+ await mined(stock.faucet(parseEther('25')));
+ p=await prepareTestLiquidity(args);assert.equal(p.funded,false);assert.equal(p.stockShort,0n);
  await mined(stock.approve(d.manager.target,p.stockAmount));
  const manager=new EthersContract(d.manager.target,TEST_MANAGER_ABI,signer);
  await mined(manager.multicall(testLiquidityCalls(Interface,p),{value:p.nativeAmount}));

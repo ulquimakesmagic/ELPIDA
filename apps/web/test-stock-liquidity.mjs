@@ -10,7 +10,7 @@ export const TEST_MANAGER_ABI = [
  'function mint((address token0,address token1,uint24 fee,int24 tickLower,int24 tickUpper,uint256 amount0Desired,uint256 amount1Desired,uint256 amount0Min,uint256 amount1Min,address recipient,uint256 deadline)) payable returns(uint256,uint128,uint256,uint256)',
  'function refundETH() payable','function multicall(bytes[]) payable returns(bytes[])',
 ];
-const STOCK_ABI=['function stockProvider() view returns(string)','function controller() view returns(address)','function referenceFeed() view returns(address)','function decimals() view returns(uint8)','function paused() view returns(bool)','function blocked(address) view returns(bool)','function balanceOf(address) view returns(uint256)'];
+const STOCK_ABI=['function stockProvider() view returns(string)','function controller() view returns(address)','function referenceFeed() view returns(address)','function decimals() view returns(uint8)','function paused() view returns(bool)','function blocked(address) view returns(bool)','function balanceOf(address) view returns(uint256)','function FAUCET_LIMIT() view returns(uint256)'];
 const FEED_ABI=['function decimals() view returns(uint8)','function marketStatus() view returns(uint8)','function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)'];
 const same=(a,b)=>String(a).toLowerCase()===String(b).toLowerCase();
 export function sqrtInteger(n){if(n<0n)throw Error('Negative square root');if(n<2n)return n;let x=n,y=(x+1n)/2n;while(y<x){x=y;y=(x+n/x)/2n;}return x;}
@@ -21,6 +21,7 @@ export function testLiquidityAmounts({nativeAmount,nativeUsd8,stockUsd8,asset,we
  const amount0=assetFirst?stockAmount:nativeAmount,amount1=assetFirst?nativeAmount:stockAmount;
  return {token0,token1,amount0,amount1,stockAmount,sqrtPriceX96:sqrtInteger((amount1<<192n)/amount0)};
 }
+const fmt18=v=>{const s=(Number(v)/1e18);return s>=1?s.toFixed(4):s.toPrecision(3);};
 export async function prepareTestLiquidity({Contract,provider,dex,chainId,asset,account,nativeAmount,nativeUsd8}){
  if(!testLiquidityChain(chainId)||Number((await provider.getNetwork()).chainId)!==Number(chainId))throw Error('Test liquidity setup is restricted to test networks (Ethereum Sepolia, Base Sepolia, BNB testnet, Robinhood testnet).');
  if(!dex?.manager||same(asset,dex.weth))throw Error('Invalid conversion deployment.');
@@ -45,9 +46,16 @@ export async function prepareTestLiquidity({Contract,provider,dex,chainId,asset,
   funded=await p.liquidity()>0n;
   if(!funded&&price>0n&&delta*10000n>plan.sqrtPriceX96*50n)throw Error('Existing conversion pool price differs from the test reference. No liquidity sent.');
  }
- if(!funded&&(await stock.balanceOf(account)<plan.stockAmount||await provider.getBalance(account)<nativeAmount+500000000000000n))throw Error('Insufficient test stock or test ETH; leave ETH for network gas.');
+ // Short of test stock: the setup takes the shortfall from the stock's own test faucet first (Malik, 11 Nov: the
+ // controller wallet held none on Base Sepolia). Short of the native coin: say so, with the amounts.
+ let stockShort=0n;
+ if(!funded){
+  const held=await stock.balanceOf(account),coin=await provider.getBalance(account),gas=500000000000000n;
+  if(coin<nativeAmount+gas)throw Error(`Not enough test coin: this needs ${fmt18(nativeAmount)} plus about ${fmt18(gas)} for gas; the wallet holds ${fmt18(coin)}.`);
+  if(held<plan.stockAmount){stockShort=plan.stockAmount-held;const limit=await stock.FAUCET_LIMIT().catch(()=>0n);if(stockShort>limit)throw Error(`Not enough test stock: this needs ${fmt18(plan.stockAmount)} and the wallet holds ${fmt18(held)}, more than one faucet call gives. Use a smaller amount.`);}
+ }
  const edge=Math.floor(887272/spacing)*spacing;
- return {...plan,asset,account,nativeAmount,fee,tickLower:-edge,tickUpper:edge,pool,funded,quotedAt:Date.now(),deadline:BigInt(block.timestamp+300)};
+ return {...plan,asset,account,nativeAmount,fee,tickLower:-edge,tickUpper:edge,pool,funded,stockShort,quotedAt:Date.now(),deadline:BigInt(block.timestamp+300)};
 }
 export function testLiquidityCalls(Interface,plan){
  const i=new Interface(TEST_MANAGER_ABI);

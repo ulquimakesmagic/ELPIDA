@@ -581,7 +581,7 @@ export class TestnetWallet {
     if(!approved)throw Error('Choose an approved simulated Ondo-style test stock.');
     const nativeWei=parseUnits(String(nativeAmount),18),price=await this.oraclePrice();
     const plan=await prepareTestLiquidity({Contract,provider:this.provider,dex:this.dex,chainId:this.net.chainId,asset,account:this.address,nativeAmount:nativeWei,nativeUsd8:parseUnits(price.usd.toFixed(8),8)});
-    return {asset,nativeAmount:String(nativeAmount),stockAmount:formatUnits(plan.stockAmount,18),quotedAt:plan.quotedAt,funded:plan.funded,pool:plan.pool,symbol:approved.symbol,account:this.address,factory:this.deployment.factory,pending:localStorage.getItem(`elpida:test-conversion:${this.net.chainId}:${String(asset).toLowerCase()}:${this.address.toLowerCase()}`)};
+    return {asset,nativeAmount:String(nativeAmount),stockAmount:formatUnits(plan.stockAmount,18),stockShort:formatUnits(plan.stockShort??0n,18),stockShortRaw:String(plan.stockShort??0n),quotedAt:plan.quotedAt,funded:plan.funded,pool:plan.pool,symbol:approved.symbol,account:this.address,factory:this.deployment.factory,pending:localStorage.getItem(`elpida:test-conversion:${this.net.chainId}:${String(asset).toLowerCase()}:${this.address.toLowerCase()}`)};
   }
   async setupTestStockLiquidity(body) {
     await this.checkNetwork();if(!testLiquidityChain(this.net.chainId)||this.net.mainnet||!this.dex?.manager)throw Error('This rehearsal needs a test network with a conversion DEX.');
@@ -593,6 +593,7 @@ export class TestnetWallet {
     if(current.funded)return {message:'The conversion pool is already funded. No additional liquidity was sent.'};
     if(parseUnits(current.stockAmount,18)>parseUnits(body.stockAmount,18))throw Error('Test stock funding amount increased. Get a fresh quote.');
     const stock=new Contract(body.asset,['function allowance(address,address) view returns(uint256)','function approve(address,uint256) returns(bool)'],this.signer),maximum=parseUnits(body.stockAmount,18);
+    if(current.stockShortRaw&&BigInt(current.stockShortRaw)>0n)await this.wait(new Contract(body.asset,['function faucet(uint256)'],this.signer).faucet(BigInt(current.stockShortRaw)),'Take the missing test stock from its faucet…');
     const allowance=await stock.allowance(this.address,this.dex.manager);
     if(allowance!==maximum){if(allowance>0n)await this.wait(stock.approve(this.dex.manager,0n),'Reset the test liquidity allowance…');await this.wait(stock.approve(this.dex.manager,maximum),'Approve the bounded test stock liquidity amount…');}
     // Recheck issuer state, price and pool after the approval, before spending native coin.
