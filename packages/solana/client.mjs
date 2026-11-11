@@ -975,6 +975,19 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
      * swaps with `swap_base_input`, and unwraps the user's wrapped SOL afterwards. `amountIn` is lamports (buy) or
      * token units (sell); `minOut` comes from `raydiumQuote` less slippage.
      */
+    raydiumSwapStable({ user, pool, usdcMint, amountIn, minOut }) {
+      // USDC → SOL through the payout pool (used to rebalance it to the market price); unwraps the SOL afterwards.
+      const r = raydiumStablePool(pool, usdcMint), u = key(usdcMint);
+      const [inVault, outVault] = r.usdcIs0 ? [r.vault0, r.vault1] : [r.vault1, r.vault0];
+      return [
+        ComputeBudgetProgram.setComputeUnitLimit({ units: RAYDIUM_SWAP_COMPUTE_UNITS }), this.createAtaIdempotent(user, user, wsol),
+        new TransactionInstruction({ programId: r.program, data: data(concat(DISCRIMINATORS.raydiumSwapBaseInput, u64(amountIn), u64(minOut))), keys: [
+          meta(user, false, true), meta(r.authority), meta(r.ammConfig), meta(r.pool, true), meta(ata(user, u), true), meta(ata(user, wsol), true), meta(inVault, true), meta(outVault, true),
+          meta(tokenProgram), meta(tokenProgram), meta(u), meta(wsol), meta(r.observation, true),
+        ] }),
+        this.unwrapSol(user),
+      ];
+    },
     raydiumSwap({ user, mint, side, amountIn, minOut }) {
       const r = raydiumAccounts(mint), buy = side === 'buy';
       const [input, output] = buy ? [ata(user, wsol), ata(user, mint)] : [ata(user, mint), ata(user, wsol)];

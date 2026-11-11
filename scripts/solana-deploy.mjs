@@ -169,7 +169,7 @@ if (!isAuthority) console.log('The upgrade authority is not this deployer (multi
 const publishedPath = `${root}deployments/solana-${args.cluster}.json`;
 const published = !localnet && existsSync(publishedPath) ? JSON.parse(readFileSync(publishedPath, 'utf8')) : null;
 const pairs = await ensurePairConfigs({ connection, payer, programId: programId, treasury: args.treasury ?? payer.publicKey.toBase58(),
-  templates: solanaPairTemplates(pricing, { test: !mainnet && !args['no-test-pairs'], usdcMint: SOLANA_ORACLES[args.cluster]?.usdcMint, usdcStartFdv: mainnet?'5000':'50', stocks: !mainnet && !!args['stock-pairs'] }), saved: savedTestAssets(state, published, programId.toBase58()), reprice: isAuthority, onProgress: message => console.log(message) });
+  templates: solanaPairTemplates(pricing, { test: !mainnet && !args['no-test-pairs'], usdcMint: SOLANA_ORACLES[args.cluster]?.usdcMint, usdcStartFdv: mainnet?'5000':'50', stocks: !mainnet && (!!args['stock-pairs'] || !!published?.pairs?.some(p => p.kind === 'xstock')) }), saved: savedTestAssets(state, published, programId.toBase58()), reprice: isAuthority, onProgress: message => console.log(message) });
 state.testAssets = mergedTestAssets(state.testAssets, pairs);
 writeFileSync(statePath, `${JSON.stringify(state, null, 2)}\n`);
 for (const p of pairs) console.log(`${p.symbol} pair config ${p.created ? 'created' : p.repriced ? 'repriced for future launches' : 'up to date'} (${p.kind}, mint ${p.mint}).`);
