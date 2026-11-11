@@ -1,8 +1,12 @@
-// Docs (#/docs): guidance in plain language. Figures come from packages/core/curve-model.mjs and the network
-// registry, so this page cannot drift from the contracts. Nothing here promises mainnet availability.
+// Docs (#/docs): guidance in plain language. Figures come from packages/core/v2-economics.mjs (the V2 launchpad every
+// network launches with) and the network registry, so this page cannot drift from the contracts (audit WEB-02,
+// 11 November 2026). Nothing here promises mainnet availability.
 import { h, icon, copyButton, short } from './ui.mjs';
 import { disclaimerPoints, fullDisclaimer } from './consent.mjs';
-import { BASE_FEE_BPS, SNIPE_START_BPS, SNIPE_WINDOW_SECONDS, GRADUATION_GRACE_SECONDS, END_MULTIPLE, TESTNET_START_FDV_USD } from '/curve-model.mjs';
+import { SNIPE_START_BPS, SNIPE_WINDOW_SECONDS } from '/curve-model.mjs';
+import { V2, V2_FEE_SPLIT, V2_PROPOSED_MIN_FEE_BPS } from '/v2-economics.mjs';
+
+const usd = e6 => `$${(Number(e6) / 1e6).toLocaleString('en-US')}`;
 
 const SECTIONS = [
   ['risk', 'Risk disclaimer', 'triangle-alert'],
@@ -47,11 +51,11 @@ function contracts(ctx) {
 }
 const FAQ = [
   ['Can I change a token’s name, symbol or image after launch?', 'No. Name, symbol, image and links are recorded in the launch transaction and cannot be edited.'],
-  ['Do I have to buy my own token?', `No. A creator purchase is optional where the network’s launchpad supports it. If you buy, it is part of the launch transaction, pays only the base ${pct(BASE_FEE_BPS)} fee and has no cap; the token page shows how much the creator bought and still holds. Launch fees and network costs apply either way.`],
+  ['Do I have to buy my own token?', `No. A creator purchase is optional. If you buy, it is part of the launch transaction, pays the token’s own fee and can receive at most ${pct(V2.firstBuyCapBps)} of the supply; the token page shows how much the creator bought and still holds. Launch fees and network costs apply either way.`],
   ['What is the launch fee?', 'A $10 fee, converted to the network’s native coin by a verified on-chain price feed at execution, or paid as 10 USDC where supported.'],
-  ['What happens if graduation fails?', `If a completed curve has not graduated ${GRADUATION_GRACE_SECONDS / 3600} hours after it completed, anyone can reopen it so every holder can trade again.`],
+  ['Can a token’s fee change later?', 'No. The creator picks it once at launch and no one, including Elpida, can change it.'],
   ['Are the contracts audited?', 'Not yet. They have not had an independent audit. Treat everything as experimental.'],
-  ['Can I trade on mainnet?', 'Elpida runs on a local simulation and public test networks, where tokens have no monetary value. Solana runs as an invite-only beta with unaudited contracts and real funds.'],
+  ['Can I trade on mainnet?', 'Not yet. Elpida runs on public test networks, where tokens have no monetary value.'],
 ];
 
 export function renderDocs(ctx, section) {
@@ -71,22 +75,25 @@ export function renderDocs(ctx, section) {
       h('p', 'Using Elpida means agreeing to the ', h('a', { href: '#/terms' }, 'Terms of Use'), '.')),
     card(1, SECTIONS[1],
       h('div.dc-steps', ...[['Connect and choose a chain', 'Connect a wallet and pick the network, on the create page or from the selector at the top.'], ['Describe the token', 'Name, symbol, image and optional links. These are fixed at launch.'], ['Pick a pair and rewards', 'Choose what buyers pay with and where the creator share of fees goes.'], ['Launch, optionally buying first', 'Pay the $10 launch fee. A creator purchase is optional: if you buy, it happens in the same transaction; zero means no tokens, no trade and no trading fee. No liquidity deposit.']].map(([t, d], i) => h('div.dc-step', h('span.dc-dot', String(i + 1)), h('div', h('strong', t), h('p', d))))),
-      h('div.dc-stats', tile('1,000,000,000', 'Fixed supply of every token.'), tile(pct(BASE_FEE_BPS), 'Trade fee on the curve.'), tile('Locked forever', 'Liquidity at graduation cannot be withdrawn.'))),
+      h('div.dc-stats', tile('1,000,000,000', 'Fixed supply of every token.'), tile(`${pct(V2_PROPOSED_MIN_FEE_BPS)}–${pct(V2.maxFeeBps)}`, 'Trading fee you pick once, at launch.'), tile('Locked from launch', 'Liquidity cannot be added to or withdrawn by anyone.'))),
     card(2, SECTIONS[2],
       h('div.dc-options', tile('Native coin', 'Buyers pay with the network’s coin, such as ETH or SOL.'), tile('USDC', 'A dollar-priced pair on networks where USDC is enabled.'), tile('Tokenized stocks', 'Test assets on public testnets only. Unavailable on Solana.'), tile('Elpida tokens', 'A graduated Elpida token can be the pair for a new launch.')),
       note('warn', 'triangle-alert', 'Tokens with a transfer fee or an issuer permanent delegate cannot be used as a trading pair.')),
     card(3, SECTIONS[3],
-      h('p', `The price comes from a virtual bonding curve, not a funded pool. Purchases build a trading reserve and sales are paid from it. The curve is built to rise ${END_MULTIPLE}x from start to graduation; on test networks a token starts at about $${TESTNET_START_FDV_USD} market cap.`),
-      h('p', `Launch protection: for the first ${SNIPE_WINDOW_SECONDS} seconds the fee starts at ${pct(SNIPE_START_BPS)} and falls in a straight line to ${pct(BASE_FEE_BPS)}. Anything above ${pct(BASE_FEE_BPS)} is added to the token’s locked liquidity. The creator’s own first purchase pays only the base fee.`),
-      h('p', 'When the curve sells out, its reserve and the remaining tokens open a DEX pool at the final curve price: Uniswap v3 on Base Sepolia, Raydium (1% fee tier) on Solana, where new launches pair with SOL (earlier tokens on other pairs keep their PumpSwap pools), a locked test pool on other test networks. That liquidity is locked permanently.'),
-      h('p', 'New standard EVM launches graduate atomically: the final purchase creates the pool and locks the liquidity in the same transaction, and if the migration fails that purchase reverts and the curve stays open. Older curves keep their original behavior and graduate through a sponsored service or manually.'),
-      h('p', `If graduation has not happened ${GRADUATION_GRACE_SECONDS / 3600} hours after the curve completed, anyone can reopen it for trading.`),
+      h('p', `Every token starts at a ${usd(V2.startFdvUsdE6)} market cap and its price follows one fixed curve to ${usd(V2.graduationFdvUsdE6)}, where it graduates (${V2.graduationFdvUsdE6 / V2.startFdvUsdE6}×). On test networks the sizes are scaled down with the same shape.`),
+      h('p', 'On EVM networks the token trades in its own Uniswap v4 pool from the first trade. The liquidity is locked from launch: nobody, including Elpida, can add to it or remove it, and graduation needs no migration. Before graduation the price cannot be sold below where it started.'),
+      h('p', 'On Solana a token trades on its curve until graduation, then moves to a locked pool: Raydium CPMM for SOL pairs (its own 1% fee tier applies there), PumpSwap for other pairs.'),
+      h('p', `Launch protection: for the first ${SNIPE_WINDOW_SECONDS} seconds the fee starts at ${pct(SNIPE_START_BPS)} and falls in a straight line to the token’s own fee. Anything above that fee is added to the token’s locked liquidity and never paid out.`),
       note('info', 'shield-check', 'Your wallet confirms every approval and transaction. Elpida never holds your keys or funds.')),
     card(4, SECTIONS[4],
-      h('p', `Each curve trade pays ${pct(BASE_FEE_BPS)}, split equally between Elpida and the creator. On standard Uniswap v3 pools the pool’s trading fees are also split 50/50.`),
-      h('div.dc-options', tile('To the creator', 'Fees accumulate for the wallets the creator chooses; each wallet claims its share.'), tile('To holders', 'Fees are paid to eligible holders, weighted by holdings at a snapshot.'), tile('Reward asset', 'Fees buy a reward asset and distribute it to holders.'), tile('Buyback and vest', 'Fees buy back the token and vest it to holders.')),
-      h('p.small.muted', 'The creator’s choice is fixed at launch. Some strategies are simulation-only or unavailable on a given network; the launch page shows what is live.'),
-      h('p', 'Optional token tax: a creator can fix a buy tax and a sell tax of 0–10% each at launch, on top of the curve fee. The tax is split 30% to Elpida and 70% to the creator’s wallet allocations, and can never be changed. Tax tokens use a separate V2-style pool whose fees stay in the locked liquidity. This is only available where a verified tax deployment is registered, and none is active on a public network yet.')),
+      h('p', `The creator picks the token’s fee at launch, from ${pct(V2_PROPOSED_MIN_FEE_BPS)} to ${pct(V2.maxFeeBps)} (${pct(V2.defaultFeeBps)} by default). It never changes, before or after graduation. Every fee is shared five ways:`),
+      h('div.dc-options',
+        tile(`${pct(V2_FEE_SPLIT.creator)} creator`, 'To the creator’s rewards: their wallet, other verified wallets, X accounts or websites, or the token’s holders, as chosen at launch.'),
+        tile(`${pct(V2_FEE_SPLIT.traderAirdrop)} traders`, 'A monthly airdrop to the traders who paid fees, in proportion to the fees they paid.'),
+        tile(`${pct(V2_FEE_SPLIT.flywheel)} flywheel`, 'Buys tokens launched on Elpida and burns them.'),
+        tile(`${pct(V2_FEE_SPLIT.holderRewards)} holders`, 'Weekly rewards to eligible holders, weighted by holdings.'),
+        tile(`${pct(V2_FEE_SPLIT.treasury)} treasury`, 'The Elpida treasury.')),
+      h('p.small.muted', 'Where a reward is paid out, it is paid in USDC (a labelled test dollar on some test networks). Older test tokens launched before V2 keep the rules they launched with.')),
     card(5, SECTIONS[5], h('p.muted', 'Generated from the network registry. Always compare an address with the explorer before interacting.'), contracts(ctx)),
     card(6, SECTIONS[6], h('div.dc-faq', ...FAQ.map(([q, a]) => h('details.dc-q', h('summary', q, icon('chevron-down', 'icon-sm')), h('p', a))))),
     card(7, SECTIONS[7],

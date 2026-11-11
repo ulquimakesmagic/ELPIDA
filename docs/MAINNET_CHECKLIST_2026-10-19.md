@@ -1,3 +1,6 @@
+> **Historical (11 November 2026).** This document predates ELPIDA V2 and describes the legacy product. The current
+> release gate is `docs/AUDIT_TRIAGE_2026-11-11.md`.
+
 # Mainnet checklist, 19 October 2026
 
 Turns the gates in `MAINNET_READINESS.md` into concrete work with an owner and the evidence that closes each one. It is a planning aid, not a security approval. Nothing here authorizes a mainnet deployment or real funds. Plan: one validated chain first (recommended: Base), creator-wallet rewards only.

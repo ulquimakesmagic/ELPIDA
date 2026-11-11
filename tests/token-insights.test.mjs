@@ -106,3 +106,14 @@ test('quick buy amounts follow the trading pair', () => {
   assert.deepEqual(quickAmounts('XYZ'), []);
   assert.deepEqual(quickAmounts(undefined), []);
 });
+
+// Audit WEB-03 (11 November 2026): the Safety card printed "1.25%" for every token, including 4% V2 tokens.
+test('the Safety card states the token’s own fee, never a fixed 1.25%', () => {
+  for (const feeBps of [100, 125, 250, 400]) {
+    const text = safetyChecks({ model: 'v2-hook', feeBps, graduated: false }).map(c => c.text).join(' ');
+    assert.ok(text.includes(`${Number((feeBps / 100).toFixed(2))}% fee`), `${feeBps}: ${text}`);
+    if (feeBps !== 125) assert.ok(!text.includes('1.25%'), text);
+    assert.match(text, /locked from launch/);
+  }
+  assert.match(safetyChecks({ feeBps: 400, graduated: true, model: 'v2-hook' }).map(c => c.text).join(' '), /before and after graduation/);
+});

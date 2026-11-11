@@ -64,9 +64,9 @@ review:
 
 | Role | Powers | Mainnet holder |
 |---|---|---|
-| Treasury | Approves pair assets (add-only), receives the 20% share and launch fees | Safe multisig, from deployment (immutable) |
-| Distributor operator | Posts roots, converts to stablecoin, sweeps | Keeper wallet, one per chain, funded separately |
-| Solana upgrade authority | Upgrades the program | Squads multisig (rehearsed on devnet, 24 Oct) |
+| Treasury | Approves pair assets (add-only), receives the 20% share and launch fees, stops or caps new launches | **Planned:** Safe multisig, set at deployment (immutable). Today on testnets: the deployer key. The mainnet deploy script refuses a treasury that is not a contract. |
+| Distributor operator | Posts roots, converts to stablecoin, sweeps | Keeper wallet, one per chain. **Custodial in effect:** it decides who a posted round pays, up to the distributor's balance (audit SOL-02). For the first mainnet release the airdrop, holder and flywheel payouts stay off, so their funds only accrue. |
+| Solana upgrade authority | Upgrades the program (and so everything it holds) | **Planned:** Squads multisig before Solana mainnet. Today: the single deployer key `FeUWF…KaH8` on devnet. The 24 Oct rehearsal used a throwaway program. |
 | Creator | Receives the 30% share through its strategy vault; no power after launch | — |
 
 ## 3. Invariants to review
