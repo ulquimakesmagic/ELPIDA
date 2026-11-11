@@ -1855,7 +1855,7 @@ test('Solana V2 stablecoin payouts: a distributor converts unpromised SOL to USD
   const free = BigInt(await f.connection.getBalance(vault)) - 890_880n;
   await failsWith(convert(f.outsider, 100_000_000n, 1n), /0x1770/);
   await failsWith(convert(keeper, free + 1n, 1n), /0x179b/);
-  const { usdc: ru, sol: rs } = await reserves(), quoted = raydiumQuote(500_000_000n, rs, ru);
+  const { usdc: ru, sol: rs } = await reserves(), quoted = raydiumQuote(500_000_000n, rs, ru).out;
   await failsWith(convert(keeper, 500_000_000n, quoted + 1n), /0x1777|0x1771|custom program error/);
   const sig = await convert(keeper, 500_000_000n, quoted * 99n / 100n);
   const ev = (await eventsOf(sig)).find(e => e.name === 'V2ConvertedToUsdc');

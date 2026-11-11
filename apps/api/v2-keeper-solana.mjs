@@ -213,7 +213,7 @@ export class SolanaV2Keeper {
     const r = this.client.raydiumStablePool(this.usdc.pool, this.usdc.mint), [v0, v1] = await this.connection.getMultipleAccountsInfo([r.vault0, r.vault1]);
     const [a0, a1] = [this.client.tokenAmount(v0?.data), this.client.tokenAmount(v1?.data)], [usdcReserve, solReserve] = r.usdcIs0 ? [a0, a1] : [a1, a0];
     if (usdcReserve <= 0n || solReserve <= 0n) return 0n;
-    const quoted = raydiumQuote(lamports, solReserve, usdcReserve), minOut = quoted * 97n / 100n;
+    const quoted = raydiumQuote(lamports, solReserve, usdcReserve).out, minOut = quoted * 97n / 100n;
     if (minOut <= 0n) return 0n;
     const before = await this.usdcAvailable(kind);
     await this.sendTx(this.connection, this.payer, [this.client.computeBudget(400_000), ...this.client.v2ConvertUsdc({ operator: this.payer.publicKey, kind, config: this.config, usdcMint: this.usdc.mint, pool: this.usdc.pool, amountIn: lamports, minOut })]);
