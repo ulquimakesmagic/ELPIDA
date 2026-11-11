@@ -77,7 +77,7 @@ test('the server serves the SEO files and pages with the right types and headers
   } finally { await s.close(); }
 });
 
-import { renderTokenPage, renderTokenNotFound, cleanText, tokenMeta, TOKEN_PATH } from '../packages/core/token-seo.mjs';
+import { renderTokenPage, renderTokenNotFound, renderTokenUnavailable, cleanText, tokenMeta, TOKEN_PATH } from '../packages/core/token-seo.mjs';
 
 const sample = { address: '0x603e1bd79259ebcbaaed0c83eec09ca0b89a5bcc', name: 'Lucky <b>Sprout</b>', symbol: '$LUCK', quoteSymbol: 'ETH', fdvQuote: '2.05', graduated: false, complete: false, metadata: { description: 'A "test" token\n<script>alert(1)</script>', image: '' } };
 
@@ -131,5 +131,34 @@ test('crawler probes: HEAD works on public pages with no body, and stays refused
     }
     assert.equal((await fetch(s.url + '/sitemap.xml', { headers: { 'user-agent': 'Googlebot/2.1', 'accept-encoding': 'gzip, br' } })).status, 200);
     assert.notEqual((await fetch(s.url + '/api/tokens', { method: 'HEAD' })).status, 200);
+  } finally { await s.close(); }
+});
+
+// Audit of 11 November 2026: WEB-05 (a failed lookup is not "Token not found"), WEB-06 (deep links that switch network
+// keep their title and never strand the previous view), WEB-07 (#view is not a live region), OPS-01 (/ready).
+test('a token whose index cannot be read gets a retry page, not "Token not found"; an unknown network says so', () => {
+  const down = renderTokenUnavailable({ origin: 'https://elpida.fun', networkName: 'Base Sepolia' });
+  assert.match(down, /could not read this token/i); assert.match(down, /Base Sepolia/); assert.ok(!/Token not found/.test(down)); assert.match(down, /noindex, nofollow/);
+  assert.match(renderTokenNotFound({ origin: 'https://elpida.fun', unknownNetwork: true }), /network Elpida does not serve/);
+  const server = readFileSync(new URL('../apps/api/server.mjs', import.meta.url), 'utf8');
+  assert.match(server, /token \? 200 : failure \? 503 : 404/);
+});
+
+test('route(): title and navigation are set before a network switch, and a failed switch shows a retry in the page', () => {
+  const src = readFileSync(new URL('../apps/web/app.mjs', import.meta.url), 'utf8'), body = src.slice(src.indexOf('function route()'));
+  assert.ok(body.indexOf('document.title = ROUTE_TITLES') < body.indexOf('switchForRoute(next'), 'title first');
+  assert.match(src, /Could not switch to \$\{name\}/); assert.match(src, /Try again/);
+  assert.match(readFileSync(new URL('../apps/web/index.html', import.meta.url), 'utf8'), /id="view" aria-live="off"/);
+});
+
+test('server: /ready reports index freshness and keeper state, out of search engines; an unknown network 404s by name', async () => {
+  const s = await startServer({ port: 0, seed: false });
+  try {
+    const r = await fetch(s.url + '/ready'), body = await r.json();
+    assert.ok([200, 503].includes(r.status)); assert.equal(typeof body.ready, 'boolean'); assert.ok(Array.isArray(body.networks));
+    assert.equal(r.headers.get('x-robots-tag'), 'noindex, nofollow');
+    const page = await fetch(`${s.url}/token/nope-net/0x${'1'.repeat(40)}`);
+    assert.equal(page.status, 404); assert.match(await page.text(), /network Elpida does not serve/);
+    assert.match(await (await fetch(s.url + '/robots.txt')).text(), /Disallow: \/ready/);
   } finally { await s.close(); }
 });

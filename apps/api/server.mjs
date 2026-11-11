@@ -39,7 +39,7 @@ import {HolderTheses,thesisIdentity} from './holder-theses.mjs';
 import {HolderChat} from './holder-chat.mjs';
 import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
-import { TOKEN_PATH, renderTokenPage, renderTokenNotFound } from '../../packages/core/token-seo.mjs';
+import { TOKEN_PATH, renderTokenPage, renderTokenNotFound, renderTokenUnavailable } from '../../packages/core/token-seo.mjs';
 import { productionGuard, formatGuardReport } from './production-guard.mjs';
 import { PAGES, canonicalOrigin, renderPage, renderSitemap, renderRobots, renderLlms } from '../../packages/core/seo.mjs';
 import { createTokenizedEquity } from '../../packages/core/tokenized-equity.mjs';
@@ -369,7 +369,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     res.setHeader('Cache-Control', 'no-store');
     // Public reads change on the indexer's 15 s tick; static vendor files never change for a given URL.
     if (req.method === 'GET' && String(req.url).startsWith('/api/public/')) res.setHeader('Cache-Control', 'public, max-age=5, stale-while-revalidate=10');
-    if (/^\/(api\/|health)/.test(String(req.url))) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    if (/^\/(api\/|health|ready)/.test(String(req.url))) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
     res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' ${connectSources}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
@@ -380,6 +380,13 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     const walletRead=req.method==='GET'&&(String(req.url).split('?')[0]==='/api/wallet-tokenlist.json'||/^\/api\/wallet-logo\/[a-z0-9-]+\/0x[0-9a-fA-F]{40}$/.test(req.url)||/^\/api\/content\/(b[a-z2-7]{30,100}|Qm[1-9A-HJ-NP-Za-km-z]{44})$/.test(req.url));
     if (!acceptsRequest({host:req.headers.host,origin:walletRead?undefined:req.headers.origin,method:req.method,path:req.url,port:actualPort,publicUrl})) return send(403, { error: 'Host or origin not allowed.' });
     if(walletRead)res.setHeader('Access-Control-Allow-Origin','*');
+    // Readiness, apart from liveness (audit OPS-01): /health answers as soon as the process serves requests and is what
+    // the platform's healthcheck uses; /ready says whether the indexes are fresh and how the keepers stand. Codes only.
+    if (req.method === 'GET' && req.url === '/ready') {
+      const networks = evmTestnets.map(n => { const st = publicIndex.status(n.key), at = st?.lastSuccess ? Date.parse(st.lastSuccess) : NaN; return { network: n.key, enabled: !!st?.enabled, lastSuccess: st?.lastSuccess ?? null, fresh: !st?.enabled || (Number.isFinite(at) && Date.now() - at < 300_000), errorCode: st?.errorCode ?? null }; });
+      const keeper = v2Keeper.status?.() ?? {}, ready = networks.every(n => n.fresh);
+      return send(ready ? 200 : 503, { ready, networks, keeper: { enabled: !!keeper.enabled, idle: keeper.idle ?? null, distributions: keeper.distributions ?? null } });
+    }
     if (req.method === 'GET' && req.url === '/health') return send(200, {status:'ok',mode:'simulation',build:String(process.env.RAILWAY_GIT_COMMIT_SHA??process.env.ELPIDA_BUILD??'dev').slice(0,12)});
     try {
       const url = new URL(req.url, `http://${req.headers.host}`);
@@ -519,7 +526,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
             catch(error){failure=publicErrorCode(error);}
             // A missing token and a failed lookup are different problems; say which one this was.
             if(data===null){if(failure)console.error(JSON.stringify({event:'public_token_lookup_failed',requestId,network:key,kind:publicMatch[2]??'token',code:failure}));return send(failure?503:404,{error:failure?'Indexer unavailable for this token. Retry shortly.':'Token not indexed yet. Check indexer status and retry.',...(failure?{code:failure}:{})});}
-            return send(200,publicMatch[2]?data:{...data,...burnFields(flywheelBurns(key),data.address)});}
+            // Freshness travels with the data (audit BE-06): a reader can tell "no trades" from "the index is behind".
+            const fresh=publicIndex.freshness(key,publicMatch[1]);if(fresh?.stale){res.setHeader('X-Index-Stale','1');res.setHeader('Cache-Control','no-store');}
+            return send(200,publicMatch[2]?data:{...data,...burnFields(flywheelBurns(key),data.address),...(fresh??{})});}
         // Bytecode for the labelled test DEX and relay feed, fetched only when the launchpad owner deploys them.
         if (url.pathname === '/api/test-dex-artifacts') return send(200, testDexArtifacts());
         if (url.pathname === '/api/v4-artifacts') return send(200, v4Artifacts());
@@ -546,10 +555,16 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
             if (key.startsWith('solana-')) return solanaIndex && solanaIndex.network.key === key ? solanaIndex.token(addr) ?? null : null;
             return /^0x/.test(addr) ? publicIndex.detail(key, addr) : null;
           };
-          let token = null; try { token = await found(); } catch { token = null; }
-          res.setHeader('Cache-Control', token ? 'public, max-age=60' : 'no-store');
-          res.writeHead(token ? 200 : 404, { 'Content-Type': 'text/html; charset=utf-8' });
-          return res.end(token ? renderTokenPage({ token, network: key, networkName: nets.get(key), origin: canonicalOrigin(), testnet: key !== 'solana-mainnet' }) : renderTokenNotFound({ origin: canonicalOrigin() }));
+          // Three different answers (audit WEB-05): an unknown network and a missing token are 404s; a lookup that failed
+          // is a 503 with a retry, never "Token not found". A token from a stale index is served but never cached.
+          let token = null, failure = null; try { token = await found(); } catch (error) { failure = publicErrorCode(error); }
+          if (failure) console.error(JSON.stringify({ event: 'token_page_lookup_failed', requestId, network: key, code: failure }));
+          const stale = token && /^0x/.test(addr) && !key.startsWith('solana-') && key !== 'local' ? publicIndex.freshness(key, addr)?.stale : false;
+          res.setHeader('Cache-Control', token && !stale ? 'public, max-age=60' : 'no-store');
+          if (failure) res.setHeader('Retry-After', '30');
+          res.writeHead(token ? 200 : failure ? 503 : 404, { 'Content-Type': 'text/html; charset=utf-8' });
+          return res.end(token ? renderTokenPage({ token, network: key, networkName: nets.get(key), origin: canonicalOrigin(), testnet: key !== 'solana-mainnet' })
+            : failure ? renderTokenUnavailable({ origin: canonicalOrigin(), networkName: nets.get(key) }) : renderTokenNotFound({ origin: canonicalOrigin(), unknownNetwork: !nets.has(key) }));
         }
         function publicErrorCode(error){return String(error?.code??error?.name??'LOOKUP_FAILED').replace(/[^a-zA-Z0-9_]/g,'').slice(0,64)||'LOOKUP_FAILED';}
         const resource = resources.get(url.pathname);
