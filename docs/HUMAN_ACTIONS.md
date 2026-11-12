@@ -2,6 +2,14 @@
 
 > **Mainnet gate (Malik, 11 November 2026):** ELPIDA goes live on mainnet only after the audit and its fixes. Every
 > agent: no mainnet deployment, funding or pinning before the audit report is in and its findings are fixed and merged.
+>
+> **Audit in, Option B chosen (Malik, 11 November 2026):** see `docs/AUDIT_TRIAGE_2026-11-11.md`. No external audit
+> firm; Base mainnet first, creator rewards only (airdrop, holder and flywheel shares accrue unpaid), a daily launch cap
+> and a launch stop, after the fix PRs listed there are merged. The deployment still needs Malik's go-ahead at the time.
+>
+> **Malik, now:** (1) fix GitHub Actions billing or the spending limit (CI has not run since 8 Nov), then require the
+> `contracts, unit and full suite` and `solana program` checks on `main`; (2) create a Safe on Base for the treasury
+> and pick a guardian wallet for the launch stop; (3) a fresh, separate Base keeper key.
 
 ## Solana USDC pool and testnet setup fixes, 11 November 2026
 

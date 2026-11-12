@@ -1,3 +1,6 @@
+> **Historical (11 November 2026).** This document predates ELPIDA V2 and describes the legacy product. The current
+> release gate is `docs/AUDIT_TRIAGE_2026-11-11.md`.
+
 # Current release gates — 13 October 2026
 
 Elpida remains a testnet product. Mainnet deployment scripts are preparation tools, not security approval. Older model-specific documents describe historical behavior; verify current code and deployment records before relying on their fee or network settings.
