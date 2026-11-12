@@ -13,6 +13,7 @@
 //    and every leaf is then paid by the keeper (anyone may pay one). SOL is paid natively from the vault PDA.
 //    Holder weights come from daily holder snapshots (a wallet must appear in two to count), the Solana stand-in for
 //    EVM's transfer history.
+import { KeeperLease, safeError } from '../../packages/core/keeper-lease.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import * as web3 from '@solana/web3.js';
 import { createElpidaSolana, v2Owed, parseAmount, TOKEN_DECIMALS, quoteBuy, raydiumQuote, ownFeeBps, tradeFeeBps, POOL_SIZE_V2, STATUS_TRADING, STATUS_MIGRATED, WSOL_MINT, V2_DIST, V2_WITHDRAW_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, RAYDIUM_SWAP_COMPUTE_UNITS, explainError } from '../../packages/solana/client.mjs';
@@ -47,8 +48,10 @@ export function snapshotHolderRound({ snapshots, pool, excluded = [], links = []
 export class SolanaV2Keeper {
   /** `deployment`: the served Solana deployment (programId, v2). `payer`: the keeper Keypair. */
   /** `index()`: the Solana public index (trades, tokens, holders) or null; `solUsd()`: fresh SOL/USD or null. */
-  constructor({ connection, payer, deployment, path = ':memory:', now = () => Math.floor(Date.now() / 1000), log = () => {}, tickMs = 300_000, cluster = 'devnet', sendTx = send, index = () => null, solUsd = () => null, publicUrl = 'https://elpida.fun', network = 'testnet' }) {
-    Object.assign(this, { connection, payer, deployment, now, log, tickMs, sendTx, index, solUsd, publicUrl, network });
+  constructor({ connection, payer, deployment, path = ':memory:', now = () => Math.floor(Date.now() / 1000), log = () => {}, tickMs = 300_000, cluster = 'devnet', sendTx = send, index = () => null, solUsd = () => null, publicUrl = 'https://elpida.fun', network = 'testnet', distributions = network !== 'mainnet', leaseTtl = 15 * 60 }) {
+    Object.assign(this, { connection, payer, deployment, now, log, tickMs, index, solUsd, publicUrl, network, distributions });
+    // Every transaction renews the signing lease first (audit BE-01): a second process on the same data never signs.
+    this.sendTx = (...args) => { this.lease.renew(); return sendTx(...args); };
     this.client = createElpidaSolana(web3, deployment.programId, { cluster });
     this.config = new PublicKey(deployment.v2.config);
     // Stablecoin payouts (Malik, 10 November): with `v2.usdc` ({ mint, pool }) recorded, each round's SOL is converted
@@ -61,12 +64,14 @@ export class SolanaV2Keeper {
       CREATE TABLE IF NOT EXISTS sv2_runs(id INTEGER PRIMARY KEY, job TEXT NOT NULL, at INTEGER NOT NULL, status TEXT NOT NULL, detail TEXT);
       CREATE TABLE IF NOT EXISTS sv2_manifests(kind INTEGER NOT NULL, round INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(kind, round));
       CREATE TABLE IF NOT EXISTS sv2_snapshots(day INTEGER NOT NULL, mint TEXT NOT NULL, holders TEXT NOT NULL, PRIMARY KEY(day, mint));`);
+    this.lease = new KeeperLease(this.db, 'sv2_lock', { now, ttl: leaseTtl });
     this.busy = false;
   }
 
   get(key, fallback) { const r = this.db.prepare('SELECT value FROM sv2_state WHERE key=?').get(key); return r ? JSON.parse(r.value) : fallback; }
   set(key, value) { this.db.prepare('INSERT OR REPLACE INTO sv2_state VALUES(?,?)').run(key, JSON.stringify(value)); }
   record(job, status, detail) {
+    if (detail?.error) detail = { ...detail, error: safeError(detail.error) };
     this.db.prepare('INSERT INTO sv2_runs(job,at,status,detail) VALUES(?,?,?,?)').run(job, this.now(), status, detail ? JSON.stringify(detail, (_, v) => (typeof v === 'bigint' ? v.toString() : v)).slice(0, 4000) : null);
     this.log({ event: 'v2_keeper', chain: 'solana', job, status, ...(detail?.error ? { error: String(detail.error).slice(0, 200) } : {}) });
   }
@@ -74,14 +79,18 @@ export class SolanaV2Keeper {
   done(job) { this.set(`${job}:last`, this.now()); }
 
   start() { if (!this.timer) { this.timer = setInterval(() => this.tick().catch(() => {}), this.tickMs); this.timer.unref?.(); setTimeout(() => this.tick().catch(() => {}), 15_000).unref?.(); } return this; }
-  async close() { clearInterval(this.timer); this.timer = null; }
+  async close() { clearInterval(this.timer); this.timer = null; if (!this.busy) this.lease.release(); }
 
   async tick() {
     if (this.busy) return; this.busy = true;
     try {
+      if (!this.lease.acquire()) { this.idle = 'lease_held_elsewhere'; return; }
+      this.idle = null;
       const clean = job => { (this.checked ??= {})[job] = this.now(); };
-      for (const job of ['fees', 'harvest', 'sweep', 'snapshot', 'flywheel']) { if (!this.due(job)) continue; try { await this[job](); clean(job); } catch (e) { this.record(job, 'failed', { error: e.message }); } }
-      for (const job of ['airdrop', 'holder']) { try { await this[job](); clean(job); } catch (e) { this.record(job, 'failed', { error: e.message }); } }
+      // With distributions off (the first mainnet release) only fees and harvests run; the other shares accrue.
+      const daily = this.distributions ? ['fees', 'harvest', 'sweep', 'snapshot', 'flywheel'] : ['fees', 'harvest'];
+      for (const job of daily) { if (!this.due(job)) continue; try { await this[job](); clean(job); } catch (e) { this.record(job, 'failed', { error: e }); if (e.code === 'lease_lost') return; } }
+      for (const job of this.distributions ? ['airdrop', 'holder'] : []) { try { await this[job](); clean(job); } catch (e) { this.record(job, 'failed', { error: e }); if (e.code === 'lease_lost') return; } }
     }
     finally { this.busy = false; }
   }
@@ -331,7 +340,7 @@ export class SolanaV2Keeper {
   }
 
   status() {
-    return { chain: this.deployment.cluster ?? 'solana', keeper: this.payer.publicKey.toBase58(), airdropNext: this.get('airdrop:next', 0), holderNext: this.get('holder:next', 0), runs: this.db.prepare('SELECT job,at,status FROM sv2_runs ORDER BY id DESC LIMIT 8').all(), jobs: latestJobs(this.db.prepare('SELECT job,at,status,detail FROM sv2_runs WHERE id IN (SELECT MAX(id) FROM sv2_runs GROUP BY job) ORDER BY job').all(), this.checked ?? {}) };
+    return { chain: this.deployment.cluster ?? 'solana', keeper: this.payer.publicKey.toBase58(), distributions: this.distributions, idle: this.idle ?? null, airdropNext: this.get('airdrop:next', 0), holderNext: this.get('holder:next', 0), runs: this.db.prepare('SELECT job,at,status FROM sv2_runs ORDER BY id DESC LIMIT 8').all(), jobs: latestJobs(this.db.prepare('SELECT job,at,status,detail FROM sv2_runs WHERE id IN (SELECT MAX(id) FROM sv2_runs GROUP BY job) ORDER BY job').all(), this.checked ?? {}) };
   }
 }
 

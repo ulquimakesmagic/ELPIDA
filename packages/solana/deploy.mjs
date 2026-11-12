@@ -19,17 +19,39 @@ export async function confirmByPolling(connection, signature, lastValidBlockHeig
   }
 }
 
-export async function send(connection, payer, instructions, signers = [], retries = 3) {
+/**
+ * Signs and sends one transaction, retrying network failures without ever sending two different transactions that could
+ * both land (audit BE-03). After an ambiguous failure (a timeout, a dropped connection) it first asks whether the signed
+ * transaction landed; while its blockhash is still valid it resends the same signed bytes; only once that blockhash has
+ * expired unseen, so the first transaction can no longer land, does it build and sign a new one. `journal(signed)` is
+ * called with { signature, lastValidBlockHeight } before each first broadcast.
+ */
+export async function send(connection, payer, instructions, signers = [], retries = 3, { journal } = {}) {
+  let signed = null;
   for (let attempt = 1; ; attempt++) {
     try {
+      if (signed) {
+        const { value: [status] } = await connection.getSignatureStatuses([signed.signature], { searchTransactionHistory: true });
+        if (status?.err) throw Object.assign(new Error(`Transaction ${signed.signature} failed: ${JSON.stringify(status.err)}`), { signature: signed.signature, final: true });
+        if (status && (status.confirmationStatus === 'confirmed' || status.confirmationStatus === 'finalized')) return signed.signature;
+        if (status || await connection.getBlockHeight('confirmed') <= signed.lastValidBlockHeight) {
+          await connection.sendRawTransaction(signed.raw, { skipPreflight: true });
+          return await confirmByPolling(connection, signed.signature, signed.lastValidBlockHeight);
+        }
+        signed = null; // expired without landing: it can never land now
+      }
       const { blockhash, lastValidBlockHeight } = await connection.getLatestBlockhash('confirmed');
       const tx = new Transaction({ feePayer: payer.publicKey, blockhash, lastValidBlockHeight }).add(...instructions);
       tx.sign(payer, ...signers);
-      const signature = await connection.sendRawTransaction(tx.serialize(), { preflightCommitment: 'confirmed' });
+      signed = { raw: tx.serialize(), signature: base58(tx.signature), lastValidBlockHeight };
+      journal?.({ signature: signed.signature, lastValidBlockHeight });
+      const signature = await connection.sendRawTransaction(signed.raw, { preflightCommitment: 'confirmed' });
       return await confirmByPolling(connection, signature, lastValidBlockHeight);
     } catch (error) {
-      const retryable = /blockhash|timed? ?out|429|ECONNRESET|fetch failed|block height exceeded/i.test(String(error.message));
+      const retryable = !error.final && /blockhash|timed? ?out|429|ECONNRESET|fetch failed|block height exceeded/i.test(String(error.message));
       if (!retryable || attempt >= retries) throw error;
+      // A preflight rejection means the transaction was never accepted: a fresh one is safe.
+      if (/blockhash not found/i.test(String(error.message))) signed = null;
       await sleep(1500 * attempt);
     }
   }
