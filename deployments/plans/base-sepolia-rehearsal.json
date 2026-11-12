@@ -5,7 +5,7 @@
   "startMcapUsd": 20000,
   "minFeeBps": 100,
   "dailyLaunchCap": 50,
-  "treasury": null,
+  "treasury": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01",
   "keeper": null,
   "guardian": null,
   "minSafeThreshold": 2,
@@ -14,6 +14,6 @@
   "feedMaxAge": 3600,
   "usdc": "0x036CbD53842c5426634e7929541eC2318f3dCF7e",
   "confirmations": 2,
-  "minDeployerBalance": "0.01",
+  "minDeployerBalance": "0.003",
   "notes": "Dress rehearsal of the exact mainnet procedure on Base Sepolia with test ETH: a real Safe (same owners and threshold as the mainnet Safe), the Safe app's Transaction Builder, real confirmations. Same $20,000 start and settings as base-mainnet. Its deployment is NOT pinned into the site, so the live Base Sepolia listings are untouched. Fill treasury (a Base Sepolia Safe), keeper and guardian (they may be the same wallets that will serve mainnet, except the keeper, which should be a throwaway here)."
 }
