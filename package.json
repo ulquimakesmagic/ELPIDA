@@ -40,8 +40,9 @@
     "test:dex": "node --test --test-concurrency=1 tests/dex-migration.test.mjs tests/dex-runtime.test.mjs",
     "test:solana-host": "cargo test --release --manifest-path contracts/solana/host-tests/Cargo.toml",
     "compile:v4": "node scripts/compile-v4.mjs",
+    "compile:all": "node scripts/compile.mjs && node scripts/compile-v4.mjs",
     "test:v4": "node --test tests/v4-locked-launch.test.mjs tests/v4-factory.test.mjs tests/v4-router.test.mjs tests/v4-indexer.test.mjs tests/v4-browser.test.mjs",
-    "test:v2": "node --test tests/v2-economics.test.mjs tests/v2-airdrop.test.mjs tests/v2-hook.test.mjs tests/v2-vaults.test.mjs tests/v2-rewards-indexer.test.mjs tests/v2-indexer.test.mjs tests/v2-browser.test.mjs tests/v2-keeper.test.mjs"
+    "test:v2": "node --test tests/v2-economics.test.mjs tests/v2-airdrop.test.mjs tests/v2-hook.test.mjs tests/v2-vaults.test.mjs tests/v2-rewards-indexer.test.mjs tests/v2-indexer.test.mjs tests/v2-browser.test.mjs tests/v2-keeper.test.mjs tests/v2-creator-rewards.test.mjs tests/v2-payout-stables.test.mjs tests/v2-rewards-view.test.mjs tests/v2-stock-feeds.test.mjs tests/v2-usdc-rewards.test.mjs tests/v2-audit-fixes.test.mjs"
   },
   "overrides": {
     "solc": {

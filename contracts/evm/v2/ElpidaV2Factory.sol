@@ -44,7 +44,19 @@ contract ElpidaV2Factory is ElpidaUsdPricing {
     struct QuoteFeed { address feed; uint64 maxAge; uint8 feedDecimals; uint8 assetDecimals; }
     mapping(address => QuoteFeed) public quoteFeeds;
     bool private entered;
+    /// Launch controls for the first mainnet release (Malik, 11 November: Base first, creator rewards only). The treasury
+    /// can stop new launches and cap them per UTC day; a guardian it names can only stop them, so a stop does not wait
+    /// for the multisig. Trading, fees and existing pools are never touched by either.
+    uint256 public constant LAUNCH_CONTROLS_VERSION = 1;
+    address public guardian;
+    bool public launchesPaused;
+    /// Most launches per UTC day; 0 means no cap.
+    uint256 public dailyLaunchCap;
+    mapping(uint256 => uint256) public launchesOnDay;
 
+    event GuardianSet(address indexed guardian);
+    event LaunchesPaused(bool paused, address indexed by);
+    event DailyLaunchCapSet(uint256 cap);
     event HookSet(address indexed hook);
     event QuoteApproved(address indexed asset, uint256 virtualQuote);
     event FeedQuoteApproved(address indexed asset, address indexed feed, uint256 maxAge);
@@ -71,6 +83,32 @@ contract ElpidaV2Factory is ElpidaUsdPricing {
         require(msg.sender == treasury && address(hook) == address(0), "owner only/set");
         require(ElpidaV2Hook(hook_).factory() == address(this) && ElpidaV2Hook(hook_).protocolTreasury() == treasury, "hook");
         hook = ElpidaV2Hook(hook_); emit HookSet(hook_);
+    }
+
+    function setGuardian(address guardian_) external {
+        require(msg.sender == treasury, "owner only"); guardian = guardian_; emit GuardianSet(guardian_);
+    }
+
+    /// Stops new launches (treasury or guardian). Only the treasury resumes them.
+    function pauseLaunches() external {
+        require(msg.sender == treasury || (msg.sender == guardian && guardian != address(0)), "owner/guardian only");
+        launchesPaused = true; emit LaunchesPaused(true, msg.sender);
+    }
+
+    function resumeLaunches() external {
+        require(msg.sender == treasury, "owner only"); launchesPaused = false; emit LaunchesPaused(false, msg.sender);
+    }
+
+    function setDailyLaunchCap(uint256 cap) external {
+        require(msg.sender == treasury, "owner only"); dailyLaunchCap = cap; emit DailyLaunchCapSet(cap);
+    }
+
+    /// Launches still possible today under the cap (type(uint256).max when uncapped, 0 while paused).
+    function launchesLeftToday() external view returns (uint256) {
+        if (launchesPaused) return 0;
+        if (dailyLaunchCap == 0) return type(uint256).max;
+        uint256 used = launchesOnDay[block.timestamp / 1 days];
+        return used >= dailyLaunchCap ? 0 : dailyLaunchCap - used;
     }
 
     /// Team-approved, immutable ERC-20 quote (USDC, an Ondo stock): its virtual quote in raw units, i.e. the starting
@@ -112,6 +150,8 @@ contract ElpidaV2Factory is ElpidaUsdPricing {
     function launch(string calldata name_, string calldata symbol_, address asset, uint256 feeBps, uint256 firstBuy, uint256 minOut, address reward, string calldata uri, bool inUsdc) external payable returns (address token, uint256 bought) {
         require(!entered, "reentrancy"); entered = true;
         require(address(hook) != address(0) && reward != address(0), "hook/reward");
+        require(!launchesPaused, "launches paused");
+        if (dailyLaunchCap != 0) require(++launchesOnDay[block.timestamp / 1 days] <= dailyLaunchCap, "daily launch cap");
         _checkName(name_); _checkSymbol(symbol_);
         if (bytes(uri).length > 0) _checkUri(uri); else require(!metadataRequired, "metadata required");
         uint256 vq = quoteVirtual(asset);

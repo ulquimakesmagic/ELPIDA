@@ -1,7 +1,8 @@
 # ELPIDA V2.0 — contracts on a local chain (roadmap step 3)
 
-8 November 2026, branch `v2.0`. **Prototype, not audited, local chain only.** Nothing is deployed; no testnet or
-mainnet was touched. Built on Model 11 (Uniswap v4 hook, liquidity locked from launch), per audit decision C8.
+8 November 2026, branch `v2.0`. **Not independently audited.** Deployed since on the four EVM test networks; no
+mainnet yet. The pre-mainnet review of 11 November and its fixes are in `AUDIT_TRIAGE_2026-11-11.md` and the section
+"Audit fixes, 11 November" below. Built on Model 11 (Uniswap v4 hook, liquidity locked from launch), per audit decision C8.
 
 Two sessions built this step in parallel on 8 November. Malik chose this version (the one first pushed as
 `v2.0-session-b`); it replaces the other's contracts and tests on `v2.0`. The audit, the reference economics and the
@@ -18,8 +19,9 @@ trader-airdrop simulation (`V2_0_AUDIT.md` §14a) are kept as they were.
 | `tests/helpers/v2-fixture.mjs`, `tests/v2-hook.test.mjs` | 9 tests against Uniswap's own PoolManager |
 | `package.json` | `npm run test:v2` (reference economics and contracts) |
 
-The existing `ElpidaV4Router` trades V2 tokens unchanged (it needs only `poolKey` and `currentFeeBps`). Sizes: hook
-17,971 bytes, factory 10,960, token 1,794 (limit 24,576). Model 11's bytecode is unchanged by the shared build.
+The existing `ElpidaV4Router` trades V2 tokens unchanged (it needs only `poolKey` and `currentFeeBps`). Sizes (11 November, after the audit fixes, `npm run compile:v4`): hook 18,141 bytes, factory 13,833, distributor
+6,326, USDC distributor 7,091, creator rewards 7,421, flywheel vault 3,522, identity allocation 2,504, token 1,794
+(limit 24,576). Model 11's bytecode is unchanged by the shared build.
 
 ## What changed from Model 11
 
@@ -59,7 +61,8 @@ every trade in its pools fails at the transfer, and every payout fails inside it
 
 ## Tests
 
-`npm run test:v2`: 26 pass (12 reference economics, 5 airdrop, 9 on chain). On chain:
+`npm run test:v2` runs the economics, airdrop, hook, vault, indexer, browser and keeper suites (48 tests on 11 November),
+plus `tests/v2-audit-fixes.test.mjs` (below). On chain:
 
 - **Start and graduation:** $20,000 at launch, never cheaper (tick rounding at most +0.1%); 16,100-tick sale range;
   sale position within 0.01% of 69.1% of supply; a buy crossing the milestone moves about $30.9k (12.36 ETH at $2,500)
@@ -112,3 +115,28 @@ PoolManager, as Model 11 does. Robinhood testnet has no v4 path. Solana is not s
 ## Deployment status
 
 Local implementation and automated tests only. No testnet deployment, no security review, no production deployment.
+
+## Audit fixes, 11 November 2026
+
+From the pre-mainnet review (`AUDIT_TRIAGE_2026-11-11.md`); tests in `tests/v2-audit-fixes.test.mjs`.
+
+- **EVM-02.** `claimMany` on both distributors skips a leaf that is already paid (its wallet claimed it itself), so one
+  self-claim never reverts the keeper's batch. A single `claim` of a paid leaf still reverts with `AlreadyPaid`.
+- **EVM-03.** The launch price is narrowed with `SafeCast.toUint160` and reverts instead of wrapping.
+- **EVM-07 (and a fix it found).** Exact-output buys and sells are now tested. They showed one rounding leak: the
+  exact-output fee is rounded up, while the part at the token's rate was worked out again from the gross and rounded
+  down, so one base unit per such trade went to the locked bonus instead of the split. Outside the first minute the
+  whole fee is now at the token's rate (`_base`).
+- **EVM-01 (documented, handled by the keeper).** `withdrawFees` pays five recipients in one call; a creator vault that
+  burns all the gas it is sent can make that call revert. `claim(token, recipient)` is the reliable primitive, and the
+  keeper falls back to it per recipient.
+- **Launch controls (first mainnet release).** `pauseLaunches` (treasury, or the guardian it names with `setGuardian`),
+  `resumeLaunches` (treasury only), `setDailyLaunchCap` (treasury; 0 = no cap) and `launchesLeftToday()`. They stop
+  or cap new launches only: trading, fees and existing pools are untouched. `LAUNCH_CONTROLS_VERSION = 1`.
+- **Stress test (audit 1.2).** A seeded random sequence of exact-input and exact-output buys and sells, large buys
+  through the milestone, time jumps across the first minute, donations, `withdrawFees` and single claims, over a
+  native-paired 4% token and a USDC-paired 1% token. After every step: the hook's claims equal what it owes plus the
+  bonus plus at most a few base units of rounding, `accrued` equals the sum of every `Fee` event at the token's rate,
+  and no `paid` counter ever falls. At the end every share pays out exactly. The suite runs 160 steps; on 11 November
+  it also ran **5 seeds × 2,000 steps (10,000 steps), all passing, every run crossing the milestone on both tokens**
+  (`ELPIDA_V2_FUZZ_SEED=1..5 ELPIDA_V2_FUZZ_STEPS=2000 node --test --test-name-pattern=stress tests/v2-audit-fixes.test.mjs`).
