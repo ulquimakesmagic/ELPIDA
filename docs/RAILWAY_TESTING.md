@@ -4,7 +4,7 @@ This deploys the frontend and API together as one test service. Simulation uses 
 
 ## Deploy
 
-1. In Railway, create a project from the GitHub repository `AbdulganiyuMalik01/ELPIDA`, branch `main`. Use the repository root `/`.
+1. In Railway, create a project from the GitHub repository `ulquimakesmagic/ELPIDA` (renamed from AbdulganiyuMalik01 on 12 Nov 2026), branch `main`. Use the repository root `/`.
 2. Railway uses the included Dockerfile and `railway.json`; leave build/start commands unset. The container uses Node 24 and listens on Railway's `PORT`. Startup compiles and seeds the simulated chain, so allow a few minutes; readiness is checked at `/health` with a 300-second timeout.
 3. Open the service's Settings → Networking → Public Networking and select **Generate Domain**. Use the port shown by Railway for the service.
 4. Redeploy after generating the domain so the server receives `RAILWAY_PUBLIC_DOMAIN`. Alternatively set `ELPIDA_PUBLIC_URL` to the full generated HTTPS origin and redeploy. This also works for a custom domain. Only the configured origin and localhost are accepted.

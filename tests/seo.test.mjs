@@ -161,6 +161,8 @@ test('server: /ready reports index freshness and keeper state, out of search eng
     assert.equal(page.status, 404); assert.match(await page.text(), /network Elpida does not serve/);
     assert.match(await (await fetch(s.url + '/robots.txt')).text(), /Disallow: \/ready/);
   } finally { await s.close(); }
+});
+
 // Audit WEB-01 (11 November 2026): the crawlable pages described the retired Model 10 ($5,000 → $50,000, 1.25% split
 // 50/50, Uniswap v3). Every number now comes from packages/core/v2-economics.mjs; this keeps it that way.
 test('the public pages state the V2 economics from v2-economics.mjs, never the retired Model 10 numbers', async () => {
