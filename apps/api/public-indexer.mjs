@@ -140,6 +140,8 @@ export class PublicIndexer {
   /** A wallet's balances on one network, across every deployment indexed there. Skips entries that are not validated. */
   balancesOf(key,owner){return this.all(key).filter(e=>e.validated&&!e.error).flatMap(e=>e.index.balancesOf(owner).map(b=>({...b,network:key})));}
   recentTrades(limit=20){const out=[];for(const key of this.entries.keys()){const tokens=new Map(this.listings(key).map(t=>[t.address.toLowerCase(),t]));for(const e of this.all(key))for(const trade of e.index.recentTrades(limit)){const t=tokens.get(String(trade.token).toLowerCase());if(t)out.push(recentTrade(key,t,trade));}}return out.sort((a,b)=>b.timestamp-a.timestamp).slice(0,limit);}
+  /** How fresh the index answering for `address` is (audit BE-06): stale after three minutes without a successful sync. */
+  freshness(key,address){const e=this.entryFor(key,address);if(!e)return null;const at=e.lastSuccess?Date.parse(e.lastSuccess):NaN;return {indexedAt:e.lastSuccess??null,stale:!Number.isFinite(at)||Date.now()-at>180_000};}
   detail(key,address,kind,interval=60,limit=100){const e=this.entryFor(key,address),token=this.listing(key,address);if(!token)return null;return kind==='trades'?e.index.trades(address,limit):kind==='candles'?e.index.candles(address,interval,limit):kind==='holders'?e.index.holders(address):token;}
   async close(){this.stopping=true;clearInterval(this.timer);while(this.running)await new Promise(r=>setTimeout(r,100));const providers=new Set();for(const e of [...this.entries.keys()].flatMap(key=>this.all(key))){await e.index.close();providers.add(e.provider);}for(const p of providers)p.destroy();}
 }

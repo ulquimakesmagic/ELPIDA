@@ -233,14 +233,36 @@ function parseRoute() {
   }
   return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/docs': 'docs', '/monkey': 'admin', '/terms': 'terms' }[hash] ?? 'notfound' };
 }
+const ROUTE_TITLES = { explore: 'Explore tokens across chains | Elpida', portfolio: 'Portfolio | Elpida', rewards: 'Creator rewards | Elpida', launch: 'Create a token | Elpida', token: 'Token | Elpida', analytics: 'Analytics — Launches, volume & fees | Elpida', admin: 'Operations | Elpida', docs: 'Docs | Elpida', terms: 'Terms of Use | Elpida', notfound: 'Page not found | Elpida' };
+
+/**
+ * A deep link naming another network: show that the switch is under way, retry once if another request is still
+ * finishing, and if the switch fails, say so in the page with a retry rather than leaving the previous view on screen
+ * under the token page's chrome (audit WEB-06).
+ */
+function switchForRoute(next, previous, attempt = 0) {
+  const name = networkByKey(next.network)?.name ?? next.network, view = $('#view');
+  view.replaceChildren(h('section.not-found', { role: 'status' }, h('p', `Switching to ${name}…`)));
+  chooseChain(next.network).then(() => { if (currentRoute === next) rerender('route'); }).catch(e => {
+    if (currentRoute !== next) return;
+    if (attempt === 0 && /Wait for the current request/.test(String(e?.message))) { setTimeout(() => switchForRoute(next, previous, 1), 1500); return; }
+    document.body.dataset.route = 'switch-failed';
+    const retry = h('button.btn.btn-primary', { type: 'button' }, 'Try again');
+    retry.addEventListener('click', () => switchForRoute(next, previous));
+    const back = h('a.btn.btn-secondary', { href: previous?.name === 'token' || !previous ? '#/' : `#/${previous.name === 'explore' ? '' : previous.name}` }, 'Back');
+    view.replaceChildren(h('section.not-found', { role: 'alert' }, h('h1', `Could not switch to ${name}`), h('p', errorText(e)), h('div.not-found-actions', retry, back)));
+  });
+}
+
 function route() {
-  const next = parseRoute(); const changed = next.name !== currentRoute.name || next.address !== currentRoute.address;
+  const previous = currentRoute, next = parseRoute(); const changed = next.name !== currentRoute.name || next.address !== currentRoute.address;
   currentRoute = next;
   document.body.dataset.route = next.name; // lets token pages drop the desktop top bar (token.css)
-
-  if(next.network&&networkByKey(next.network)&&next.network!==currentChain()){chooseChain(next.network).catch(e=>toast(errorText(e),{kind:'error'}));return;}
+  // Title and navigation first, so a deep link that also switches network still names its page (audit WEB-06).
   $$('[data-nav]').forEach(link => { if (link.dataset.nav === next.name) link.setAttribute('aria-current', 'page'); else link.removeAttribute('aria-current'); });
-  document.title = { explore: 'Explore tokens across chains | Elpida', portfolio: 'Portfolio | Elpida', rewards: 'Creator rewards | Elpida', launch: 'Create a token | Elpida', token: 'Token | Elpida', analytics: 'Analytics — Launches, volume & fees | Elpida', admin: 'Operations | Elpida', docs: 'Docs | Elpida', terms: 'Terms of Use | Elpida', notfound: 'Page not found | Elpida' }[next.name];
+  document.title = ROUTE_TITLES[next.name];
+
+  if(next.network&&networkByKey(next.network)&&next.network!==currentChain()){switchForRoute(next, previous);return;}
   rerender('route');
   { const v = $('#view'); v.classList.remove('view-enter'); void v.offsetWidth; v.classList.add('view-enter'); }
   if(changed&&wallet?.address&&!['explore','analytics'].includes(next.name))refresh({preserveInput:true,walletRead:true}).catch(e=>toast(errorText(e),{kind:'error'}));

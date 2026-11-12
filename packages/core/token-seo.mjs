@@ -87,12 +87,24 @@ ${about ? `<p>${esc(about)}</p>` : ''}
 }
 
 /** Plain not-found page so a bad link never looks like a real token. Not indexable. */
-export function renderTokenNotFound({ origin }) {
+/** The index could not be read (an indexer restart, an RPC outage): not a missing token, so 503 and a retry (audit WEB-05). */
+export function renderTokenUnavailable({ origin, networkName }) {
+  return `<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Token temporarily unavailable · ${SITE_NAME}</title>
+<meta name="robots" content="noindex, nofollow">
+<link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="/learn.css"><script src="/theme-boot.js"></script>
+</head><body class="lp"><main class="lp-main"><h1>We could not read this token right now</h1><p class="lp-lead">The ${esc(networkName ?? 'network')} index did not answer. The token is not gone: try again in a minute.</p><p class="lp-cta"><a class="lp-btn" href="${esc(origin)}/">Explore tokens</a></p></main></body></html>
+`;
+}
+
+/** `unknownNetwork`: the link names a network Elpida does not serve. */
+export function renderTokenNotFound({ origin, unknownNetwork = false }) {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Token not found · ${SITE_NAME}</title>
 <meta name="robots" content="noindex, nofollow">
 <link rel="stylesheet" href="/theme.css"><link rel="stylesheet" href="/learn.css"><script src="/theme-boot.js"></script>
-</head><body class="lp"><main class="lp-main"><h1>Token not found</h1><p class="lp-lead">This token is not indexed on this network yet, or the link is wrong.</p><p class="lp-cta"><a class="lp-btn" href="${esc(origin)}/">Explore tokens</a></p></main></body></html>
+</head><body class="lp"><main class="lp-main"><h1>Token not found</h1><p class="lp-lead">${unknownNetwork ? 'This link names a network Elpida does not serve.' : 'This token is not indexed on this network yet, or the link is wrong.'}</p><p class="lp-cta"><a class="lp-btn" href="${esc(origin)}/">Explore tokens</a></p></main></body></html>
 `;
 }

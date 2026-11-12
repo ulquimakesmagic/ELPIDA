@@ -239,6 +239,7 @@ User-agent: *
 Allow: /
 Disallow: /api/
 Disallow: /health
+Disallow: /ready
 
 Sitemap: ${origin}/sitemap.xml
 `;
