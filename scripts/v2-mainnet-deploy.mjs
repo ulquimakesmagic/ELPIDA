@@ -11,7 +11,8 @@
 //   node scripts/v2-mainnet-deploy.mjs deploy   --plan deployments/plans/base-mainnet.json
 //   node scripts/v2-mainnet-deploy.mjs verify   --plan deployments/plans/base-mainnet.json
 //
-// `deploy` needs ELPIDA_MAINNET_RPC_URL and ELPIDA_MAINNET_DEPLOYER_KEY (a fresh wallet holding only gas; never
+// `deploy` needs ELPIDA_MAINNET_RPC_URL and asks for the deployer key with a hidden prompt (or reads
+// ELPIDA_MAINNET_DEPLOYER_KEY): a fresh wallet holding only gas; never
 // printed). It deploys the contracts, checks every constructor argument by reading it back, writes the deployment record
 // (deployments/<key>.json, resumable) and the Safe batch (deployments/<key>-safe-batch.json) for the treasury-only
 // wiring. After the Safe executes that batch, `verify` checks the wiring and marks the record ready.
@@ -261,6 +262,39 @@ export async function rehearse({ plan: given, fork = null, log = () => {}, recor
   } finally { provider.destroy(); await connection.close(); }
 }
 
+/**
+ * The deployer key from whatever was pasted: terminals such as VS Code's wrap a paste in invisible bracketed-paste
+ * markers, and a copy may carry spaces or a newline. Takes the one 64-hex key out of it, or explains what is wrong
+ * without ever printing the input.
+ */
+export function deployerKey(input) {
+  const text = String(input ?? ''), found = text.match(/(?<![0-9a-fA-F])(?:0x)?[0-9a-fA-F]{64}(?![0-9a-fA-F])/g) ?? [];
+  if (found.length !== 1) throw new Error(found.length ? 'More than one key-like value was pasted. Paste only the deployer key. Nothing was deployed.'
+    : `That is not a private key (${text.replace(/\x1b\[[0-9;]*[~A-Za-z]/g, '').trim().length} characters; a key is 64 hexadecimal characters, optionally starting with 0x). Nothing was deployed.`);
+  return '0x' + found[0].replace(/^0x/, '');
+}
+
+/** Reads one line from the terminal without echoing it. */
+async function askHidden(prompt) {
+  const { stdin, stdout } = process;
+  if (!stdin.isTTY) throw new Error('Run deploy in a terminal (it asks for the deployer key), or set ELPIDA_MAINNET_DEPLOYER_KEY.');
+  stdout.write(prompt);
+  return new Promise((resolve, reject) => {
+    let buf = '';
+    stdin.setRawMode(true); stdin.resume(); stdin.setEncoding('utf8');
+    const done = v => { stdin.setRawMode(false); stdin.pause(); stdin.off('data', on); stdout.write('\n'); v instanceof Error ? reject(v) : resolve(v); };
+    const on = chunk => {
+      for (const ch of chunk) {
+        if (ch === '\r' || ch === '\n') return done(buf);
+        if (ch === '\u0003') return done(new Error('Cancelled. Nothing was deployed.'));
+        if (ch === '\u007f' || ch === '\b') { buf = buf.slice(0, -1); continue; }
+        buf += ch;
+      }
+    };
+    stdin.on('data', on);
+  });
+}
+
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2), arg = n => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : null; };
   const planPath = arg('plan'); if (!cmd || !planPath) { console.log('usage: node scripts/v2-mainnet-deploy.mjs check|rehearse|deploy|verify --plan deployments/plans/<key>.json [--fork <rpc>]'); process.exit(2); }
@@ -279,7 +313,7 @@ async function main() {
   if (cmd === 'verify') { const out = await verifyDeployment({ provider, plan, record: JSON.parse(readFileSync(recordPath, 'utf8')), recordPath }); print(out); process.exit(out.every(c => c.ok) ? 0 : 1); }
   if (cmd === 'deploy') {
     const approval = approvalFor(plan.key, hash);
-    const key = process.env.ELPIDA_MAINNET_DEPLOYER_KEY; if (!key || !/^(0x)?[0-9a-fA-F]{64}$/.test(key)) throw new Error('Set ELPIDA_MAINNET_DEPLOYER_KEY (a fresh wallet holding only gas).');
+    const key = deployerKey(process.env.ELPIDA_MAINNET_DEPLOYER_KEY ?? await askHidden('Deployer private key (hidden, then Enter): '));
     const signer = new Wallet(key, provider), c = await preflight({ provider, plan, deployer: signer.address }); print(c);
     if (c.failed.length) throw new Error('Preflight failed. Nothing was deployed.');
     const record = await deployPlan({ provider, signer, plan, hash, approval, recordPath, log: m => console.log(m) });

@@ -60,3 +60,14 @@ test('preflight refuses a treasury that is a plain wallet or a 1-of-N Safe, and 
   assert.ok((await failed({ ...base, treasury: await deploySafe(2), keeper: a[3] })).includes('treasury, keeper, guardian and deployer are four different wallets'));
   assert.ok((await failed({ ...base, treasury: await deploySafe(2), startMcapUsd: 50 })).includes('start market cap $20,000'));
 });
+
+test('the deployer key is taken cleanly from a messy paste, and never echoed in an error', async () => {
+  const { deployerKey } = await import('../scripts/v2-mainnet-deploy.mjs');
+  const hex = 'ab'.repeat(32);
+  assert.equal(deployerKey(hex), '0x' + hex);
+  assert.equal(deployerKey(`  0x${hex}\r\n`), '0x' + hex);
+  assert.equal(deployerKey(`\x1b[200~${hex}\x1b[201~`), '0x' + hex, 'VS Code bracketed paste');
+  assert.throws(() => deployerKey('not a key'), e => /not a private key/.test(e.message) && !e.message.includes('not a key'));
+  assert.throws(() => deployerKey(`${hex} ${'cd'.repeat(32)}`), /More than one/);
+  assert.throws(() => deployerKey('ab'.repeat(33)), e => /not a private key/.test(e.message) && !e.message.includes('abab'));
+});
