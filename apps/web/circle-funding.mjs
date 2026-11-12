@@ -6,7 +6,7 @@ export function circleFundingPanel({ config, csrf, connected }) {
     h('a.link-button', { href: 'https://faucet.circle.com/', target: '_blank', rel: 'noopener noreferrer' }, 'Open Circle USDC faucet'));
   if (!config?.enabled) {
     section.append(h('p.hint', 'Circle wallet helper needs server setup. See docs/CIRCLE_TEST_FUNDING.md. The public USDC faucet is available now.'));
-    section.append(h('a.link-button', { href: 'https://github.com/AbdulganiyuMalik01/ELPIDA/blob/main/docs/CIRCLE_TEST_FUNDING.md', target: '_blank', rel: 'noopener noreferrer' }, 'Circle wallet setup instructions'));
+    section.append(h('a.link-button', { href: 'https://github.com/ulquimakesmagic/ELPIDA/blob/main/docs/CIRCLE_TEST_FUNDING.md', target: '_blank', rel: 'noopener noreferrer' }, 'Circle wallet setup instructions'));
     return section;
   }
   const network = h('select.select', config.networks.map(n => h('option', { value: n.key, selected: n.key === connected?.network }, n.name)));
