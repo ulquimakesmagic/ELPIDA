@@ -9,6 +9,14 @@ start, an approval no older than 14 days, a contract treasury, and `verifyDeploy
 against a gate plan built from what was deployed (kept in the record as `gate`). `scripts/deploy-v2.mjs` (#234) checks a
 plan whose vaults already exist; this script deploys the vaults itself, so its approval pins the plan file instead.
 
+## 0. Dress rehearsal on Base Sepolia (recommended first)
+
+`deployments/plans/base-sepolia-rehearsal.json` runs the exact procedure below (steps 1–6) on Base Sepolia with test ETH:
+a real Safe (create it in the Safe app on Base Sepolia with the same owners and threshold you will use on mainnet), a
+real approval file, `deploy`, the Transaction Builder import and signing, and `verify`. Use the Base Sepolia RPC
+(`https://sepolia.base.org`) as `ELPIDA_MAINNET_RPC_URL`. Afterwards, launch one token through the rehearsal factory and
+pull the guardian stop once. The rehearsal deployment is not pinned into the site.
+
 ## 1. Fill the plan (Malik)
 
 `deployments/plans/base-mainnet.json`: `treasury` (a Base Safe, 2-of-N or stricter), `keeper` (a fresh wallet used
