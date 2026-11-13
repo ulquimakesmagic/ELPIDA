@@ -1,0 +1,21 @@
+{
+  "key": "ethereum-mainnet",
+  "name": "Ethereum",
+  "chainId": 1,
+  "nativeSymbol": "ETH",
+  "startMcapUsd": 20000,
+  "minFeeBps": 100,
+  "dailyLaunchCap": 500,
+  "treasury": null,
+  "keeper": null,
+  "guardian": null,
+  "minSafeThreshold": 2,
+  "poolManager": "0x000000000004444c5dc75cB358380D2e3dE08A90",
+  "usdFeed": "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
+  "feedMaxAge": 10800,
+  "usdc": "0xA0b86991c6218b36c1d19D4a2e9Eb0cE3606eB48",
+  "usdcDecimals": 6,
+  "confirmations": 2,
+  "minDeployerBalance": "0.015",
+  "notes": "Fill treasury (a NEW Safe on Ethereum with the clean signers), keeper and guardian. PoolManager: Uniswap's v4 deployment on Ethereum (developers.uniswap.org v4 deployments). usdFeed: Chainlink ETH / USD (1 h heartbeat, so feedMaxAge 3 h); `check` confirms its description and freshness and that USDC has 6 decimals. Gas: the deploy is about 12.5M gas, so deploy on a low-gas day; minDeployerBalance 0.015 ETH covers up to about 1 gwei."
+}

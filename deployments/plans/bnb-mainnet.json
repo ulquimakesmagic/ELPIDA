@@ -1,0 +1,21 @@
+{
+  "key": "bnb-mainnet",
+  "name": "BNB Chain",
+  "chainId": 56,
+  "nativeSymbol": "BNB",
+  "startMcapUsd": 20000,
+  "minFeeBps": 100,
+  "dailyLaunchCap": 500,
+  "treasury": null,
+  "keeper": null,
+  "guardian": null,
+  "minSafeThreshold": 2,
+  "poolManager": "0x28e2Ea090877bF75740558f6BFB36A5ffeE9e9dF",
+  "usdFeed": "0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE",
+  "feedMaxAge": 3600,
+  "usdc": "0x8AC76a51cc950d9822D68b83fE1Ad97B32Cd580d",
+  "usdcDecimals": 18,
+  "confirmations": 2,
+  "minDeployerBalance": "0.01",
+  "notes": "Fill treasury (a NEW Safe on BNB Chain with the clean signers), keeper and guardian. PoolManager: Uniswap's v4 deployment on BNB Smart Chain (developers.uniswap.org v4 deployments). usdFeed: Chainlink BNB / USD; `check` confirms its description is BNB / USD and fresh. USDC on BNB Chain (Binance-Peg) has 18 decimals: the USDC pair's virtual quote is 25,000e18 and the $10 USDC fee is 10e18 (ElpidaUsdPricing, 13 November)."
+}
