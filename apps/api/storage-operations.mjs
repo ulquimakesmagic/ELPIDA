@@ -1,10 +1,12 @@
 import {DatabaseSync,backup} from 'node:sqlite';
 import {createHash} from 'node:crypto';
-import {existsSync,mkdirSync,readdirSync,readFileSync,writeFileSync,copyFileSync,lstatSync,unlinkSync} from 'node:fs';
+import {existsSync,mkdirSync,readdirSync,readFileSync,writeFileSync,copyFileSync,lstatSync,unlinkSync,openSync,readSync,closeSync} from 'node:fs';
 import {join,resolve,dirname} from 'node:path';
 import {validCid} from './metadata-store.mjs';
 
-const digest=file=>createHash('sha256').update(readFileSync(file)).digest('hex');
+// Hashes in 1 MB pieces: database files can be hundreds of MB, and reading one whole raised the server's memory by
+// that much during every backup and restore check.
+const digest=file=>{const h=createHash('sha256'),buf=Buffer.allocUnsafe(1048576),fd=openSync(file,'r');try{for(let n;(n=readSync(fd,buf,0,buf.length,null))>0;)h.update(buf.subarray(0,n));}finally{closeSync(fd);}return h.digest('hex');};
 // Chain indexes are rebuilt from the chain after a restore (slower start, nothing lost), so scheduled backups can leave
 // them out. The V2 keepers' databases hold the published payout lists (claim proofs) and carried balances: kept. The
 // graduation, buyback and flywheel keepers' journals too (audit BE-05): without them a restore would forget pending
