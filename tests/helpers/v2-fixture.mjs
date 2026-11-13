@@ -31,7 +31,7 @@ const hex = s => (s.startsWith('0x') ? s : '0x' + s);
  * distributor its USDC → native conversion. `usdcPayouts: true` (with convert) also deploys the two USDC payout
  * distributors (contracts.usdcAirdrop, contracts.usdcHolder) fed by the airdrop and holder distributors.
  */
-export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN_FEE_BPS, requireMetadata = false, vaults: realVaults = false, convert = false, usdcPayouts = false } = {}) {
+export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN_FEE_BPS, requireMetadata = false, vaults: realVaults = false, convert = false, usdcPayouts = false, usdcDecimals = 6 } = {}) {
   const connection = await network.create('localCancun'), provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 });
   provider.pollingInterval = 10; t.after(async () => { provider.destroy(); await connection.close(); });
   const signers = await Promise.all([0, 1, 2, 3, 4].map(i => provider.getSigner(i))), addresses = await Promise.all(signers.map(s => s.getAddress()));
@@ -44,6 +44,9 @@ export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN
   const liquidityRouter = await deploy(uniswapV4Artifact('PoolModifyLiquidityTest'), manager.target);
   const factory = await deploy(v4Art('ElpidaV2Factory'), treasury, startMcapUsd, requireMetadata);
   const usdc = await deploy(v4Art('MockUSDC'));
+  // BNB Chain's USDC has 18 decimals (13 November): `usdcDecimals: 18` runs the same launchpad against it.
+  if (usdcDecimals !== 6) await mined(usdc.setDecimals(usdcDecimals));
+  const usdcUnit = 10n ** BigInt(usdcDecimals);
   if (realVaults) {
     const now = (await provider.getBlock('latest')).timestamp, today = now - now % 86_400, d = new Date(now * 1000);
     const Z = ZeroAddress;
@@ -58,8 +61,8 @@ export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN
   const feed = await deploy(v4Art('MockUsdFeed'), ETH_USD * 10n ** 8n);
   const stock = await deploy(v4Art('MockIssuerStock'));
   await mined(factory.connect(owner).configureUsdPricing(feed.target, 86400, usdc.target));
-  await mined(factory.connect(owner).approveQuote(usdc.target, USDC_VIRTUAL_QUOTE * BigInt(startMcapUsd) / 20_000n));
-  for (const a of addresses) { await mined(usdc.mint(a, 10n ** 12n)); await mined(stock.mint(a, parseEther('1000000'))); }
+  await mined(factory.connect(owner).approveQuote(usdc.target, USDC_VIRTUAL_QUOTE * BigInt(startMcapUsd) / 20_000n * usdcUnit / 10n ** 6n));
+  for (const a of addresses) { await mined(usdc.mint(a, 1_000_000n * usdcUnit)); await mined(stock.mint(a, parseEther('1000000'))); }
   const create2 = await deploy(v4Art('ElpidaCreate2Deployer'));
   const hookArt = v4Art('ElpidaV2Hook');
   const args = AbiCoder.defaultAbiCoder().encode(['address', 'address', 'address', 'address', 'address', 'address', 'uint256'],
@@ -71,7 +74,7 @@ export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN
   await mined(factory.connect(owner).setHook(address));
   const router = await deploy(v4Art('ElpidaV4Router'), manager.target, address);
   if (realVaults) await mined(contracts.flywheel.connect(signers[4]).setRouter(router.target));
-  const f = { provider, signers, addresses, treasury, owner, vaults, contracts, manager, swapRouter, liquidityRouter, factory, hook, router, feed, usdc, stock, deploy };
+  const f = { provider, signers, addresses, treasury, owner, vaults, contracts, manager, swapRouter, liquidityRouter, factory, hook, router, feed, usdc, usdcUnit, stock, deploy };
   f.recipient = (l, r) => (r === 'creator' ? l.reward : r === 'treasury' ? treasury : vaults[r]);
   f.now = async () => (await provider.getBlock('latest')).timestamp;
   f.advance = async s => { await provider.send('evm_increaseTime', [s]); await provider.send('evm_mine', []); };
@@ -88,7 +91,7 @@ export async function launchV2(f, { signer = f.signers[0], pair = 'native', feeB
   const quote = pair === 'usdc' ? f.usdc : pair === 'stock' ? f.stock : null, asset = quote ? quote.target : ZeroAddress;
   reward ??= Wallet.createRandom().address;
   if (quote && firstBuy > 0n) await mined(quote.connect(signer).approve(f.factory.target, firstBuy));
-  if (inUsdc) await mined(f.usdc.connect(signer).approve(f.factory.target, 10n * 10n ** 6n));
+  if (inUsdc) await mined(f.usdc.connect(signer).approve(f.factory.target, 10n * (f.usdcUnit ?? 10n ** 6n)));
   const value = (inUsdc ? 0n : LAUNCH_FEE) + (quote ? 0n : firstBuy);
   const receipt = await mined(f.factory.connect(signer).launch(name, symbol, asset, feeBps, firstBuy, minOut, reward, uri, inUsdc, { value }));
   const [ev] = parse(f.factory, receipt, 'Launched'), [launched] = parse(f.hook, receipt, 'Launched');

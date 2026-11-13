@@ -1245,18 +1245,24 @@ test('Solana beta gate: invite-only launches, allowlist managed by the beta admi
   await launch({ symbol: 'OPEN' });
 });
 
-test('Solana mainnet build rejects test instructions; the upgrade authority can move to a multisig', { skip }, async () => {
+// Mainnet is V2-only (Malik, 13 November): the mainnet build leaves out the test instructions and the Model 10 launch,
+// its partner tiers, PumpSwap migration and Raydium buybacks (about 300 KB less rent). Calling one is an unknown
+// instruction (Anchor 101, 0x65); test_build_check stays and still fails with TestNetworksOnly. Pools that already
+// exist keep trading.
+test('Solana mainnet build is V2-only: test and Model 10 instructions are gone; the upgrade authority can move to a multisig', { skip }, async () => {
   if (!existsSync(mainnetElfPath)) return;
   const programId = f.programId;
+  const { mint } = await launch({ symbol: 'MAINB' });
+  await afterSnipeWindow(mint);
   assert.equal(await rejectsTestInstructions({ connection: f.connection, payer: f.authority, programId }), false, 'the test build accepts them');
   await upgradeProgram({ connection: f.connection, payer: f.authority, programId, elf: readFileSync(mainnetElfPath), sendsPerSecond: 200 });
   assert.equal(await rejectsTestInstructions({ connection: f.connection, payer: f.authority, programId }), true, 'the mainnet build rejects them');
   const user = Keypair.generate(); await airdrop(f.connection, user.publicKey, web3.LAMPORTS_PER_SOL);
-  await failsWith(send(f.connection, user, [f.client.testUsdcFaucet({ user: user.publicKey, mint: f.faucetMint })], [], 1), /0x1786/);
-  if (conversionStock) await failsWith(send(f.connection, conversionStock.user, [f.client.testConversionSwap({ user: conversionStock.user.publicKey, quoteMint: conversionStock.quoteMint, quoteTokenProgram: conversionStock.quoteTokenProgram, amountIn: 1_000_000n, minOut: 1n, solIn: true })], [], 1), /0x1786/);
-  // Normal trading still works on the mainnet build.
-  const { mint } = await launch({ symbol: 'MAINB' });
-  await afterSnipeWindow(mint);
+  await failsWith(send(f.connection, user, [f.client.testUsdcFaucet({ user: user.publicKey, mint: f.faucetMint })], [], 1), /0x65\b/);
+  if (conversionStock) await failsWith(send(f.connection, conversionStock.user, [f.client.testConversionSwap({ user: conversionStock.user.publicKey, quoteMint: conversionStock.quoteMint, quoteTokenProgram: conversionStock.quoteTokenProgram, amountIn: 1_000_000n, minOut: 1n, solIn: true })], [], 1), /0x65\b/);
+  await failsWith(launch({ symbol: 'OLDV1' }), /0x65\b/);
+  assert.equal(await f.client.supportsPartnerTiers(f.connection, f.authority.publicKey), false, 'no partner tiers on the mainnet build');
+  // A pool that already exists still trades on the mainnet build.
   await buy(f.trader, mint, 2n * USDC, 1n);
   // Multisig flow: a buffer handed to the multisig, then the program's upgrade authority itself.
   const multisig = Keypair.generate();
