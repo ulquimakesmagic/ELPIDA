@@ -73,6 +73,21 @@ ELPIDA_MAINNET_RPC_URL=<Base RPC> node scripts/v2-mainnet-deploy.mjs verify --pl
 When the record says `"status": "ready"`, the site's network entry is added in a separate PR (mainnet labels, the
 keeper with `ELPIDA_V2_DISTRIBUTIONS` unset so distributions stay off, the deploy block for the indexer).
 
+## 7. Publish the source on BaseScan
+
+```
+node scripts/v2-explorer-verify.mjs --plan deployments/plans/base-mainnet.json
+```
+
+Needs `ELPIDA_MAINNET_RPC_URL` and `ETHERSCAN_API_KEY` (a free key from etherscan.io; one key covers Base and Base
+Sepolia, and verification stays free). Both may be set in `.env`; the key is never printed. The script compares each
+contract's creation code on chain with this checkout's build, takes the constructor arguments from the creation
+transactions (the hook's from the CREATE2 call), and submits a self-contained Standard JSON input for all seven
+contracts. Line endings are part of the metadata hash: a Windows checkout builds with CRLF, so when the build on disk
+does not match it tries the other line ending (the 13 November rehearsal was built with CRLF). Run it from the commit in
+the deployment record; a contract that matches neither build is reported, not submitted. Once verified, the guardian
+and the Safe can use the explorer's Read and Write tabs.
+
 ## Emergency stop
 
 The guardian (or the Safe) calls `pauseLaunches()` on the factory: new launches stop; trading, fees and existing pools
