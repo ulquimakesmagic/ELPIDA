@@ -94,7 +94,14 @@ cp /tmp/sbf-main/elpida_launchpad.so build/elpida_launchpad-mainnet.so
 
 `Cargo.lock` pins dependencies compatible with the Solana toolchain's Rust 1.84 (for example `blake3` 1.5.5). The program ID is fixed by `declare_id!` and `keys/elpida_launchpad-keypair.json` (private, git-ignored).
 
-Release builds (13 November 2026, **V2-only mainnet build**: mainnet is V2-only, so the mainnet build leaves out the test instructions and the Model 10 `launch`, `withdraw_fees`, partner tiers (`set_partner`, `partner_tiers_version`), `initialize_curve` / `add_curve_config` / `update_curve_config`, `migrate_to_pumpswap`, `harvest_lp_fees` and `raydium_buyback`, and Anchor's IDL instructions; the test build keeps everything. `opt-level = "z"`. Mainnet 829,312 bytes, from 1,229,872: about 5.78 SOL of rent instead of 8.56):
+Release builds (13 November 2026, **V2 stock pairs**: `set_quote_pricing` binds a stock's Pyth price per V2 pair; `add_v2_config` accepts issuer-controlled stocks, which graduate into the locked pool; `launch_v2` starts a stock pair at Pyth price × the mint's ScaledUiAmount multiplier and refuses a paused mint. Mainnet 856,528 bytes, about 5.97 SOL of rent):
+
+| File | Build | sha256 |
+|---|---|---|
+| `build/elpida_launchpad.so` | `--features testnet` (devnet, localnet) | `8856e1702e3f6d70401e07a559a027665e1b68929fb95c5cd4da4ae180e90a7b` |
+| `build/elpida_launchpad-mainnet.so` | mainnet, V2-only (`--features no-idl`) | `b517c41f915376c5516319bfe6eab1e81db1e7b6032bb1057616aa755aa40e69` |
+
+Previous release (13 November 2026, **V2-only mainnet build**: mainnet is V2-only, so the mainnet build leaves out the test instructions and the Model 10 `launch`, `withdraw_fees`, partner tiers (`set_partner`, `partner_tiers_version`), `initialize_curve` / `add_curve_config` / `update_curve_config`, `migrate_to_pumpswap`, `harvest_lp_fees` and `raydium_buyback`, and Anchor's IDL instructions; the test build keeps everything. `opt-level = "z"`. Mainnet 829,312 bytes, from 1,229,872: about 5.78 SOL of rent instead of 8.56):
 
 | File | Build | sha256 |
 |---|---|---|

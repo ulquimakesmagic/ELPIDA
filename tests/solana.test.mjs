@@ -79,6 +79,8 @@ const mplFixture = `${root}contracts/solana/fixtures/mpl_token_metadata.so`;
 const f = {};
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 /** A Full-verification Pyth PriceUpdateV2 account (133 bytes) as solana-test-validator --account JSON. */
+// A made-up Pyth feed ID for the stock price fixture (V2 stock pairs).
+const STOCK_FEED_ID = '16dad506d7db8da01c87581c87ca897a012a153557d4d578c3b9c9e1bc0632f1';
 function priceUpdate({ publishTime, price = 11_106_000_000n, conf = 5_000_000n, exponent = -8, feedId = SOL_USD_FEED_ID, owner = PYTH_RECEIVER }) {
   const data = Buffer.alloc(133); let o = 0;
   Buffer.from(DISCRIMINATORS.PriceUpdateV2).copy(data, o); o += 8 + 32; data[o++] = 1;
@@ -98,10 +100,12 @@ test.before(async () => {
   [f.authority, f.creator, f.trader, f.outsider, f.rewardWallet] = Array.from({ length: 5 }, () => Keypair.generate());
   f.oracleStart = Math.floor(Date.now() / 1000);
   f.oracleDir = mkdtempSync(join(tmpdir(), 'elpida-oracles-'));
-  f.oracles = { fresh: new PublicKey(SOL_USD_PRICE_ACCOUNT), stale: Keypair.generate().publicKey, wide: Keypair.generate().publicKey, otherFeed: Keypair.generate().publicKey, notPyth: Keypair.generate().publicKey };
+  f.oracles = { fresh: new PublicKey(SOL_USD_PRICE_ACCOUNT), stale: Keypair.generate().publicKey, wide: Keypair.generate().publicKey, otherFeed: Keypair.generate().publicKey, notPyth: Keypair.generate().publicKey, stock: Keypair.generate().publicKey };
   const oracleArgs = Object.entries({
     fresh: priceUpdate({ publishTime: f.oracleStart }), stale: priceUpdate({ publishTime: f.oracleStart - 7200 }), wide: priceUpdate({ publishTime: f.oracleStart, conf: 555_300_000n }),
     otherFeed: priceUpdate({ publishTime: f.oracleStart, feedId: 'e62df6c8b4a85fe1a67db44dc12de5db330f7ac66b72dc658afedf0f4a415b43' }), notPyth: priceUpdate({ publishTime: f.oracleStart, owner: '11111111111111111111111111111111' }),
+    // A stock's Pyth price (V2 stock pairs): $400 a share.
+    stock: priceUpdate({ publishTime: f.oracleStart, feedId: STOCK_FEED_ID, price: 40_000_000_000n, conf: 20_000_000n }),
   }).flatMap(([name, account]) => { const file = join(f.oracleDir, `${name}.json`); writeFileSync(file, JSON.stringify({ pubkey: f.oracles[name].toBase58(), account })); return ['--account', f.oracles[name].toBase58(), file]; });
   f.validator = spawn(validatorBin, [...oracleArgs, '--reset', '--quiet', '--ledger', f.ledger, '--rpc-port', String(port), '--faucet-port', String(port + 2), '--dynamic-port-range', `${port + 10}-${port + 60}`, '--gossip-port', String(port + 3),
     ...(pumpSkip ? [] : ['--bpf-program', PUMP_AMM_PROGRAM, `${fixtures}pump_amm.so`, '--account', PUMP_GLOBAL_CONFIG, `${fixtures}pumpswap_global_config.json`]),
@@ -1507,7 +1511,7 @@ const V2_PARAMS = curveParams({ startFdv: 5_000, endFdv: 25_000, quoteDecimals: 
 
 test('Solana V2 client: discriminators, fee schedule, ledger and tickers match the program', () => {
   const disc = name => [...createHash('sha256').update(name).digest().subarray(0, 8)];
-  for (const [key, name] of [['addV2Config', 'global:add_v2_config'], ['launchV2', 'global:launch_v2'], ['withdrawV2Fees', 'global:withdraw_v2_fees']]) assert.deepEqual(DISCRIMINATORS[key], disc(name), key);
+  for (const [key, name] of [['addV2Config', 'global:add_v2_config'], ['launchV2', 'global:launch_v2'], ['withdrawV2Fees', 'global:withdraw_v2_fees'], ['setQuotePricing', 'global:set_quote_pricing']]) assert.deepEqual(DISCRIMINATORS[key], disc(name), key);
   assert.deepEqual(V2.split, [3_000, 3_000, 1_000, 1_000, 2_000]);
   assert.deepEqual([0, 30, 59, 60, 600].map(t => v2FeeBps(125, t)), [9_000, 4_562, 272, 125, 125]);
   assert.deepEqual(v2Owed({ accrued: 1_003n, paid: [100n, 0n, 0n, 0n, 0n] }), [200n, 300n, 100n, 100n, 200n]);
@@ -1623,6 +1627,55 @@ test('Solana V2: own fee, anti-snipe to liquidity, five-way ledger, permissionle
   await withdraw();
   const d1 = await bal();
   assert.deepEqual(d1.map((v, i) => v - d0[i]), owedH, 'graduated-pool fees split five ways');
+});
+
+// V2 stock pairs (Malik, 13 November): an Ondo-shaped stock is a V2 pair that graduates into the program's own locked
+// pool. Each launch starts at the stock's dollar value: Pyth's share price times the mint's ScaledUiAmount multiplier.
+test('Solana V2 stock pairs (Ondo stand-in): priced from the share price × the multiplier, refused while paused, locked pool after the curve', { skip }, async () => {
+  const spl = f.spl, t22 = new PublicKey(TOKEN_2022_PROGRAM), stock = Keypair.generate(), issuer = f.authority, UNIT = 1_000_000_000n;
+  await send(f.connection, f.authority, await spl.createStockMint2022Ixs(f.connection, f.authority.publicKey, stock.publicKey, 9, f.client.faucetAuthority, issuer.publicKey, 1.25), [stock]);
+  const params = curveParams({ startFdv: 50, endFdv: 250, quoteDecimals: 9, launchFee: '0.01', baseFeeBps: 100, snipeStartBps: 9_000, snipeWindowSecs: 60, maxCreatorBuyBps: 300 });
+  await send(f.connection, f.authority, [f.client.computeBudget(), f.client.addV2Config({ authority: f.authority.publicKey, quoteMint: stock.publicKey, treasury: f.treasury, params, quoteTokenProgram: t22 })], [], 1);
+  const config = { address: f.client.configV2For(stock.publicKey), quoteMint: stock.publicKey, treasury: f.treasury, quoteTokenProgram: t22 };
+  const cfg = f.client.decodeConfig((await f.connection.getAccountInfo(config.address)).data);
+  for (const kp of [f.creator, f.trader]) await send(f.connection, kp, [f.client.testUsdcFaucet({ user: kp.publicKey, mint: stock.publicKey, tokenProgram: t22, amount: 1_000n * UNIT })]);
+  const launch = ({ symbol, priced = true, firstBuy = UNIT / 10n }) => {
+    const mint = Keypair.generate();
+    return { mint: mint.publicKey, sent: send(f.connection, f.creator, [f.client.computeBudget(), f.client.launchV2({ uri: TEST_URI, creator: f.creator.publicKey, config, mint: mint.publicKey, name: 'Stock V2', symbol, feeBps: 200, firstBuy, reward: f.rewardWallet.publicKey, stockPriceUpdate: priced ? f.oracles.stock : null })], [mint], 1) };
+  };
+  // Without the stock's price: refused (quote pricing not set yet, and then the accounts missing).
+  await failsWith(launch({ symbol: 'NOPRICE' }).sent, /0x17a1/);
+  const setQuote = (who, extra = {}) => send(f.connection, who, [f.client.setQuotePricing({ authority: who.publicKey, config: config.address, quoteMint: stock.publicKey, priceUpdate: f.oracles.stock, feedId: STOCK_FEED_ID, startFdvUsdE6: 20_000_000_000n, ...extra })], [], 1);
+  await failsWith(setQuote(f.outsider), /0x1770/);
+  await failsWith(setQuote(f.authority, { maxAgeSecs: 5 * 86_400 }), /0x1774/);
+  await failsWith(send(f.connection, f.authority, [f.client.setQuotePricing({ authority: f.authority.publicKey, config: f.client.configV2For(f.quoteMint), quoteMint: f.quoteMint, priceUpdate: f.oracles.stock, feedId: STOCK_FEED_ID, startFdvUsdE6: 20_000_000_000n })], [], 1), /custom program error/, 'not a stock pair');
+  await setQuote(f.authority);
+  const qp = f.client.decodePricing((await f.connection.getAccountInfo(f.client.quotePricingFor(config.address))).data);
+  assert.equal(qp.priceFeed.toBase58(), f.oracles.stock.toBase58()); assert.equal(qp.feedId, STOCK_FEED_ID);
+  await failsWith(launch({ symbol: 'NOACCTS', priced: false }).sent, /0x17a1/);
+  // $20,000 at $400 × 1.25 = $500 a token: 40 tokens of starting value, so the virtual reserve is 40 × virtualToken / supply.
+  const { mint, sent } = launch({ symbol: 'STKV2' });
+  await sent;
+  let p = await pool(mint);
+  const start = 40n * UNIT, expected = (start * cfg.virtualToken + TOKEN_SUPPLY - 1n) / TOKEN_SUPPLY;
+  assert.equal(p.virtualQuote, expected, 'priced from the share price times the multiplier');
+  // Paused by the issuer: no launch.
+  await send(f.connection, issuer, [spl.pauseIx(stock.publicKey, issuer.publicKey, true)]);
+  await failsWith(launch({ symbol: 'PAUSED' }).sent, /0x17a2/);
+  await send(f.connection, issuer, [spl.pauseIx(stock.publicKey, issuer.publicKey, false)]);
+  // Trading to completion opens the locked pool; V2 fees keep booking and pay out in the stock.
+  await afterSnipeWindow(mint);
+  p = await pool(mint);
+  const q = quoteBuy(p, 900n * UNIT, 200n);
+  assert.equal(q.graduates, true, 'a large buy completes the curve');
+  await send(f.connection, f.trader, [f.client.buy({ buyer: f.trader.publicKey, config, mint, grossIn: 900n * UNIT, minTokensOut: 1n })], [], 1);
+  p = await pool(mint);
+  assert.equal(p.status, STATUS_LOCKED, 'the stock pair graduates into the locked pool');
+  const held = await balance(f.client.ata(f.trader.publicKey, mint));
+  await send(f.connection, f.trader, [f.client.sell({ seller: f.trader.publicKey, config, mint, tokensIn: held / 2n, minQuoteOut: 1n })], [], 1);
+  const rewardBefore = await balance(f.client.quoteAta(f.rewardWallet.publicKey, config));
+  await send(f.connection, f.outsider, [f.client.computeBudget(), f.client.withdrawV2Fees({ payer: f.outsider.publicKey, config, mint, reward: f.rewardWallet.publicKey })], [], 1);
+  assert.ok(await balance(f.client.quoteAta(f.rewardWallet.publicKey, config)) > (rewardBefore ?? 0n), 'the creator share is paid in the stock');
 });
 
 test('Solana V2 SOL pair: graduates into Raydium; Raydium fees are burned (token side) and split five ways (SOL side)', { skip: raySkip }, async () => {
