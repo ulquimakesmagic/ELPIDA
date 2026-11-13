@@ -19,7 +19,7 @@ const KEYS = { terms: 'elpida:terms', consent: 'elpida:consent', visitor: 'elpid
 /** The three points of the risk disclaimer on the Docs page. */
 export function disclaimerPoints({ mainnet = false } = {}) {
   return [
-    { key: 'risk', icon: 'triangle-alert', title: 'Trading risk', text: `Tokens launched here are highly volatile and most lose all their value. ${mainnet ? 'On Solana mainnet beta you trade with real funds: only use what you can afford to lose.' : 'Most networks here are test networks, where tokens have no monetary value.'}` },
+    { key: 'risk', icon: 'triangle-alert', title: 'Trading risk', text: `Tokens launched here are highly volatile and most lose all their value. ${mainnet ? 'On networks marked mainnet you trade with real funds: only use what you can afford to lose.' : 'Most networks here are test networks, where tokens have no monetary value.'}` },
     { key: 'advice', icon: 'circle-help', title: 'Not financial advice', text: 'Nothing on Elpida is investment, financial, legal or tax advice. Tokens are created by anyone and are not endorsed by Elpida. Do your own research.' },
     { key: 'yours', icon: 'shield-check', title: 'Your responsibility', text: 'The contracts have not had an independent audit and bugs are possible. You control your wallet and approve every transaction yourself. Make sure using Elpida is legal where you are.' },
   ];
@@ -30,7 +30,7 @@ export function fullDisclaimer({ mainnet = false } = {}) {
   return [
     'Elpida is experimental software provided “as is”, without warranties of any kind. Elpida does not hold your keys or funds: you interact with smart contracts directly from your own wallet, and every transaction is final once confirmed.',
     'Anyone can create a token on Elpida. Elpida does not review, endorse or guarantee any token, creator, link or image, and a listing is not a recommendation. Token prices are set by a bonding curve and later by a DEX pool, and can fall to zero.',
-    mainnet ? 'Solana runs as an invite-only mainnet beta with real funds and contracts that have not had an independent audit. All other networks are public test networks whose tokens have no monetary value.' : 'Elpida currently runs on public test networks and a local simulation. Test tokens have no monetary value and cannot be exchanged for money.',
+    mainnet ? 'Networks marked mainnet use real funds and contracts that have not had an independent audit. All other networks are public test networks whose tokens have no monetary value.' : 'Elpida currently runs on public test networks and a local simulation. Test tokens have no monetary value and cannot be exchanged for money.',
     'Smart contracts, wallets, RPC providers, bridges, oracles and DEXs can fail, be exploited or behave unexpectedly. Network fees are paid to the network, not to Elpida, and are not refundable.',
     'You are responsible for complying with the laws and tax rules that apply to you. Do not use Elpida if it is prohibited where you live or are located, or if you are subject to sanctions.',
     'Nothing on Elpida, including analytics, rankings and creator content, is investment, financial, legal or tax advice.',
