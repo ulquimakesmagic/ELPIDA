@@ -1,0 +1,10 @@
+[
+  { "symbol": "TSLAon", "name": "Tesla, Inc. Common Stock (Ondo)", "address": "0xf6b1117ec07684d3958cad8beb1b302bfd21103f", "feed": "0x89904B6fcF8dAD1e5DA47dFdF69fC38Ad6be0bd5", "maxAge": 345600 },
+  { "symbol": "SPYon", "name": "SPDR S&P 500 ETF Trust (Ondo)", "address": "0xfedc5f4a6c38211c1338aa411018dfaf26612c08", "feed": "0x6EcC1b902dB35eAFE95332443802774Fd1D72576", "maxAge": 345600 },
+  { "symbol": "QQQon", "name": "Invesco QQQ (Ondo)", "address": "0x0e397938c1aa0680954093495b70a9f5e2249aba", "feed": "0x2098C245Fe4C80cdA93cF85Cff0718328D4eEa85", "maxAge": 345600 },
+  { "symbol": "IAUon", "name": "iShares Gold Trust (Ondo)", "address": "0x4f0ca3df1c2e6b943cf82e649d576ffe7b2fabcf", "feed": "0x1f09475Fe4D212fC24611bAE180201869956c238", "maxAge": 345600 },
+  { "symbol": "STRCon", "name": "Strategy Preferred (Ondo)", "address": "0xecabe1ff8a9e1dc55899cf58dac8497ece5ae84c", "feed": "0xC353ac4b425f818Ad87E228bf816E15c2173AC07", "maxAge": 345600 },
+  { "symbol": "SGOVon", "name": "iShares 0-3 Month Treasury Bond ETF (Ondo)", "address": "0x8de5d49725550f7b318b2fa0f1b1f118e98e8d0f", "feed": "0xfE45662E9fA552464289B0568D4A846c6F284Db9", "maxAge": 345600 },
+  { "symbol": "BILon", "name": "SPDR Bloomberg 1-3 Month T-Bill ETF (Ondo)", "address": "0x2710e30d84b376c34a3b3036aa196b26a83a321b", "feed": "0x254599afD7f9F3f18775fC24693Ba0d1cE8A4Ac6", "maxAge": 345600 },
+  { "symbol": "USFRon", "name": "WisdomTree Floating Rate Treasury Fund (Ondo)", "address": "0xfb82561a955bf59b9263301126af490d3799e231", "feed": "0xC5D98E16Bcb6Cf753BA27A24Df2A04c2F0267E57", "maxAge": 345600 }
+]

@@ -17,5 +17,6 @@
   "usdcDecimals": 6,
   "confirmations": 2,
   "minDeployerBalance": "0.015",
-  "notes": "Fill treasury (a NEW Safe on Ethereum with the clean signers), keeper and guardian. PoolManager: Uniswap's v4 deployment on Ethereum (developers.uniswap.org v4 deployments). usdFeed: Chainlink ETH / USD (1 h heartbeat, so feedMaxAge 3 h); `check` confirms its description and freshness and that USDC has 6 decimals. Gas: the deploy is about 12.5M gas, so deploy on a low-gas day; minDeployerBalance 0.015 ETH covers up to about 1 gwei."
+  "notes": "Fill treasury (a NEW Safe on Ethereum with the clean signers), keeper and guardian. PoolManager: Uniswap's v4 deployment on Ethereum (developers.uniswap.org v4 deployments). usdFeed: Chainlink ETH / USD (1 h heartbeat, so feedMaxAge 3 h); `check` confirms its description and freshness and that USDC has 6 decimals. Gas: the deploy is about 12.5M gas, so deploy on a low-gas day; minDeployerBalance 0.015 ETH covers up to about 1 gwei. explorerApi: Blockscout, only to find an existing stock holder to impersonate on a fork (`rehearse --fork <rpc> --stocks config/stocks/candidates/ethereum-ondo.json`).",
+  "explorerApi": "https://eth.blockscout.com"
 }
