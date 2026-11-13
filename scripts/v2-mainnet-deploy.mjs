@@ -210,7 +210,7 @@ export async function verifyDeployment({ provider, plan, record, recordPath }) {
   const c = record.contracts, f = new Contract(c.factory, FACTORY_READ, provider), out = [], eq = (check, a, b) => out.push({ check, ok: String(a).toLowerCase() === String(b).toLowerCase(), detail: `${a}` });
   eq('factory hook', await f.hook(), c.hook); eq('USD feed', await f.usdFeed(), plan.usdFeed);
   eq('USDC approved at $25,000 virtual', await f.approvedQuotes(plan.usdc), BigInt(MAINNET_START_MCAP_USD) * 5n / 4n * 10n ** 6n);
-  eq('guardian', await f.guardian(), plan.guardian); eq('daily launch cap', await f.dailyLaunchCap(), plan.dailyLaunchCap); eq('launches open', await f.launchesPaused(), false);
+  eq('guardian', await f.guardian(), plan.guardian); eq('daily launch cap', await f.dailyLaunchCap(), plan.dailyLaunchCap); eq('launches paused', await f.launchesPaused(), false);
   let vq = 0n; try { vq = await f.nativeVirtualQuote(); } catch { /* feed */ }
   out.push({ check: 'native start price readable', ok: vq > 0n, detail: `${formatEther(vq)} native = $25,000 virtual` });
   const flyRouter = await new Contract(c.flywheel, FLYWHEEL_READ, provider).router();
