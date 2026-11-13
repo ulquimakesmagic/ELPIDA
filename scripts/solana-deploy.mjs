@@ -55,6 +55,9 @@ const { values: args } = parseArgs({ options: {
 if (!['devnet', 'localnet', 'mainnet'].includes(args.cluster)) throw new Error('--cluster must be devnet, localnet or mainnet');
 const localnet = args.cluster === 'localnet';
 const mainnet = args.cluster === 'mainnet';
+// Mainnet is V2-only (Malik, 13 November): the mainnet build has no Model 10 pair configs, which this script still sets
+// up first. Stop before deploying (and paying rent) until the V2-only mainnet path lands with the Solana mainnet release.
+if (mainnet) throw new Error('Solana mainnet is V2-only and this deploy path still sets up Model 10 pairs, which the mainnet build no longer has. It ships with the Solana mainnet release. Nothing was deployed.');
 const pricing = solanaPricing(args.cluster);
 if (mainnet && !args.treasury) throw new Error('Mainnet needs --treasury: the wallet or Squads vault that receives protocol fees.');
 // A private devnet RPC (for example Helius) via --rpc or SOLANA_RPC_URL avoids public rate limits.

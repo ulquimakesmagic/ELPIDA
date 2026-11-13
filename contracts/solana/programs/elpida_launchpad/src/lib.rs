@@ -235,10 +235,13 @@ pub struct PricingParams {
 #[program]
 pub mod elpida_launchpad {
     use super::*;
+    /// Kept on every build: the site probes it before a launch with no creator buy.
     pub fn optional_buy_version(_ctx: Context<OptionalBuyVersion>) -> Result<()> { Ok(()) }
+    #[cfg(feature = "testnet")]
     /// Lets clients detect this version (partner tiers, the extra `partner` launch account, writable mint on trades).
     pub fn partner_tiers_version(_ctx: Context<OptionalBuyVersion>) -> Result<()> { Ok(()) }
 
+    #[cfg(feature = "testnet")]
     /// The SOL pair's treasury registers `creator` for an early-partner tier: `buyback_bps` 1000 or 2000 with an
     /// expiry at most 180 days ahead, or (0, 0) to end it early. Only future launches by that wallet are affected.
     pub fn set_partner(ctx: Context<SetPartner>, creator: Pubkey, buyback_bps: u16, expires_at: i64) -> Result<()> {
@@ -259,6 +262,7 @@ pub mod elpida_launchpad {
         Ok(())
     }
 
+    #[cfg(feature = "testnet")]
     /// One-time setup by the program's upgrade authority: quote mint, treasury and curve parameters.
     pub fn initialize_curve(ctx: Context<InitializeCurve>, params: CurveParams) -> Result<()> {
         let bump = ctx.bumps.curve_config;
@@ -267,6 +271,7 @@ pub mod elpida_launchpad {
         write_config(&mut ctx.accounts.curve_config, quote_mint, ctx.accounts.quote_mint.decimals, treasury, &params, bump)
     }
 
+    #[cfg(feature = "testnet")]
     /// Upgrade authority: an additional curve config for another quote mint, PDA ["curve-config", quote_mint].
     /// Every config is created only here or by `initialize_curve`; pools record the config they use.
     pub fn add_curve_config(ctx: Context<AddCurveConfig>, params: CurveParams) -> Result<()> {
@@ -276,6 +281,7 @@ pub mod elpida_launchpad {
         write_config(&mut ctx.accounts.curve_config, quote_mint, ctx.accounts.quote_mint.decimals, treasury, &params, bump)
     }
 
+    #[cfg(feature = "testnet")]
     /// Upgrade authority: reprices an existing config for future launches (native SOL pricing set by the
     /// team). Pools copy the curve values at launch, so live pools are unaffected. The fee schedule
     /// (base fee and anti-snipe decay) is read by live pools on every trade and therefore cannot change.
@@ -296,12 +302,14 @@ pub mod elpida_launchpad {
         Ok(())
     }
 
+    #[cfg(feature = "testnet")]
     /// TEST NETWORKS ONLY (devnet / localnet): creates "Elpida tUSDC", a valueless 6-decimal stand-in
     /// for USDC at PDA ["test-usdc"] whose only minter is `test_usdc_faucet`. Never create on mainnet.
     pub fn create_test_usdc(_ctx: Context<CreateTestUsdc>) -> Result<()> {
         test_networks_only()
     }
 
+    #[cfg(feature = "testnet")]
     /// TEST NETWORKS ONLY: mints a test asset to the caller. Works only for mints whose mint authority
     /// is the faucet PDA (Elpida tUSDC and the labelled test assets created by the deploy script).
     pub fn test_usdc_faucet(ctx: Context<TestUsdcFaucet>, amount: u64) -> Result<()> {
@@ -321,6 +329,7 @@ pub mod elpida_launchpad {
         test_networks_only()
     }
 
+    #[cfg(feature = "testnet")]
     /// TEST NETWORKS ONLY: adds SOL and a test asset to the SOL/asset conversion pool at PDA
     /// ["test-conversion", asset mint]. On mainnet, paying in SOL for a stock pair routes through Jupiter; devnet has
     /// no Jupiter and no DEX that accepts Ondo-shaped mints, so this constant-product pool stands in for it. Only the
@@ -340,6 +349,7 @@ pub mod elpida_launchpad {
         Ok(())
     }
 
+    #[cfg(feature = "testnet")]
     /// TEST NETWORKS ONLY: swaps SOL for the test asset (`sol_in`) or back, x·y = k with a 0.3% fee that stays in
     /// the pool. The caller's asset account is created if needed, so SOL can buy a stock in one step.
     pub fn test_conversion_swap(ctx: Context<TestConversionSwap>, amount_in: u64, min_out: u64, sol_in: bool) -> Result<()> {
@@ -413,6 +423,7 @@ pub mod elpida_launchpad {
         Ok(())
     }
 
+    #[cfg(feature = "testnet")]
     /// `max_fee`: the most lamports the creator accepts for the SOL creation fee (price movement guard).
     /// `fee_in_usdc`: pay the USD fee in USDC instead; the four USDC accounts follow in remaining accounts.
     /// `uri`: the token's IPFS metadata document (`ipfs://…`), written once into immutable Metaplex metadata.
@@ -596,6 +607,7 @@ pub mod elpida_launchpad {
         Ok(())
     }
 
+    #[cfg(feature = "testnet")]
     /// Permissionless: pays accrued base fees to the fixed treasury and creator-reward accounts.
     /// `real_quote` and `liquidity_bonus` are never touched.
     pub fn withdraw_fees(ctx: Context<WithdrawFees>) -> Result<()> {
@@ -981,6 +993,7 @@ pub mod elpida_launchpad {
         Ok(())
     }
 
+    #[cfg(feature = "testnet")]
     /// Permissionless once the curve is complete (pairs other than SOL): seeds a PumpSwap pool with the remaining supply and
     /// all raised quote (curve reserve + locked anti-snipe bonus). The LP tokens stay in a program PDA
     /// forever. The caller pays PumpSwap's account rent (refunded surplus) and the transaction fee.
@@ -1086,6 +1099,7 @@ pub mod elpida_launchpad {
         Ok(())
     }
 
+    #[cfg(feature = "testnet")]
     /// Permissionless: withdraws only the LP tokens that represent trading-fee growth since migration
     /// (liquidity units above the migrated principal) and splits the proceeds 50/50 between the
     /// protocol treasury and the creator reward wallet. The principal liquidity stays locked.
@@ -1351,6 +1365,7 @@ pub mod elpida_launchpad {
         Ok(())
     }
 
+    #[cfg(feature = "testnet")]
     /// Permissionless: spends a partner pool's queued SOL (the quote side of its harvests) on its own token through the
     /// Raydium pool and burns what it buys. One call spends at most 0.5% of the pool's SOL depth, at most once every
     /// BUYBACK_SLOT_GAP slots.

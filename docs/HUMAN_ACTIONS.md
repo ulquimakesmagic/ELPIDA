@@ -25,6 +25,22 @@
 - **Wallet + X + website allocations** no longer fail with "Every allocation share must be above zero": the shares were read from a field the form no longer fills. Nothing to do.
 - **Share fees with holders** now asks for dollars: a distribution threshold (default $20) and a minimum holding value (default $20), both editable. The threshold is converted to the pair asset at the launch-time price and fixed in the vault; the vault also records both dollar figures (ElpidaV2CreatorRewards version 2). The keeper applies the minimum holding value at the token's last trade price each round, and waits rather than guess when there is no fresh price. Earlier vaults keep working.
 - **Conversion pools** (native coin ↔ test stock) can now be funded on Ethereum Sepolia, Base Sepolia, BNB testnet and Robinhood testnet: Operator panel → Pairs → "conversion liquidity", with the stock's controller wallet (at most 0.1 test coin per setup; PancakeSwap uses its 1% tier). Do this on Robinhood for tTSLAon (0xc6df…af87) so the token page can take ETH.
+## Solana: V2-only mainnet build, 13 November 2026
+
+Mainnet is V2-only on every chain (Malik, 13 November), and the $200 test budget cannot cover the old program's rent.
+The mainnet build now leaves out the test instructions and the Model 10 launch, partner tiers, PumpSwap migration and
+Raydium buybacks; the test build keeps them, so devnet and the tests are unchanged. Both builds use `opt-level = "z"`.
+The mainnet build also leaves out Anchor's on-chain IDL instructions (`--features no-idl`).
+
+| Build | Size | Rent at deploy | SHA256 (Solana CLI 2.3.13) |
+|---|---|---|---|
+| test (`--features testnet`, devnet) | 1,132,064 bytes | — | `3c3a5b1518590d6a90660c1c85e24a9801241260feb67a32b9e86448e0a346e0` |
+| mainnet (`--features no-idl`) | 829,312 bytes (was 1,229,872) | about 5.78 SOL (was 8.56) | `f8d9f33f005eced0c184f57997566167c50de2019f35c384cb2885fe7276213d` |
+
+1. Upgrade the devnet program with the test build as before (`solana-upgrade.cmd`). Nothing changes for devnet users.
+2. Solana mainnet is not deployed yet: `scripts/solana-deploy.mjs --cluster mainnet` refuses until its V2-only setup
+   lands with the Solana mainnet release (with the SOL audit fixes and Squads). Plan the rent from Base launch fees.
+
 ## Solana devnet: USDC payouts (program upgrade), 11 November 2026
 
 After the Solana USDC payouts PR is merged:
