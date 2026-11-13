@@ -74,6 +74,21 @@ it unchanged. One small contract per stock; nothing in it can change after deplo
    the results on a branch, then approve the list from the operator panel after the BNB deploy (Safe batches).
 
 Pyth (for stocks Chainlink does not cover) is a later step; it needs a price update in the launch transaction.
+## Solana: V2-only mainnet build, 13 November 2026
+
+Mainnet is V2-only on every chain (Malik, 13 November), and the $200 test budget cannot cover the old program's rent.
+The mainnet build now leaves out the test instructions and the Model 10 launch, partner tiers, PumpSwap migration and
+Raydium buybacks; the test build keeps them, so devnet and the tests are unchanged. Both builds use `opt-level = "z"`.
+The mainnet build also leaves out Anchor's on-chain IDL instructions (`--features no-idl`).
+
+| Build | Size | Rent at deploy | SHA256 (Solana CLI 2.3.13) |
+|---|---|---|---|
+| test (`--features testnet`, devnet) | 1,132,064 bytes | — | `3c3a5b1518590d6a90660c1c85e24a9801241260feb67a32b9e86448e0a346e0` |
+| mainnet (`--features no-idl`) | 829,312 bytes (was 1,229,872) | about 5.78 SOL (was 8.56) | `f8d9f33f005eced0c184f57997566167c50de2019f35c384cb2885fe7276213d` |
+
+1. Upgrade the devnet program with the test build as before (`solana-upgrade.cmd`). Nothing changes for devnet users.
+2. Solana mainnet is not deployed yet: `scripts/solana-deploy.mjs --cluster mainnet` refuses until its V2-only setup
+   lands with the Solana mainnet release (with the SOL audit fixes and Squads). Plan the rent from Base launch fees.
 
 ## Solana devnet: USDC payouts (program upgrade), 11 November 2026
 

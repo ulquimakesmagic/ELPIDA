@@ -80,7 +80,7 @@ There is no admin, rescue or reserve withdrawal. Error codes 6000+ are listed in
 Two builds ship in `build/`, so deploying needs no Rust:
 
 - `elpida_launchpad.so`, the **test build** (`--features testnet`). It is used for devnet and localnet, and its test-asset faucet works.
-- `elpida_launchpad-mainnet.so`, the **mainnet build**. Test-only instructions fail with `TestNetworksOnly` (6022), so it can never mint test assets. The mainnet deploy script confirms this on-chain (`test_build_check`) before configuring anything.
+- `elpida_launchpad-mainnet.so`, the **mainnet build**, V2-only (13 November): the test instructions and the Model 10 launch, partner, PumpSwap and buyback instructions are not in it at all (calling one is an unknown instruction, Anchor 101), so it can never mint test assets. `test_build_check` stays and fails with `TestNetworksOnly` (6022); the deploy script confirms that on chain before configuring anything.
 
 To rebuild (Linux, macOS or WSL) with the Solana CLI 2.3.x:
 
@@ -88,13 +88,20 @@ To rebuild (Linux, macOS or WSL) with the Solana CLI 2.3.x:
 cd contracts/solana
 cargo-build-sbf --manifest-path programs/elpida_launchpad/Cargo.toml --features testnet --sbf-out-dir /tmp/sbf-test
 cp /tmp/sbf-test/elpida_launchpad.so build/elpida_launchpad.so
-cargo-build-sbf --manifest-path programs/elpida_launchpad/Cargo.toml --sbf-out-dir /tmp/sbf-main
+cargo-build-sbf --manifest-path programs/elpida_launchpad/Cargo.toml --features no-idl --sbf-out-dir /tmp/sbf-main
 cp /tmp/sbf-main/elpida_launchpad.so build/elpida_launchpad-mainnet.so
 ```
 
 `Cargo.lock` pins dependencies compatible with the Solana toolchain's Rust 1.84 (for example `blake3` 1.5.5). The program ID is fixed by `declare_id!` and `keys/elpida_launchpad-keypair.json` (private, git-ignored).
 
-Release builds (11 November 2026, **V2 stablecoin payouts**: `v2_convert_usdc`, the operator converts a distributor's SOL that no posted round owes into USDC through a Raydium CPMM WSOL/USDC pool on the 1% config, at least `min_out`; the USDC stays in the vault for USDC rounds):
+Release builds (13 November 2026, **V2-only mainnet build**: mainnet is V2-only, so the mainnet build leaves out the test instructions and the Model 10 `launch`, `withdraw_fees`, partner tiers (`set_partner`, `partner_tiers_version`), `initialize_curve` / `add_curve_config` / `update_curve_config`, `migrate_to_pumpswap`, `harvest_lp_fees` and `raydium_buyback`, and Anchor's IDL instructions; the test build keeps everything. `opt-level = "z"`. Mainnet 829,312 bytes, from 1,229,872: about 5.78 SOL of rent instead of 8.56):
+
+| File | Build | sha256 |
+|---|---|---|
+| `build/elpida_launchpad.so` | `--features testnet` (devnet, localnet) | `3c3a5b1518590d6a90660c1c85e24a9801241260feb67a32b9e86448e0a346e0` |
+| `build/elpida_launchpad-mainnet.so` | mainnet, V2-only (`--features no-idl`) | `f8d9f33f005eced0c184f57997566167c50de2019f35c384cb2885fe7276213d` |
+
+Previous release (11 November 2026, **V2 stablecoin payouts**: `v2_convert_usdc`, the operator converts a distributor's SOL that no posted round owes into USDC through a Raydium CPMM WSOL/USDC pool on the 1% config, at least `min_out`; the USDC stays in the vault for USDC rounds):
 
 | File | Build | sha256 |
 |---|---|---|
