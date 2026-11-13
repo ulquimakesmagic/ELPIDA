@@ -120,6 +120,14 @@ export function renderAdmin(ctx, { connect }) {
       b.lastError ? ['Last error', h('small.muted', String(b.lastError))] : null,
     ]));
 
+    // Server memory (Railway bills it per GB-minute). Program memory versus the kernel's file cache, when the container says.
+    const mem = d.memory, cg = mem?.cgroup;
+    const memory = mem ? card('Server memory', kv([
+      ['Process', `${mem.rss} MB resident · heap ${mem.heapUsed} of ${mem.heapTotal} MB (ceiling ${mem.heapLimit ?? '?'} MB) · buffers ${mem.arrayBuffers} MB`],
+      cg ? ['Container', `${cg.current} MB: program ${cg.anon ?? '?'} MB, file cache ${cg.file ?? '?'} MB${cg.limit ? ` · limit ${cg.limit} MB` : ''}`] : null,
+      ['Up', `${mem.uptimeMinutes} min · ${mem.streams} live streams · ${mem.vanityWorkers} grinder${mem.vanityWorkers === 1 ? '' : 's'}`],
+    ])) : null;
+
     // ELPIDA V2 keepers: EVM chains and Solana. A keeper that is off says why (no key, waiting for setup, mainnet).
     const k = d.keepers ?? {}, ks = k.solana ?? {};
     const keeperState = state => pill(state === 'running' ? 'ok' : state === 'error' || state === 'invalid_key' ? 'bad' : 'warn',
@@ -149,6 +157,7 @@ export function renderAdmin(ctx, { connect }) {
       banner, strip,
       h('div.op-grid', treasury, nets),
       h('div.op-grid.op-grid-3', relay, graduation, backup),
+      memory ? h('div.op-grid.op-grid-3', memory) : null,
       keepers, prices);
   }
 
