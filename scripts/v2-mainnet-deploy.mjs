@@ -268,7 +268,12 @@ export async function rehearse({ plan: given, fork = null, log = () => {}, recor
  * without ever printing the input.
  */
 export function deployerKey(input) {
-  const text = String(input ?? ''), found = text.match(/(?<![0-9a-fA-F])(?:0x)?[0-9a-fA-F]{64}(?![0-9a-fA-F])/g) ?? [];
+  const text = String(input ?? '');
+  // A recovery phrase (12–24 words) unlocks every account in the wallet, the Safe signer included. Refuse it at once,
+  // never echo it, and say where the one-account private key is.
+  const words = text.replace(/\x1b\[[0-9;]*[~A-Za-z]/g, ' ').trim().split(/\s+/).filter(w => /^[a-z]+$/i.test(w));
+  if (words.length >= 12 && !/[0-9a-fA-F]{64}/.test(text)) throw new Error('That looks like a recovery phrase (words), not a private key. It was not used or stored. Never paste the recovery phrase: it controls every account in the wallet. Use the deployer account\'s private key instead: MetaMask → the Elpida Deployer account → ⋮ → Account details → Show private key (64 letters and numbers). If the phrase was pasted somewhere it could be seen, treat it as exposed. Nothing was deployed.');
+  const found = text.match(/(?<![0-9a-fA-F])(?:0x)?[0-9a-fA-F]{64}(?![0-9a-fA-F])/g) ?? [];
   if (found.length !== 1) throw new Error(found.length ? 'More than one key-like value was pasted. Paste only the deployer key. Nothing was deployed.'
     : `That is not a private key (${text.replace(/\x1b\[[0-9;]*[~A-Za-z]/g, '').trim().length} characters; a key is 64 hexadecimal characters, optionally starting with 0x). Nothing was deployed.`);
   return '0x' + found[0].replace(/^0x/, '');

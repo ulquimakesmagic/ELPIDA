@@ -71,3 +71,10 @@ test('the deployer key is taken cleanly from a messy paste, and never echoed in 
   assert.throws(() => deployerKey(`${hex} ${'cd'.repeat(32)}`), /More than one/);
   assert.throws(() => deployerKey('ab'.repeat(33)), e => /not a private key/.test(e.message) && !e.message.includes('abab'));
 });
+
+test('a pasted recovery phrase is refused at once and never echoed', async () => {
+  const { deployerKey } = await import('../scripts/v2-mainnet-deploy.mjs');
+  const phrase = 'alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima';
+  for (const input of [phrase, `\x1b[200~${phrase}\x1b[201~`, `${phrase} mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray`])
+    assert.throws(() => deployerKey(input), e => /recovery phrase/.test(e.message) && !/alpha|bravo|lima/.test(e.message));
+});
