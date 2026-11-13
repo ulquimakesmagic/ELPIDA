@@ -4,6 +4,9 @@
 import { solanaRpcList } from '../../packages/solana/rpc-config.mjs';
 import { publicOrigin } from './network-policy.mjs';
 
+/** Data survives restarts: a Railway volume, or an explicit data directory on a host's own disk (Oracle hosting). */
+export const durableStorage = (env = process.env) => Boolean(env.RAILWAY_VOLUME_MOUNT_PATH || env.ELPIDA_DATA_DIR);
+
 /**
  * @param {object} input
  * @param {Record<string,string|undefined>} input.env  process environment
@@ -32,7 +35,7 @@ export function productionGuard({ env = {}, solana = null } = {}) {
   try { if (!publicOrigin(env)) error('public_url_missing', 'Set ELPIDA_PUBLIC_URL (or RAILWAY_PUBLIC_DOMAIN) so origin checks and link previews use the real domain.'); }
   catch { error('public_url_invalid', 'ELPIDA_PUBLIC_URL must be an HTTPS origin without a path, query or credentials.'); }
   if (!env.PINATA_JWT) error('pinning_missing', 'Set PINATA_JWT: mainnet token details must be pinned to public IPFS before a launch.');
-  if (!env.RAILWAY_VOLUME_MOUNT_PATH && !env.ELPIDA_DATA_DIR) error('storage_ephemeral', 'Attach a persistent volume: indexes, journals and holder data must survive restarts.');
+  if (!durableStorage(env)) error('storage_ephemeral', 'Attach a persistent volume: indexes, journals and holder data must survive restarts.');
   if (env.ELPIDA_BACKUP_ENABLED !== 'true') error('backup_disabled', 'Enable verified off-site backups (ELPIDA_BACKUP_ENABLED=true with the ELPIDA_BACKUP_S3_* settings) before mainnet.');
   else if (!env.ELPIDA_BACKUP_MIRROR_S3_ENDPOINT) warn('backup_single_provider', 'Backups are stored at one provider only. Add ELPIDA_BACKUP_MIRROR_S3_* (for example Cloudflare R2) so a hosting outage cannot also take the backups.');
 
