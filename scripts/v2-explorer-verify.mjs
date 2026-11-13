@@ -100,29 +100,37 @@ export async function explorerJobs({ provider, record, art = artifacts(), build 
 
 const form = o => new URLSearchParams(Object.entries(o).map(([k, v]) => [k, String(v)])).toString();
 
-/** The explorer's answer, without ever echoing the request (it carries the API key). */
-async function call(fetchImpl, chainId, params, post) {
-  const res = await fetchImpl(`${API}?chainid=${chainId}${post ? '' : '&' + form(params)}`, post ? { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form(params) } : {});
-  if (!res.ok) throw new Error(`explorer answered HTTP ${res.status}`);
-  const body = await res.json();
-  return { status: String(body.status), result: typeof body.result === 'string' ? body.result : body.result, message: body.message };
+const wait = ms => new Promise(r => setTimeout(r, ms));
+
+/**
+ * The explorer's answer, without ever echoing the request (it carries the API key). The free tier allows 3 calls a
+ * second; a rate-limit answer is waited out and retried rather than reported as a failed verification.
+ */
+async function call(fetchImpl, chainId, params, post, sleep = wait) {
+  for (let attempt = 0; ; attempt++) {
+    const res = await fetchImpl(`${API}?chainid=${chainId}${post ? '' : '&' + form(params)}`, post ? { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form(params) } : {});
+    if (!res.ok) throw new Error(`explorer answered HTTP ${res.status}`);
+    const body = await res.json();
+    if (attempt < 8 && /rate limit/i.test(String(body.result ?? body.message))) { await sleep(1_500 * (attempt + 1)); continue; }
+    return { status: String(body.status), result: body.result, message: body.message };
+  }
 }
 
 /** True when the explorer already shows this address's source. */
-export async function isVerified({ fetch: fetchImpl = fetch, chainId, apiKey, address }) {
-  const r = await call(fetchImpl, chainId, { module: 'contract', action: 'getsourcecode', address, apikey: apiKey }, false);
+export async function isVerified({ fetch: fetchImpl = fetch, sleep = wait, chainId, apiKey, address }) {
+  const r = await call(fetchImpl, chainId, { module: 'contract', action: 'getsourcecode', address, apikey: apiKey }, false, sleep);
   return Array.isArray(r.result) && Boolean(r.result[0]?.SourceCode);
 }
 
 /** Submits one job and waits for the explorer's verdict. Returns { ok, detail }. */
-export async function submit({ fetch: fetchImpl = fetch, sleep = ms => new Promise(r => setTimeout(r, ms)), chainId, apiKey, job, input = standardInput(job.contractName, { eol: job.eol ?? 'disk' }), polls = 40 }) {
-  if (await isVerified({ fetch: fetchImpl, chainId, apiKey, address: job.address })) return { ok: true, detail: 'already verified' };
+export async function submit({ fetch: fetchImpl = fetch, sleep = wait, chainId, apiKey, job, input = standardInput(job.contractName, { eol: job.eol ?? 'disk' }), polls = 40 }) {
+  if (await isVerified({ fetch: fetchImpl, sleep, chainId, apiKey, address: job.address })) return { ok: true, detail: 'already verified' };
   const sent = await call(fetchImpl, chainId, { apikey: apiKey, module: 'contract', action: 'verifysourcecode', contractaddress: job.address, sourceCode: JSON.stringify(input),
-    codeformat: 'solidity-standard-json-input', contractname: job.contractName, compilerversion: compilerVersion(), constructorArguements: job.args ?? '' }, true);
+    codeformat: 'solidity-standard-json-input', contractname: job.contractName, compilerversion: compilerVersion(), constructorArguements: job.args ?? '' }, true, sleep);
   if (sent.status !== '1') return /already verified/i.test(String(sent.result)) ? { ok: true, detail: 'already verified' } : { ok: false, detail: String(sent.result ?? sent.message).slice(0, 200) };
   for (let i = 0; i < polls; i++) {
     await sleep(i === 0 ? 5_000 : 3_000);
-    const r = await call(fetchImpl, chainId, { module: 'contract', action: 'checkverifystatus', guid: sent.result, apikey: apiKey }, false);
+    const r = await call(fetchImpl, chainId, { module: 'contract', action: 'checkverifystatus', guid: sent.result, apikey: apiKey }, false, sleep);
     const text = String(r.result);
     if (/pending|queue/i.test(text)) continue;
     if (/^pass|already verified/i.test(text)) return { ok: true, detail: 'verified' };
@@ -143,6 +151,7 @@ export async function verifyOnExplorer({ provider, plan, record, apiKey, fetch: 
     if (!job.ok) { out.push({ check: job.key, ok: false, detail: job.detail }); continue; }
     log(`submitting ${job.key} (${job.contractName.split(':')[1]}${job.eol === 'disk' ? '' : `, ${job.eol.toUpperCase()} sources`})…`);
     const r = await submit({ fetch: fetchImpl, sleep, chainId, apiKey, job });
+    await (sleep ?? wait)(400);
     out.push({ check: job.key, ok: r.ok, detail: r.ok ? `${r.detail}: ${link}` : r.detail });
   }
   return out;

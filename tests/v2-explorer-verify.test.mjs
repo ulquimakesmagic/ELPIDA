@@ -81,6 +81,14 @@ test('submit: skips a verified contract, waits through the queue, reports a fail
   e = explorer(p => p.action === 'getsourcecode' ? { status: '1', result: [{}] } : p.action === 'verifysourcecode' ? { status: '1', result: 'g' } : { status: '0', result: 'Pending in queue' });
   assert.match((await submit({ fetch: e.fetch, sleep, chainId: 84532, apiKey: KEY, job, polls: 3 })).detail, /run this again/);
 
+  // The free tier's 3 calls a second (seen on the rehearsal, 13 November): waited out, not reported as a failure.
+  let limited = 0;
+  e = explorer(p => p.action === 'getsourcecode' ? { status: '1', result: [{}] }
+    : p.action === 'verifysourcecode' ? (limited++ < 2 ? { status: '0', message: 'NOTOK', result: 'Max calls per sec rate limit reached (3/sec)' } : { status: '1', result: 'g' })
+    : { status: '1', result: 'Pass - Verified' });
+  assert.deepEqual(await submit({ fetch: e.fetch, sleep, chainId: 84532, apiKey: KEY, job }), { ok: true, detail: 'verified' });
+  assert.equal(e.calls.filter(c => c.params.action === 'verifysourcecode').length, 3);
+
   e = explorer(() => 500);
   await assert.rejects(submit({ fetch: e.fetch, sleep, chainId: 84532, apiKey: KEY, job }), err => /HTTP 500/.test(err.message) && !err.message.includes(KEY));
 });
