@@ -4,7 +4,7 @@
   "chainId": 84532,
   "startMcapUsd": 20000,
   "minFeeBps": 100,
-  "dailyLaunchCap": 50,
+  "dailyLaunchCap": 500,
   "treasury": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01",
   "keeper": "0x29Cd5A2F3187Fb80051E2349b64E8E098000D03c",
   "guardian": "0xfC08505EfEf934c3fF19d82D189f60f28a0255eB",
