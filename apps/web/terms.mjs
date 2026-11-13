@@ -6,8 +6,8 @@
 // accept again. The restricted places come from ELPIDA_RESTRICTED_JURISDICTIONS via /api/config.
 import { h } from './ui.mjs';
 
-export const TERMS_VERSION = 1;
-export const TERMS_UPDATED = '30 October 2026';
+export const TERMS_VERSION = 2;
+export const TERMS_UPDATED = '13 November 2026';
 export const CONTACT = { x: '@elpidadotfun', xUrl: 'https://x.com/elpidadotfun', telegram: 't.me/elpidadotfun', telegramUrl: 'https://t.me/elpidadotfun' };
 
 const list = names => names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} or ${names.at(-1)}`;
@@ -53,7 +53,7 @@ export function termsDocument({ mainnet = false, restricted = [] } = {}) {
     ]],
     ['Test networks and the mainnet beta', [
       'Most networks on Elpida are public test networks. Test coins come from free faucets, and tokens on test networks, including test stablecoins and test tokenized stocks such as “tNVDAon”, have no monetary value, cannot be exchanged for money and are not real shares or securities. Test assets are not issued, endorsed or backed by any company whose name or ticker they resemble.',
-      mainnet ? 'Solana mainnet runs as an invite-only beta with real funds. Its contracts are new and have not had an independent audit. Use only amounts you can afford to lose completely.' : 'No network on Elpida currently uses real funds. If a mainnet beta opens, these Terms will be updated and you will be asked to accept them again.',
+      mainnet ? 'Networks marked “mainnet” use real funds. Their contracts are new and have not had an independent security audit, and some features (for example trader airdrops, holder rewards and the flywheel) may stay switched off at first. Use only amounts you can afford to lose completely.' : 'No network on Elpida currently uses real funds. If a mainnet opens, these Terms will be updated and you will be asked to accept them again.',
     ]],
     ['Tokens and what you submit', [
       'Anyone can launch a token on Elpida. We do not review, approve, endorse or guarantee any token, creator, name, image, link or claim, and a token appearing on the Services is not a recommendation. Token names and images may imitate other projects, brands or people; that does not mean those parties are involved.',
@@ -65,6 +65,22 @@ export function termsDocument({ mainnet = false, restricted = [] } = {}) {
       'Launching a token costs a launch fee, and trades on a bonding curve pay a trading fee, at the rates shown on the Services when you act. Creators may also set a token tax at launch where a network supports it. Part of these fees goes to Elpida and part to the wallets the creator chose. The split for each token is fixed in its contracts at launch.',
       'Creator fees, holder rewards and buybacks are automatic results of how the contracts are written. They are not promises, not a return on any investment and not an obligation Elpida owes you, and they may produce nothing. An amount is yours only once it reaches your wallet on chain.',
       'Network fees (gas) go to the blockchain, not to Elpida. Fees are not refundable once a transaction is submitted, even if it fails. You are responsible for any taxes on your activity.',
+    ]],
+    ['Tokenized stock pairs', [
+      'On some networks a token can be paired with a tokenized stock or exchange-traded fund instead of the network’s coin or a stablecoin, for example a token issued by Ondo Global Markets (a “Tokenized Stock”). This section applies whenever you launch, buy, sell or hold a token paired with a Tokenized Stock, or acquire or use a Tokenized Stock through the Services.',
+      { sub: 'Not for US persons' },
+      'Tokenized Stock pairs are not offered to, and may not be used by, US Persons. A “US Person” is anyone who is a citizen or resident of the United States, is located in the United States, or acts for or on behalf of such a person, and any company, partnership, trust or other entity organised, incorporated or established in the United States. They are also not available to Restricted Persons (section 4), to anyone the issuer’s own eligibility rules exclude, or to anyone in a place where the issuer does not offer the Tokenized Stock or where holding it would be unlawful. For Ondo Global Markets those rules currently exclude, among others, persons in Canada and in several sanctioned countries, and allow persons in the United Kingdom, the European Economic Area, Switzerland, Brazil, Hong Kong, Malaysia and Singapore only if they qualify as professional or qualified investors; the issuer’s published rules prevail and may change. By using a Tokenized Stock pair you confirm that none of this applies to you and that you are allowed to hold that Tokenized Stock under the issuer’s terms and the law that applies to you.',
+      { sub: 'No affiliation' },
+      'Elpida is independent. It is not affiliated with, endorsed, sponsored or approved by Ondo Global Markets, Ondo Finance or any other issuer of a Tokenized Stock, or by any company, fund or index whose shares or name a Tokenized Stock refers to. Their names and tickers appear on the Services only to identify the assets. Elpida does not issue, sell, redeem or custody Tokenized Stocks and is not a broker, dealer or investment adviser. You get Tokenized Stocks from third parties, on their terms and at your own responsibility.',
+      { sub: 'What a Tokenized Stock is not' },
+      'A Tokenized Stock is a token issued by a third party under its own terms. Holding one, or a token paired with one, does not make you a shareholder of the underlying company or fund and does not by itself give you voting rights, dividends or any claim against that company or fund. Read the issuer’s terms and disclosures before you acquire a Tokenized Stock; they, not Elpida, set what the token represents and who may hold it.',
+      { sub: 'Risks particular to Tokenized Stocks' },
+      { items: [
+        'The issuer can pause, freeze, block or reverse transfers, change or end the token, redeem it, or take tokens back, including tokens held in a token’s curve, its locked pool or any other contract. If that happens, a pool may become impossible to trade or to graduate, and you may lose what you put in.',
+        'Corporate actions such as splits, dividends and mergers can change how many tokens represent one share. Price feeds may pause during such events and while markets are closed.',
+        'Tokenized Stock prices come from third-party price feeds (for example Chainlink or Pyth) and follow markets that trade only part of the week. A price can be out of date, paused or wrong; launches paired with a Tokenized Stock may be refused while its price is unavailable.',
+        'The issuer’s solvency, custody of the underlying assets, regulatory status and ability to redeem are outside Elpida’s control and are not reflected in any price shown on the Services.',
+      ] },
     ]],
     ['Risks you accept', [
       'Using Elpida carries serious risks, including these:',
@@ -131,8 +147,9 @@ export function termsDocument({ mainnet = false, restricted = [] } = {}) {
     ]],
   ];
   const notice = [
-    `Elpida is experimental software. Its smart contracts have not had an independent security audit. ${mainnet ? 'Solana runs as an invite-only mainnet beta with real funds; every other network is a test network whose tokens have no monetary value.' : 'Elpida runs on public test networks and a local simulation, where tokens have no monetary value.'}${mainnet ? ' You can lose everything you put in.' : ''} Please read sections ${n('Test networks and the mainnet beta')} and ${n('Risks you accept')} carefully.`,
+    `Elpida is experimental software. Its smart contracts have not had an independent security audit. ${mainnet ? 'Networks marked mainnet use real funds; every other network is a test network whose tokens have no monetary value.' : 'Elpida runs on public test networks and a local simulation, where tokens have no monetary value.'}${mainnet ? ' You can lose everything you put in.' : ''} Please read sections ${n('Test networks and the mainnet beta')} and ${n('Risks you accept')} carefully.`,
     `Elpida is not registered, licensed or approved by any financial regulator. Nothing on the website is an offer to sell or a solicitation to buy any security, derivative or other financial product, and nothing on it is investment, financial, legal or tax advice. Please read section ${n('Not advice, not an offer')} carefully.`,
+    `Tokenized stock pairs are not available to US Persons, and Elpida is not affiliated with Ondo or any other issuer. Please read section ${n('Tokenized stock pairs')} before using them.`,
     `These Terms limit Elpida’s liability and require disputes to be raised individually, not as a class or group. Please read sections ${n('No warranties')} to ${n('Disputes')} carefully.`,
   ];
   return { title: 'Elpida Terms of Use', updated: TERMS_UPDATED, version: TERMS_VERSION, notice, sections };

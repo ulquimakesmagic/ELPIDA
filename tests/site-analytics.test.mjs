@@ -122,7 +122,18 @@ test('Terms and cookie choices are versioned; the restricted places follow the o
   assert.match(text(plain), /Cuba, Iran, North Korea/, 'comprehensively sanctioned places are always restricted');
   assert.match(plain.notice[0], /no monetary value/);
   assert.doesNotMatch(plain.notice[0], /lose everything/, 'testnet terms do not claim real losses');
-  assert.match(termsDocument({ mainnet: true }).notice[0], /invite-only mainnet beta with real funds/);
+  assert.match(termsDocument({ mainnet: true }).notice[0], /Networks marked mainnet use real funds/);
+  // Tokenized stocks (13 November): US Persons excluded in the Terms, no affiliation with Ondo, issuer risks, and the
+  // notice points at the section.
+  const stocks = plain.sections.find(([t]) => t === 'Tokenized stock pairs');
+  assert.ok(stocks, 'a Tokenized stock pairs section');
+  assert.match(text(stocks), /not offered to, and may not be used by, US Persons/);
+  assert.match(text(stocks), /persons in Canada/);
+  assert.match(text(stocks), /not affiliated with, endorsed, sponsored or approved by Ondo Global Markets/);
+  assert.match(text(stocks), /does not make you a shareholder/);
+  assert.match(text(stocks), /pause, freeze, block or reverse transfers/);
+  assert.doesNotMatch(text(plain), /Powered by Ondo|Built on Ondo/i);
+  assert.match(plain.notice.join(' '), new RegExp(`section ${plain.sections.findIndex(([t]) => t === 'Tokenized stock pairs') + 1} before using them`));
   // Section references in the notice point at the sections they name.
   const titles = plain.sections.map(([t]) => t);
   assert.match(plain.notice[0], new RegExp(`sections ${titles.indexOf('Test networks and the mainnet beta') + 1} and ${titles.indexOf('Risks you accept') + 1}`));
@@ -132,7 +143,7 @@ test('Terms and cookie choices are versioned; the restricted places follow the o
   assert.equal(disclaimerPoints().length, 3);
   assert.match(disclaimerPoints({ mainnet: true })[0].text, /real funds/);
   assert.match(fullDisclaimer().join(' '), /no monetary value/);
-  assert.match(fullDisclaimer({ mainnet: true }).join(' '), /mainnet beta with real funds/);
+  assert.match(fullDisclaimer({ mainnet: true }).join(' '), /Networks marked mainnet use real funds/);
 });
 
 test('the page wires the banner, footer links and stylesheet; no module sets a style attribute', () => {
