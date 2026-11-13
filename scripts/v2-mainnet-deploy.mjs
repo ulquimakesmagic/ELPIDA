@@ -86,6 +86,7 @@ export function approvalFor(key, hash, dir = join(root, 'deployments', 'approval
  * `deployer` is optional (`check` runs without a key).
  */
 export async function preflight({ provider, plan, deployer = null }) {
+  const native = nativeSymbol(plan);
   const out = [], add = (check, ok, detail = '') => out.push({ check, ok: !!ok, detail });
   const code = async a => (await provider.getCode(a)) !== '0x';
   const net = await provider.getNetwork();
@@ -108,10 +109,12 @@ export async function preflight({ provider, plan, deployer = null }) {
     const feed = new Contract(plan.usdFeed, FEED, provider), [decimals, round] = await Promise.all([feed.decimals(), feed.latestRoundData()]);
     let description = ''; try { description = await feed.description(); } catch { /* optional */ }
     const block = await provider.getBlock('latest'), age = block.timestamp - Number(round[3]);
-    add('ETH/USD feed answers fresh', round[1] > 0n && age >= 0 && age <= Number(plan.feedMaxAge), `${Number(round[1]) / 10 ** Number(decimals)} USD, ${age} s old${description ? `, "${description}"` : ''}`);
-    add('ETH/USD feed is ETH / USD', !description || /ETH\s*\/\s*USD/i.test(description), description);
-  } catch (e) { add('ETH/USD feed answers fresh', false, e.shortMessage ?? e.message); }
-  try { const u = new Contract(plan.usdc, ERC20, provider); add('USDC has 6 decimals', Number(await u.decimals()) === 6, await u.symbol().catch(() => '')); } catch (e) { add('USDC has 6 decimals', false, e.shortMessage ?? e.message); }
+    add(`${native}/USD feed answers fresh`, round[1] > 0n && age >= 0 && age <= Number(plan.feedMaxAge), `${Number(round[1]) / 10 ** Number(decimals)} USD, ${age} s old${description ? `, "${description}"` : ''}`);
+    add(`${native}/USD feed is ${native} / USD`, !description || new RegExp(`^\\s*${native}\\s*/\\s*USD\\s*$`, 'i').test(description), description);
+  } catch (e) { add(`${native}/USD feed answers fresh`, false, e.shortMessage ?? e.message); }
+  // USDC: 6 decimals on Base and Ethereum, 18 on BNB Chain (13 November). The plan states which; the chain must agree.
+  const wantDecimals = usdcDecimals(plan);
+  try { const u = new Contract(plan.usdc, ERC20, provider); add(`USDC has ${wantDecimals} decimals`, Number(await u.decimals()) === wantDecimals, await u.symbol().catch(() => '')); } catch (e) { add(`USDC has ${wantDecimals} decimals`, false, e.shortMessage ?? e.message); }
   if (deployer) { const bal = await provider.getBalance(deployer); add('deployer holds gas', bal >= parseEther(String(plan.minDeployerBalance ?? '0.01')), `${formatEther(bal)}`); }
   return Object.assign(out, { failed: out.filter(c => !c.ok) });
 }
@@ -180,6 +183,13 @@ export async function deployPlan({ provider, signer, plan, hash, approval, recor
   return record;
 }
 
+/** The chain's native coin for the price-feed check: ETH on Base and Ethereum, BNB on BNB Chain. */
+export const nativeSymbol = plan => { const s = String(plan.nativeSymbol ?? 'ETH').toUpperCase(); if (!/^[A-Z]{2,6}$/.test(s)) throw new Error('nativeSymbol: 2 to 6 letters'); return s; };
+/** USDC's decimals on the plan's chain: 6 unless the plan says otherwise (BNB Chain: 18). */
+export const usdcDecimals = plan => { const d = Number(plan.usdcDecimals ?? 6); if (!Number.isInteger(d) || d < 6 || d > 18) throw new Error('usdcDecimals must be 6 to 18'); return d; };
+/** The USDC pair's virtual quote: $20,000 × 5/4 = $25,000 of USDC in its own units. */
+export const usdcVirtualQuote = plan => BigInt(MAINNET_START_MCAP_USD) * 5n / 4n * 10n ** BigInt(usdcDecimals(plan));
+
 export const safeBatchPath = recordPath => recordPath.replace(/\.json$/, '-safe-batch.json');
 
 /** Reads every constructor argument back from the chain. */
@@ -199,7 +209,7 @@ export async function constructorChecks({ provider, plan, record }) {
 /** The treasury-only wiring as a Safe Transaction Builder batch (Safe app → Transaction Builder → load JSON). */
 export function safeBatch(plan, record) {
   const i = new Interface(FACTORY_WRITE), f = record.contracts.factory;
-  const usdcVirtual = BigInt(MAINNET_START_MCAP_USD) * 5n / 4n * 10n ** 6n;
+  const usdcVirtual = usdcVirtualQuote(plan);
   const calls = [['setHook', [record.contracts.hook]], ['configureUsdPricing', [plan.usdFeed, plan.feedMaxAge, plan.usdc]], ['approveQuote', [plan.usdc, usdcVirtual]], ['setGuardian', [plan.guardian]], ['setDailyLaunchCap', [plan.dailyLaunchCap]]];
   return { version: '1.0', chainId: String(plan.chainId), createdAt: Date.now(), meta: { name: `ELPIDA V2 ${plan.name} wiring`, description: `Plan ${record.planSha256.slice(0, 16)}: connect the hook, set USD pricing, approve USDC ($25,000 virtual quote), name the guardian, cap launches at ${plan.dailyLaunchCap} a day.`, txBuilderVersion: '1.16.5', createdFromSafeAddress: plan.treasury },
     transactions: calls.map(([name, args]) => ({ to: f, value: '0', data: i.encodeFunctionData(name, args), contractMethod: null, contractInputsValues: null, description: `${name}(${args.join(', ')})` })) };
@@ -209,7 +219,7 @@ export function safeBatch(plan, record) {
 export async function verifyDeployment({ provider, plan, record, recordPath }) {
   const c = record.contracts, f = new Contract(c.factory, FACTORY_READ, provider), out = [], eq = (check, a, b) => out.push({ check, ok: String(a).toLowerCase() === String(b).toLowerCase(), detail: `${a}` });
   eq('factory hook', await f.hook(), c.hook); eq('USD feed', await f.usdFeed(), plan.usdFeed);
-  eq('USDC approved at $25,000 virtual', await f.approvedQuotes(plan.usdc), BigInt(MAINNET_START_MCAP_USD) * 5n / 4n * 10n ** 6n);
+  eq('USDC approved at $25,000 virtual', await f.approvedQuotes(plan.usdc), usdcVirtualQuote(plan));
   eq('guardian', await f.guardian(), plan.guardian); eq('daily launch cap', await f.dailyLaunchCap(), plan.dailyLaunchCap); eq('launches paused', await f.launchesPaused(), false);
   let vq = 0n; try { vq = await f.nativeVirtualQuote(); } catch { /* feed */ }
   out.push({ check: 'native start price readable', ok: vq > 0n, detail: `${formatEther(vq)} native = $25,000 virtual` });
@@ -238,6 +248,8 @@ export async function rehearse({ plan: given, fork = null, log = () => {}, recor
     if (!fork) {
       const safe = await deployMock('MockSafe', [[addrs[1], addrs[2]], 2]);
       Object.assign(plan, { chainId: Number((await provider.getNetwork()).chainId), treasury: safe, keeper: addrs[3], guardian: addrs[4], poolManager: await deployMock('PoolManager', [addrs[0]]), usdFeed: await deployMock('MockUsdFeed', [2500n * 10n ** 8n]), usdc: await deployMock('MockUSDC', []) });
+      if (usdcDecimals(plan) !== 6) await (await new Contract(plan.usdc, ['function setDecimals(uint8)'], signers[0]).setDecimals(usdcDecimals(plan))).wait();
+      if (nativeSymbol(plan) !== 'ETH') await (await new Contract(plan.usdFeed, ['function setDescription(string)'], signers[0]).setDescription(`${nativeSymbol(plan)} / USD`)).wait();
     }
     const checks = await preflight({ provider, plan, deployer: addrs[0] });
     if (checks.failed.length) throw new Error(`Preflight failed: ${checks.failed.map(c => `${c.check} (${c.detail})`).join('; ')}`);

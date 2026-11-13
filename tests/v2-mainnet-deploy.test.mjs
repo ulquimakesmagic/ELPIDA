@@ -45,6 +45,18 @@ test('rehearsal: preflight, deploy at $20,000, constructor read-back, Safe batch
   assert.deepEqual(batch.transactions.map(x => x.description.split('(')[0]), ['setHook', 'configureUsdPricing', 'approveQuote', 'setGuardian', 'setDailyLaunchCap']);
 });
 
+test('BNB Chain rehearsal: BNB / USD feed, 18-decimal USDC approved at 25,000e18, the same $20,000 launch and the guardian stop', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'elpida-bnb-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { plan } = readPlan(new URL('../deployments/plans/bnb-mainnet.json', import.meta.url), { local: true });
+  assert.equal(plan.chainId, 56); assert.equal(plan.usdcDecimals, 18); assert.equal(plan.nativeSymbol, 'BNB');
+  const r = await rehearse({ plan, recordPath: join(dir, 'bnb-mainnet.rehearsal.json') });
+  assert.equal(r.checks.failed.length, 0, JSON.stringify(r.checks.failed));
+  assert.ok(r.checks.some(c => c.check === 'BNB/USD feed is BNB / USD' && c.ok) && r.checks.some(c => c.check === 'USDC has 18 decimals' && c.ok));
+  assert.ok(r.verified.some(c => c.check === 'USDC approved at $25,000 virtual' && c.ok && c.detail === String(25_000n * 10n ** 18n)), JSON.stringify(r.verified));
+  assert.ok(r.launch.startMcapUsd >= 20_000 * 0.999 && r.launch.startMcapUsd <= 20_000 * 1.002, `starts at $${r.launch.startMcapUsd}`);
+  assert.equal(r.guardianPaused, true);
+});
+
 test('preflight refuses a treasury that is a plain wallet or a 1-of-N Safe, and a shared keeper', async t => {
   const { network } = await import('hardhat'), { BrowserProvider, ContractFactory } = await import('ethers'), { compileV4 } = await import('../scripts/compile-v4.mjs');
   const connection = await network.create('localCancun'), provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 });

@@ -27,7 +27,9 @@ abstract contract ElpidaUsdPricing {
         if(!(msg.sender==pricingOwner()&&address(usdFeed)==address(0)))revert PricingFixed();
         if(!(feed.code.length>0&&maxAge>0&&maxAge<=1 days))revert OracleConfiguration();
         if(!(IUsdFeed(feed).decimals()<=18))revert OracleConfiguration();
-        if(usdc!=address(0))if(!(usdc.code.length>0&&IUsdFeeToken(usdc).decimals()==6))revert OracleConfiguration();
+        // USDC with 6 decimals (Base, Ethereum) or up to 18 (BNB Chain's USDC has 18, Malik 13 November). The $10 fee
+        // is charged in the token's own units (10 × 10^decimals), so every chain charges exactly $10. Below 6 decimals reverts.
+        if(usdc!=address(0))if(!(usdc.code.length>0&&IUsdFeeToken(usdc).decimals()-6<=12))revert OracleConfiguration();
         usdFeed=IUsdFeed(feed);maxPriceAge=maxAge;feeUsdc=usdc;
         price();emit UsdPricingConfigured(feed,maxAge,usdc);
     }
@@ -53,10 +55,10 @@ abstract contract ElpidaUsdPricing {
         if(address(usdFeed)!=address(0))(,timestamp,)=price();
         if(inUsdc){
             if(!(feeUsdc!=address(0)))revert UsdcUnavailable();
-            IUsdFeeToken coin=IUsdFeeToken(feeUsdc);uint256 beforeBalance=coin.balanceOf(pricingOwner());
-            if(!(coin.transferFrom(msg.sender,pricingOwner(),10_000_000)))revert FeeTransferFailed();
-            if(!(coin.balanceOf(pricingOwner())==beforeBalance+10_000_000))revert FeeTransferFailed();
-            emit LaunchFeePaid(msg.sender,feeUsdc,10_000_000,timestamp);
+            IUsdFeeToken coin=IUsdFeeToken(feeUsdc);uint256 amount=10*10**uint256(coin.decimals());uint256 beforeBalance=coin.balanceOf(pricingOwner());
+            if(!(coin.transferFrom(msg.sender,pricingOwner(),amount)))revert FeeTransferFailed();
+            if(!(coin.balanceOf(pricingOwner())==beforeBalance+amount))revert FeeTransferFailed();
+            emit LaunchFeePaid(msg.sender,feeUsdc,amount,timestamp);
         }else{
             (bool ok,)=pricingOwner().call{value:fee}("");if(!(ok))revert FeeTransferFailed();
             emit LaunchFeePaid(msg.sender,address(0),fee,timestamp);
