@@ -236,7 +236,7 @@ export async function verifyDeployment({ provider, plan, record, recordPath }) {
  * batch by impersonation, verify, then launch a token and check it starts at $20,000 and that the guardian can stop
  * new launches. Returns { record, checks, launch }.
  */
-export async function rehearse({ plan: given, fork = null, log = () => {}, recordPath }) {
+export async function rehearse({ plan: given, fork = null, log = () => {}, recordPath, stocks = [], findHolder = null }) {
   const { network } = await import('hardhat');
   const { BrowserProvider } = await import('ethers');
   const connection = await network.create(fork ? { network: 'localCancun', override: { forking: { url: fork, enabled: true } } } : 'localCancun');
@@ -250,6 +250,12 @@ export async function rehearse({ plan: given, fork = null, log = () => {}, recor
       Object.assign(plan, { chainId: Number((await provider.getNetwork()).chainId), treasury: safe, keeper: addrs[3], guardian: addrs[4], poolManager: await deployMock('PoolManager', [addrs[0]]), usdFeed: await deployMock('MockUsdFeed', [2500n * 10n ** 8n]), usdc: await deployMock('MockUSDC', []) });
       if (usdcDecimals(plan) !== 6) await (await new Contract(plan.usdc, ['function setDecimals(uint8)'], signers[0]).setDecimals(usdcDecimals(plan))).wait();
       if (nativeSymbol(plan) !== 'ETH') await (await new Contract(plan.usdFeed, ['function setDescription(string)'], signers[0]).setDescription(`${nativeSymbol(plan)} / USD`)).wait();
+      // Local stand-ins for `{ mock: true, price }` stocks (tests): an issuer-controlled stock and its feed, held by signer 1.
+      for (const s of stocks.filter(x => x.mock)) {
+        s.address = await deployMock('MockIssuerStock', []); s.feed = await deployMock('MockUsdFeed', [BigInt(Math.round(s.price * 1e8))]); s.holder = addrs[1]; s.symbol = 'mSTK';
+        await (await new Contract(s.address, ['function mint(address,uint256)'], signers[0]).mint(addrs[1], 10n ** 24n)).wait();
+        await (await new Contract(s.feed, ['function setDescription(string)'], signers[0]).setDescription('mSTK / USD')).wait();
+      }
     }
     const checks = await preflight({ provider, plan, deployer: addrs[0] });
     if (checks.failed.length) throw new Error(`Preflight failed: ${checks.failed.map(c => `${c.check} (${c.detail})`).join('; ')}`);
@@ -267,10 +273,14 @@ export async function rehearse({ plan: given, fork = null, log = () => {}, recor
     const [, answer] = await new Contract(plan.usdFeed, FEED, provider).latestRoundData(), feedDecimals = Number(await new Contract(plan.usdFeed, FEED, provider).decimals());
     const ethUsd = Number(answer) / 10 ** feedDecimals, sqrtLower = 1.0001 ** (Number(info.upperTick) / 2), priceTokensPerEth = sqrtLower ** 2;
     const startMcap = 1e9 / priceTokensPerEth * ethUsd;
+    // Real tokenized stocks on a fork (Malik, 13 November: Ondo stocks on mainnet): each one approved by the treasury,
+    // launched against, bought and sold through the router, so the pool and the router are shown to hold and move it.
+    const stockResults = [];
+    for (const s of stocks) stockResults.push(await rehearseStock({ provider, signer: signers[0], plan, record, art, stock: s, findHolder, log }));
     // The guardian can stop new launches.
     await (await new Contract(record.contracts.factory, ['function pauseLaunches()'], signers.find((_, i) => addrs[i] === plan.guardian) ?? signers[4]).pauseLaunches()).wait();
     const paused = await new Contract(record.contracts.factory, FACTORY_READ, provider).launchesPaused();
-    return { record, checks, verified, launch: { token: launched.args.token, startMcapUsd: startMcap }, guardianPaused: paused };
+    return { record, checks, verified, launch: { token: launched.args.token, startMcapUsd: startMcap }, stocks: stockResults, guardianPaused: paused };
   } finally { provider.destroy(); await connection.close(); }
 }
 
@@ -279,6 +289,69 @@ export async function rehearse({ plan: given, fork = null, log = () => {}, recor
  * markers, and a copy may carry spaces or a newline. Takes the one 64-hex key out of it, or explains what is wrong
  * without ever printing the input.
  */
+const ERC20_RW = ['function balanceOf(address) view returns(uint256)', 'function transfer(address,uint256) returns(bool)', 'function approve(address,uint256) returns(bool)', 'function decimals() view returns(uint8)', 'function symbol() view returns(string)'];
+const ROUTER_TRADE = ['function buy(address token,uint256 quoteIn,uint256 minTokensOut,address recipient,uint256 deadline) payable returns(uint256)', 'function sell(address token,uint256 tokensIn,uint256 minQuoteOut,address recipient,uint256 deadline) returns(uint256)'];
+
+/**
+ * One real stock on a fork: the treasury approves it priced by its feed, a launch pairs with it at the $20,000 start
+ * (read back from the pool's starting tick at the feed's price), and a buy and a full sell move the stock through the
+ * router and the v4 pool. The stock is funded by impersonating an existing holder on the fork only. Returns
+ * { symbol, ok, startMcapUsd, bought, returned, error }.
+ */
+export async function rehearseStock({ provider, signer, plan, record, art, stock, findHolder, log = () => {} }) {
+  const out = { symbol: stock.symbol, address: stock.address, feed: stock.feed, ok: false };
+  try {
+    const me = await signer.getAddress(), token = new Contract(stock.address, ERC20_RW, provider);
+    if ((await token.symbol()) !== stock.symbol) throw new Error(`the token's symbol is not ${stock.symbol}`);
+    const decimals = Number(await token.decimals()), unit = 10n ** BigInt(decimals);
+    const [, answer] = await new Contract(stock.feed, FEED, provider).latestRoundData(), feedDecimals = Number(await new Contract(stock.feed, FEED, provider).decimals());
+    const priceUsd = Number(answer) / 10 ** feedDecimals;
+    // Approve as the Safe would: impersonating the treasury on the fork.
+    await provider.send('hardhat_impersonateAccount', [plan.treasury]);
+    const approve = new Interface(['function approvePricedQuote(address,address,uint256)']).encodeFunctionData('approvePricedQuote', [stock.address, stock.feed, stock.maxAge ?? 4 * DAY]);
+    await provider.waitForTransaction(await provider.send('eth_sendTransaction', [{ from: plan.treasury, to: record.contracts.factory, data: approve }]));
+    // About $300 of the stock from an existing holder (fork only).
+    const want = BigInt(Math.ceil(300 / priceUsd * 1e6)) * unit / 1_000_000n;
+    const holder = stock.holder ?? (findHolder ? await findHolder(stock.address, want) : null);
+    if (!holder) throw new Error('no holder to fund the test (set ELPIDA_STOCK_HOLDER_<SYMBOL>)');
+    await provider.send('hardhat_impersonateAccount', [holder]); await provider.send('hardhat_setBalance', [holder, '0x' + (10n ** 18n).toString(16)]);
+    const data = new Interface(ERC20_RW).encodeFunctionData('transfer', [me, want]);
+    await provider.waitForTransaction(await provider.send('eth_sendTransaction', [{ from: holder, to: stock.address, data }]));
+    if ((await token.balanceOf(me)) < want) throw new Error('the holder transfer did not arrive (transfer restricted?)');
+    // Launch paired with the stock: no first buy, $10 fee in the native coin.
+    const factory = new Contract(record.contracts.factory, art.factory.abi, signer), fee = await factory.nativeUsdAmount(10);
+    const receipt = await (await factory.launch(`Rehearsal ${stock.symbol}`, 'RSTK', stock.address, 125, 0n, 0n, me, 'ipfs://bafkreigh2akiscaildcqabsyg3dfr6chu3fgpregiymsck7e7aqa4s52zy', false, { value: fee })).wait();
+    const launched = receipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(e => e?.name === 'Launched');
+    const info = await new Contract(record.contracts.hook, art.hook.abi, provider).launchOf(launched.args.token);
+    const sqrtLower = 1.0001 ** (Number(info.upperTick) / 2), tokensPerQuoteRaw = sqrtLower ** 2;
+    out.startMcapUsd = 1e9 * 1e18 / tokensPerQuoteRaw / Number(unit) * priceUsd;
+    // Past the 60-second anti-snipe window, buy with half and sell everything back.
+    await provider.send('evm_increaseTime', [61]); await provider.send('evm_mine', []);
+    const router = new Contract(record.contracts.router, ROUTER_TRADE, signer), launchedToken = new Contract(launched.args.token, ERC20_RW, signer);
+    const deadline = (await provider.getBlock('latest')).timestamp + 600, half = want / 2n, before = await token.balanceOf(me);
+    await (await new Contract(stock.address, ERC20_RW, signer).approve(record.contracts.router, half)).wait();
+    await (await router.buy(launched.args.token, half, 1n, me, deadline)).wait();
+    out.bought = (await launchedToken.balanceOf(me)).toString();
+    await (await launchedToken.approve(record.contracts.router, BigInt(out.bought))).wait();
+    await (await router.sell(launched.args.token, BigInt(out.bought), 1n, me, deadline)).wait();
+    out.returned = ((await token.balanceOf(me)) - (before - half)).toString();
+    const back = Number(BigInt(out.returned) * 10_000n / half) / 100;
+    out.ok = out.startMcapUsd >= 20_000 * 0.998 && out.startMcapUsd <= 20_000 * 1.003 && back > 95 && back < 100;
+    out.detail = `starts at $${out.startMcapUsd.toFixed(0)}, a ${stock.symbol} buy and full sell returned ${back}% after both fees`;
+    log(`${out.ok ? 'ok  ' : 'FAIL'} stock ${stock.symbol}: ${out.detail}`);
+  } catch (e) { out.error = String(e.shortMessage ?? e.message).slice(0, 200); log(`FAIL stock ${stock.symbol}: ${out.error}`); }
+  return out;
+}
+
+/** A holder of `address` with at least `want`, from a Blockscout explorer (read only; impersonated on the fork only). */
+export const blockscoutHolder = (explorer, provider) => async (address, want) => {
+  const r = await fetch(`${explorer.replace(/\/$/, '')}/api/v2/tokens/${address}/holders`, { signal: AbortSignal.timeout(30000), headers: { accept: 'application/json' } });
+  if (!r.ok) return null;
+  const token = new Contract(address, ERC20_RW, provider);
+  for (const it of ((await r.json()).items ?? []).slice(0, 25)) { const a = it.address?.hash; if (a && !it.address?.is_contract && await token.balanceOf(a) >= want) return a; }
+  return null;
+};
+
 export function deployerKey(input) {
   const text = String(input ?? '');
   // A recovery phrase (12–24 words) unlocks every account in the wallet, the Safe signer included. Refuse it at once,
@@ -319,9 +392,19 @@ async function main() {
   const print = list => { for (const c of list) console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.check}${c.detail ? `: ${c.detail}` : ''}`); };
   console.log(`plan ${plan.key} (${plan.name}), sha256 ${hash}`);
   if (cmd === 'rehearse') {
-    const r = await rehearse({ plan, fork: arg('fork'), log: m => console.log(m), recordPath: join(dirname(recordPath), `${plan.key}.rehearsal.json`) });
+    // --stocks <config/stocks/candidates/….json>: also launch against each real stock on the fork (fork only).
+    const stocksFile = arg('stocks'), stocks = stocksFile ? JSON.parse(readFileSync(stocksFile, 'utf8')).map(s => ({ ...s, holder: process.env[`ELPIDA_STOCK_HOLDER_${String(s.symbol).toUpperCase()}`] ?? null })) : [];
+    if (stocks.length && !arg('fork')) throw new Error('--stocks needs --fork <rpc>: real stocks exist only on the real chain.');
+    if (stocks.some(s => !s.holder) && !plan.explorerApi) throw new Error('The plan has no explorerApi (a Blockscout URL) to find stock holders; set ELPIDA_STOCK_HOLDER_<SYMBOL> per stock.');
+    const r = await rehearse({ plan, fork: arg('fork'), log: m => console.log(m), recordPath: join(dirname(recordPath), `${plan.key}.rehearsal.json`), stocks,
+      findHolder: plan.explorerApi ? (address, want) => blockscoutHolder(plan.explorerApi, new JsonRpcProvider(arg('fork'), undefined, { staticNetwork: true }))(address, want) : null });
     print(r.checks); print(r.verified);
     console.log(`rehearsal launch ${r.launch.token}: starts at $${r.launch.startMcapUsd.toFixed(2)}; guardian stop works: ${r.guardianPaused}`);
+    if (r.stocks.length) {
+      const evidence = { network: plan.key, chainId: plan.chainId, at: new Date().toISOString(), scope: 'LOCAL FORK ONLY: nothing was sent to the public chain', gitCommit: gitCommit(), stocks: r.stocks };
+      saveJson(join(root, 'deployments', `${plan.key}-stock-rehearsal.json`), evidence);
+      console.log(`${r.stocks.filter(s => s.ok).length} of ${r.stocks.length} stocks passed. Evidence: deployments/${plan.key}-stock-rehearsal.json`);
+    }
     return;
   }
   const rpc = process.env.ELPIDA_MAINNET_RPC_URL; if (!rpc) throw new Error('Set ELPIDA_MAINNET_RPC_URL.');

@@ -25,6 +25,30 @@
 - **Wallet + X + website allocations** no longer fail with "Every allocation share must be above zero": the shares were read from a field the form no longer fills. Nothing to do.
 - **Share fees with holders** now asks for dollars: a distribution threshold (default $20) and a minimum holding value (default $20), both editable. The threshold is converted to the pair asset at the launch-time price and fixed in the vault; the vault also records both dollar figures (ElpidaV2CreatorRewards version 2). The keeper applies the minimum holding value at the token's last trade price each round, and waits rather than guess when there is no fresh price. Earlier vaults keep working.
 - **Conversion pools** (native coin ↔ test stock) can now be funded on Ethereum Sepolia, Base Sepolia, BNB testnet and Robinhood testnet: Operator panel → Pairs → "conversion liquidity", with the stock's controller wallet (at most 0.1 test coin per setup; PancakeSwap uses its 1% tier). Do this on Robinhood for tTSLAon (0xc6df…af87) so the token page can take ETH.
+## Ondo stocks on Ethereum mainnet, 13 November 2026
+
+Malik, 13 November: Ondo stocks go live without waiting for Ondo's reply, with neutral wording (no "powered by"), and
+the US restriction in the Terms. Chainlink publishes feeds for **9** Ondo tokens, all on Ethereum (none yet on BNB
+Chain, Solana or Base; Ondo is not on Base). `config/stocks/candidates/ethereum-ondo.json` lists **8** of them:
+addresses from Ondo's own asset pages (app.ondo.finance), Chainlink's "calculated" feed for each (equity price × Ondo's
+multiplier), 4-day staleness for weekends. FLHYon is left out: Chainlink lists two different calculated feeds for it.
+
+1. Once the Ethereum Safe exists and `ethereum-mainnet.json` has its wallets, run the free fork test (an Ethereum RPC,
+   e.g. Alchemy's free tier; nothing is sent):
+   ```
+   node scripts/v2-mainnet-deploy.mjs rehearse --plan deployments/plans/ethereum-mainnet.json --fork <ETH RPC> --stocks config/stocks/candidates/ethereum-ondo.json
+   ```
+   Each stock is approved, launched against at $20,000, bought and sold back through our router on the fork. The result
+   is saved to `deployments/ethereum-mainnet-stock-rehearsal.json`; push it on a branch for review.
+2. Build the verified list (reads only):
+   ```
+   $env:STOCK_LIST_RPC_URL="<ETH RPC>"
+   node scripts/stock-list.mjs ethereum config/stocks/candidates/ethereum-ondo.json --source "app.ondo.finance asset pages and Chainlink's feed directory, 13 November 2026"
+   ```
+   Push `config/stocks/ethereum.json` on a branch.
+3. After the Ethereum deploy: operator panel → Pairs → V2 card → approve the stock list. With a Safe treasury it
+   downloads Transaction Builder files (25 stocks each) for the Safe to sign.
+
 ## Solana devnet: USDC payouts (program upgrade), 11 November 2026
 
 After the Solana USDC payouts PR is merged:
