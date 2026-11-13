@@ -128,6 +128,7 @@ test('Terms and cookie choices are versioned; the restricted places follow the o
   const stocks = plain.sections.find(([t]) => t === 'Tokenized stock pairs');
   assert.ok(stocks, 'a Tokenized stock pairs section');
   assert.match(text(stocks), /not offered to, and may not be used by, US Persons/);
+  assert.match(text(stocks), /persons in Canada/);
   assert.match(text(stocks), /not affiliated with, endorsed, sponsored or approved by Ondo Global Markets/);
   assert.match(text(stocks), /does not make you a shareholder/);
   assert.match(text(stocks), /pause, freeze, block or reverse transfers/);
