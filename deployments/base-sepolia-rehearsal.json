@@ -1,0 +1,243 @@
+{
+  "network": "base-sepolia-rehearsal",
+  "name": "Base Sepolia (dress rehearsal)",
+  "chainId": 84532,
+  "planSha256": "a71c1ec67a97a14854b94a938ac69dbba6c6a5208a6976fda4930443364a47f1",
+  "approval": "base-sepolia-rehearsal-a71c1ec67a97a148.json",
+  "model": "v2-hook",
+  "compiler": "solc 0.8.26 (cancun, via IR, 200 runs)",
+  "gitCommit": "cd66f559862527fecdbb53505c3136a54b5cfd85",
+  "startMcapUsd": 20000,
+  "contracts": {
+    "create2": "0x4F0dB50A2E123Ece9B9927596073937037d1cFaa",
+    "factory": "0x167bff77A4Ed0054784186B89Cf8A33D83e2213D",
+    "airdrop": "0x19e98b21FC07315D4f621A662688c6D3Da2570C0",
+    "holder": "0x3566cc9F8aCd8057B9c0255930D05504D02a25a5",
+    "flywheel": "0xa4EA550653701c6988c00485F919b269bfF5957F",
+    "hook": "0x7448aA80BD505FFc3cfDCc397d044FE9B29A68cC",
+    "router": "0xb45BBa0E5B901C19C40d5911b17A1d79eCbA48c1"
+  },
+  "txs": {
+    "create2": {
+      "hash": "0x275b7fb3d7807933ab07bf7a0550020ea261fd1fd45d5375b7abc4b54b9b2ea2",
+      "block": 58058947
+    },
+    "factory": {
+      "hash": "0x0821338edcf9acb58e17399be7630b314d311bdf129bbdec554bcdc332c28222",
+      "block": 58058958
+    },
+    "airdrop": {
+      "hash": "0xad77f072f7bf336ff3027f2527a77567f1481383976e8302fd52a9f8a7e348b7",
+      "block": 58058967
+    },
+    "holder": {
+      "hash": "0x41574c1678820cede87dde1d66c8e6ac241aef59f379fcdb19bcd62cb3ee53ce",
+      "block": 58058976
+    },
+    "flywheel": {
+      "hash": "0x95f0b03caf2d305bc3ceffda8cb7e489ff82702825fb8f5b710b6fdb34b9d307",
+      "block": 58058984
+    },
+    "hook": {
+      "hash": "0xc2abcd5a75954d1dd4614677a2b4ed926bdf5ce8bfa6a6adee57344dc14a12bd",
+      "block": 58058995
+    },
+    "router": {
+      "hash": "0xafb279f501f8ab075c631314d0d671e30754b295e28554444e1e711b20c37027",
+      "block": 58059003
+    }
+  },
+  "deployer": "0x41590c8124d9A4Da5FF9cc3Ff84a247a9A633475",
+  "block": 58058958,
+  "airdropGenesis": 1793491200,
+  "holderGenesis": 1794528000,
+  "hookSalt": "0x000000000000000000000000000000000000000000000000000000000000120e",
+  "gate": {
+    "recordedAt": "2026-11-13T01:34:35.186Z",
+    "plan": {
+      "chainId": 84532,
+      "network": "Base Sepolia (dress rehearsal)",
+      "mainnet": true,
+      "startMcapUsd": 20000,
+      "treasury": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01",
+      "recipients": [
+        "0x19e98b21FC07315D4f621A662688c6D3Da2570C0",
+        "0xa4EA550653701c6988c00485F919b269bfF5957F",
+        "0x3566cc9F8aCd8057B9c0255930D05504D02a25a5"
+      ],
+      "minFeeBps": 100,
+      "metadataRequired": true,
+      "approver": "Malik",
+      "approvedAt": 1794528000000,
+      "planHash": "0xb8555a896774a166588683f3956bf2a2474cb1af775c3221906876f94a123823"
+    },
+    "deployment": {
+      "factory": "0x167bff77A4Ed0054784186B89Cf8A33D83e2213D",
+      "hook": "0x7448aA80BD505FFc3cfDCc397d044FE9B29A68cC",
+      "router": "0xb45BBa0E5B901C19C40d5911b17A1d79eCbA48c1",
+      "blockNumber": 58058958,
+      "transactions": [
+        "0x275b7fb3d7807933ab07bf7a0550020ea261fd1fd45d5375b7abc4b54b9b2ea2",
+        "0x0821338edcf9acb58e17399be7630b314d311bdf129bbdec554bcdc332c28222",
+        "0xad77f072f7bf336ff3027f2527a77567f1481383976e8302fd52a9f8a7e348b7",
+        "0x41574c1678820cede87dde1d66c8e6ac241aef59f379fcdb19bcd62cb3ee53ce",
+        "0x95f0b03caf2d305bc3ceffda8cb7e489ff82702825fb8f5b710b6fdb34b9d307",
+        "0xc2abcd5a75954d1dd4614677a2b4ed926bdf5ce8bfa6a6adee57344dc14a12bd",
+        "0xafb279f501f8ab075c631314d0d671e30754b295e28554444e1e711b20c37027"
+      ]
+    }
+  },
+  "constructorChecks": [
+    {
+      "check": "factory treasury",
+      "ok": true,
+      "detail": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01"
+    },
+    {
+      "check": "factory start $20,000",
+      "ok": true,
+      "detail": "20000"
+    },
+    {
+      "check": "factory requires metadata",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "check": "factory has launch controls",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "check": "hook factory",
+      "ok": true,
+      "detail": "0x167bff77A4Ed0054784186B89Cf8A33D83e2213D"
+    },
+    {
+      "check": "hook treasury",
+      "ok": true,
+      "detail": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01"
+    },
+    {
+      "check": "hook PoolManager",
+      "ok": true,
+      "detail": "0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408"
+    },
+    {
+      "check": "hook airdrop vault",
+      "ok": true,
+      "detail": "0x19e98b21FC07315D4f621A662688c6D3Da2570C0"
+    },
+    {
+      "check": "hook flywheel vault",
+      "ok": true,
+      "detail": "0xa4EA550653701c6988c00485F919b269bfF5957F"
+    },
+    {
+      "check": "hook holder vault",
+      "ok": true,
+      "detail": "0x3566cc9F8aCd8057B9c0255930D05504D02a25a5"
+    },
+    {
+      "check": "hook minimum fee",
+      "ok": true,
+      "detail": "100"
+    },
+    {
+      "check": "airdrop operator is the keeper",
+      "ok": true,
+      "detail": "0x29Cd5A2F3187Fb80051E2349b64E8E098000D03c"
+    },
+    {
+      "check": "airdrop period",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "check": "holder operator is the keeper",
+      "ok": true,
+      "detail": "0x29Cd5A2F3187Fb80051E2349b64E8E098000D03c"
+    },
+    {
+      "check": "holder period",
+      "ok": true,
+      "detail": "604800"
+    },
+    {
+      "check": "flywheel operator is the keeper",
+      "ok": true,
+      "detail": "0x29Cd5A2F3187Fb80051E2349b64E8E098000D03c"
+    },
+    {
+      "check": "flywheel factory",
+      "ok": true,
+      "detail": "0x167bff77A4Ed0054784186B89Cf8A33D83e2213D"
+    },
+    {
+      "check": "router hook",
+      "ok": true,
+      "detail": "0x7448aA80BD505FFc3cfDCc397d044FE9B29A68cC"
+    },
+    {
+      "check": "router PoolManager",
+      "ok": true,
+      "detail": "0x05E73354cFDd6745C338b50BcFDfA3Aa6fA03408"
+    },
+    {
+      "check": "gate (#234) verifyDeployment: no mismatches",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "safeBatch": "base-sepolia-rehearsal-safe-batch.json",
+  "status": "ready",
+  "pending": {
+    "safe": "Execute the Safe batch (setHook, configureUsdPricing, approveQuote USDC, setGuardian, setDailyLaunchCap), then run verify.",
+    "keeper": "flywheel.setRouter(router) from the keeper, before the flywheel is switched on (it stays off in the first release)."
+  },
+  "verify": {
+    "at": "2026-11-13T01:51:56.320Z",
+    "checks": [
+      {
+        "check": "factory hook",
+        "ok": true,
+        "detail": "0x7448aA80BD505FFc3cfDCc397d044FE9B29A68cC"
+      },
+      {
+        "check": "USD feed",
+        "ok": true,
+        "detail": "0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1"
+      },
+      {
+        "check": "USDC approved at $25,000 virtual",
+        "ok": true,
+        "detail": "25000000000"
+      },
+      {
+        "check": "guardian",
+        "ok": true,
+        "detail": "0xfC08505EfEf934c3fF19d82D189f60f28a0255eB"
+      },
+      {
+        "check": "daily launch cap",
+        "ok": true,
+        "detail": "500"
+      },
+      {
+        "check": "launches open",
+        "ok": true,
+        "detail": "false"
+      },
+      {
+        "check": "native start price readable",
+        "ok": true,
+        "detail": "12.43273888264489114 native = $25,000 virtual"
+      },
+      {
+        "check": "flywheel router (keeper, before the flywheel is switched on)",
+        "ok": true,
+        "detail": "not set yet (flywheel off in the first release)"
+      }
+    ]
+  }
+}

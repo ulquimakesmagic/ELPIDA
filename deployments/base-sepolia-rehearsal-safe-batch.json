@@ -1,0 +1,53 @@
+{
+  "version": "1.0",
+  "chainId": "84532",
+  "createdAt": 1794533675210,
+  "meta": {
+    "name": "ELPIDA V2 Base Sepolia (dress rehearsal) wiring",
+    "description": "Plan a71c1ec67a97a148: connect the hook, set USD pricing, approve USDC ($25,000 virtual quote), name the guardian, cap launches at 500 a day.",
+    "txBuilderVersion": "1.16.5",
+    "createdFromSafeAddress": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01"
+  },
+  "transactions": [
+    {
+      "to": "0x167bff77A4Ed0054784186B89Cf8A33D83e2213D",
+      "value": "0",
+      "data": "0x3dfd38730000000000000000000000007448aa80bd505ffc3cfdcc397d044fe9b29a68cc",
+      "contractMethod": null,
+      "contractInputsValues": null,
+      "description": "setHook(0x7448aA80BD505FFc3cfDCc397d044FE9B29A68cC)"
+    },
+    {
+      "to": "0x167bff77A4Ed0054784186B89Cf8A33D83e2213D",
+      "value": "0",
+      "data": "0x4d6e402e0000000000000000000000004adc67696ba383f43dd60a9e78f2c97fbbfc7cb10000000000000000000000000000000000000000000000000000000000000e10000000000000000000000000036cbd53842c5426634e7929541ec2318f3dcf7e",
+      "contractMethod": null,
+      "contractInputsValues": null,
+      "description": "configureUsdPricing(0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1, 3600, 0x036CbD53842c5426634e7929541eC2318f3dCF7e)"
+    },
+    {
+      "to": "0x167bff77A4Ed0054784186B89Cf8A33D83e2213D",
+      "value": "0",
+      "data": "0x56fafe72000000000000000000000000036cbd53842c5426634e7929541ec2318f3dcf7e00000000000000000000000000000000000000000000000000000005d21dba00",
+      "contractMethod": null,
+      "contractInputsValues": null,
+      "description": "approveQuote(0x036CbD53842c5426634e7929541eC2318f3dCF7e, 25000000000)"
+    },
+    {
+      "to": "0x167bff77A4Ed0054784186B89Cf8A33D83e2213D",
+      "value": "0",
+      "data": "0x8a0dac4a000000000000000000000000fc08505efef934c3ff19d82d189f60f28a0255eb",
+      "contractMethod": null,
+      "contractInputsValues": null,
+      "description": "setGuardian(0xfC08505EfEf934c3fF19d82D189f60f28a0255eB)"
+    },
+    {
+      "to": "0x167bff77A4Ed0054784186B89Cf8A33D83e2213D",
+      "value": "0",
+      "data": "0xda62122d00000000000000000000000000000000000000000000000000000000000001f4",
+      "contractMethod": null,
+      "contractInputsValues": null,
+      "description": "setDailyLaunchCap(500)"
+    }
+  ]
+}
