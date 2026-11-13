@@ -1,0 +1,80 @@
+[
+  {
+    "symbol": "COINon",
+    "name": "Coinbase Global (Ondo)",
+    "address": "0xf8589b526fdd65f7f301c605a6e04f0f1b4b3620",
+    "underlyingFeed": "0x2d1AB79D059e21aE519d88F978cAF39d74E31AEB"
+  },
+  {
+    "symbol": "NVDAon",
+    "name": "NVIDIA (Ondo)",
+    "address": "0xa9ee28c80f960b889dfbd1902055218cba016f75",
+    "underlyingFeed": "0xea5c2Cbb5cD57daC24E26180b19a929F3E9699B8"
+  },
+  {
+    "symbol": "TSLAon",
+    "name": "Tesla (Ondo)",
+    "address": "0x2494b603319d4d9f9715c9f4496d9e0364b59d93",
+    "underlyingFeed": "0xEEA2ae9c074E87596A85ABE698B2Afebc9B57893"
+  },
+  {
+    "symbol": "PFEon",
+    "name": "Pfizer (Ondo)",
+    "address": "0x8a83c31d6751833b4940b6e871c48d9a15a07b46",
+    "underlyingFeed": "0xe96fFdE2ba50E0e869520475ee1bC73cA2dEE326"
+  },
+  {
+    "symbol": "GMEon",
+    "name": "GameStop (Ondo)",
+    "address": "0xdabb9aff4cf02f26d2014e4ca9f94ac6fe6572a3",
+    "underlyingFeed": "0x66cD2975d02f5F5cdEF2E05cBca12549B1a5022D"
+  },
+  {
+    "symbol": "JPMon",
+    "name": "JPMorgan Chase (Ondo)",
+    "address": "0x317bf42b43a394860718266dec445dcc9fd9da49",
+    "underlyingFeed": "0x8f26ba94180371baA2D2C143f96b6886DCACA250"
+  },
+  {
+    "symbol": "GOOGLon",
+    "name": "Alphabet Class A (Ondo)",
+    "address": "0x091fc7778e6932d4009b087b191d1ee3bac5729a",
+    "underlyingFeed": "0xeDA73F8acb669274B15A977Cb0cdA57a84F18c2a"
+  },
+  {
+    "symbol": "AMZNon",
+    "name": "Amazon (Ondo)",
+    "address": "0x4553cfe1c09f37f38b12dc509f676964e392f8fc",
+    "underlyingFeed": "0x51d08ca89d3e8c12535BA8AEd33cDf2557ab5b2a"
+  },
+  {
+    "symbol": "AAPLon",
+    "name": "Apple (Ondo)",
+    "address": "0x390a684ef9cade28a7ad0dfa61ab1eb3842618c4",
+    "underlyingFeed": "0xb7Ed5bE7977d61E83534230f3256C021e0fae0B6"
+  },
+  {
+    "symbol": "MSFTon",
+    "name": "Microsoft (Ondo)",
+    "address": "0x6bfe75d1ad432050ea973c3a3dcd88f02e2444c3",
+    "underlyingFeed": "0x5D209cE1fBABeAA8E6f9De4514A74FFB4b34560F"
+  },
+  {
+    "symbol": "METAon",
+    "name": "Meta Platforms (Ondo)",
+    "address": "0xd7df5863a3e742f0c767768cdfcb63f09e0422f6",
+    "underlyingFeed": "0xfc76E9445952A3C31369dFd26edfdfb9713DF5Bb"
+  },
+  {
+    "symbol": "NFLXon",
+    "name": "Netflix (Ondo)",
+    "address": "0x7048f5227b032326cc8dbc53cf3fddd947a2c757",
+    "underlyingFeed": "0x1fE6c9Bd9B29e5810c2819f37dDa8559739ebeC9"
+  },
+  {
+    "symbol": "MRNAon",
+    "name": "Moderna (Ondo)",
+    "address": "0x01486675da0764ee780ea7cb65c33062e9b2d28c",
+    "underlyingFeed": "0x6101F4DFBb24Cac3D64e28A815255B428b93639f"
+  }
+]

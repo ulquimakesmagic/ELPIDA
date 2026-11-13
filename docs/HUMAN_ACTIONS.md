@@ -49,6 +49,32 @@ multiplier), 4-day staleness for weekends. FLHYon is left out: Chainlink lists t
 3. After the Ethereum deploy: operator panel → Pairs → V2 card → approve the stock list. With a Safe treasury it
    downloads Transaction Builder files (25 stocks each) for the Safe to sign.
 
+## Ondo stocks on BNB Chain (and 2 more on Ethereum): price adapters, 13 November 2026
+
+Chainlink has no feed for Ondo's tokens on BNB Chain, but it has feeds for **14 underlying shares** there, and Ondo
+publishes each token's shares multiplier on chain (`SyntheticSharesOracle.getSValue`, read on 13 November: TSLAon
+1.000000, NVDAon 1.001715 on BNB; SPYon 1.009473 on Ethereum). `ElpidaOndoStockFeed` answers price × multiplier like
+a Chainlink feed and refuses while Ondo pauses a token for a corporate action, so the V2 factory and the stock list use
+it unchanged. One small contract per stock; nothing in it can change after deployment.
+
+- BNB: `config/stocks/candidates/bnb-ondo-underlying.json`, 13 stocks (AAPL, AMZN, COIN, GME, GOOGL, JPM, META, MRNA,
+  MSFT, NFLX, NVDA, PFE, TSLA). Morgan Stanley has a Chainlink feed but no Ondo token page under that name.
+- Ethereum: `config/stocks/candidates/ethereum-ondo-underlying.json`, GOOGLon and NVDAon (Chainlink's 24/5 feeds), on
+  top of the 8 with direct feeds.
+
+1. Check (reads only), with a BNB RPC:
+   ```
+   $env:ELPIDA_MAINNET_RPC_URL="<BNB RPC>"
+   node scripts/ondo-stock-feeds.mjs check --network bnb --list config/stocks/candidates/bnb-ondo-underlying.json
+   ```
+2. With your go-ahead at the time: `deploy` instead of `check` (13 contracts, a few cents each on BNB). It asks for the
+   deployer key with the hidden prompt and a typed DEPLOY, then writes `deployments/bnb-ondo-feeds.json` and
+   `config/stocks/candidates/bnb-ondo-adapted.json`.
+3. `node scripts/stock-list.mjs bnb config/stocks/candidates/bnb-ondo-adapted.json` (with `STOCK_LIST_RPC_URL`), push
+   the results on a branch, then approve the list from the operator panel after the BNB deploy (Safe batches).
+
+Pyth (for stocks Chainlink does not cover) is a later step; it needs a price update in the launch transaction.
+
 ## Solana devnet: USDC payouts (program upgrade), 11 November 2026
 
 After the Solana USDC payouts PR is merged:

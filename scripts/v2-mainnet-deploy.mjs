@@ -365,7 +365,7 @@ export function deployerKey(input) {
 }
 
 /** Reads one line from the terminal without echoing it. */
-async function askHidden(prompt) {
+export async function askHidden(prompt) {
   const { stdin, stdout } = process;
   if (!stdin.isTTY) throw new Error('Run deploy in a terminal (it asks for the deployer key), or set ELPIDA_MAINNET_DEPLOYER_KEY.');
   stdout.write(prompt);

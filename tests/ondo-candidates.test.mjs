@@ -21,3 +21,18 @@ test('Ethereum Ondo candidates: eight stocks, valid addresses and feeds, at most
   }
   assert.ok(!list.some(s => s.symbol === 'FLHYon'), 'FLHYon waits until Chainlink lists one calculated feed for it');
 });
+
+test('underlying-feed candidates (BNB 13, Ethereum 2): valid, no duplicates, matching the registry, and no overlap with Ethereum’s direct feeds', () => {
+  const registry = read('config/tokenized-equity-registry.json'), direct = read('config/stocks/candidates/ethereum-ondo.json').map(s => s.symbol);
+  for (const [network, file, count] of [['bnb', 'config/stocks/candidates/bnb-ondo-underlying.json', 13], ['ethereum', 'config/stocks/candidates/ethereum-ondo-underlying.json', 2]]) {
+    const list = read(file), seen = new Set();
+    assert.equal(list.length, count, file);
+    for (const s of list) {
+      assert.match(s.symbol, /^[A-Z]{2,6}on$/); getAddress(s.address.toLowerCase()); getAddress(s.underlyingFeed.toLowerCase());
+      for (const k of [s.symbol, s.address.toLowerCase(), s.underlyingFeed.toLowerCase()]) { assert.ok(!seen.has(k), `duplicate ${k}`); seen.add(k); }
+      const known = registry.assets.find(a => a.provider === 'ondo' && a.network === network && a.symbol === s.symbol);
+      if (known) assert.equal(known.address.toLowerCase(), s.address.toLowerCase(), `${network} ${s.symbol} matches the registry`);
+      if (network === 'ethereum') assert.ok(!direct.includes(s.symbol), `${s.symbol} already has a direct feed`);
+    }
+  }
+});
