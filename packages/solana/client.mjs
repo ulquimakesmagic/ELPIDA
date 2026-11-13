@@ -152,6 +152,7 @@ export const DISCRIMINATORS = {
   BetaCreator: [196, 152, 244, 127, 100, 59, 189, 139],
   updateCurveConfig: [23, 123, 231, 253, 103, 196, 100, 218],
   setPricing: [52, 200, 157, 192, 18, 134, 57, 123],
+  setQuotePricing: [213, 232, 6, 111, 126, 174, 223, 196],
   PricingConfig: [126, 131, 53, 131, 89, 154, 123, 85],
   PriceUpdateV2: [34, 241, 35, 99, 157, 126, 244, 205],
   reopenCurve: [133, 7, 138, 0, 67, 115, 150, 12],
@@ -324,6 +325,8 @@ export const PROGRAM_ERRORS = [
   'This round is closed.',
   'Flywheel limits: tokens a day old, at most 10% of the vault per order, one order per token every 6 hours.',
   'The flywheel never completes a curve.',
+  'A stock pair needs its quote pricing and price account.',
+  'The stock is paused by its issuer. Try again when it trades again.',
 ];
 
 /** Turns a Solana/Anchor error into a readable message. */
@@ -590,6 +593,8 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
   const metadataPda = mint => PublicKey.findProgramAddressSync([enc('metadata'), mplProgram.toBytes(), key(mint).toBytes()], mplProgram)[0];
   const betaCreatorPda = creator => PublicKey.findProgramAddressSync([enc('beta-creator'), key(creator).toBytes()], programId)[0];
   const pricingPda = config => PublicKey.findProgramAddressSync([enc('pricing'), key(config).toBytes()], programId)[0];
+  /** V2 stock pairs: the stock's own USD pricing (PDA ["quote-pricing", config]). */
+  const quotePricingPda = config => PublicKey.findProgramAddressSync([enc('quote-pricing'), key(config).toBytes()], programId)[0];
   const migrationPda = mint => PublicKey.findProgramAddressSync([enc('pump-migration'), key(mint).toBytes()], programId)[0];
   const partnerPda = creator => PublicKey.findProgramAddressSync([enc('partner'), key(creator).toBytes()], programId)[0];
   const ataWith = (owner, mint, program) => PublicKey.findProgramAddressSync([key(owner).toBytes(), key(program).toBytes(), key(mint).toBytes()], ataProgram)[0];
@@ -673,7 +678,8 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
         concat(DISCRIMINATORS.addV2Config, encodeCurveParams(params)));
     },
     /** ELPIDA V2 launch: `feeBps` is the token's own fee (the pair's minimum to 4%, fixed for good); first buy at most 3%. */
-    launchV2({ creator, config, mint, name, symbol, feeBps, firstBuy = 0n, minTokensOut = 0n, reward, uri, priceUpdate = null, maxFee = (1n << 64n) - 1n, usdc = null }) {
+    /** `stockPriceUpdate`: stock pairs only, the stock's bound Pyth price account (its quote pricing goes first in the remaining accounts). */
+    launchV2({ creator, config, mint, name, symbol, feeBps, firstBuy = 0n, minTokensOut = 0n, reward, uri, priceUpdate = null, maxFee = (1n << 64n) - 1n, usdc = null, stockPriceUpdate = null }) {
       if (!validMetadataUri(uri) || uri.length > MAX_LAUNCH_URI) throw new Error(PROGRAM_ERRORS[30]);
       if (!validV2Symbol(symbol)) throw new Error('Tickers are 1 to 10 letters or digits.');
       const pool = poolPda(mint), cfg = config.address;
@@ -683,7 +689,7 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
         meta(mint, true, true), meta(pool, true), meta(ata(pool, mint), true), meta(qata(pool, config), true),
         meta(qata(creator, config), true), meta(ata(creator, mint), true), meta(tokenProgram), meta(qp(config)), meta(ataProgram), meta(SystemProgram.programId),
         meta(betaGatePda), meta(betaCreatorPda(creator)), meta(pricingPda(cfg)), meta(priceUpdate ?? SystemProgram.programId),
-        meta(metadataPda(mint), true), meta(mplProgram), ...usdcMetas,
+        meta(metadataPda(mint), true), meta(mplProgram), ...(stockPriceUpdate ? [meta(quotePricingPda(cfg)), meta(stockPriceUpdate)] : []), ...usdcMetas,
       ], concat(DISCRIMINATORS.launchV2, str(name), str(symbol), u16(feeBps), u64(firstBuy), u64(minTokensOut), key(reward).toBytes(), u64(maxFee), [usdc ? 1 : 0], str(uri)));
     },
     /** Permissionless: pays a V2 pool's owed shares to the creator, the three reward vaults and the treasury. */
@@ -854,6 +860,14 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
       return ix([meta(authority, true, true), meta(config), meta(pricingPda(config), true), meta(priceUpdate), meta(programId), meta(programDataAddress), meta(SystemProgram.programId)],
         concat(DISCRIMINATORS.setPricing, feed, u32(maxAgeSecs), u16(maxConfBps), u64(feeUsdE6), u64(startFdvUsdE6), key(usdcMint ?? PublicKey.default).toBytes()));
     },
+    /** Upgrade authority, V2 stock pairs: the stock's USD price (Pyth `feedId` bound to `priceUpdate`) and the dollar start. */
+    setQuotePricing({ authority, config, quoteMint, priceUpdate, feedId, maxAgeSecs = 4 * 86_400, maxConfBps = 300, startFdvUsdE6 }) {
+      const feed = Uint8Array.from(String(feedId).replace(/^0x/, '').match(/../g).map(b => parseInt(b, 16)));
+      if (feed.length !== 32) throw new Error('feedId must be 32 bytes of hex.');
+      return ix([meta(authority, true, true), meta(config), meta(quoteMint), meta(quotePricingPda(config), true), meta(priceUpdate), meta(programId), meta(programDataAddress), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.setQuotePricing, feed, u32(maxAgeSecs), u16(maxConfBps), u64(0n), u64(BigInt(startFdvUsdE6)), PublicKey.default.toBytes()));
+    },
+    quotePricingFor: config => quotePricingPda(config),
     /** Decodes a PricingConfig account, or null when the bytes are not one. */
     decodePricing(raw) {
       const bytes = raw ? new Uint8Array(raw) : null;

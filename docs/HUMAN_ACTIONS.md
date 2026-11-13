@@ -25,6 +25,23 @@
 - **Wallet + X + website allocations** no longer fail with "Every allocation share must be above zero": the shares were read from a field the form no longer fills. Nothing to do.
 - **Share fees with holders** now asks for dollars: a distribution threshold (default $20) and a minimum holding value (default $20), both editable. The threshold is converted to the pair asset at the launch-time price and fixed in the vault; the vault also records both dollar figures (ElpidaV2CreatorRewards version 2). The keeper applies the minimum holding value at the token's last trade price each round, and waits rather than guess when there is no fresh price. Earlier vaults keep working.
 - **Conversion pools** (native coin ↔ test stock) can now be funded on Ethereum Sepolia, Base Sepolia, BNB testnet and Robinhood testnet: Operator panel → Pairs → "conversion liquidity", with the stock's controller wallet (at most 0.1 test coin per setup; PancakeSwap uses its 1% tier). Do this on Robinhood for tTSLAon (0xc6df…af87) so the token page can take ETH.
+## Solana: V2 stock pairs (Ondo), 13 November 2026
+
+V2 now takes issuer-controlled stocks (Ondo's Token-2022 mints) as pairs that graduate into the program's own locked
+pool. Each launch starts at the stock's dollar value: Pyth's share price (bound per pair with `set_quote_pricing`)
+times the mint's ScaledUiAmount multiplier; a paused mint cannot launch. The $10 fee stays priced in SOL. Checked on
+13 November: Solana mainnet TSLAon is Token-2022, 9 decimals, multiplier 1, Pausable, a freeze authority, and a
+TransferHook with no program set, which the program accepts.
+
+| Build | Size | Rent at deploy | SHA256 (Solana CLI 2.3.13) |
+|---|---|---|---|
+| test (`--features testnet`, devnet) | 1,159,416 bytes | — | `8856e1702e3f6d70401e07a559a027665e1b68929fb95c5cd4da4ae180e90a7b` |
+| mainnet (`--features no-idl`) | 856,528 bytes (+27 KB for stock pricing) | about 5.97 SOL | `b517c41f915376c5516319bfe6eab1e81db1e7b6032bb1057616aa755aa40e69` |
+
+Not yet: the site's Solana stock launch (posting a fresh Pyth price first) and the Solana mainnet deploy path. If Ondo
+ever sets a transfer-hook program on its mints, stock transfers through the program stop until it passes that hook's
+accounts.
+
 ## Ondo stocks on Ethereum mainnet, 13 November 2026
 
 Malik, 13 November: Ondo stocks go live without waiting for Ondo's reply, with neutral wording (no "powered by"), and

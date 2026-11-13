@@ -423,6 +423,32 @@ pub mod elpida_launchpad {
         Ok(())
     }
 
+    /// Upgrade authority, V2 stock pairs (Ondo, 13 November): the stock's own USD price (PDA ["quote-pricing", config]),
+    /// a Pyth feed bound to one price account, so each launch starts at `start_fdv_usd_e6` worth of the stock at
+    /// Pyth's price times the mint's ScaledUiAmount multiplier. The $10 fee stays priced by the config's SOL/USD
+    /// `pricing`. Stock markets close for weekends, so the price may be up to four days old.
+    pub fn set_quote_pricing(ctx: Context<SetQuotePricing>, params: PricingParams) -> Result<()> {
+        require!(params.max_age_secs > 0 && params.max_age_secs <= STOCK_PRICE_MAX_AGE, ElpidaError::InvalidParams);
+        require!(params.max_conf_bps > 0 && params.max_conf_bps <= 1_000, ElpidaError::InvalidParams);
+        require!(params.fee_usd_e6 == 0 && params.usdc_mint == Pubkey::default(), ElpidaError::InvalidParams);
+        require!(params.start_fdv_usd_e6 > 0 && params.start_fdv_usd_e6 <= 100_000_000 * 1_000_000, ElpidaError::InvalidParams);
+        require!(ctx.accounts.curve_config.model_version == V2_MODEL_VERSION, ElpidaError::NotV2);
+        require!(locked_pool_venue(&ctx.accounts.quote_mint.to_account_info())?, ElpidaError::UnsupportedQuote);
+        let p = &mut ctx.accounts.quote_pricing;
+        p.config = ctx.accounts.curve_config.key();
+        p.price_feed = ctx.accounts.price_update.key();
+        p.feed_id = params.feed_id;
+        p.max_age_secs = params.max_age_secs;
+        p.max_conf_bps = params.max_conf_bps;
+        p.fee_usd_e6 = 0;
+        p.start_fdv_usd_e6 = params.start_fdv_usd_e6;
+        p.usdc_mint = Pubkey::default();
+        p.bump = ctx.bumps.quote_pricing;
+        let price = read_price(&ctx.accounts.price_update.to_account_info(), p, Clock::get()?.unix_timestamp)?;
+        emit!(PricingConfigSet { config: p.config, price_feed: p.price_feed, fee_usd_e6: 0, start_fdv_usd_e6: p.start_fdv_usd_e6, usdc_mint: Pubkey::default(), price: price.price, exponent: price.exponent, publish_time: price.publish_time });
+        Ok(())
+    }
+
     #[cfg(feature = "testnet")]
     /// `max_fee`: the most lamports the creator accepts for the SOL creation fee (price movement guard).
     /// `fee_in_usdc`: pay the USD fee in USDC instead; the four USDC accounts follow in remaining accounts.
@@ -629,14 +655,14 @@ pub mod elpida_launchpad {
 
     /// ELPIDA V2, upgrade authority: a V2 trading pair for `quote_mint` (PDA ["curve-config-v2", quote_mint]). Pools
     /// fix their own fee at launch, from `base_fee_bps` (the minimum) to 4%, with the 90% anti-snipe start over 60 s and
-    /// a 3% first-buy cap. Quotes that would need the locked pool (no DEX venue) are refused: V2 graduates to a DEX.
+    /// a 3% first-buy cap. Issuer-controlled stocks (Ondo, 13 November) graduate into the program's own locked pool, as
+    /// no Solana DEX accepts their mints; their launches need `set_quote_pricing` (the stock's USD price) as well.
     pub fn add_v2_config(ctx: Context<AddV2Config>, params: CurveParams) -> Result<()> {
         check_v2_config(&params)?;
         let bump = ctx.bumps.curve_config;
         let (quote_mint, treasury) = (ctx.accounts.quote_mint.key(), ctx.accounts.treasury.key());
         let info = ctx.accounts.quote_mint.to_account_info();
         check_quote_mint(&info)?;
-        require!(!locked_pool_venue(&info)?, ElpidaError::UnsupportedQuote);
         let config = &mut ctx.accounts.curve_config;
         write_config(config, quote_mint, ctx.accounts.quote_mint.decimals, treasury, &params, bump)?;
         config.model_version = V2_MODEL_VERSION;
@@ -663,10 +689,17 @@ pub mod elpida_launchpad {
         let a = &ctx.accounts;
         let tp = a.token_program.to_account_info();
         let decimals = a.quote_mint.decimals;
+        // Stock pairs: the stock's quote pricing and price account come first in the remaining accounts (the four USDC
+        // fee accounts, when paying in USDC, follow them), and the launch starts at the stock's dollar value.
+        let stock = locked_pool_venue(&a.quote_mint.to_account_info())?;
+        let (stock_start, remaining) = if stock {
+            require!(ctx.remaining_accounts.len() >= 2, ElpidaError::QuotePricingRequired);
+            (Some(stock_start_quote(&ctx.remaining_accounts[0], &ctx.remaining_accounts[1], &a.quote_mint.to_account_info(), &a.curve_config.key(), decimals, now)?), &ctx.remaining_accounts[2..])
+        } else { (None, &ctx.remaining_accounts[..]) };
         let start_quote = pay_creation_fee(&CreationFee {
             creator: a.creator.to_account_info(), treasury: a.treasury.to_account_info(), system_program: a.system_program.to_account_info(),
             pricing: a.pricing.to_account_info(), price_update: a.price_update.to_account_info(), config: a.curve_config.key(), launch_fee: cfg.launch_fee, mint: a.mint.key(),
-        }, ctx.remaining_accounts, max_fee, fee_in_usdc, now)?;
+        }, remaining, max_fee, fee_in_usdc, now)?.or(stock_start);
         token::mint_to(CpiContext::new(tp.clone(), MintTo { mint: a.mint.to_account_info(), to: a.token_vault.to_account_info(), authority: a.creator.to_account_info() }), TOKEN_SUPPLY)?;
         create_metadata(&a.token_metadata_program, &a.metadata, &a.mint.to_account_info(), &a.creator.to_account_info(), &a.pool.to_account_info(), &a.system_program.to_account_info(), &name, &symbol, &uri)?;
         token::set_authority(CpiContext::new(tp.clone(), SetAuthority { current_authority: a.creator.to_account_info(), account_or_mint: a.mint.to_account_info() }), AuthorityType::MintTokens, None)?;
@@ -1868,6 +1901,58 @@ pub fn usd_to_quote(usd_e6: u64, px: &OraclePrice, decimals: u32) -> Result<u64>
     Ok(v as u64)
 }
 
+/// The oldest stock price a launch accepts: a weekend and a market holiday (as the EVM factory's stock feeds).
+pub const STOCK_PRICE_MAX_AGE: u32 = 4 * 86_400;
+
+/// A stock pair's starting reserve: `start_fdv_usd_e6` of the stock at Pyth's price times the mint's current
+/// ScaledUiAmount multiplier (shares per token). Refuses a paused mint and a quote pricing account that is not this
+/// config's ["quote-pricing", config] PDA.
+pub fn stock_start_quote(pricing: &AccountInfo, price_update: &AccountInfo, mint: &AccountInfo, config: &Pubkey, decimals: u8, now: i64) -> Result<u64> {
+    require!(*pricing.owner == crate::ID && !pricing.data_is_empty(), ElpidaError::QuotePricingRequired);
+    let p = PricingConfig::try_deserialize(&mut &pricing.try_borrow_data()?[..])?;
+    let expected = Pubkey::create_program_address(&[b"quote-pricing", config.as_ref(), &[p.bump]], &crate::ID).map_err(|_| error!(ElpidaError::QuotePricingRequired))?;
+    require_keys_eq!(pricing.key(), expected, ElpidaError::QuotePricingRequired);
+    require_keys_eq!(p.config, *config, ElpidaError::QuotePricingRequired);
+    let px = read_price(price_update, &p, now)?;
+    let (multiplier_e12, paused) = stock_mint_terms(&mint.try_borrow_data()?, now)?;
+    require!(!paused, ElpidaError::QuotePaused);
+    let adjusted = (px.price as u128).checked_mul(multiplier_e12).ok_or(ElpidaError::MathOverflow)? / 1_000_000_000_000;
+    require!(adjusted > 0 && adjusted <= i64::MAX as u128, ElpidaError::PriceUnavailable);
+    usd_to_quote(p.start_fdv_usd_e6, &OraclePrice { price: adjusted as i64, exponent: px.exponent, publish_time: px.publish_time }, decimals as u32)
+}
+
+/// A Token-2022 mint's ScaledUiAmount multiplier in effect at `now` (12 decimals; 1.0 without the extension) and its
+/// Pausable state. ScaledUiAmount (25): authority 32, multiplier f64, new-multiplier timestamp i64, new multiplier f64.
+/// Pausable (26): authority 32, paused bool.
+pub fn stock_mint_terms(data: &[u8], now: i64) -> Result<(u128, bool)> {
+    const BASE: usize = 165;
+    let (mut multiplier, mut paused) = (1_000_000_000_000u128, false);
+    if data.len() <= BASE || data[BASE] != 1 { return Ok((multiplier, paused)); }
+    let mut offset = BASE + 1;
+    while offset + 4 <= data.len() {
+        let kind = u16::from_le_bytes([data[offset], data[offset + 1]]);
+        let len = u16::from_le_bytes([data[offset + 2], data[offset + 3]]) as usize;
+        let value = data.get(offset + 4..offset + 4 + len).ok_or(ElpidaError::UnsupportedQuote)?;
+        match kind {
+            0 => break,
+            25 => {
+                require!(len >= 56, ElpidaError::UnsupportedQuote);
+                let current = f64::from_le_bytes(value[32..40].try_into().unwrap());
+                let at = i64::from_le_bytes(value[40..48].try_into().unwrap());
+                let next = f64::from_le_bytes(value[48..56].try_into().unwrap());
+                let m = if now >= at { next } else { current };
+                require!(m.is_finite() && m > 0.0 && m <= 1_000.0, ElpidaError::UnsupportedQuote);
+                multiplier = (m * 1e12).round() as u128;
+            }
+            26 => { require!(len >= 33, ElpidaError::UnsupportedQuote); paused = value[32] != 0; }
+            _ => {}
+        }
+        offset += 4 + len;
+    }
+    require!(multiplier > 0, ElpidaError::UnsupportedQuote);
+    Ok((multiplier, paused))
+}
+
 /// Linear decay from `snipe_start_bps` at launch to `base_fee_bps` at the end of the window.
 pub fn current_fee_bps(cfg: &CurveConfig, created_at: i64, now: i64) -> u64 {
     let base = cfg.base_fee_bps as u64;
@@ -2782,6 +2867,24 @@ pub struct SetPricing<'info> {
     pub system_program: Program<'info, System>,
 }
 
+#[derive(Accounts)]
+pub struct SetQuotePricing<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    #[account(has_one = quote_mint)]
+    pub curve_config: Box<Account<'info, CurveConfig>>,
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(init_if_needed, payer = authority, space = 8 + PricingConfig::INIT_SPACE, seeds = [b"quote-pricing", curve_config.key().as_ref()], bump)]
+    pub quote_pricing: Box<Account<'info, PricingConfig>>,
+    /// CHECK: validated by `read_price` and then bound.
+    pub price_update: UncheckedAccount<'info>,
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ ElpidaError::Unauthorized)]
+    pub program: Program<'info, crate::program::ElpidaLaunchpad>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ ElpidaError::Unauthorized)]
+    pub program_data: Box<Account<'info, ProgramData>>,
+    pub system_program: Program<'info, System>,
+}
+
 /// Oracle pricing for one curve config (PDA ["pricing", config]).
 #[account]
 #[derive(InitSpace)]
@@ -3437,4 +3540,6 @@ pub enum ElpidaError {
     #[msg("This round is closed")] RoundClosed,
     #[msg("Flywheel limits: tokens a day old, at most 10% of the vault per order, one order per token every 6 hours")] FlywheelLimit,
     #[msg("The flywheel never completes a curve")] FlywheelWouldComplete,
+    #[msg("A stock pair needs its quote pricing and price account")] QuotePricingRequired,
+    #[msg("The stock is paused by its issuer")] QuotePaused,
 }
