@@ -3,7 +3,7 @@
 // collects the token's fees from the pool and pays that wallet. Anyone may press it; the money only goes to the wallet.
 import { JsonRpcProvider, formatUnits } from '/vendor/ethers.js';
 import { h, short, number, errorText, copyButton, icon, usdRate } from './ui.mjs';
-import { creatorSplitState, creatorStrategyState, identityAllocationState, allocationKind, creatorWalletState } from './v2-launchpad.mjs';
+import { creatorSplitState, creatorStrategyState, identityAllocationState, allocationKind, creatorWalletState, creatorEarnings } from './v2-launchpad.mjs';
 
 /** How often an allocation card re-reads the chain while it is on screen and the tab is visible. */
 export const ALLOCATION_REFRESH_MS = 12_000;
@@ -21,6 +21,9 @@ export function keepFresh(card, load, every = ALLOCATION_REFRESH_MS) {
   };
   const wake = () => { if (document.visibilityState === 'visible' && card.isConnected) { clearTimeout(timer); tick(); } };
   document.addEventListener('visibilitychange', wake);
+  // The token page announces each new trade it sees: refresh at once instead of waiting for the next tick.
+  const onTrade = () => { if (!card.isConnected) { document.removeEventListener('elpida:trade', onTrade); return; } wake(); };
+  document.addEventListener('elpida:trade', onTrade);
   timer = setTimeout(tick, every);
 }
 
@@ -44,7 +47,7 @@ export function creatorSplitCard(ctx, token) {
       h('p.small.muted', `The creator's 30% share is split between these wallets, fixed for good by contract `, h('span.mono', short(state.vault)), '. Fees still in the pool are collected when a share is paid out.'),
       h('ul.split-list', state.rows.map(r => h('li',
         h('span.mono', { title: r.wallet }, short(r.wallet)), h('span.split-share', `${number(r.bps / 100, 2)}%`),
-        claimableUsd(token, r.claimable, decimals, symbol),
+        amountCell(token, r, decimals, symbol),
         h('button.btn.btn-secondary.btn-sm', { type: 'button', disabled: ctx.mode !== 'testnet', title: ctx.mode !== 'testnet' ? 'Connect a wallet on this network to pay out.' : undefined, on: { click: async () => {
           if (busy) return; busy = true; error.textContent = '';
           try { await ctx.run('claim-creator-split', { token: token.address, wallet: r.wallet }); await load(); } catch (e) { error.textContent = errorText(e); } finally { busy = false; }
@@ -132,7 +135,7 @@ export function identityAllocationCard(ctx, token) {
         h('span', { title: r.wallet ?? '' }, name(r), r.wallet ? h('span.verified-tick', { title: r.kind === 'wallet' ? 'Wallet fixed at launch' : `Verified: pays ${r.wallet}`, 'aria-label': 'Verified' }, icon('badge-check', 'icon-xs')) : null,
           r.kind !== 'wallet' ? h('small.muted', r.wallet ? ` · pays ${short(r.wallet)}` : ' · not verified') : null),
         h('span.split-share', `${number(r.bps / 100, 2)}%`),
-        claimableUsd(token, r.claimable, decimals, symbol),
+        amountCell(token, r, decimals, symbol),
         r.wallet ? h('button.btn.btn-secondary.btn-sm', { type: 'button', disabled: ctx.mode !== 'testnet', on: { click: () => act(async () => { await ctx.run('claim-identity-row', { token: token.address, index: r.index }); await load(); }) } }, 'Collect and pay out')
           : h('button.btn.btn-secondary.btn-sm', { type: 'button', disabled: r.kind === 'x' && !ctx.config?.v2Identities?.x, title: r.kind === 'x' && !ctx.config?.v2Identities?.x ? 'X sign-in is not set up on this server yet.' : undefined, on: { click: () => verify(r) } }, 'Verify ownership')))));
   }
@@ -164,7 +167,7 @@ export function creatorWalletCard(ctx, token) {
       h('ul.split-list', h('li',
         h('span', { title: r.wallet }, h('span.mono', short(r.wallet)), h('span.verified-tick', { title: 'Wallet fixed at launch', 'aria-label': 'Verified' }, icon('badge-check', 'icon-xs'))),
         h('span.split-share', '100%'),
-        claimableUsd(token, r.claimable, decimals, symbol),
+        amountCell(token, r, decimals, symbol),
         h('button.btn.btn-secondary.btn-sm', { type: 'button', disabled: ctx.mode !== 'testnet' || r.claimable === 0n, title: ctx.mode !== 'testnet' ? 'Connect a wallet on this network to pay out.' : r.claimable === 0n ? 'Nothing to collect yet.' : undefined, on: { click: async () => {
           if (busy) return; busy = true; error.textContent = '';
           try { await ctx.run('claim-v2-creator', { token: token.address }); await load(); } catch (e) { error.textContent = errorText(e); } finally { busy = false; }
@@ -183,9 +186,27 @@ const v2Evm = (ctx, token) => token?.deploymentModel === 'v2-hook' && !String(to
  */
 export function claimFeesTag(ctx, token) {
   const net = v2Evm(ctx, token); if (!net) return null;
-  const tag = h('a.tk-tag.tk-tag-claim', { href: claimHref(token), hidden: true, title: 'This token shares its creator fees. Recipients claim here: wallets collect; X accounts and websites verify ownership first.' }, icon('coins', 'icon-xs'), 'Claim fees');
-  const provider = ctx.wallet?.net?.key === net.key && ctx.wallet?.provider ? ctx.wallet.provider : new JsonRpcProvider(net.rpcUrl, net.chainId, { staticNetwork: true });
-  allocationKind({ provider, net, token: token.address }).then(kind => { tag.hidden = !kind; }).catch(() => {});
+  const native = token.pair === 'native', decimals = native ? 18 : Number(token.quoteDecimals ?? 18), symbol = native ? net.nativeCurrency?.symbol ?? 'ETH' : token.quoteSymbol;
+  // Every V2 token shows its lifetime creator fees beside the coins icon (Malik, 14 Nov), refreshed with each trade.
+  // Tokens that share the creator fee also link to their claim page.
+  const amount = h('span.tk-tag-amount', '…'), label = h('span', 'Creator fees');
+  const tag = h('a.tk-tag.tk-tag-claim', { href: claimHref(token), hidden: true }, icon('coins', 'icon-xs'), label, amount);
+  const provider = () => (ctx.wallet?.net?.key === net.key && ctx.wallet?.provider ? ctx.wallet.provider : new JsonRpcProvider(net.rpcUrl, net.chainId, { staticNetwork: true }));
+  let kind;
+  async function load() {
+    try {
+      if (kind === undefined) kind = await allocationKind({ provider: provider(), net, token: token.address }).catch(() => null);
+      const e = await creatorEarnings({ provider: provider(), net, token: token.address });
+      if (!e) { tag.hidden = true; return; }
+      const fmt = v => claimableUsd(token, v, decimals, symbol).textContent;
+      amount.textContent = fmt(e.earned);
+      tag.title = `Lifetime creator fees: ${fmt(e.earned)}. Already sent out of the pool: ${fmt(e.paid)}; waiting to be collected: ${fmt(e.owed)}.${kind ? ' Recipients claim on the linked page.' : ''}`;
+      label.textContent = kind ? 'Claim fees ·' : 'Creator fees';
+      if (!kind) { tag.removeAttribute('href'); tag.setAttribute('role', 'note'); }
+      tag.hidden = false;
+    } catch { /* keep the last value */ }
+  }
+  load().then(() => keepFresh(tag, load));
   return tag;
 }
 
@@ -220,6 +241,11 @@ export function allocationClaimView(ctx, { address, network, xResult = null }) {
  * What a recipient can claim, in dollars (Malik, 11 Nov: USD, not the pair asset), from the token's price reference.
  * The amount in the pair asset stays in the tooltip; without a fresh price the cell says so rather than guess.
  */
+/** What a row can collect now and, under it, what it has already been paid (Malik, 14 Nov). */
+export function amountCell(token, r, decimals, symbol) {
+  return h('span.split-amounts', claimableUsd(token, r.claimable, decimals, symbol),
+    r.claimed !== undefined ? h('small.split-claimed', 'Claimed ', claimableUsd(token, r.claimed, decimals, symbol)) : null);
+}
 export function claimableUsd(token, amount, decimals, symbol) {
   const units = Number(formatUnits(amount ?? 0n, decimals)), rate = usdRate(token), detail = `${number(units, 6)} ${symbol}`;
   if (rate === null || !Number.isFinite(rate)) return h('span.split-amount.muted', { title: detail }, units > 0 ? 'Awaiting a price' : '$0');

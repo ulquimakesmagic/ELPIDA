@@ -10,7 +10,7 @@ import { v4Artifacts } from '../apps/api/v4-artifacts.mjs';
 import { V2Indexer } from '../packages/indexer/v2-indexer.mjs';
 import { V2_MODEL, splitFee } from '../packages/core/v2-economics.mjs';
 
-const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom, v2StockPairs, approveV2Stock, claimCreatorSplit, creatorSplitState, creatorStrategyState, identityAllocationState, claimIdentityRow, allocationKind, creatorWalletState, claimV2CreatorFees } = await import('../apps/web/v2-launchpad.mjs');
+const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom, v2StockPairs, approveV2Stock, claimCreatorSplit, creatorSplitState, creatorStrategyState, identityAllocationState, claimIdentityRow, allocationKind, creatorWalletState, claimV2CreatorFees, creatorEarnings } = await import('../apps/web/v2-launchpad.mjs');
 const { v2Deployment, v4Quote, v4Trade, isV4Token, isV2Token, v4WithdrawFees } = await import('../apps/web/v4-launchpad.mjs');
 
 function browser(t) {
@@ -112,6 +112,13 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   await claimV2CreatorFees(bw, { token: item.address });
   assert.equal(await f.provider.getBalance(cw.address) - creatorBefore, owedBefore, 'collecting pays exactly what the card showed');
   assert.equal((await creatorWalletState({ provider: f.provider, net, token: item.address })).rows[0].claimable, 0n);
+  // Lifetime creator fees (the header tag) are what was paid out plus what is waiting; the card shows what was claimed.
+  const earned = await creatorEarnings({ provider: f.provider, net, token: item.address });
+  assert.equal(earned.owed, 0n); assert.equal(earned.earned, earned.paid);
+  assert.equal((await creatorWalletState({ provider: f.provider, net, token: item.address })).rows[0].claimed, earned.paid);
+  await v4Trade(bw, item, 'buy', { amount: '0.01', slippage: '1' });
+  const after = await creatorEarnings({ provider: f.provider, net, token: item.address });
+  assert.ok(after.earned > earned.earned && after.owed > 0n && after.paid === earned.paid, 'a trade raises the lifetime total at once');
 
   // Creator split: the creator's 30% goes to an ownerless split contract for 3 wallets (50/30/20); each wallet is paid
   // only its share, whoever presses the button; a second launch with the same split reuses the same contract.
@@ -205,6 +212,14 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   const beforeOwner = await f.provider.getBalance(ownerAddr);
   await claimIdentityRow(cw, { token: ids.token, index: 1 });
   assert.ok(await f.provider.getBalance(ownerAddr) > beforeOwner, 'the verified website owner was paid');
+  // Each row shows what it has already been paid: the wallet and website rows were paid out, the X row was not.
+  const paidRows = await identityAllocationState({ provider: f.provider, net, token: ids.token });
+  assert.ok(paidRows.rows[0].claimed > 0n && paidRows.rows[1].claimed > 0n, 'paid rows show what they received');
+  assert.equal(paidRows.rows[2].claimed, 0n, 'an unpaid row shows nothing claimed');
+  assert.ok(paidRows.rows[1].claimed >= (await f.provider.getBalance(ownerAddr)) - beforeOwner - 2n, 'the website row\'s claimed amount is what its owner received');
+  const e2 = await creatorEarnings({ provider: f.provider, net, token: ids.token });
+  const total = paidRows.rows.reduce((a, r) => a + r.claimed + r.claimable, 0n);
+  assert.ok(total <= e2.earned && e2.earned - total <= 10n, `claimed plus claimable adds up to the lifetime total (${total} of ${e2.earned})`);
   // Only the verifier can bind; an allocation verified by another server is refused.
   await assert.rejects(new Contract(vaultAddr, v4Art('ElpidaV2IdentityAllocation').abi, bw.signer).bind(2, bw.address));
   const other = new V2Identities({ signerFor: () => ({ signer: f.signers[0], chainId: 31337 }), x, dnsResolver: async () => [] });
