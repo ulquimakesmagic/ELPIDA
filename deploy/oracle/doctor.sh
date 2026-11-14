@@ -3,13 +3,14 @@
 #   sudo bash /opt/elpida/app/deploy/oracle/doctor.sh
 set -uo pipefail
 ENVF="${ELPIDA_ENV_FILE:-/etc/elpida/elpida.env}"
-[ "$(id -u)" = 0 ] || { echo "Run it with sudo."; exit 1; }
+# ELPIDA_DOCTOR_NO_ROOT=1 is for the test suite only (CI runs as a normal user); on the VM always use sudo.
+[ "$(id -u)" = 0 ] || [ "${ELPIDA_DOCTOR_NO_ROOT:-}" = 1 ] || { echo "Run it with sudo."; exit 1; }
 say() { printf '%-22s %s\n' "$1" "$2"; }
 
 say "host" "$(. /etc/os-release; echo "$PRETTY_NAME") $(uname -m), $(nproc) CPU, $(free -g | awk '/^Mem/{print $2" GB RAM, "$7" GB free"}')"
 say "disk" "$(df -h /var/lib | awk 'NR==2{print $4" free of "$2}'), data $(du -sh /var/lib/elpida 2>/dev/null | cut -f1)"
 say "node" "$(node --version 2>/dev/null || echo missing)"
-say "code" "$(sudo -u elpida git -C /opt/elpida/app log -1 --format='%h %cs %s' 2>/dev/null | cut -c1-80)"
+say "code" "$(sudo -n -u elpida git -C /opt/elpida/app log -1 --format='%h %cs %s' 2>/dev/null | cut -c1-80)"
 say "mode" "$([ -f /etc/elpida/staging.env ] && echo 'STAGING (keepers and backups off)' || echo 'PRODUCTION')"
 say "elpida service" "$(systemctl is-active elpida) since $(systemctl show elpida -p ActiveEnterTimestamp --value)"
 say "cloudflared" "$(systemctl is-active cloudflared 2>/dev/null)"
