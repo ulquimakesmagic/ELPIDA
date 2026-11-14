@@ -55,3 +55,12 @@ test('avatars ask for a thumbnail of stored logos only, at twice their displayed
   assert.equal(thumbnailUrl('https://example.com/logo.png', 82), 'https://example.com/logo.png');
   assert.equal(thumbnailUrl('/api/wallet-logo/base/0x0000000000000000000000000000000000000001', 82), '/api/wallet-logo/base/0x0000000000000000000000000000000000000001');
 });
+
+test('logos Elpida served under its old Railway address load from this site; other hosts are left alone', async () => {
+  const { thumbnailUrl, ownImagePath } = await import('../apps/web/ui.mjs');
+  assert.equal(ownImagePath('https://elpida-production.up.railway.app/assets/brand/icon-512.png'), '/assets/brand/icon-512.png');
+  assert.equal(thumbnailUrl('https://elpida-production.up.railway.app/api/content/bafkreiabc', 82), '/api/content/bafkreiabc?w=164');
+  assert.equal(ownImagePath('https://other.up.railway.app/assets/x.png'), 'https://other.up.railway.app/assets/x.png');
+  assert.equal(ownImagePath('http://elpida-production.up.railway.app/assets/x.png'), 'http://elpida-production.up.railway.app/assets/x.png');
+  assert.equal(ownImagePath('https://elpida-production.up.railway.app/admin'), 'https://elpida-production.up.railway.app/admin');
+});
