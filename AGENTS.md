@@ -21,3 +21,6 @@ At the start of every new or resumed chat, before implementation or deployment:
 Keep Model 10 pricing and separate chain wallets unless explicitly instructed
 otherwise. No mainnet transactions or real funds without explicit authorization.
 Never expose secrets or key files. Use a feature branch and PR; never push main.
+
+Owner instruction (14 November 2026): keep Elpida's repository link out of the
+public site footer until the owner explicitly asks for it to be added again.
