@@ -18,7 +18,7 @@ test('fees are split by the V2 shares, revenue is launch fees plus the treasury 
   for (const g of [a.mainnet, a.testnet]) {
     assert.equal(g.trades, 1, 'only V2 trades inside the period');
     assert.equal(g.feesGeneratedUsd, 3000);
-    assert.deepEqual(Object.fromEntries(Object.entries(g.shares).map(([k, s]) => [k, s.earnedUsd])), { creator: 900, traderAirdrop: 900, flywheel: 300, holderRewards: 300, treasury: 600 });
+    assert.deepEqual(Object.fromEntries(Object.entries(g.shares).map(([k, s]) => [k, s.earnedUsd])), { creator: 900, traderAirdrop: 900, flywheel: 300, holderRewards: 300, treasury: 600, buybackBurn: 0 });
     assert.equal(g.launchFeesUsd, 15 + 10, 'native launch fee at the ETH price, USDC at face value');
     assert.equal(g.revenueUsd, 25 + 600); assert.equal(g.revenueCollectedUsd, 25 + 600);
     assert.equal(g.shares.creator.failedPayouts, 1); assert.equal(g.shares.creator.withdrawnUsd, 0);
@@ -41,4 +41,31 @@ test('recorded hourly prices value each fee at the time it happened, unknown pri
   const none = feeAnalytics({ sources: [source('base', true)], prices: {}, period: '24h', now });
   assert.equal(none.mainnet.feesGeneratedUsd, 0); assert.ok(none.mainnet.valuation.unpriced > 0);
   assert.equal(none.mainnet.launchFeesUsd, 10, 'USDC launch fees need no price');
+});
+
+test('Model 10 curve fees are recomputed per trade exactly as the curve charges them, including anti-snipe sells', async t => {
+  const { createRuntime } = await import('../apps/api/curve-runtime.mjs');
+  const { Contract } = await import('ethers');
+  const r = await createRuntime({ seed: false, dex: true }); t.after(() => r.close());
+  const { token } = await r.transact('launch', { name: 'Fee count', symbol: 'FEEC', pair: 'native', firstBuy: '0.025' });
+  // Inside the first minute the rate is above the base: the sell's gross is rebuilt at that rate.
+  await r.transact('buy', { token, amount: '0.01' }); await r.transact('sell', { token, amount: '777777' });
+  await r.transact('buy', { token, amount: '0.003' }); await r.transact('sell', { token, amount: '1234' });
+  const curveOf = () => new Contract(r.indexer.listings().find(x => x.address === token).curve, r.config.contracts.dexCurve.abi, r.provider);
+  const analyse = () => feeAnalytics({ sources: [{ key: 'local', name: 'Local', mainnet: false, tokens: r.indexer.listings(), trades: r.indexer.db.prepare('SELECT data FROM trades').all().map(x => JSON.parse(x.data)),
+    launchFees: { complete: true, rows: [] }, feePayouts: r.indexer.feePayouts() }], prices: { local: { status: 'fresh', usd: 1000, updatedAt: Math.floor(Date.now() / 1000) } }, period: 'all', now: 4_000_000_000 });
+  let a = analyse(), [rec] = a.networks[0].reconciliation;
+  assert.equal(rec.model, 'model10'); assert.equal(a.networks[0].model10Tokens, 1);
+  const owed = (await curveOf().creatorFees()) + (await curveOf().protocolFees());
+  assert.equal(BigInt(rec.ledgerRaw), owed);
+  assert.ok(Math.abs(Number(rec.differenceRaw)) <= 4, `counted from trades matches the curve to the wei (difference ${rec.differenceRaw})`);
+  assert.equal(a.testnet.byModel.model10.trades, 5, 'the first buy, two buys and two sells');
+  assert.ok(Math.abs(a.testnet.shares.creator.earnedUsd - a.testnet.shares.treasury.earnedUsd) < 1e-9, 'half each');
+  // After paying out, the curve owes nothing and what it paid closes the gap.
+  await r.transact('withdraw', { token });
+  a = analyse(); [rec] = a.networks[0].reconciliation;
+  assert.equal(await curveOf().creatorFees(), 0n);
+  assert.ok(Math.abs(Number(rec.differenceRaw)) <= 4);
+  assert.ok(a.testnet.shares.creator.withdrawnUsd > 0 && a.testnet.shares.treasury.withdrawnUsd > 0);
+  assert.equal(a.testnet.shares.creator.outstandingUsd, 0);
 });

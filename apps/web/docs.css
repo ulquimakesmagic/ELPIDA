@@ -310,3 +310,4 @@
   .analytics-fees .analytics-table th[scope="row"] .icon { display: none; }
   .analytics-fees .analytics-table th, .analytics-fees .analytics-table td { padding-left: 8px; padding-right: 8px; font-size: 13px; }
 }
+.analytics-fees .share-basis { display: block; font-weight: 400; font-size: 12px; }

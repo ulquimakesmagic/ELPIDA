@@ -108,6 +108,25 @@ export class EvmIndexer {
     return decode(row?.data);
   }
   snapshot(address) {return decode(this.db.prepare('SELECT data FROM snapshots WHERE address=? ORDER BY height DESC LIMIT 1').get(address.toLowerCase())?.data);}
+  /** Stored events of one contract kind and name, oldest first, with their block time. */
+  eventsNamed(kind, name) {
+    return this.db.prepare("SELECT e.tx, e.idx, e.height, e.data, b.timestamp FROM events e LEFT JOIN blocks b ON b.height = e.height WHERE json_extract(e.data,'$.kind') = ? AND json_extract(e.data,'$.name') = ? ORDER BY e.height, e.idx")
+      .all(kind, name).map(r => ({ tx: r.tx, idx: r.idx, height: r.height, timestamp: r.timestamp ?? null, ...(d => ({ address: String(d.address).toLowerCase(), args: d.args }))(JSON.parse(r.data)) }));
+  }
+  /**
+   * Model 10 curve fee payouts (14 Nov 2026, analytics): the curve's FeesWithdrawn / FeePayoutFailed, as
+   * [{ token, recipient (0 creator, 4 treasury), to, amountRaw, failed, timestamp, tx }]. A payout to the creator reward
+   * vault is the creator's; any other recipient is the protocol treasury (the curve pays only these two).
+   */
+  feePayouts() {
+    const byCurve = new Map(this.tokens().map(t => [t.curve, t]));
+    const rows = name => this.eventsNamed('curve', name).flatMap(e => {
+      const t = byCurve.get(e.address); if (!t) return [];
+      const to = String(e.args[0]);
+      return [{ token: t.address, recipient: to.toLowerCase() === String(t.reward ?? '').toLowerCase() ? 0 : 4, to, amountRaw: String(e.args[1]), failed: name === 'FeePayoutFailed', timestamp: e.timestamp, tx: e.tx }];
+    });
+    return [...rows('FeesWithdrawn'), ...rows('FeePayoutFailed')];
+  }
   listings() {
     const latest=new Map(this.db.prepare('SELECT address,data FROM snapshots WHERE height=(SELECT MAX(height) FROM snapshots WHERE address=snapshots.address)').all().map(r=>[r.address,decode(r.data)]));
     return this.tokens().map(t=>({...t,...latest.get(t.address)}));
