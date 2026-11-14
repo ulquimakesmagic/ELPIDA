@@ -1,7 +1,7 @@
 // Fees and revenue for the analytics page (analytics step 2, 14 Nov 2026).
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { feeAnalytics } from '../apps/api/fee-analytics.mjs';
+import { feeAnalytics, timeline } from '../apps/api/fee-analytics.mjs';
 import { PriceHistory } from '../apps/api/price-history.mjs';
 import { V2_MODEL } from '../packages/core/v2-economics.mjs';
 
@@ -68,4 +68,13 @@ test('Model 10 curve fees are recomputed per trade exactly as the curve charges 
   assert.ok(Math.abs(Number(rec.differenceRaw)) <= 4);
   assert.ok(a.testnet.shares.creator.withdrawnUsd > 0 && a.testnet.shares.treasury.withdrawnUsd > 0);
   assert.equal(a.testnet.shares.creator.outstandingUsd, 0);
+});
+
+test('fees, revenue and payouts are bucketed for the chart and by calendar month', () => {
+  const t0 = Date.UTC(2026, 9, 31, 22) / 1000; // 31 Oct 2026 22:00 UTC
+  const out = timeline([{ timestamp: t0, feesUsd: 10, revenueUsd: 2, creatorUsd: 3 }, { timestamp: t0 + 7200, feesUsd: 5, revenueUsd: 1 }, { timestamp: t0 + 7300, withdrawnUsd: 4 }, { timestamp: t0 + 9000, revenueUsd: 10, launchFeesUsd: 10 }], '7d', t0 + 86400 * 6 - 604800, t0 + 86400 * 6);
+  assert.equal(out.series.length, 8, 'one bar a day, the first and last partial');
+  assert.equal(out.series.reduce((s, b) => s + b.feesUsd, 0), 15);
+  assert.deepEqual(out.months.map(m => [m.month, m.feesUsd, m.revenueUsd, m.withdrawnUsd, m.launchFeesUsd]), [['2026-11', 5, 11, 4, 10], ['2026-10', 10, 2, 0, 0]]);
+  assert.equal(timeline([], '24h', 1000 - 86400, 1000).series.length, 25);
 });

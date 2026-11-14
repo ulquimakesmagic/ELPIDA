@@ -26,7 +26,7 @@ function emptyGroup() {
   const share = () => ({ earnedUsd: 0, withdrawnUsd: 0, outstandingUsd: 0, failedPayouts: 0 });
   return { feesGeneratedUsd: 0, launchFeesUsd: 0, launches: 0, revenueUsd: 0, revenueCollectedUsd: 0, trades: 0,
     shares: Object.fromEntries(ALL_SHARES.map(k => [k, share()])), byModel: {},
-    valuation: { atTradeTime: 0, revalued: 0, unpriced: 0 }, untracked: [] };
+    valuation: { atTradeTime: 0, revalued: 0, unpriced: 0 }, untracked: [], events: [] };
 }
 
 /** The Model 10 fee rate (bps) at `timestamp`: linear decay from the anti-snipe start to the base over the window. */
@@ -51,6 +51,25 @@ export function model10TradeFee(t, trade) {
 }
 const isModel10 = t => t.curveModel === 10 && (t.deploymentModel ?? DEX_MODEL) === DEX_MODEL && !!t.curve;
 const modelOf = t => t.model === V2_MODEL ? 'v2' : isModel10(t) ? 'model10' : t.model ?? t.deploymentModel ?? (t.curveModel ? `model-${t.curveModel}` : 'v1');
+
+const FIELDS = ['feesUsd', 'revenueUsd', 'creatorUsd', 'launchFeesUsd', 'withdrawnUsd'];
+/**
+ * Chart buckets (hourly for 24h, daily for 7d and 30d, weekly for all time, UTC) and calendar months (UTC), each with
+ * fees generated, Elpida revenue, the creators' share, launch fees and amounts withdrawn, in dollars.
+ */
+export function timeline(events, period, start, now) {
+  const from = Number.isFinite(start) ? start : events.reduce((m, e) => Math.min(m, e.timestamp), now);
+  const step = period === '24h' ? 3600 : period === 'all' ? 7 * 86400 : 86400, empty = t => ({ timestamp: t, ...Object.fromEntries(FIELDS.map(f => [f, 0])) });
+  const buckets = new Map();
+  for (let t = Math.floor(from / step) * step; t <= now; t += step) buckets.set(t, empty(t));
+  const months = new Map(), monthOf = ts => { const d = new Date(ts * 1000); return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}`; };
+  for (const e of events) {
+    const b = buckets.get(Math.floor(e.timestamp / step) * step), key = monthOf(e.timestamp);
+    if (!months.has(key)) months.set(key, { month: key, ...Object.fromEntries(FIELDS.map(f => [f, 0])) });
+    for (const f of FIELDS) { if (b) b[f] += e[f] ?? 0; months.get(key)[f] += e[f] ?? 0; }
+  }
+  return { series: [...buckets.values()], months: [...months.values()].sort((a, b) => b.month.localeCompare(a.month)) };
+}
 
 /**
  * `sources`: [{ key, name, mainnet, tokens (listings), trades (iterable of trade rows), launchFees: { complete, rows },
@@ -101,13 +120,15 @@ export function feeAnalytics({ sources, priceHistory = null, prices = {}, period
       const asUsd = value(x.asset, Number(formatUnits(fee, x.d)), trade.timestamp, x.current);
       group.feesGeneratedUsd += asUsd; model(x.m).feesGeneratedUsd += asUsd;
       for (const [k, part] of Object.entries(parts)) group.shares[k].earnedUsd += asUsd * part;
+      group.events.push({ timestamp: trade.timestamp, feesUsd: asUsd, revenueUsd: asUsd * (parts.treasury ?? 0), creatorUsd: asUsd * (parts.creator ?? 0) });
     }
     for (const p of source.feePayouts ?? []) {
       const x = tokens.get(String(p.token).toLowerCase()), k = FEE_SHARES[p.recipient]; if (!x || !k) continue;
       if (!p.failed) x.withdrawnRaw += BigInt(p.amountRaw);
       if (p.timestamp < start || p.timestamp > now) continue;
       if (p.failed) { group.shares[k].failedPayouts++; continue; }
-      group.shares[k].withdrawnUsd += value(x.asset, Number(formatUnits(BigInt(p.amountRaw), x.d)), p.timestamp, x.current);
+      const paidUsd = value(x.asset, Number(formatUnits(BigInt(p.amountRaw), x.d)), p.timestamp, x.current);
+      group.shares[k].withdrawnUsd += paidUsd; group.events.push({ timestamp: p.timestamp, withdrawnUsd: paidUsd });
     }
     for (const x of tokens.values()) {
       const symbol = x.t.metadata?.symbol ?? x.t.symbol ?? null, row = (ledger, basis) => net.reconciliation.push({ token: x.t.address, symbol, model: x.m, basis,
@@ -132,8 +153,9 @@ export function feeAnalytics({ sources, priceHistory = null, prices = {}, period
       if (f.timestamp < start || f.timestamp > now) continue;
       const native = !f.asset || String(f.asset).toLowerCase() === ZERO, amount = Number(formatUnits(BigInt(f.amountRaw), native ? 18 : 6));
       // A non-native launch fee is paid in the factory's USDC (ElpidaUsdPricing), so it is worth its face value.
-      group.launchFeesUsd += native ? value('native', amount, f.timestamp, currentUsd({ pair: 'native' })) : amount;
-      group.launches++;
+      const launchUsd = native ? value('native', amount, f.timestamp, currentUsd({ pair: 'native' })) : amount;
+      group.launchFeesUsd += launchUsd; group.launches++;
+      group.events.push({ timestamp: f.timestamp, revenueUsd: launchUsd, launchFeesUsd: launchUsd });
     }
     net.untracked = [...untracked].map(([model, tokens]) => ({ model, tokens }));
     group.untracked.push(...net.untracked.map(u => ({ network: source.key, ...u })));
@@ -142,6 +164,7 @@ export function feeAnalytics({ sources, priceHistory = null, prices = {}, period
   for (const g of Object.values(groups)) {
     g.revenueUsd = g.launchFeesUsd + g.shares.treasury.earnedUsd;
     g.revenueCollectedUsd = g.launchFeesUsd + g.shares.treasury.withdrawnUsd;
+    Object.assign(g, timeline(g.events, period, start, now)); delete g.events;
   }
   return { period, network, updatedAt: now, mainnet: groups.mainnet, testnet: groups.testnet, networks,
     split: Object.fromEntries(FEE_SHARES.map(k => [k, V2_FEE_SPLIT[k] / Number(BPS)])), model10Split: { creator: 0.5, treasury: 0.5, note: 'a partner token\'s buyback burn comes out of Elpida\'s half' },
