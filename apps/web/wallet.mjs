@@ -5,7 +5,7 @@ import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './
 import { isV4Token, v4Available, v4Deployment, deployTestPoolManager, v4Quote, v4Trade, v4WithdrawFees, v4TokenState, v4RouterFor } from './v4-launchpad.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
 import { V2_MODEL } from '/v2-economics.mjs';
-import { deployV2, deployV2UsdcDistributors, setupTestPayoutStable, approveV2StockList, launchV2, approveV2Stock, claimCreatorSplit, claimIdentityRow } from './v2-launchpad.mjs';
+import { deployV2, deployV2UsdcDistributors, setupTestPayoutStable, approveV2StockList, launchV2, approveV2Stock, claimCreatorSplit, claimIdentityRow, claimV2CreatorFees } from './v2-launchpad.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress } from '/vendor/ethers.js';
 import { routerAbi, swapCalldata } from '/dex-router.mjs';
@@ -1046,6 +1046,7 @@ export class TestnetWallet {
     if(action==='approve-v2-stock-list')return approveV2StockList(this);
     if(action==='launch'&&body?.model===V2_MODEL)return launchV2(this,body);
     if(action==='claim-creator-split')return claimCreatorSplit(this,body??{});
+    if(action==='claim-v2-creator')return claimV2CreatorFees(this,body??{});
     if(action==='claim-identity-row')return claimIdentityRow(this,body??{});
     {const v4item=body?.token?this.launches.get(String(body.token).toLowerCase()):null;
       if(v4item&&isV4Token(v4item)){
