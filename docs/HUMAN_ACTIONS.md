@@ -11,6 +11,21 @@
 > `contracts, unit and full suite` and `solana program` checks on `main`; (2) create a Safe on Base for the treasury
 > and pick a guardian wallet for the launch stop; (3) a fresh, separate Base keeper key.
 
+## Move hosting from Railway to Oracle Cloud (free), 13 November 2026
+
+Full runbook: `docs/ORACLE_HOSTING.md`. Railway stays live until the cut-over, and can be brought back in minutes.
+
+1. **Now:** create the Oracle Cloud account (pick the home region carefully; it cannot change) and the VM: Ubuntu 24.04,
+   VM.Standard.A1.Flex, 2 OCPU / 12 GB (all of the free A1 allowance), 100 GB boot volume, your SSH public key.
+   Optional but recommended: upgrade to Pay As You Go with a $1 budget alert (free resources stay free).
+2. **Now:** Cloudflare Zero Trust → Tunnels → create `elpida-oracle`; public hostname `staging.elpida.fun` →
+   `127.0.0.1:3000`. Keep the token for the VM; never paste it into chat.
+3. **After this PR is merged:** on the VM, run `deploy/oracle/setup.sh` (step 3), paste Railway's variables into
+   `/etc/elpida/elpida.env`, run `doctor.sh` and send Claude its output (names only), then restore the newest backup.
+4. Check https://staging.elpida.fun together (staging mode: no keepers, no backups, no launches).
+5. Cut-over together (step 7), then within a week move backups to R2 + Oracle Object Storage (step 6) and delete the
+   Railway service, volume and bucket (step 8).
+
 ## Solana USDC pool and testnet setup fixes, 11 November 2026
 
 - The Solana payout pool is pinned (`deployments/solana-devnet.json` → `v2.usdc`, pool `5QYRTeS…iwo`). It opened at

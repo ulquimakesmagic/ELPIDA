@@ -85,10 +85,20 @@ export function decodeBase58(text) {
   return Buffer.from([...Array(32 - bytes.length).fill(0), ...bytes]);
 }
 
-/** Behind Railway's proxy the client address is the right-most X-Forwarded-For entry; elsewhere the socket. */
+const LOOPBACK = new Set(['127.0.0.1', '::1', '::ffff:127.0.0.1']);
+/**
+ * The visitor's address for rate limits. Behind Railway's proxy: the right-most X-Forwarded-For entry. Behind a
+ * Cloudflare Tunnel (ELPIDA_TRUST_PROXY=cloudflare, Oracle hosting): CF-Connecting-IP, trusted only when the request
+ * reached the server from cloudflared on the same machine. Elsewhere: the socket.
+ */
 export function clientAddress(req, env = process.env) {
+  const socket = req.socket?.remoteAddress;
+  if (env.ELPIDA_TRUST_PROXY === 'cloudflare' && LOOPBACK.has(socket)) {
+    const cf = String(req.headers?.['cf-connecting-ip'] ?? '').trim();
+    if (cf) return cf;
+  }
   const forwarded = String(req.headers?.['x-forwarded-for'] ?? '').split(',').map(s => s.trim()).filter(Boolean);
-  return (env.RAILWAY_ENVIRONMENT_NAME && forwarded.length ? forwarded.at(-1) : req.socket?.remoteAddress) ?? 'unknown';
+  return (env.RAILWAY_ENVIRONMENT_NAME && forwarded.length ? forwarded.at(-1) : socket) ?? 'unknown';
 }
 
 // Legacy (v0 header-free) Solana message parsing: header, account keys, blockhash, instructions.

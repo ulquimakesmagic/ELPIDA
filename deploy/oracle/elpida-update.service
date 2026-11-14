@@ -1,0 +1,9 @@
+# Deploys a new commit on main to this VM (update.sh --auto), as Railway did on every merge. Started by elpida-update.timer.
+[Unit]
+Description=Elpida: deploy the latest main
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+ExecStart=/bin/bash /opt/elpida/app/deploy/oracle/update.sh --auto
