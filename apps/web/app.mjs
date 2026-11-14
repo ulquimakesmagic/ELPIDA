@@ -315,7 +315,8 @@ function rerender(reason) {
   }
   launchView = null;
   if(r.name==='rewards'&&!r.claim&&!r.xResult&&(mode!=='testnet'||!wallet.address)){view.replaceChildren(h('div.empty',h('h1',r.name==='rewards'?'Rewards':'Portfolio'),h('p','Connect your wallet to see your '+r.name+'.'),h('p.small.muted','Connecting lets you interact—it does not give us access to your funds.'),h('button.btn.btn-primary',{type:'button',on:{click:connectCurrent}},'Connect wallet')));return;}
-  if (!state) { closeExplore(); view.replaceChildren(loadingView()); return; }
+  // The server may have drawn the Explore skeleton with the first trending logos already in it: keep it until data arrives.
+  if (!state) { closeExplore(); if (!(currentRoute.name === 'explore' && view.querySelector('.explore[aria-busy]'))) view.replaceChildren(loadingView()); return; }
   if (r.name === 'token') {
     // Keep the editor and wallet-signing state intact while a holder is writing.
     const previous = reason === 'background' ? {
