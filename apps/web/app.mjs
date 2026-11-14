@@ -485,6 +485,8 @@ async function init() {
     $('#footer-note').textContent = 'Solana mainnet beta: real funds, new contracts. Other networks are test networks with no monetary value.';
     $('#how-network-note').textContent = 'Solana runs as a mainnet beta with real funds and new, unaudited contracts; launching is invite-only while the beta gate is on. The other networks are test networks.';
   }
+  // Never hold Explore in its skeleton for long: a network that never answers must not hide the others' tokens.
+  setTimeout(() => { if (!discoveryReady) { discoveryReady = true; if (currentRoute.name === 'explore') rerender('background'); } }, 8000);
   evmWallet = new TestnetWallet(config, onWalletProgress);
   solWallet = new SolanaWallet(config, onWalletProgress);
   wallet = evmWallet;
