@@ -1,0 +1,32 @@
+# systemd unit for Elpida on an Oracle Cloud VM (docs/ORACLE_HOSTING.md). Installed by setup.sh.
+[Unit]
+Description=Elpida launchpad server
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+User=elpida
+Group=elpida
+WorkingDirectory=/opt/elpida/app
+# Variables copied from Railway (names in docs/ORACLE_HOSTING.md). The build id is written by update.sh.
+EnvironmentFile=/etc/elpida/elpida.env
+EnvironmentFile=-/etc/elpida/build.env
+# start.sh sets the hosting values last (127.0.0.1:3000, /var/lib/elpida, behind the Cloudflare Tunnel) and strips
+# the keeper keys while /etc/elpida/staging.env exists.
+ExecStart=/opt/elpida/app/deploy/oracle/start.sh
+Restart=always
+RestartSec=5
+TimeoutStopSec=60
+KillSignal=SIGTERM
+LimitNOFILE=65536
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+
+[Install]
+WantedBy=multi-user.target

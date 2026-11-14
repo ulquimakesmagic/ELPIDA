@@ -121,6 +121,16 @@ test('client address: right-most X-Forwarded-For behind Railway, the socket else
   assert.equal(clientAddress(req, {}), '10.0.0.1');
 });
 
+test('client address behind a Cloudflare Tunnel: CF-Connecting-IP only when cloudflared on this machine sent it', () => {
+  const env = { ELPIDA_TRUST_PROXY: 'cloudflare' };
+  const tunnel = { headers: { 'cf-connecting-ip': '8.8.4.4', 'x-forwarded-for': 'spoofed' }, socket: { remoteAddress: '127.0.0.1' } };
+  assert.equal(clientAddress(tunnel, env), '8.8.4.4');
+  assert.equal(clientAddress({ ...tunnel, socket: { remoteAddress: '::1' } }, env), '8.8.4.4');
+  assert.equal(clientAddress({ ...tunnel, socket: { remoteAddress: '203.0.113.7' } }, env), '203.0.113.7', 'a direct caller cannot pick its own address');
+  assert.equal(clientAddress(tunnel, {}), '127.0.0.1', 'headers ignored unless the tunnel is configured');
+  assert.equal(clientAddress({ headers: {}, socket: { remoteAddress: '127.0.0.1' } }, env), '127.0.0.1');
+});
+
 test('rate limits survive a flood of new identities instead of resetting', () => {
   const pool = new VanityMintPool({ path: null, key: null, programId: PROGRAM });
   let now = 0; pool.now = () => now;

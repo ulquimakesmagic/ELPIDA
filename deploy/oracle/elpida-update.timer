@@ -1,0 +1,11 @@
+# Checks main every 5 minutes. Turn automatic deploys off: sudo systemctl disable --now elpida-update.timer
+[Unit]
+Description=Elpida: check main for a new commit every 5 minutes
+
+[Timer]
+OnBootSec=5min
+OnUnitActiveSec=5min
+RandomizedDelaySec=30
+
+[Install]
+WantedBy=timers.target

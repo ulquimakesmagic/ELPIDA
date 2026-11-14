@@ -40,7 +40,7 @@ import {HolderChat} from './holder-chat.mjs';
 import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
 import { TOKEN_PATH, renderTokenPage, renderTokenNotFound, renderTokenUnavailable } from '../../packages/core/token-seo.mjs';
-import { productionGuard, formatGuardReport } from './production-guard.mjs';
+import { productionGuard, formatGuardReport, durableStorage } from './production-guard.mjs';
 import { PAGES, canonicalOrigin, renderPage, renderSitemap, renderRobots, renderLlms } from '../../packages/core/seo.mjs';
 import { createTokenizedEquity } from '../../packages/core/tokenized-equity.mjs';
 import { MAX_METADATA_REQUEST_BYTES, normalizeMetadata } from '../web/metadata.mjs';
@@ -192,7 +192,7 @@ export function createRpcProxy(targets, { perSecond = 15, burst = 60 } = {}) {
   let preferred = 0;
   const buckets = new Map();
   return async (req, res, send) => {
-    const ip = req.socket.remoteAddress ?? 'unknown', now = Date.now();
+    const ip = clientAddress(req), now = Date.now();
     const bucket = buckets.get(ip) ?? { tokens: burst, at: now };
     bucket.tokens = Math.min(burst, bucket.tokens + (now - bucket.at) / 1000 * perSecond); bucket.at = now; buckets.set(ip, bucket);
     if (buckets.size > 10_000) buckets.clear();
@@ -223,7 +223,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const circle = circleFunding ?? createCircleFunding({ path: port === 0 ? null : dataFile('circle-test-wallets.json') });
   const metadataStore=new MetadataStore({path:port===0?null:dataFile('ipfs-content'),chainBound:Boolean(publicUrl),...(process.env.ELPIDA_METADATA_MAX_BYTES?{maxBytes:Number(process.env.ELPIDA_METADATA_MAX_BYTES)}:{}),...(process.env.ELPIDA_METADATA_MAX_PENDING_BYTES?{maxPendingBytes:Number(process.env.ELPIDA_METADATA_MAX_PENDING_BYTES)}:{})});
   const walletTokenLists=new WalletTokenLists({path:port===0?null:dataFile('wallet-tokenlists.json')});
-  const bootStarted=Date.now(),buildId=String(process.env.RAILWAY_GIT_COMMIT_SHA??'dev').slice(0,12);
+  const bootStarted=Date.now(),buildId=String(process.env.RAILWAY_GIT_COMMIT_SHA??process.env.ELPIDA_BUILD??'dev').slice(0,12);
   const bootPhase=phase=>console.log(JSON.stringify({event:'boot_phase',phase,build:buildId,ms:Date.now()-bootStarted}));
   const bootFailure=error=>console.log(JSON.stringify({event:'subsystem_unavailable',code:String(error?.code??error?.name??'INIT').slice(0,40),message:String(error?.message??error).slice(0,160)}));
   const soft=(name,make,disabled)=>{try{return make();}catch(error){bootFailure(error);console.log(JSON.stringify({event:'subsystem_unavailable',subsystem:name,degraded:true}));return disabled();}};
@@ -308,7 +308,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   let v2Keeper={enabled:false,status:()=>({enabled:false,state:'not_configured'}),manifest:()=>null,close:async()=>{}};
   queueMicrotask(()=>{if(port===0)return;try{v2Keeper=configuredV2Keeper({env:process.env,networks:evmTestnets,indexFor:key=>publicIndex.v2Index(key),prices:()=>priceSnapshot(),path:dataFile('v2-keeper.sqlite'),publicUrl:process.env.ELPIDA_PUBLIC_URL||'https://elpida.fun',log:e=>console.log(JSON.stringify(e))});if(v2Keeper.enabled){v2Keeper.start();console.log(JSON.stringify({event:'v2_keeper_started',keeper:v2Keeper.address}));}}catch(error){console.log(JSON.stringify({event:'subsystem_unavailable',subsystem:'v2Keeper',degraded:true,message:String(error.message).slice(0,120)}));}});
   const flywheelKeeper=port===0?{summary:()=>({enabled:false,state:'not_configured'}),close:async()=>{}}:soft('flywheelKeeper',()=>configuredFlywheelKeeper({env:process.env,publicIndex,dexes:testnetDexes,path:dataFile('flywheel-keeper.sqlite'),log:e=>console.log(JSON.stringify(e))}),()=>({summary:()=>({enabled:false,state:'unavailable'}),close:async()=>{}}));
-  console.log(JSON.stringify({event:'storage_ready',durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),dataDir,publicNetworks:[...publicIndex.entries.keys()],simulation:runtime.config.simulation?.durable?`journal replay: ${runtime.config.simulation.replayed} actions restored, ${runtime.config.simulation.skipped} skipped`:'resets on process restart'}));
+  console.log(JSON.stringify({event:'storage_ready',durable:durableStorage(),dataDir,publicNetworks:[...publicIndex.entries.keys()],simulation:runtime.config.simulation?.durable?`journal replay: ${runtime.config.simulation.replayed} actions restored, ${runtime.config.simulation.skipped} skipped`:'resets on process restart'}));
   const priceKeeper=soft('priceKeeper',()=>new PriceKeeper(),()=>({refresh:async()=>{},snapshot:()=>({})}));
   const updatePrices=async()=>{await priceKeeper.refresh();const prices=priceKeeper.snapshot();const p=[prices.local,prices['base-sepolia'],prices['ethereum-sepolia']].find(p=>p.status==='fresh');if(p)await runtime.updatePrice(p.usd);};
   const priceTimer=port===0?null:setInterval(()=>updatePrices().catch(()=>{}),60000);priceTimer?.unref();
@@ -358,7 +358,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rpcProxy = solana.mainnet ? createRpcProxy(solanaRpcList(process.env).urls) : null;
   const operationsStartedAt=Date.now();
   const backupRunner=configuredBackup({env:port===0?{}:process.env,dataDir,statePath:port===0?null:dataFile('ops-backup-state.json'),workDir:process.env.ELPIDA_BACKUP_WORK_DIR??resolve(tmpdir(),'elpida-backups-'+dataPrefix.replace(/[^a-z0-9-]/gi,'')),log:console.log});
-  const operationsInput=()=>({relay:feedRelay.status(),graduation:graduationKeeper.status(),startedAt:operationsStartedAt,durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),storage:metadataStore.status().storage,networks:Object.fromEntries([...publicIndex.entries.keys()].map(key=>[key,publicIndex.status(key)])),prices:priceSnapshot(),backup:backupRunner.status()});
+  const operationsInput=()=>({relay:feedRelay.status(),graduation:graduationKeeper.status(),startedAt:operationsStartedAt,durable:durableStorage(),storage:metadataStore.status().storage,networks:Object.fromEntries([...publicIndex.entries.keys()].map(key=>[key,publicIndex.status(key)])),prices:priceSnapshot(),backup:backupRunner.status()});
   const monitor=new OperationsMonitor({read:operationsInput});
   const operationsTimer=port===0?null:setInterval(()=>monitor.tick(),60000);operationsTimer?.unref();
   if(port!==0){backupRunner.start();monitor.tick();}
@@ -445,7 +445,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           const activity=Object.fromEntries(['24h','7d','all'].map(period=>{try{const a=protocolAnalytics({sources:analyticsSources(),prices:priceSnapshot(),period});return [period,{totals:a.totals,coverage:a.coverage}];}catch(error){return [period,{error:error.message}];}}));
           let treasury=[];try{treasury=await treasuries();}catch(error){treasury=[{error:String(error.message).slice(0,160)}];}
           const keepers=await keeperStatus();
-          return send(200,{operator:s.address,keepers,generatedAt:Date.now(),health,backup:backupRunner.status(),relay:feedRelay.status(),graduation:graduationKeeper.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),metadata:metadataStore.status().storage},prices:priceSnapshot(),networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,{name:n.name,...publicIndex.status(n.key)}])),...(solanaIndex?{[solanaIndex.network.key]:{name:solanaIndex.network.name,enabled:true,...solanaIndex.status()}}:{})},treasury,activity,admins:{configured:adminAddresses.length,treasuries:treasury.filter(t=>t.treasury).length}});
+          return send(200,{operator:s.address,keepers,generatedAt:Date.now(),health,backup:backupRunner.status(),relay:feedRelay.status(),graduation:graduationKeeper.status(),storage:{durable:durableStorage(),metadata:metadataStore.status().storage},prices:priceSnapshot(),networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,{name:n.name,...publicIndex.status(n.key)}])),...(solanaIndex?{[solanaIndex.network.key]:{name:solanaIndex.network.name,enabled:true,...solanaIndex.status()}}:{})},treasury,activity,admins:{configured:adminAddresses.length,treasuries:treasury.filter(t=>t.treasury).length}});
         }
         if(url.pathname==='/api/admin/visitors'){
           const s=adminAuth.session(req.headers.cookie);if(!s)return send(401,{error:'Sign in as an operator to see this.'});
@@ -456,7 +456,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/metadata/challenge'){
           let client=String(req.headers.cookie??'').split(';').map(v=>v.trim()).find(v=>v.startsWith('elpida_upload='))?.slice(14);
           if(!/^[a-f0-9]{64}$/.test(client??'')){client=randomBytes(32).toString('hex');res.setHeader('Set-Cookie',`elpida_upload=${client}; HttpOnly; SameSite=Strict; Path=/api/metadata; Max-Age=86400${cookieSecurity}`);}
-          return send(200,uploadAdmission.issue({digest:url.searchParams.get('digest'),client,transport:req.socket.remoteAddress??'unknown'}));
+          return send(200,uploadAdmission.issue({digest:url.searchParams.get('digest'),client,transport:clientAddress(req)}));
         }
         if(url.pathname==='/api/rewards/x/callback'&&v2Identities.owns(url.searchParams.get('state'))){
           // Back to the token's claim page in the app, which shows the result (verified with the blue tick, or why not).
@@ -488,10 +488,10 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/public/stock-catalog'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,stockCatalog.summary());}
         const stockIcon=url.pathname.match(/^\/api\/public\/stock-icon\/([A-Z0-9.]{1,12}on)\.png$/);
         if(stockIcon){const bytes=await stockCatalog.icon(stockIcon[1]);if(!bytes)return send(404,{error:'No icon for this stock.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});return res.end(bytes);}
-        if(url.pathname==='/api/public/status')return send(200,{stream:tradeFeed.status(),graduation:graduationKeeper.status(),buyback:buybackKeeper.status(),relay:feedRelay.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),simulationEphemeral:!runtime.config.simulation?.durable,simulation:runtime.config.simulation},networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,publicIndex.status(n.key)])),...(solanaIndex?{[solanaIndex.network.key]:{enabled:true,...solanaIndex.status()}}:{})}});
+        if(url.pathname==='/api/public/status')return send(200,{stream:tradeFeed.status(),graduation:graduationKeeper.status(),buyback:buybackKeeper.status(),relay:feedRelay.status(),storage:{durable:durableStorage(),simulationEphemeral:!runtime.config.simulation?.durable,simulation:runtime.config.simulation},networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,publicIndex.status(n.key)])),...(solanaIndex?{[solanaIndex.network.key]:{enabled:true,...solanaIndex.status()}}:{})}});
         if(url.pathname==='/api/public/stream'){
           if(req.method!=='GET')return send(405,{error:'Use GET for the event stream.'});
-          const address=String(req.headers['x-forwarded-for']??req.socket?.remoteAddress??'').split(',')[0].trim();
+          const address=clientAddress(req);
           const opened=tradeFeed.subscribe({res,address});
           if(!opened.ok)return send(opened.status,{error:opened.error});
           return;
@@ -595,7 +595,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       let uploadDigest;
       if(url.pathname==='/api/metadata/stage'){
         const client=String(req.headers.cookie??'').split(';').map(v=>v.trim()).find(v=>v.startsWith('elpida_upload='))?.slice(14)??'';
-        uploadDigest=uploadAdmission.consume({id:req.headers['x-elpida-upload-id'],nonce:req.headers['x-elpida-upload-nonce'],client,transport:req.socket.remoteAddress??'unknown'});
+        uploadDigest=uploadAdmission.consume({id:req.headers['x-elpida-upload-id'],nonce:req.headers['x-elpida-upload-nonce'],client,transport:clientAddress(req)});
       }
       const chunks = [];
       let size = 0;
@@ -649,7 +649,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         const pinned=metadataStore.status().publicEnabled;
         // Mainnet tokens must point at publicly pinned IPFS content, never Elpida-hosted storage alone.
         if(solana&&solanaNet.mainnet&&!pinned)return send(503,{error:'Mainnet token details need public IPFS pinning. Configure PINATA_JWT on the server first; no launch was submitted.'});
-        if(!pinned&&!process.env.RAILWAY_VOLUME_MOUNT_PATH)return send(503,{error:'Configure public IPFS pinning or a persistent testnet data volume before launching with metadata.'});
+        if(!pinned&&!durableStorage())return send(503,{error:'Configure public IPFS pinning or a persistent testnet data volume before launching with metadata.'});
         return send(200,{...(await metadataStore.publish(body,pinned,{provisional:true})),storage:pinned?'public-ipfs':'elpida-hosted',retention:'pending-chain-verification'});
       }
       if(action==='solana/vanity-mint')return send(200,vanity.reserve({wallet:String(body.wallet??''),address:clientAddress(req)}));

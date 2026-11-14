@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { productionGuard, formatGuardReport } from '../apps/api/production-guard.mjs';
+import { productionGuard, formatGuardReport, durableStorage } from '../apps/api/production-guard.mjs';
 
 const root = fileURLToPath(new URL('..', import.meta.url));
 const mainnet = (deployment = { programId: 'ELpida1111111111111111111111111111111111111', build: 'mainnet' }) => ({ key: 'solana-mainnet', mainnet: true, cluster: 'mainnet', deployment });
@@ -91,4 +91,10 @@ test('the server refuses to start in a mainnet configuration that fails the guar
   assert.match(r.stdout, /Production guard: FAIL/);
   assert.match(r.stderr, /Refusing to start/);
   assert.ok(!/Elpida is ready/.test(r.stdout));
+});
+
+test('durable storage: a Railway volume or an explicit data directory (Oracle hosting), nothing otherwise', () => {
+  assert.equal(durableStorage({ RAILWAY_VOLUME_MOUNT_PATH: '/data' }), true);
+  assert.equal(durableStorage({ ELPIDA_DATA_DIR: '/var/lib/elpida' }), true);
+  assert.equal(durableStorage({}), false);
 });
