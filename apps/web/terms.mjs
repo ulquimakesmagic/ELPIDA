@@ -6,8 +6,8 @@
 // accept again. The restricted places come from ELPIDA_RESTRICTED_JURISDICTIONS via /api/config.
 import { h } from './ui.mjs';
 
-export const TERMS_VERSION = 2;
-export const TERMS_UPDATED = '13 November 2026';
+export const TERMS_VERSION = 3;
+export const TERMS_UPDATED = '14 November 2026';
 export const CONTACT = { x: '@elpidadotfun', xUrl: 'https://x.com/elpidadotfun', telegram: 't.me/elpidadotfun', telegramUrl: 'https://t.me/elpidadotfun' };
 
 const list = names => names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} or ${names.at(-1)}`;
@@ -48,7 +48,9 @@ export function termsDocument({ mainnet = false, restricted = [] } = {}) {
     ]],
     ['What Elpida is', [
       'Elpida is a website and software interface for public blockchains. It lets you browse tokens and market data, connect a wallet you control, launch a token on a bonding curve, trade tokens on their curves, follow a token as it graduates to a decentralised exchange pool whose liquidity is locked permanently, and claim creator fees that the contracts have assigned to your wallet.',
-      'Elpida has no user accounts and never holds your keys, your recovery phrase or your funds. Every transaction is prepared in your browser and signed by you in your own wallet. Once a transaction is confirmed on a blockchain, nobody, including Elpida, can reverse or change it. Smart contracts run as they are written; once deployed, Elpida cannot change how a contract behaves or recover assets sent to it.',
+      'Elpida has no user accounts and never holds your keys, your recovery phrase or your funds. Every transaction is prepared in your browser and signed by you in your own wallet. Once a transaction is confirmed on a blockchain, nobody, including Elpida, can reverse or change it. Smart contracts run as they are written; once deployed, Elpida cannot change how a token’s contracts behave or recover assets sent to them, except through the controls described in the next paragraph.',
+      'Elpida keeps a small set of administrative controls over the launch factory only. Elpida’s treasury (a multi-signature wallet) can pause or resume new launches, limit how many launches happen per day, and decide which assets a new token may be paired with and which price feeds price them; a separate guardian wallet can pause new launches in an emergency. These controls cannot change, pause or take any token, pool, trade or balance that already exists. On Solana, Elpida’s program can be upgraded by Elpida’s upgrade authority; we publish the fingerprint (hash) of every build we deploy.',
+      'Elpida publishes a read-only public API, described in Docs. You may use it under these Terms, within the rate limits we set, and you must not hide which application is using it. We may change or withdraw it at any time.',
       'We may change, add or remove any part of the Services at any time, without notice.',
     ]],
     ['Test networks and the mainnet beta', [
@@ -59,11 +61,14 @@ export function termsDocument({ mainnet = false, restricted = [] } = {}) {
       'Anyone can launch a token on Elpida. We do not review, approve, endorse or guarantee any token, creator, name, image, link or claim, and a token appearing on the Services is not a recommendation. Token names and images may imitate other projects, brands or people; that does not mean those parties are involved.',
       'When you launch a token, you provide its name, symbol, image, description and links (your “Submission”). You confirm that your Submission is accurate, is yours to use, does not infringe anyone’s copyright, trademark, privacy or other rights, does not impersonate anyone, and is not unlawful, hateful, sexually explicit, harassing or misleading.',
       'A Submission is written into the launch transaction and stored on a blockchain and in public storage such as IPFS. It is permanent and public: nobody, including Elpida, can edit or delete it there. We may hide any token or Submission from the Services at any time, for any reason.',
+      'A creator may send the creator’s share of fees to one wallet, split it between several wallets, or reserve parts of it for an X account or a website. These choices are fixed in contracts at launch and nobody, including Elpida and the creator, can change them afterwards. A share reserved for an X account or a website is paid only to a wallet whose owner has proved control of that account or website through the Services; until then it stays in its contract under the contract’s rules. Elpida does not decide who owns an account or website beyond those checks.',
       'You allow Elpida to display, copy and process your Submission, without payment, to run, show and improve the Services.',
     ]],
     ['Fees', [
       'Launching a token costs a launch fee, and trades on a bonding curve pay a trading fee, at the rates shown on the Services when you act. Creators may also set a token tax at launch where a network supports it. Part of these fees goes to Elpida and part to the wallets the creator chose. The split for each token is fixed in its contracts at launch.',
-      'Creator fees, holder rewards and buybacks are automatic results of how the contracts are written. They are not promises, not a return on any investment and not an obligation Elpida owes you, and they may produce nothing. An amount is yours only once it reaches your wallet on chain.',
+      'The contracts split each trading fee into fixed shares, for example the creator’s wallet or wallets, a traders’ airdrop pool, a holders’ reward pool, a flywheel (buy-back) pool and Elpida’s treasury. The creator’s share can be collected by anyone and is only ever paid to the creator’s chosen wallets.',
+      { sub: 'Platform mechanisms' },
+      'Trader airdrops, holder rewards, the flywheel, payouts in stablecoins and any similar distribution (“Platform Mechanisms”) are carried out by services Elpida runs, on a schedule and under rules we describe on the Services, using Elpida’s own wallets to pay network fees. We may pause, delay, change or end any Platform Mechanism at any time and for any reason, including when network fees or price data make it uneconomic or unsafe, and a distribution may wait until those services have the funds for network fees. Platform Mechanisms are not promises, not a return on any investment and not an obligation Elpida owes you; they create no account, balance or claim in your favour, and they may produce nothing. An amount is yours only once it reaches your wallet on chain.',
       'Network fees (gas) go to the blockchain, not to Elpida. Fees are not refundable once a transaction is submitted, even if it fails. You are responsible for any taxes on your activity.',
     ]],
     ['Tokenized stock pairs', [
@@ -80,6 +85,7 @@ export function termsDocument({ mainnet = false, restricted = [] } = {}) {
         'Corporate actions such as splits, dividends and mergers can change how many tokens represent one share. Price feeds may pause during such events and while markets are closed.',
         'Tokenized Stock prices come from third-party price feeds (for example Chainlink or Pyth) and follow markets that trade only part of the week. A price can be out of date, paused or wrong; launches paired with a Tokenized Stock may be refused while its price is unavailable.',
         'The issuer’s solvency, custody of the underlying assets, regulatory status and ability to redeem are outside Elpida’s control and are not reflected in any price shown on the Services.',
+        'On Solana, a token paired with a Tokenized Stock graduates into a pool run by Elpida’s program rather than a third-party exchange, because those exchanges do not accept such tokens. Its liquidity is locked there permanently and it can be traded only through that pool.',
       ] },
     ]],
     ['Risks you accept', [
@@ -115,6 +121,7 @@ export function termsDocument({ mainnet = false, restricted = [] } = {}) {
     ]],
     ['No warranties', [
       'THE SERVICES ARE PROVIDED “AS IS” AND “AS AVAILABLE”. TO THE FULLEST EXTENT THE LAW ALLOWS, ELPIDA AND ITS OPERATORS, CONTRIBUTORS AND SERVICE PROVIDERS GIVE NO WARRANTIES OF ANY KIND, WHETHER EXPRESS, IMPLIED OR STATUTORY, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE, TITLE AND NON-INFRINGEMENT. WE DO NOT WARRANT THAT THE SERVICES OR ANY SMART CONTRACT WILL BE AVAILABLE, SECURE, ACCURATE, FREE OF ERRORS OR HARMFUL CODE, OR THAT ANY DEFECT WILL BE FIXED.',
+      'We are not responsible for loss caused by attacks on your device, browser, wallet or connection, such as malware, phishing, fake websites imitating Elpida or interception of your traffic. Always check that you are on elpida.fun and read what your wallet asks you to sign.',
       'Nothing in these Terms removes any right that the law where you live does not allow to be removed.',
     ]],
     ['Limits on our liability', [
@@ -128,6 +135,7 @@ export function termsDocument({ mainnet = false, restricted = [] } = {}) {
     ['Disputes', [
       `Before starting any formal claim, you agree to contact us ${contact} with a description of the problem and any wallet address or transaction involved, and to give us 60 days to try to resolve it.`,
       'To the fullest extent the law allows, any claim must be brought by you individually and not as a plaintiff or member of a class, group or representative action, and you give up any right to a jury trial.',
+      'If we make a material change to this section, the website will show you the new Terms to accept before you continue to use the Services.',
       'The forum and rules for resolving disputes that cannot be settled informally will be stated here once Elpida’s operating entity is formed. Any claim must be started within one year after you knew, or should have known, of the facts behind it, unless the law requires a longer period.',
     ]],
     ['Governing law', [

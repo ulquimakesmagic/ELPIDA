@@ -133,6 +133,16 @@ test('Terms and cookie choices are versioned; the restricted places follow the o
   assert.match(text(stocks), /does not make you a shareholder/);
   assert.match(text(stocks), /pause, freeze, block or reverse transfers/);
   assert.doesNotMatch(text(plain), /Powered by Ondo|Built on Ondo/i);
+  // Terms v3 (14 November): the distributions Elpida runs are described as such and can be paused; the factory's
+  // remaining admin controls are disclosed; allocations, the public API and the Solana stock pool are covered.
+  const fees = text(plain.sections.find(([t]) => t === 'Fees'));
+  assert.match(fees, /carried out by services Elpida runs/); assert.match(fees, /pause, delay, change or end any Platform Mechanism/);
+  assert.doesNotMatch(fees, /automatic results of how the contracts are written/);
+  const what = text(plain.sections.find(([t]) => t === 'What Elpida is'));
+  assert.match(what, /pause or resume new launches/); assert.match(what, /cannot change, pause or take any token, pool, trade or balance that already exists/);
+  assert.match(what, /read-only public API/);
+  assert.match(text(plain.sections.find(([t]) => t === 'Tokens and what you submit')), /proved control of that account or website/);
+  assert.match(text(stocks), /graduates into a pool run by Elpida’s program/);
   assert.match(plain.notice.join(' '), new RegExp(`section ${plain.sections.findIndex(([t]) => t === 'Tokenized stock pairs') + 1} before using them`));
   // Section references in the notice point at the sections they name.
   const titles = plain.sections.map(([t]) => t);
