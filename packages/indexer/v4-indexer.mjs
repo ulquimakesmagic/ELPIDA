@@ -108,11 +108,6 @@ export class V4Indexer extends EvmIndexer {
     const tip = this.tip(); if (!tip) return true;
     try { const row = this.db.prepare("SELECT next FROM backfills WHERE name='LaunchFeePaid'").get(); return !!row && row.next > tip.height; } catch { return false; }
   }
-  /** Stored events of one contract kind and name, oldest first, with their block time. */
-  eventsNamed(kind, name) {
-    return this.db.prepare("SELECT e.tx, e.idx, e.height, e.data, b.timestamp FROM events e LEFT JOIN blocks b ON b.height = e.height WHERE json_extract(e.data,'$.kind') = ? AND json_extract(e.data,'$.name') = ? ORDER BY e.height, e.idx")
-      .all(kind, name).map(r => ({ tx: r.tx, idx: r.idx, height: r.height, timestamp: r.timestamp ?? null, args: JSON.parse(r.data).args }));
-  }
   /** Launch fees as paid: [{ token, payer, asset, amountRaw, timestamp, tx }]. The token is the Launched event of the same transaction. */
   launchFees() {
     const launched = new Map(this.eventsNamed('factory', 'Launched').map(e => [e.tx, String(e.args[1]).toLowerCase()]));
