@@ -48,4 +48,19 @@ test('V2 launches, trades and fee ledgers are indexed for the site', async t => 
   assert.equal(after.feeLedgers.owed.flywheel, '0.0'); assert.ok(Number(after.feeLedgers.paid.flywheel) > 0);
   assert.equal(after.supply, formatUnits(await l.token.totalSupply(), 18));
   assert.equal(index.status().model, V2_MODEL);
+  // Analytics data (14 Nov): the launch fee as paid, matched to its token, and every fee share the hook paid out.
+  const fees = index.launchFees();
+  assert.equal(fees.length, 1); assert.equal(fees[0].token, item.address); assert.equal(fees[0].asset, '0x0000000000000000000000000000000000000000');
+  const [paidFee] = parse(f.factory, l.receipt, 'LaunchFeePaid');
+  assert.equal(fees[0].amountRaw, paidFee.args.amount.toString()); assert.ok(fees[0].timestamp > 0);
+  const payouts = index.feePayouts().filter(p => !p.failed);
+  assert.deepEqual(payouts.map(p => p.recipient).sort(), [0, 1, 2, 3, 4], 'one payout per recipient');
+  const [, paid] = await f.hook.ledgers(l.token.target);
+  for (const p of payouts) assert.equal(p.amountRaw, paid[p.recipient].toString(), 'each payout matches the hook ledger');
+  // A deployment indexed before LaunchFeePaid was in the ABI gets it from a one-time backfill.
+  index.db.prepare("DELETE FROM events WHERE json_extract(data,'$.name')='LaunchFeePaid'").run();
+  index.db.prepare('DELETE FROM backfills').run();
+  assert.equal(index.launchFees().length, 0); assert.equal(index.backfillComplete(), false);
+  await index.backfillFactoryEvents();
+  assert.deepEqual(index.launchFees(), fees); assert.equal(index.backfillComplete(), true);
 });

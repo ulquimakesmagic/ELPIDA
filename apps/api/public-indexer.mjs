@@ -56,6 +56,10 @@ export class PublicIndexer {
   /** The stored image, including an inline data: URI, for the one route that serves it. */
   rawImage(key,address){const entry=this.entryFor(key,address);const image=entry?.metadata?.get(String(address).toLowerCase())?.image;return typeof image==='string'?image:null;}
   entryFor(key,address){const a=String(address).toLowerCase();return this.all(key).find(e=>Boolean(e.index.tokenAt(a)))??null;}
+  /** Launch fees as paid, across the network's deployments that record them (V2), with whether the backfill is done. */
+  launchFees(key){const entries=this.all(key).filter(e=>typeof e.index.launchFees==='function');return {complete:entries.every(e=>e.index.backfillComplete?.()!==false),rows:entries.flatMap(e=>e.index.launchFees())};}
+  /** Fee shares paid out by the V2 hook(s) on the network. */
+  feePayouts(key){return this.all(key).filter(e=>typeof e.index.feePayouts==='function').flatMap(e=>e.index.feePayouts());}
   /** Trade rows across every deployment on the network, in timestamp order. */
   tradeRows(key){
     const entries=this.all(key);if(entries.length<2)return entries[0]?.index.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()??[];
