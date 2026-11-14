@@ -391,3 +391,11 @@
 
 /* Trending glides on its own (explore-view.mjs autoScroll): no snapping while it moves, or each frame snaps back. */
 .trend-track.auto-scroll { scroll-snap-type: none; }
+
+/* Loading shape (PageSpeed, 14 Nov): the skeleton keeps the Trending row and the list controls at their real heights so
+   the loaded page replaces it without pushing the list down. */
+.trend-skeleton { border-color: transparent; background: none; box-shadow: none; pointer-events: none; }
+.trend-skeleton .tc-media { margin: 8px 8px 0; }
+.trend-skeleton-line { height: 104px; margin: 12px 10px 12px; border-radius: 12px; }
+.explore-controls-skeleton { height: 94px; border-radius: 20px; margin-bottom: 16px; }
+@media (max-width: 720px) { .explore-controls-skeleton { height: 140px; } }

@@ -24,6 +24,7 @@ import { createCircleFunding } from './circle-test-wallets.mjs';
 import { VanityMintPool, vanityKey, clientAddress } from './vanity-mints.mjs';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
+import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 import { readFile } from 'node:fs/promises';
 import { readFileSync, existsSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
@@ -41,6 +42,7 @@ import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
 import { TOKEN_PATH, renderTokenPage, renderTokenNotFound, renderTokenUnavailable } from '../../packages/core/token-seo.mjs';
 import { memoryReport } from './memory-report.mjs';
+import { Thumbnails, thumbWidth } from './thumbnails.mjs';
 import { getHeapStatistics } from 'node:v8';
 import { productionGuard, formatGuardReport, durableStorage } from './production-guard.mjs';
 import { PAGES, canonicalOrigin, renderPage, renderSitemap, renderRobots, renderLlms } from '../../packages/core/seo.mjs';
@@ -63,6 +65,7 @@ const resources = new Map([['/', ['index.html', 'text/html']], ['/launch', ['ind
 // Static design assets (brand, fonts, icon sprite): only these extensions, only inside apps/web/assets.
 const assetRoot = fileURLToPath(new URL('../web/assets/', import.meta.url));
 resources.set('/terminal-chart.mjs',['terminal-chart.mjs','text/javascript']);
+resources.set('/vendor-loader.mjs',['vendor-loader.mjs','text/javascript']);
 resources.set('/holder-terminal.mjs',['holder-terminal.mjs','text/javascript']);
 resources.set('/chat-signature.mjs',['chat-signature.mjs','text/javascript']);
 resources.set('/holder-chat.mjs',['holder-chat.mjs','text/javascript']);
@@ -149,6 +152,24 @@ const vendorFiles = new Map([
 ]);
 const base58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const IMMUTABLE = 'public, max-age=31536000, immutable';
+// Compressed copies of the app's JavaScript and CSS, made once per file and build. Cloudflare compresses in front of
+// Railway, but a host without it (Oracle, local) sent about 2 MB uncompressed on every first visit (PageSpeed, 14 Nov).
+const compressedCache = new Map();
+function sendCompressed(req, res, headers, body) {
+  const accept = String(req.headers['accept-encoding'] ?? ''), size = Buffer.byteLength(body);
+  const encoding = size < 1024 ? null : /\bbr\b/.test(accept) ? 'br' : /\bgzip\b/.test(accept) ? 'gzip' : null;
+  if (!encoding) { res.writeHead(200, headers); return res.end(body); }
+  // A URL's body only changes with a deploy, which restarts the process and empties this cache.
+  const key = `${encoding}:${req.url}:${size}`;
+  let out = compressedCache.get(key);
+  if (!out) {
+    out = encoding === 'br' ? brotliCompressSync(body, { params: { [zlibConstants.BROTLI_PARAM_QUALITY]: 9 } }) : gzipSync(body, { level: 9 });
+    compressedCache.set(key, out);
+    while (compressedCache.size > 400) compressedCache.delete(compressedCache.keys().next().value);
+  }
+  res.writeHead(200, { ...headers, 'Content-Encoding': encoding, 'Vary': 'Accept-Encoding', 'Content-Length': out.length });
+  return res.end(out);
+}
 /** A list size from ?limit= (trades and candles), 1 to 500. */
 const listLimit = (url, fallback) => Math.max(1, Math.min(500, Number(url.searchParams.get('limit')) || fallback));
 // Every served script and stylesheet, for versioned URLs and the modulepreload list (apps/api/static-assets.mjs).
@@ -223,6 +244,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const dataDir=resolve(process.env.ELPIDA_DATA_DIR??process.env.RAILWAY_VOLUME_MOUNT_PATH??fileURLToPath(new URL('../../local-data/',import.meta.url)));
   const dataFile=name=>resolve(dataDir,dataPrefix+name);
   const circle = circleFunding ?? createCircleFunding({ path: port === 0 ? null : dataFile('circle-test-wallets.json') });
+  const thumbnails=new Thumbnails({dir:port===0?null:dataFile('thumbnails')});
   const metadataStore=new MetadataStore({path:port===0?null:dataFile('ipfs-content'),chainBound:Boolean(publicUrl),...(process.env.ELPIDA_METADATA_MAX_BYTES?{maxBytes:Number(process.env.ELPIDA_METADATA_MAX_BYTES)}:{}),...(process.env.ELPIDA_METADATA_MAX_PENDING_BYTES?{maxPendingBytes:Number(process.env.ELPIDA_METADATA_MAX_PENDING_BYTES)}:{})});
   const walletTokenLists=new WalletTokenLists({path:port===0?null:dataFile('wallet-tokenlists.json')});
   const bootStarted=Date.now(),buildId=String(process.env.RAILWAY_GIT_COMMIT_SHA??process.env.ELPIDA_BUILD??'dev').slice(0,12);
@@ -539,7 +561,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if (url.pathname === '/api/v4-artifacts') return send(200, v4Artifacts());
         if (url.pathname === '/api/config') return send(200, { ...runtime.config, serverTime: Date.now()/1000, vanity: vanity.status(), circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), relay: feedRelay.publicConfig(), v2Keeper: v2Keeper.address?{address:v2Keeper.address,active:Boolean(v2Keeper.enabled)}:null,v2Identities:{x:v2Identities.xEnabled}, consent: consentConfig, csrf });
         if(url.pathname==='/api/metadata/resolve')return send(200,await metadataStore.resolve(url.searchParams.get('uri')));
-        if(url.pathname.startsWith('/api/content/')){const record=metadataStore.get(url.pathname.slice('/api/content/'.length));if(!record)return send(404,{error:'Content not found.'});res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}
+        if(url.pathname.startsWith('/api/content/')){const cid=url.pathname.slice('/api/content/'.length),record=metadataStore.get(cid);if(!record)return send(404,{error:'Content not found.'});const width=thumbWidth(url.searchParams.get('w'));const thumb=width?await thumbnails.get(cid,record,width):null;if(thumb){res.writeHead(200,{'Content-Type':'image/webp','Cache-Control':'public, max-age=31536000, immutable','Content-Length':thumb.length});return res.end(thumb);}res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}
         if (url.pathname === '/api/indexer/status') { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); return send(200,runtime.indexer.status()); }
         if (url.pathname === '/api/tokens') { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); return send(200,runtime.listings()); }
         const indexed = url.pathname.match(/^\/api\/tokens\/(0x[a-fA-F0-9]{40})(?:\/(trades|candles|holders))?$/);
@@ -547,7 +569,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if (url.pathname === '/api/state') return send(200, await runtime.state(url.searchParams.get('account') ?? '0'));
         // Simulation buys for the Explore live feed: the same public shape as /api/public/recent-trades.
         if (url.pathname === '/api/recent-trades') { const limit=Math.max(1,Math.min(50,Number(url.searchParams.get('limit'))||20)),tokens=new Map(runtime.listings().map(t=>[t.address.toLowerCase(),t])); return send(200, runtime.indexer.recentTrades(limit).flatMap(trade=>{const t=tokens.get(String(trade.token).toLowerCase());return t?[recentTrade('local',t,trade)]:[];})); }
-        if (vendorFiles.has(url.pathname)) { const out = staticAssets.serve(url.pathname, url.searchParams.get('v')); res.writeHead(200, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': out.immutable ? IMMUTABLE : 'no-cache' }); return res.end(out.body); }
+        if (vendorFiles.has(url.pathname)) { const out = staticAssets.serve(url.pathname, url.searchParams.get('v')); return sendCompressed(req, res, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': out.immutable ? IMMUTABLE : 'no-cache' }, out.body); }
         const seoOrigin = canonicalOrigin(), seoPage = PAGES.find(p => p.path === url.pathname);
         const seoBody = url.pathname === '/robots.txt' ? [renderRobots(seoOrigin), 'text/plain'] : url.pathname === '/sitemap.xml' ? [renderSitemap(seoOrigin), 'application/xml'] : url.pathname === '/llms.txt' ? [renderLlms(seoOrigin), 'text/plain'] : seoPage ? [renderPage(seoPage, seoOrigin), 'text/html'] : null;
         if (seoBody) { res.setHeader('Cache-Control', 'public, max-age=3600'); res.writeHead(200, { 'Content-Type': `${seoBody[1]}; charset=utf-8` }); return res.end(seoBody[0]); }
@@ -576,9 +598,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if (resource) {
           // App code changes with every deploy: unversioned URLs are revalidated, versioned ones (?v=<build>, which
           // index.html and every import use) are immutable because a deploy changes the build id.
-          if (resource[1] === 'text/html') { res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }); return res.end(staticAssets.html(await readFile(resolve(webRoot, resource[0]), 'utf8'))); }
+          if (resource[1] === 'text/html') return sendCompressed(req, res, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }, staticAssets.html(await readFile(resolve(webRoot, resource[0]), 'utf8')));
           const out = staticAssets.serve(url.pathname, url.searchParams.get('v'));
-          res.writeHead(200, { 'Content-Type': `${resource[1]}; charset=utf-8`, 'Cache-Control': out.immutable ? IMMUTABLE : 'no-cache' }); return res.end(out.body);
+          return sendCompressed(req, res, { 'Content-Type': `${resource[1]}; charset=utf-8`, 'Cache-Control': out.immutable ? IMMUTABLE : 'no-cache' }, out.body);
         }
         if (url.pathname.startsWith('/assets/')) {
           const file = resolve(assetRoot, '.' + decodeURIComponent(url.pathname.slice('/assets'.length)));

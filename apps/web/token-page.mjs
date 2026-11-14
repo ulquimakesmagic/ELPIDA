@@ -18,7 +18,7 @@ import {filterTrades} from './trade-filter.mjs';
 import {odometer} from './odometer.mjs';
 import {filterByWho,topTraders,safetyChecks,quickAmounts,walletHolders} from './token-insights.mjs';
 import {flywheelChip} from './burn-labels.mjs';
-import { creatorSplitCard, creatorStrategyCard, identityAllocationCard, claimFeesTag } from './creator-split.mjs';
+import { creatorSplitCard, creatorStrategyCard, identityAllocationCard, claimFeesTag, creatorWalletCard } from './creator-split.mjs';
 export { exceedsRemaining };
 
 const metadataRequests = new Map();
@@ -82,6 +82,9 @@ export function renderToken(ctx, address) {
 
   const holdersValue = h('strong', '—'),volumeValue=h('strong',token.volume24h!=null?fmtValue(token.volume24h,token):'—');
   const creatorFeesTotal=h('strong','Loading…');
+  // V2 EVM tokens show the creator's 30% in the Allocations card (one wallet, a split, or X/website rows), read live from
+  // the hook, so the separate lifetime "Creator fees" panel is not shown for them (Malik, 14 Nov).
+  const v2Allocations=token?.deploymentModel==='v2-hook'&&!String(token.network??'').startsWith('solana');
   const creatorFeesStat=h('section.tk-card.tk-fees',{'aria-label':'Creator fees',title:'Lifetime creator fees, including claimed amounts. LP fees include collected and currently collectible fees. Assets are shown separately.'},h('h2.tk-h','Creator fees'),creatorFeesTotal,h('p.hint','Lifetime total, including amounts already claimed.'),h('a.btn.btn-secondary.btn-sm',{href:'#/rewards'},'Claim fees',icon('arrow-right','icon-sm')));
   const tile=(label,value,title)=>h('div.tk-tile',{title:title??null},h('span',label),h('strong',value));
   const details = h('section.tk-card.tk-details', { 'aria-label': 'Token details' }, h('h2.tk-h', 'Token details'), h('div.tk-tiles',
@@ -198,9 +201,9 @@ export function renderToken(ctx, address) {
       h('div.tk-top', priceCard),
       // Allocations and splits sit right under the trade panel so recipients see them (Malik, 11 Nov); they stay hidden
       // for tokens whose creator share has no other recipients.
-      h('aside.tk-rail.stack', trade, identityAllocationCard(ctx, token), creatorSplitCard(ctx, token), desk.position, curve, safety, creatorFeesStat, creatorStrategyCard(ctx, token)),
+      h('aside.tk-rail.stack', trade, identityAllocationCard(ctx, token), creatorSplitCard(ctx, token), creatorWalletCard(ctx, token), desk.position, curve, safety, v2Allocations ? null : creatorFeesStat, creatorStrategyCard(ctx, token)),
       h('div.tk-rest.stack', activity)), mobileBar);
-  async function loadCreatorFees(){if(!page.isConnected)return;try{const result=await ctx.api(`creator-fees?network=${encodeURIComponent(token.network??ctx.currentChain())}&token=${encodeURIComponent(token.address)}`);if(!page.isConnected)return;if(result.status==='ready'){creatorFeesTotal.textContent=result.assets.filter(a=>Number(a.amount)>0).map(a=>`${number(a.amount,6)} ${a.symbol}`).join(' + ')||`0 ${q}`;creatorFeesStat.title=`Lifetime creator fees through indexed block ${result.indexedBlock}, including claimed amounts. Token and quote assets are shown separately.`;}else{creatorFeesTotal.textContent=result.status==='loading'?'Loading…':'Unavailable';}}catch{creatorFeesTotal.textContent='Unavailable';}if(page.isConnected)setTimeout(loadCreatorFees,15000);}
+  async function loadCreatorFees(){if(!page.isConnected||v2Allocations)return;try{const result=await ctx.api(`creator-fees?network=${encodeURIComponent(token.network??ctx.currentChain())}&token=${encodeURIComponent(token.address)}`);if(!page.isConnected)return;if(result.status==='ready'){creatorFeesTotal.textContent=result.assets.filter(a=>Number(a.amount)>0).map(a=>`${number(a.amount,6)} ${a.symbol}`).join(' + ')||`0 ${q}`;creatorFeesStat.title=`Lifetime creator fees through indexed block ${result.indexedBlock}, including claimed amounts. Token and quote assets are shown separately.`;}else{creatorFeesTotal.textContent=result.status==='loading'?'Loading…':'Unavailable';}}catch{creatorFeesTotal.textContent='Unavailable';}if(page.isConnected)setTimeout(loadCreatorFees,15000);}
   queueMicrotask(loadCreatorFees);
   return page;
 }

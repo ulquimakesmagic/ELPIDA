@@ -138,6 +138,14 @@ test('localhost API exercises launch, trading, fee payout and request protection
     const owner=await state(),url=`${base}/api/terminal?network=local&token=${address}&author=${owner.wallet}`;
     const response=await fetch(url);assert.equal(response.status,200);const terminal=await response.json();assert.ok(terminal.position.basisKnown);assert.ok(Number(terminal.position.balance)>0);assert.ok(Number(terminal.volume24hQuote)>0);
     assert.equal((await fetch(`${base}/terminal-chart.mjs`)).status,200);assert.equal((await fetch(`${base}/vendor/lightweight-charts.js`)).status,200);
+    // The vendor loader is served, the page no longer ships the chart or Solana libraries, and the app's code is compressed
+    // at the origin (PageSpeed, 14 Nov).
+    assert.equal((await fetch(`${base}/vendor-loader.mjs`)).status,200);
+    const page=await (await fetch(`${base}/`)).text();assert.doesNotMatch(page,/solana-web3\.js|lightweight-charts\.js/);
+    const { request: raw } = await import('node:http');
+    const encoded=await new Promise((done,fail)=>{raw(`${base}/app.mjs`,{headers:{'accept-encoding':'br'}},r=>{let n=0;r.on('data',c=>{n+=c.length;});r.on('end',()=>done({enc:r.headers['content-encoding'],vary:r.headers.vary,n}));}).on('error',fail).end();});
+    const plain=await (await fetch(`${base}/app.mjs`,{headers:{'accept-encoding':'identity'}})).arrayBuffer();
+    assert.equal(encoded.enc,'br');assert.equal(encoded.vary,'Accept-Encoding');assert.ok(encoded.n*2<plain.byteLength,`${encoded.n} compressed vs ${plain.byteLength}`);
     const body={network:'local',token:address,author:owner.wallet,text:'Simulation integration test thesis.'},prepared=await request('theses/prepare',body);assert.equal(prepared.status,200);
     assert.equal((await request('theses/save',{...body,nonce:prepared.body.nonce,signature:'0x00'})).status,400);
     const signer=await app.runtime.provider.getSigner(owner.wallet);{const signature=await signer.signMessage(prepared.body.message);assert.equal((await request('theses/save',{...body,nonce:prepared.body.nonce,signature})).status,200);assert.equal((await (await fetch(url)).json()).theses.length,1);}

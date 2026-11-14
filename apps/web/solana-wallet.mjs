@@ -1,3 +1,4 @@
+import { ensureSolanaLibrary } from './vendor-loader.mjs';
 import { nowSeconds } from './clock.mjs';
 import { createElpidaSolana, v2Owed, ownFeeBps, validV2Symbol, V2, quoteBuy, quoteSell, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, tradeFeeBps, lockedPoolVenue, mintControls, testConversionOut, decodeTestConversion, STATUS_TRADING, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut, VENUE_RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, raydiumQuote, raydiumCreationCost, raydiumBuybackAmount } from '/elpida-solana.mjs';
 import {normalizeMetadata,withSavedMetadata} from './metadata.mjs';
@@ -30,7 +31,10 @@ const metadataKey=(program,mint)=>`elpida:solana-metadata:${program}:${mint}`;
 const readSaved=async key=>{try{return await readMetadataCache(key)??null;}catch{return null;}};
 const readMetadata=async key=>withSavedMetadata({},await readSaved(key));
 
-const web3 = globalThis.solanaWeb3;
+// The Solana web3 library is loaded on first use (vendor-loader.mjs), not with every page. `web3` follows it.
+let web3 = globalThis.solanaWeb3 ?? null;
+/** Loads the Solana library if needed; every Solana action runs after this (app.mjs calls it when Solana becomes active). */
+export async function ensureSolanaWeb3() { await ensureSolanaLibrary(); web3 = globalThis.solanaWeb3 ?? null; if (!web3) throw new Error('The Solana library could not load. Refresh and retry.'); return web3; }
 
 // Browser-wallet flow for the Elpida Solana program, model 3 (Phantom, Solflare or Backpack).
 // Same surface as TestnetWallet so the UI can treat every chain alike. Pricing is native: launches pair
@@ -48,8 +52,13 @@ export class SolanaWallet {
     this.config = config; this.net = config.solana; this.onProgress = onProgress;
     this.launches = new Map();
     // Mainnet uses the server's RPC proxy (a relative URL), so the provider key stays server-side.
-    this.connection = web3 ? new web3.Connection(new URL(this.net.rpcUrl, location.origin).href, 'confirmed') : null;
   }
+  /** Made on first use, once the Solana library has loaded; null before that. */
+  get connection() {
+    if (this._connection === undefined) { if (!web3) return null; this._connection = new web3.Connection(new URL(this.net.rpcUrl, location.origin).href, 'confirmed'); }
+    return this._connection;
+  }
+  set connection(value) { this._connection = value; }
   select(key) {
     if (key !== this.net.key) throw new Error('That Solana network is not available.');
     return this.net;
