@@ -19,10 +19,10 @@ export function homePreloads({ sources, prices = {}, now = Math.floor(Date.now()
 }
 
 /** The first `limit` trending cards' logos in rank order: this site's own thumbnail URL, or null for any other image. */
-export function trendingLogos({ sources, prices = {}, now = Math.floor(Date.now() / 1000), limit = 5 }) {
+export function trendingLogos({ sources, prices = {}, now = Math.floor(Date.now() / 1000), limit = 5, imageOf = () => '' }) {
   const tokens = pairTokenReferences(sources.flatMap(({ network, tokens, solana }) => (tokens ?? []).map(t => ({ ...t, network,
     usdReference: usdReferenceFor(solana ? { ...t, network, usdReference: t.pair === 'xstock' ? t.usdReference ?? null : null } : { ...t, network }, prices?.[network] ?? null, now) }))));
-  return trendingTokens(tokens, limit, now).map(t => thumbnailUrl(safeImage(t.metadata?.image ?? t.image ?? ''), TREND_IMAGE))
+  return trendingTokens(tokens, limit, now).map(t => thumbnailUrl(safeImage(t.metadata?.image || t.image || imageOf(t) || ''), TREND_IMAGE))
     .map(src => /^\/api\/content\/[A-Za-z0-9]+\?w=\d+$/.test(src) ? src : null);
 }
 
@@ -55,4 +55,22 @@ export function withFirstScreen(html, urls) {
   const start = html.indexOf('<div id="view"'), head = html.indexOf('<div class="page-head">', start), end = head < 0 ? -1 : html.indexOf('</div></div>', head);
   if (!urls.some(Boolean) || start < 0 || head < 0 || end < 0) return html;
   return html.slice(0, head) + homeFirstScreen(urls) + html.slice(end + '</div></div>'.length);
+}
+
+/**
+ * The logo of a token whose details are only in its launch metadata document (`metadataURI`, as V2 launches publish
+ * them): read from this server's own store, with no network request; '' when the document or its image is not stored
+ * here. Mirrors MetadataStore.resolve, which the browser calls for the same token.
+ */
+export function storedMetadataImage(store, token) {
+  try {
+    const uri = String(token?.metadataURI ?? ''); if (!uri.startsWith('ipfs://')) return '';
+    const record = store.get(uri.slice(7)); if (!record || record.type !== 'application/json') return '';
+    const doc = JSON.parse(Buffer.from(record.data, 'base64').toString());
+    if (doc.schema !== 'elpida-token-v1') return '';
+    const image = String(doc.image ?? '');
+    if (!image.startsWith('ipfs://')) return '';
+    const cid = image.slice(7);
+    return /^[A-Za-z0-9]+$/.test(cid) && store.get(cid) ? `/api/content/${cid}` : '';
+  } catch { return ''; }
 }

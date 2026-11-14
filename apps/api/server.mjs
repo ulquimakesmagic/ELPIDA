@@ -46,7 +46,7 @@ import { memoryReport } from './memory-report.mjs';
 import { Thumbnails, thumbWidth } from './thumbnails.mjs';
 import { PriceHistory, priceEntries } from './price-history.mjs';
 import { usdReferenceFor } from '../../packages/core/pairs.mjs';
-import { trendingLogos, withPreloads, withFirstScreen } from './home-preload.mjs';
+import { trendingLogos, withPreloads, withFirstScreen, storedMetadataImage } from './home-preload.mjs';
 import { getHeapStatistics } from 'node:v8';
 import { productionGuard, formatGuardReport, durableStorage } from './production-guard.mjs';
 import { PAGES, canonicalOrigin, renderPage, renderSitemap, renderRobots, renderLlms } from '../../packages/core/seo.mjs';
@@ -384,7 +384,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     try{
       const sources=evmTestnets.map(net=>{const activity=new Map();return {network:net.key,tokens:publicIndex.listings(net.key,(e,t)=>{if(!activity.has(e))activity.set(e,indexedActivity(e.index.db));return activityOf(activity.get(e),t.address);})};});
       if(solanaIndex){const activity=indexedActivity(solanaIndex.db);sources.push({network:solanaIndex.network.key,solana:true,tokens:solanaIndex.listings().map(t=>({...t,...activityOf(activity,t.address)}))});}
-      urls=trendingLogos({sources,prices:priceSnapshot(),limit:5});
+      urls=trendingLogos({sources,prices:priceSnapshot(),limit:5,imageOf:t=>storedMetadataImage(metadataStore,t)});
     }catch(error){console.error(JSON.stringify({event:'home_preload_failed',message:String(error?.message??error).slice(0,200)}));}
     homePreload={at:Date.now(),urls};return urls;
   }
