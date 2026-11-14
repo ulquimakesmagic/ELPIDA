@@ -186,7 +186,7 @@ export function renderToken(ctx, address) {
   const info = h('div.tk-info.stack', details, addresses, about, tech);
   const activity = marketActivity(ctx, token, q, { addressUrl, isCreator, me, info,
     onCounts: ({ holders }) => { holdersValue.textContent = holders ?? '—'; },
-    onHolders: rows => drawSafety(rows), onLiveTrade: () => chart.refresh?.() });
+    onHolders: rows => drawSafety(rows), onLiveTrade: () => { chart.refresh?.(); document.dispatchEvent(new CustomEvent('elpida:trade', { detail: { token: token.address } })); } });
   const desk=holderTerminal(ctx,token,{onVolume:v=>volumeValue.textContent=fmtValue(v,token)});
   const trade = tradePanel(ctx, token, { dex, solana });
   const sideButton = s => h(`button.btn.btn-lg.${s === 'buy' ? 'btn-buy' : 'btn-sell'}`, { type: 'button', on: { click: () => { trade.selectSide?.(s); trade.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' }); } } }, s === 'buy' ? `Buy ${token.symbol}` : 'Sell');

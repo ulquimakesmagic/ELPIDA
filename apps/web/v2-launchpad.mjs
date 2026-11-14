@@ -574,8 +574,31 @@ export async function readSplit(provider, vault) {
  * next payout (Malik, 14 Nov: "faster indexing of allocation values"). Read live from the hook's ledger.
  */
 export async function creatorOwedInHook(provider, hook, token) {
-  try { return (await new Contract(hook, ['function ledgers(address) view returns(uint256[5] owed,uint128[5] paid)'], provider).ledgers(token)).owed[0]; } catch { return 0n; }
+  return (await creatorLedger(provider, hook, token)).owed;
 }
+/**
+ * The creator's ledger in the hook for `token`: `owed` (earned, still in the pool), `paid` (already sent to the creator's
+ * wallet or vault) and `earned` (their sum: every creator fee the token has made). Exact, read live, so it moves with each
+ * trade (Malik, 14 Nov: show the total creator fees earned on every token page).
+ */
+export async function creatorLedger(provider, hook, token) {
+  try {
+    const l = await new Contract(hook, ['function ledgers(address) view returns(uint256[5] owed,uint128[5] paid)'], provider).ledgers(token);
+    return { owed: l.owed[0], paid: BigInt(l.paid[0]), earned: l.owed[0] + BigInt(l.paid[0]) };
+  } catch { return { owed: 0n, paid: 0n, earned: 0n }; }
+}
+/** A V2 token's lifetime creator fees, in the quote asset: { earned, paid, owed, asset }, or null for other tokens. */
+export async function creatorEarnings({ provider, net, token }) {
+  const d = v2Deployment(net); if (!d?.hook) return null;
+  const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
+  if (!l.creatorVault || l.creatorVault === ZeroAddress) return null;
+  return { asset: l.quote, ...(await creatorLedger(provider, d.hook, token)) };
+}
+/**
+ * What each row has already been paid: its share of everything the hook sent to the vault, less what the vault still
+ * holds for it. Computed from on-chain state (the vault keeps no running total); exact up to a few wei of rounding.
+ */
+const claimedFromVault = (rows, paidToVault, inVault) => shareOut(rows, paidToVault).map((entitled, i) => (entitled > inVault[i] ? entitled - inVault[i] : 0n));
 const vaultHeld = (provider, asset, vault) => (asset === ZeroAddress ? provider.getBalance(vault) : new Contract(asset, ERC20, provider).balanceOf(vault));
 /** Splits `amount` by basis points, the last row taking the rounding remainder (as the vault contracts do). */
 const shareOut = (rows, amount) => { let assigned = 0n; return rows.map((r, i) => { const part = i + 1 === rows.length ? amount - assigned : amount * BigInt(r.bps) / 10000n; assigned += part; return part; }); };
@@ -585,10 +608,11 @@ export async function creatorSplitState({ provider, net, token }) {
   const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
   const rows = await readSplit(provider, l.creatorVault); if (!rows) return null;
   const c = new Contract(l.creatorVault, SPLIT_ABI, provider), asset = l.quote;
-  const [held, accounted, owed, claimed] = await Promise.all([vaultHeld(provider, asset, l.creatorVault), c.accounted(asset), creatorOwedInHook(provider, d.hook, token), Promise.all(rows.map(r => c.claimable(asset, r.wallet)))]);
-  const parts = shareOut(rows, (held > accounted ? held - accounted : 0n) + owed);
-  rows.forEach((r, i) => { r.claimable = claimed[i] + parts[i]; });
-  return { vault: l.creatorVault, asset, rows };
+  const [held, accounted, ledger, claimed] = await Promise.all([vaultHeld(provider, asset, l.creatorVault), c.accounted(asset), creatorLedger(provider, d.hook, token), Promise.all(rows.map(r => c.claimable(asset, r.wallet)))]);
+  const unsynced = shareOut(rows, held > accounted ? held - accounted : 0n), owedParts = shareOut(rows, ledger.owed);
+  const inVault = rows.map((_, i) => claimed[i] + unsynced[i]), paidOut = claimedFromVault(rows, ledger.paid, inVault);
+  rows.forEach((r, i) => { r.claimable = inVault[i] + owedParts[i]; r.claimed = paidOut[i]; });
+  return { vault: l.creatorVault, asset, rows, earned: ledger.earned };
 }
 
 /** A V2 token whose creator share goes straight to one wallet: that wallet, 100%, and what the hook owes it. */
@@ -596,7 +620,8 @@ export async function creatorWalletState({ provider, net, token }) {
   const d = v2Deployment(net); if (!d?.hook) return null;
   const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
   if (!l.creatorVault || l.creatorVault === ZeroAddress || (await provider.getCode(l.creatorVault)) !== '0x') return null;
-  return { vault: l.creatorVault, asset: l.quote, rows: [{ kind: 'wallet', wallet: l.creatorVault, bps: 10000, claimable: await creatorOwedInHook(provider, d.hook, token) }] };
+  const ledger = await creatorLedger(provider, d.hook, token);
+  return { vault: l.creatorVault, asset: l.quote, rows: [{ kind: 'wallet', wallet: l.creatorVault, bps: 10000, claimable: ledger.owed, claimed: ledger.paid }], earned: ledger.earned };
 }
 
 /** Collects the token's fees from the pool (permissionless): the creator's share goes straight to its wallet. */
@@ -643,12 +668,13 @@ export async function identityAllocationState({ provider, net, token }) {
   try { if ((await c.IDENTITY_ALLOCATION_VERSION()) !== 1n) return null; } catch { return null; }
   const n = Number(await c.rowCount()), asset = l.quote;
   // Every read in parallel: the card refreshes every few seconds, and one RPC round trip per row made it slow.
-  const [raw, claimed, held, accounted, owed] = await Promise.all([Promise.all(Array.from({ length: n }, (_, i) => c.row(i))), Promise.all(Array.from({ length: n }, (_, i) => c.claimable(asset, i))),
-    vaultHeld(provider, asset, l.creatorVault), c.accounted(asset), creatorOwedInHook(provider, d.hook, token)]);
+  const [raw, claimed, held, accounted, ledger] = await Promise.all([Promise.all(Array.from({ length: n }, (_, i) => c.row(i))), Promise.all(Array.from({ length: n }, (_, i) => c.claimable(asset, i))),
+    vaultHeld(provider, asset, l.creatorVault), c.accounted(asset), creatorLedger(provider, d.hook, token)]);
   const rows = raw.map((r, i) => { const [kind, ...rest] = String(r.label).split(':'); return { index: i, kind, target: rest.join(':') || null, wallet: r.wallet === ZeroAddress ? null : r.wallet, bps: Number(r.share) }; });
-  const parts = shareOut(rows, (held > accounted ? held - accounted : 0n) + owed);
-  rows.forEach((r, i) => { r.claimable = claimed[i] + parts[i]; });
-  return { vault: l.creatorVault, asset, rows };
+  const unsynced = shareOut(rows, held > accounted ? held - accounted : 0n), owedParts = shareOut(rows, ledger.owed);
+  const inVault = rows.map((_, i) => claimed[i] + unsynced[i]), paidOut = claimedFromVault(rows, ledger.paid, inVault);
+  rows.forEach((r, i) => { r.claimable = inVault[i] + owedParts[i]; r.claimed = paidOut[i]; });
+  return { vault: l.creatorVault, asset, rows, earned: ledger.earned };
 }
 
 /**
