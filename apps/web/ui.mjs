@@ -91,17 +91,30 @@ const AVATAR_SIZES = { 'tc-image': 256, 'koth-avatar': 96, 'lc-avatar': 82 };
  * A logo stored on this server (`/api/content/<cid>`) as a small WebP thumbnail instead of the uploaded original, which
  * can be megabytes (PageSpeed, 14 Nov). Other image URLs are returned unchanged.
  */
+/**
+ * An image Elpida itself served under its former Railway address (a test token launched before elpida.fun had its own
+ * domain still points there; that address now refuses requests, PageSpeed 14 Nov) becomes the same path on this site.
+ */
+export function ownImagePath(src) {
+  try {
+    const u = new URL(String(src));
+    if (u.protocol === 'https:' && /^elpida[a-z0-9-]*\.up\.railway\.app$/.test(u.hostname) && /^\/(assets|api\/content)\//.test(u.pathname)) return u.pathname + u.search;
+  } catch { /* relative or invalid: unchanged */ }
+  return src;
+}
 export function thumbnailUrl(src, cssPixels = 64) {
+  src = ownImagePath(src);
   if (!/^\/api\/content\/[A-Za-z0-9]+$/.test(String(src))) return src;
   return `${src}?w=${Math.min(512, Math.ceil(cssPixels * 2))}`;
 }
-export function avatar(token, cls = '') {
+export function avatar(token, cls = '', { priority = false } = {}) {
   const box = h(`div.avatar${cls ? '.' + cls : ''}`);
   const image = safeImage(token?.metadata?.image ?? token?.image ?? '');
   const initials = h('span.initials', { text: (token?.symbol || token?.name || '?').slice(0, 2).toUpperCase() });
   if (image) {
     const thumb = thumbnailUrl(image, AVATAR_SIZES[cls] ?? 64);
-    const img = h('img', { alt: '', src: thumb, referrerPolicy: 'no-referrer', loading: 'lazy', decoding: 'async' });
+    const img = h('img', { alt: '', src: thumb, referrerPolicy: 'no-referrer', loading: priority ? 'eager' : 'lazy', decoding: 'async' });
+    if (priority) img.setAttribute('fetchpriority', 'high');
     // A thumbnail that fails falls back to the original once; an original that fails shows the initials.
     img.addEventListener('error', () => { if (img.getAttribute('src') !== image) img.src = image; else img.replaceWith(initials); });
     box.append(img);

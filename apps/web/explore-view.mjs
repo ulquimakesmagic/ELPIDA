@@ -145,7 +145,8 @@ function trendCard(token, rank, ctx) {
   const card = h('li.trend-item', { 'data-key': keyOf(token) }, h('article.trend-card',
     // The whole card opens the token; the name link is the one keyboard and screen reader users get.
     h('a.card-cover', { href, tabIndex: -1, 'aria-hidden': 'true' }),
-    h('div.tc-media', avatar(token, 'tc-image'), rankChip, pill, kothBadge(token, ctx.king?.()),
+    // The first trending logos are the home page's largest image on most screens: fetch them first, not lazily.
+    h('div.tc-media', avatar(token, 'tc-image', { priority: rank <= 2 }), rankChip, pill, kothBadge(token, ctx.king?.()),
       h('div.tc-band', h('h3.tc-name', h('a.tc-link', { href }, name)), h('span.tc-ticker', `$${symbol}`, pairStack(token, ctx.nativeSymbol(token), ctx.networkName(token))), curveLine(token))),
     h('div.tc-stats', h('div', h('span.label-xs', 'Market cap'), cap), h('div', h('span.label-xs', '24h volume'), volume)),
     h('div.tc-foot', h('span.mono.tc-address', short(token.address)), token.created ? timeNode('time.mono.tc-age', Math.floor(token.created / 1000), 'age-long') : null)));
