@@ -66,7 +66,7 @@ test('the service runs start.sh as the elpida user with the variables file, rest
     assert.match(unit, new RegExp(`^${line.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`, 'm'));
 });
 
-test('doctor.sh lists variable names and problems but never a value', { skip: process.getuid?.() !== 0 && 'needs root, as on the VM' }, () => {
+test('doctor.sh lists variable names and problems but never a value', () => {
   const t = mkdtempSync(join(tmpdir(), 'elpida-doctor-')), envFile = join(t, 'elpida.env');
   const secrets = ['0xdeadbeefSECRETKEY', 'r2-secret-ACCESS', 'https://staging.example.SECRET'];
   writeFileSync(envFile, [
@@ -76,7 +76,7 @@ test('doctor.sh lists variable names and problems but never a value', { skip: pr
     `RAILWAY_PUBLIC_DOMAIN=${secrets[2]}`,
     '# a comment=not a name',
   ].join('\n') + '\n');
-  const r = spawnSync('bash', [join(dir, 'doctor.sh')], { encoding: 'utf8', env: { ...process.env, ELPIDA_ENV_FILE: envFile } });
+  const r = spawnSync('bash', [join(dir, 'doctor.sh')], { encoding: 'utf8', env: { ...process.env, ELPIDA_ENV_FILE: envFile, ELPIDA_DOCTOR_NO_ROOT: '1' }, timeout: 30_000 });
   rmSync(t, { recursive: true, force: true });
   const out = r.stdout + r.stderr;
   for (const s of [...secrets, 'elpida-backups.ACCESS_KEY_ID']) assert.ok(!out.includes(s), `never prints ${s}`);
