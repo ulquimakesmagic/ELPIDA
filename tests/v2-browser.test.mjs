@@ -10,7 +10,7 @@ import { v4Artifacts } from '../apps/api/v4-artifacts.mjs';
 import { V2Indexer } from '../packages/indexer/v2-indexer.mjs';
 import { V2_MODEL, splitFee } from '../packages/core/v2-economics.mjs';
 
-const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom, v2StockPairs, approveV2Stock, claimCreatorSplit, creatorSplitState, creatorStrategyState, identityAllocationState, claimIdentityRow, allocationKind } = await import('../apps/web/v2-launchpad.mjs');
+const { deployV2, launchV2, v2LaunchTerms, splitPreview, feeBpsFrom, v2StockPairs, approveV2Stock, claimCreatorSplit, creatorSplitState, creatorStrategyState, identityAllocationState, claimIdentityRow, allocationKind, creatorWalletState, claimV2CreatorFees } = await import('../apps/web/v2-launchpad.mjs');
 const { v2Deployment, v4Quote, v4Trade, isV4Token, isV2Token, v4WithdrawFees } = await import('../apps/web/v4-launchpad.mjs');
 
 function browser(t) {
@@ -101,6 +101,17 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   await v4WithdrawFees(bw, item);
   assert.ok(await f.provider.getBalance(record.flywheel) > 0n);
   await assert.rejects(v4Trade(bw, { ...item, factory: '0x0000000000000000000000000000000000000001' }, 'buy', { amount: '0.01' }), /another V2 launchpad/);
+  // A token whose creator share goes to one wallet: the Allocations card shows that wallet at 100% with what the hook
+  // owes it after each trade (before anyone collects), and "Collect and pay out" pays it (Malik, 14 Nov).
+  assert.equal((await creatorWalletState({ provider: f.provider, net, token: item.address })).rows[0].claimable, 0n, 'nothing owed right after a collection');
+  await v4Trade(bw, item, 'buy', { amount: '0.01', slippage: '1' });
+  const plain = await creatorWalletState({ provider: f.provider, net, token: item.address });
+  assert.equal(plain.rows.length, 1); assert.equal(plain.rows[0].bps, 10000); assert.equal(plain.rows[0].wallet, cw.address);
+  assert.ok(plain.rows[0].claimable > 0n, 'the creator\'s share shows straight after the trades, before any payout');
+  const creatorBefore = await f.provider.getBalance(cw.address), owedBefore = plain.rows[0].claimable;
+  await claimV2CreatorFees(bw, { token: item.address });
+  assert.equal(await f.provider.getBalance(cw.address) - creatorBefore, owedBefore, 'collecting pays exactly what the card showed');
+  assert.equal((await creatorWalletState({ provider: f.provider, net, token: item.address })).rows[0].claimable, 0n);
 
   // Creator split: the creator's 30% goes to an ownerless split contract for 3 wallets (50/30/20); each wallet is paid
   // only its share, whoever presses the button; a second launch with the same split reuses the same contract.
@@ -116,6 +127,8 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   const splitItem = { ...index.listings().find(x => x.address.toLowerCase() === splitLaunch.token.toLowerCase()), deploymentModel: V2_MODEL, factory: record.factory };
   await f.advance(120);
   await v4Trade(bw, splitItem, 'buy', { amount: '0.05', slippage: '1' });
+  const owedFirst = await creatorSplitState({ provider: f.provider, net, token: splitItem.address });
+  assert.ok(owedFirst.rows[2].claimable > 0n, 'a split wallet sees its share before anyone collects');
   const before3 = await f.provider.getBalance(third);
   await claimCreatorSplit(bw, { token: splitItem.address, wallet: third });
   const paid3 = await f.provider.getBalance(third) - before3;
@@ -154,6 +167,9 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   await f.advance(120);
   await v4Trade(bw, idsItem, 'buy', { amount: '0.05', slippage: '1' });
   let st = await identityAllocationState({ provider: f.provider, net, token: ids.token });
+  // Fees still in the hook count straight away: nobody has collected yet, and each row already shows its share.
+  assert.ok(st.rows.every(r => r.claimable > 0n), 'every row shows its share of fees still in the pool');
+  assert.ok(st.rows[0].claimable * 3000n / 5000n - st.rows[1].claimable <= 1n, 'in proportion to the shares');
   assert.deepEqual(st.rows.map(r => [r.kind, r.target, r.bps, r.wallet]), [['wallet', null, 5000, cw.address], ['domain', 'community.org', 3000, null], ['x', 'elpida_fun', 2000, null]]);
   await assert.rejects(claimIdentityRow(bw, { token: ids.token, index: 1 }), /held until its owner verifies/);
   await claimIdentityRow(bw, { token: ids.token, index: 0 });

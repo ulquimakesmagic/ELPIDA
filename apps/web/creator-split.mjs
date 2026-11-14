@@ -3,7 +3,26 @@
 // collects the token's fees from the pool and pays that wallet. Anyone may press it; the money only goes to the wallet.
 import { JsonRpcProvider, formatUnits } from '/vendor/ethers.js';
 import { h, short, number, errorText, copyButton, icon, usdRate } from './ui.mjs';
-import { creatorSplitState, creatorStrategyState, identityAllocationState, allocationKind } from './v2-launchpad.mjs';
+import { creatorSplitState, creatorStrategyState, identityAllocationState, allocationKind, creatorWalletState } from './v2-launchpad.mjs';
+
+/** How often an allocation card re-reads the chain while it is on screen and the tab is visible. */
+export const ALLOCATION_REFRESH_MS = 12_000;
+/**
+ * Re-runs `load` every few seconds while `card` is in the page and the tab is visible, and right away when the tab comes
+ * back, so a recipient's amount follows each trade (Malik, 14 Nov). Stops by itself once the card leaves the page.
+ */
+export function keepFresh(card, load, every = ALLOCATION_REFRESH_MS) {
+  let timer = null, running = false;
+  const tick = async () => {
+    timer = null;
+    if (!card.isConnected) { document.removeEventListener('visibilitychange', wake); return; }
+    if (document.visibilityState === 'visible' && !running) { running = true; try { await load({ quiet: true }); } finally { running = false; } }
+    timer = setTimeout(tick, every);
+  };
+  const wake = () => { if (document.visibilityState === 'visible' && card.isConnected) { clearTimeout(timer); tick(); } };
+  document.addEventListener('visibilitychange', wake);
+  timer = setTimeout(tick, every);
+}
 
 export function creatorSplitCard(ctx, token) {
   if (token?.deploymentModel !== 'v2-hook' || String(token.network ?? '').startsWith('solana')) return null;
@@ -11,12 +30,14 @@ export function creatorSplitCard(ctx, token) {
   if (!net) return null;
   const native = token.pair === 'native', decimals = native ? 18 : Number(token.quoteDecimals ?? 18), symbol = native ? net.nativeCurrency?.symbol ?? 'ETH' : token.quoteSymbol;
   const body = h('div.stack'), error = h('p.error-text', { role: 'alert' });
-  const card = h('section.tk-card.tk-split', { hidden: true, 'aria-label': 'Creator split' }, h('h2.tk-h', 'Creator split'), body, error);
+  const card = h('section.tk-card.tk-split.tk-alloc', { hidden: true, 'aria-label': 'Allocations' }, h('div.tk-alloc-head', h('h2.tk-h', icon('coins', 'icon-sm'), 'Allocations')), body, error);
   const provider = () => (ctx.wallet?.net?.key === net.key && ctx.wallet?.provider ? ctx.wallet.provider : new JsonRpcProvider(net.rpcUrl, net.chainId, { staticNetwork: true }));
   let busy = false;
-  async function load() {
+  async function load({ quiet = false } = {}) {
+    if (quiet && busy) return;
     let state = null;
-    try { state = await creatorSplitState({ provider: provider(), net, token: token.address }); } catch { state = null; }
+    try { state = await creatorSplitState({ provider: provider(), net, token: token.address }); } catch { state = quiet ? undefined : null; }
+    if (state === undefined) return;
     if (!state) { card.hidden = true; return; }
     card.hidden = false;
     body.replaceChildren(
@@ -29,7 +50,7 @@ export function creatorSplitCard(ctx, token) {
           try { await ctx.run('claim-creator-split', { token: token.address, wallet: r.wallet }); await load(); } catch (e) { error.textContent = errorText(e); } finally { busy = false; }
         } } }, 'Collect and pay out')))));
   }
-  load();
+  load().then(() => { if (!card.hidden) keepFresh(card, load); });
   return card;
 }
 
@@ -96,9 +117,11 @@ export function identityAllocationCard(ctx, token) {
       }
     }).then(() => { if (error.textContent) flow.replaceChildren(); });
   }
-  async function load() {
+  async function load({ quiet = false } = {}) {
+    if (quiet && (busy || flow.childElementCount)) return;
     let state = null;
-    try { state = await identityAllocationState({ provider: provider(), net, token: token.address }); } catch { state = null; }
+    try { state = await identityAllocationState({ provider: provider(), net, token: token.address }); } catch { state = quiet ? undefined : null; }
+    if (state === undefined) return;
     if (!state) { card.hidden = true; return; }
     card.hidden = false; vault = state.vault;
     body.replaceChildren(
@@ -113,7 +136,41 @@ export function identityAllocationCard(ctx, token) {
         r.wallet ? h('button.btn.btn-secondary.btn-sm', { type: 'button', disabled: ctx.mode !== 'testnet', on: { click: () => act(async () => { await ctx.run('claim-identity-row', { token: token.address, index: r.index }); await load(); }) } }, 'Collect and pay out')
           : h('button.btn.btn-secondary.btn-sm', { type: 'button', disabled: r.kind === 'x' && !ctx.config?.v2Identities?.x, title: r.kind === 'x' && !ctx.config?.v2Identities?.x ? 'X sign-in is not set up on this server yet.' : undefined, on: { click: () => verify(r) } }, 'Verify ownership')))));
   }
-  load();
+  load().then(() => { if (!card.hidden) keepFresh(card, load); });
+  return card;
+}
+
+/**
+ * A V2 token whose creator share goes to one wallet: the same Allocations card, one row at 100%, with what the hook has
+ * earned for it so far (Malik, 14 Nov: replace the "Creator fees" panel with just the allocation).
+ */
+export function creatorWalletCard(ctx, token) {
+  const net = v2Evm(ctx, token); if (!net) return null;
+  const native = token.pair === 'native', decimals = native ? 18 : Number(token.quoteDecimals ?? 18), symbol = native ? net.nativeCurrency?.symbol ?? 'ETH' : token.quoteSymbol;
+  const body = h('div.stack'), error = h('p.error-text', { role: 'alert' });
+  const card = h('section.tk-card.tk-split.tk-alloc', { hidden: true, 'aria-label': 'Allocations' }, h('div.tk-alloc-head', h('h2.tk-h', icon('coins', 'icon-sm'), 'Allocations')), body, error);
+  const provider = () => (ctx.wallet?.net?.key === net.key && ctx.wallet?.provider ? ctx.wallet.provider : new JsonRpcProvider(net.rpcUrl, net.chainId, { staticNetwork: true }));
+  let busy = false;
+  async function load({ quiet = false } = {}) {
+    if (quiet && busy) return;
+    let state = null;
+    try { state = await creatorWalletState({ provider: provider(), net, token: token.address }); } catch { state = quiet ? undefined : null; }
+    if (state === undefined) return;
+    if (!state) { card.hidden = true; return; }
+    card.hidden = false;
+    const r = state.rows[0];
+    body.replaceChildren(
+      h('p.small.muted', "The creator's 30% share of every fee goes to this wallet. Anyone can collect it; it is only ever paid to this wallet."),
+      h('ul.split-list', h('li',
+        h('span', { title: r.wallet }, h('span.mono', short(r.wallet)), h('span.verified-tick', { title: 'Wallet fixed at launch', 'aria-label': 'Verified' }, icon('badge-check', 'icon-xs'))),
+        h('span.split-share', '100%'),
+        claimableUsd(token, r.claimable, decimals, symbol),
+        h('button.btn.btn-secondary.btn-sm', { type: 'button', disabled: ctx.mode !== 'testnet' || r.claimable === 0n, title: ctx.mode !== 'testnet' ? 'Connect a wallet on this network to pay out.' : r.claimable === 0n ? 'Nothing to collect yet.' : undefined, on: { click: async () => {
+          if (busy) return; busy = true; error.textContent = '';
+          try { await ctx.run('claim-v2-creator', { token: token.address }); await load(); } catch (e) { error.textContent = errorText(e); } finally { busy = false; }
+        } } }, 'Collect and pay out'))));
+  }
+  load().then(() => { if (!card.hidden) keepFresh(card, load); });
   return card;
 }
 
