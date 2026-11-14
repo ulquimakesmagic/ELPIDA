@@ -40,7 +40,6 @@ import {HolderChat} from './holder-chat.mjs';
 import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
 import { TOKEN_PATH, renderTokenPage, renderTokenNotFound, renderTokenUnavailable } from '../../packages/core/token-seo.mjs';
-import { productionGuard, formatGuardReport } from './production-guard.mjs';
 import { memoryReport } from './memory-report.mjs';
 import { getHeapStatistics } from 'node:v8';
 import { productionGuard, formatGuardReport, durableStorage } from './production-guard.mjs';
