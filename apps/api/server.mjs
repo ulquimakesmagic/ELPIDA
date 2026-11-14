@@ -40,6 +40,9 @@ import {HolderChat} from './holder-chat.mjs';
 import {positionSummary} from '../../packages/core/position.mjs';
 import { publicOrigin, acceptsRequest } from './network-policy.mjs';
 import { TOKEN_PATH, renderTokenPage, renderTokenNotFound, renderTokenUnavailable } from '../../packages/core/token-seo.mjs';
+import { productionGuard, formatGuardReport } from './production-guard.mjs';
+import { memoryReport } from './memory-report.mjs';
+import { getHeapStatistics } from 'node:v8';
 import { productionGuard, formatGuardReport, durableStorage } from './production-guard.mjs';
 import { PAGES, canonicalOrigin, renderPage, renderSitemap, renderRobots, renderLlms } from '../../packages/core/seo.mjs';
 import { createTokenizedEquity } from '../../packages/core/tokenized-equity.mjs';
@@ -361,6 +364,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const operationsInput=()=>({relay:feedRelay.status(),graduation:graduationKeeper.status(),startedAt:operationsStartedAt,durable:durableStorage(),storage:metadataStore.status().storage,networks:Object.fromEntries([...publicIndex.entries.keys()].map(key=>[key,publicIndex.status(key)])),prices:priceSnapshot(),backup:backupRunner.status()});
   const monitor=new OperationsMonitor({read:operationsInput});
   const operationsTimer=port===0?null:setInterval(()=>monitor.tick(),60000);operationsTimer?.unref();
+  const memoryNow=()=>memoryReport({heapLimit:getHeapStatistics().heap_size_limit,extra:{uptimeMinutes:Math.round(process.uptime()/60),streams:tradeFeed.status().clients,vanityWorkers:vanity.status().grinding}});
+  const memoryTimer=port===0?null:setInterval(()=>console.log(JSON.stringify({event:'memory',...memoryNow()})),15*60000);memoryTimer?.unref();
   if(port!==0){backupRunner.start();monitor.tick();}
   const server = createServer(async (req, res) => {
     const actualPort = server.address().port;
@@ -445,6 +450,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           const activity=Object.fromEntries(['24h','7d','all'].map(period=>{try{const a=protocolAnalytics({sources:analyticsSources(),prices:priceSnapshot(),period});return [period,{totals:a.totals,coverage:a.coverage}];}catch(error){return [period,{error:error.message}];}}));
           let treasury=[];try{treasury=await treasuries();}catch(error){treasury=[{error:String(error.message).slice(0,160)}];}
           const keepers=await keeperStatus();
+          return send(200,{operator:s.address,keepers,generatedAt:Date.now(),memory:memoryNow(),health,backup:backupRunner.status(),relay:feedRelay.status(),graduation:graduationKeeper.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),metadata:metadataStore.status().storage},prices:priceSnapshot(),networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,{name:n.name,...publicIndex.status(n.key)}])),...(solanaIndex?{[solanaIndex.network.key]:{name:solanaIndex.network.name,enabled:true,...solanaIndex.status()}}:{})},treasury,activity,admins:{configured:adminAddresses.length,treasuries:treasury.filter(t=>t.treasury).length}});
           return send(200,{operator:s.address,keepers,generatedAt:Date.now(),health,backup:backupRunner.status(),relay:feedRelay.status(),graduation:graduationKeeper.status(),storage:{durable:durableStorage(),metadata:metadataStore.status().storage},prices:priceSnapshot(),networks:{...Object.fromEntries(evmTestnets.map(n=>[n.key,{name:n.name,...publicIndex.status(n.key)}])),...(solanaIndex?{[solanaIndex.network.key]:{name:solanaIndex.network.name,enabled:true,...solanaIndex.status()}}:{})},treasury,activity,admins:{configured:adminAddresses.length,treasuries:treasury.filter(t=>t.treasury).length}});
         }
         if(url.pathname==='/api/admin/visitors'){
@@ -672,7 +678,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
   bootPhase('listening');
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();await v2Keeper.close();solanaRewards?.stop();await solanaV2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();await v2Keeper.close();solanaRewards?.stop();await solanaV2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);clearInterval(memoryTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

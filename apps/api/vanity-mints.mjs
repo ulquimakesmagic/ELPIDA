@@ -150,10 +150,11 @@ export class VanityMintPool {
     if (!this.enabled || this.stopped || !this.autoGrind) return;
     while (this.grinding < this.workers && this.stored.length + this.grinding < this.target) {
       this.grinding++;
-      const worker = new Worker(new URL(import.meta.url), { workerData: { vanityGrind: this.grindSuffix } });
+      // A grinder holds a few buffers at a time; a small heap keeps its garbage from growing the process.
+      const worker = new Worker(new URL(import.meta.url), { workerData: { vanityGrind: this.grindSuffix }, resourceLimits: { maxOldGenerationSizeMb: 48, maxYoungGenerationSizeMb: 8 } });
       worker.unref();
       worker.once('message', ({ seed, pubkey }) => { if (!this.stopped) this.add(Buffer.from(seed), Buffer.from(pubkey)); });
-      worker.once('exit', () => { this.grinding--; this.fill(); });
+      worker.once('exit', () => { this.grinding--; this.current = this.current.filter(w => w !== worker); this.fill(); });
       worker.once('error', () => {});
       this.current = [...(this.current ?? []), worker];
     }
