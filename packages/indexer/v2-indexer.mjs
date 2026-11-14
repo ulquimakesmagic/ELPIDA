@@ -12,7 +12,8 @@ const dead = '0x000000000000000000000000000000000000dead';
 const RECIPIENTS = ['creator', 'traderAirdrop', 'flywheel', 'holderRewards', 'treasury'];
 
 export const V2_ABIS = Object.freeze({
-  factory: ['event Launched(address indexed creator,address indexed token,address indexed quote,uint256 feeBps,uint256 firstBuy,uint256 bought)', 'event MetadataPublished(address indexed token,string uri)', 'event QuoteApproved(address indexed asset,uint256 virtualQuote)', 'event HookSet(address indexed hook)',
+  // LaunchFeePaid (ElpidaUsdPricing): the $10 launch fee as paid, in the native coin or USDC (analytics, 14 Nov).
+  factory: ['event Launched(address indexed creator,address indexed token,address indexed quote,uint256 feeBps,uint256 firstBuy,uint256 bought)', 'event LaunchFeePaid(address indexed payer,address indexed asset,uint256 amount,uint256 priceUpdatedAt)', 'event MetadataPublished(address indexed token,string uri)', 'event QuoteApproved(address indexed asset,uint256 virtualQuote)', 'event HookSet(address indexed hook)',
     'function MODEL_VERSION() view returns(uint256)', 'function hook() view returns(address)', 'function feeUsdc() view returns(address)', 'function treasury() view returns(address)', 'function startMcapUsd() view returns(uint256)'],
   hook: ['event Launched(address indexed token,address indexed quote,address indexed creatorVault,uint256 feeBps,int24 upperTick,int24 lowerTick,uint128 saleLiquidity,uint128 upperLiquidity,uint256 dustBurned)',
     'event Fee(address indexed token,address indexed trader,bool buy,uint256 feeBps,uint256 fee,uint256 lockedBonus)',

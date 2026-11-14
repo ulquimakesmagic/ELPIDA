@@ -6,6 +6,7 @@ import { parseEther, formatUnits } from 'ethers';
 import { v2Fixture, launchV2, trade, mined, parse } from './helpers/v2-fixture.mjs';
 import { V2Indexer, verifyV2Deployment } from '../packages/indexer/v2-indexer.mjs';
 import { V2_MODEL } from '../packages/core/v2-economics.mjs';
+import { feeAnalytics } from '../apps/api/fee-analytics.mjs';
 
 test('V2 launches, trades and fee ledgers are indexed for the site', async t => {
   const f = await v2Fixture(t, { vaults: true });
@@ -48,4 +49,31 @@ test('V2 launches, trades and fee ledgers are indexed for the site', async t => 
   assert.equal(after.feeLedgers.owed.flywheel, '0.0'); assert.ok(Number(after.feeLedgers.paid.flywheel) > 0);
   assert.equal(after.supply, formatUnits(await l.token.totalSupply(), 18));
   assert.equal(index.status().model, V2_MODEL);
+  // Analytics data (14 Nov): the launch fee as paid, matched to its token, and every fee share the hook paid out.
+  const fees = index.launchFees();
+  assert.equal(fees.length, 1); assert.equal(fees[0].token, item.address); assert.equal(fees[0].asset, '0x0000000000000000000000000000000000000000');
+  const [paidFee] = parse(f.factory, l.receipt, 'LaunchFeePaid');
+  assert.equal(fees[0].amountRaw, paidFee.args.amount.toString()); assert.ok(fees[0].timestamp > 0);
+  const payouts = index.feePayouts().filter(p => !p.failed);
+  assert.deepEqual(payouts.map(p => p.recipient).sort(), [0, 1, 2, 3, 4], 'one payout per recipient');
+  const [, paid] = await f.hook.ledgers(l.token.target);
+  for (const p of payouts) assert.equal(p.amountRaw, paid[p.recipient].toString(), 'each payout matches the hook ledger');
+  // A deployment indexed before LaunchFeePaid was in the ABI gets it from a one-time backfill.
+  index.db.prepare("DELETE FROM events WHERE json_extract(data,'$.name')='LaunchFeePaid'").run();
+  index.db.prepare('DELETE FROM backfills').run();
+  assert.equal(index.launchFees().length, 0); assert.equal(index.backfillComplete(), false);
+  await index.backfillFactoryEvents();
+  assert.deepEqual(index.launchFees(), fees); assert.equal(index.backfillComplete(), true);
+  // Analytics step 2: fees counted from the trades equal the hook's own running total, and the payouts equal its shares.
+  const tradeRows = index.db.prepare('SELECT data FROM trades').all().map(r => JSON.parse(r.data));
+  const at = (await f.provider.getBlock('latest')).timestamp; // the test chain's clock runs ahead of the wall clock
+  const prices = { 'base-sepolia': { status: 'fresh', usd: 2000, updatedAt: at, source: 'test' } };
+  const a = feeAnalytics({ sources: [{ key: 'base-sepolia', name: 'Base Sepolia', mainnet: false, tokens: index.listings(), trades: tradeRows, launchFees: { complete: true, rows: index.launchFees() }, feePayouts: index.feePayouts() }], prices, period: 'all', now: at });
+  const [rec] = a.networks[0].reconciliation;
+  assert.equal(rec.differenceRaw, '0', 'every fee the hook accrued is a fee counted from a trade');
+  const accrued = BigInt(rec.ledgerRaw), feeUsd = Number(formatUnits(accrued, 18)) * 2000;
+  assert.ok(Math.abs(a.testnet.feesGeneratedUsd - feeUsd) < 1e-6);
+  assert.ok(Math.abs(a.testnet.shares.treasury.withdrawnUsd - Number(formatUnits(paid[4], 18)) * 2000) < 1e-6);
+  assert.equal(a.testnet.shares.flywheel.outstandingUsd, 0);
+  assert.equal(a.testnet.launches, 1); assert.equal(a.mainnet.feesGeneratedUsd, 0, 'test networks never count as mainnet');
 });

@@ -70,8 +70,58 @@ export class V4Indexer extends EvmIndexer {
       await this.scanRange(height, end, full && end === target);
     }
     if (full && (tip ? tip.height : this.fromBlock - 1) < target) this.lastFull = Date.now();
+    await this.backfillFactoryEvents();
     this.head = head; this.lastError = null;
     return this.status();
+  }
+  /**
+   * Factory events added to the ABI after a deployment was first indexed (LaunchFeePaid, 14 Nov) are read once for the
+   * blocks already indexed, a few batches per scan so normal indexing is never held up. Resumable: the next block to
+   * read is kept in `backfills`.
+   */
+  async backfillFactoryEvents(maxBatches = 20) {
+    const names = ['LaunchFeePaid'].filter(n => { try { return !!this.interfaces.factory.getEvent(n); } catch { return false; } });
+    if (!names.length) return;
+    this.db.exec('CREATE TABLE IF NOT EXISTS backfills (name TEXT PRIMARY KEY, next INTEGER NOT NULL)');
+    const tip = this.tip(); if (!tip) return;
+    for (const name of names) {
+      let next = this.db.prepare('SELECT next FROM backfills WHERE name=?').get(name)?.next ?? this.fromBlock;
+      const topic = this.interfaces.factory.getEvent(name).topicHash, step = Math.max(this.batchSize, 1000);
+      for (let i = 0; i < maxBatches && next <= tip.height; i++) {
+        const to = Math.min(tip.height, next + step - 1);
+        const logs = await this.provider.getLogs({ address: this.factory, topics: [topic], fromBlock: next, toBlock: to });
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+          for (const l of logs) {
+            const e = this.parse('factory', l); if (!e) continue;
+            this.db.prepare('INSERT OR IGNORE INTO events(tx,idx,height,data,address,sender,recipient) VALUES(?,?,?,?,?,?,?)').run(l.transactionHash, l.index, l.blockNumber, json({ address: l.address, kind: 'factory', name: e.name, args: e.args.toArray(), blockHash: l.blockHash }), l.address.toLowerCase(), null, null);
+          }
+          this.db.prepare('INSERT INTO backfills(name,next) VALUES(?,?) ON CONFLICT(name) DO UPDATE SET next=excluded.next').run(name, to + 1);
+          this.db.exec('COMMIT');
+        } catch (e) { this.db.exec('ROLLBACK'); throw e; }
+        next = to + 1;
+      }
+    }
+  }
+  /** Whether every backfill has reached the indexed tip (analytics show launch fees as incomplete until then). */
+  backfillComplete() {
+    const tip = this.tip(); if (!tip) return true;
+    try { const row = this.db.prepare("SELECT next FROM backfills WHERE name='LaunchFeePaid'").get(); return !!row && row.next > tip.height; } catch { return false; }
+  }
+  /** Stored events of one contract kind and name, oldest first, with their block time. */
+  eventsNamed(kind, name) {
+    return this.db.prepare("SELECT e.tx, e.idx, e.height, e.data, b.timestamp FROM events e LEFT JOIN blocks b ON b.height = e.height WHERE json_extract(e.data,'$.kind') = ? AND json_extract(e.data,'$.name') = ? ORDER BY e.height, e.idx")
+      .all(kind, name).map(r => ({ tx: r.tx, idx: r.idx, height: r.height, timestamp: r.timestamp ?? null, args: JSON.parse(r.data).args }));
+  }
+  /** Launch fees as paid: [{ token, payer, asset, amountRaw, timestamp, tx }]. The token is the Launched event of the same transaction. */
+  launchFees() {
+    const launched = new Map(this.eventsNamed('factory', 'Launched').map(e => [e.tx, String(e.args[1]).toLowerCase()]));
+    return this.eventsNamed('factory', 'LaunchFeePaid').map(e => ({ token: launched.get(e.tx) ?? null, payer: e.args[0], asset: e.args[1], amountRaw: String(e.args[2]), timestamp: e.timestamp, tx: e.tx }));
+  }
+  /** Fee shares the hook paid out: [{ token, recipient (0 creator … 4 treasury), to, amountRaw, failed, timestamp, tx }]. */
+  feePayouts() {
+    const rows = name => this.eventsNamed('hook', name).map(e => ({ token: String(e.args[0]).toLowerCase(), recipient: Number(e.args[1]), to: e.args[2], amountRaw: String(e.args[3]), failed: name === 'FeePayoutFailed', timestamp: e.timestamp, tx: e.tx }));
+    return [...rows('FeesWithdrawn'), ...rows('FeePayoutFailed')];
   }
   async scanRange(from, to, refreshAll) {
     const known = this.tokens();

@@ -1,6 +1,7 @@
 import {CreatorFeeTotals} from './creator-fees.mjs';
 import { indexedChange, indexedActivity, activityOf } from '../web/discovery.mjs';
 import { protocolAnalytics } from './protocol-analytics.mjs';
+import { feeAnalytics } from './fee-analytics.mjs';
 import { AdminAuth, parseAdminAddresses, sessionCookie, clearCookie } from './admin-auth.mjs';
 import { readTreasuries, operatorAddresses, cachedLoader } from './admin-overview.mjs';
 import { SiteAnalytics, cleanEvent, telemetryLimiter, restrictedJurisdictions } from './site-analytics.mjs';
@@ -43,6 +44,8 @@ import { publicOrigin, acceptsRequest } from './network-policy.mjs';
 import { TOKEN_PATH, renderTokenPage, renderTokenNotFound, renderTokenUnavailable } from '../../packages/core/token-seo.mjs';
 import { memoryReport } from './memory-report.mjs';
 import { Thumbnails, thumbWidth } from './thumbnails.mjs';
+import { PriceHistory, priceEntries } from './price-history.mjs';
+import { usdReferenceFor } from '../../packages/core/pairs.mjs';
 import { getHeapStatistics } from 'node:v8';
 import { productionGuard, formatGuardReport, durableStorage } from './production-guard.mjs';
 import { PAGES, canonicalOrigin, renderPage, renderSitemap, renderRobots, renderLlms } from '../../packages/core/seo.mjs';
@@ -102,6 +105,7 @@ resources.set('/analytics', ['index.html', 'text/html']);
 resources.set('/analytics-view.mjs', ['analytics-view.mjs', 'text/javascript']);
 resources.set('/v2-rewards-view.mjs', ['v2-rewards-view.mjs', 'text/javascript']);
 resources.set('/analytics-headline.mjs', ['analytics-headline.mjs', 'text/javascript']);
+resources.set('/fee-analytics-view.mjs', ['fee-analytics-view.mjs', 'text/javascript']);
 resources.set('/v2-launchpad.mjs', ['v2-launchpad.mjs', 'text/javascript']);
 resources.set('/metadata-cache.mjs', ['metadata-cache.mjs', 'text/javascript']);
 resources.set('/wallet-batch.mjs', ['wallet-batch.mjs', 'text/javascript']);
@@ -338,6 +342,10 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const priceTimer=port===0?null:setInterval(()=>updatePrices().catch(()=>{}),60000);priceTimer?.unref();
   if(port!==0)updatePrices().catch(()=>{});
   const priceSnapshot=()=>({...priceKeeper.snapshot(),local:runtime.config.local.price});
+  // Hourly USD prices for analytics (fees valued at the hour they happened). Recorded a minute after start, then hourly.
+  const priceHistory=port===0?new PriceHistory():new PriceHistory({path:dataFile('price-history.sqlite')});
+  const recordPrices=()=>{try{const tokens=[...evmTestnets.flatMap(net=>publicIndex.listings(net.key).map(t=>({...t,network:net.key}))),...(solanaIndex?solanaIndex.listings().map(t=>({...t,network:solanaIndex.network.key})):[])];priceHistory.record(priceEntries(priceKeeper.snapshot(),tokens,usdReferenceFor));}catch(error){console.error(JSON.stringify({event:'price_history_error',error:String(error.message).slice(0,200)}));}};
+  const priceHistoryStart=port===0?null:setTimeout(recordPrices,60_000),priceHistoryTimer=port===0?null:setInterval(recordPrices,3_600_000);priceHistoryStart?.unref?.();priceHistoryTimer?.unref?.();
   const cookieSecurity = publicUrl ? '; Secure' : '';
   const creatorFeeTotals=new CreatorFeeTotals();
   const csrf = randomBytes(24).toString('hex');
@@ -355,6 +363,14 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     if(solanaIndex)sources.push({key:solanaIndex.network.key,name:solanaIndex.network.name,status:{enabled:true,...solanaIndex.status(),scope:'Elpida curves and Raydium / PumpSwap swaps on migrated Elpida pools'},tokens:solanaIndex.listings(),trades:solanaIndex.db.prepare('SELECT data FROM trades ORDER BY timestamp').iterate()});
     if(!solanaIndex)sources.push({key:solanaNet.key,name:solanaNet.name,status:{enabled:false,reason:'No public Solana deployment configured.'},tokens:[],trades:[]});
     for(const source of sources){const rows=source.trades;source.trades=(function*(){for(const row of rows)yield JSON.parse(row.data);})();}
+    return sources;
+  };
+  // Fee and revenue sources (analytics step 2): EVM V2 deployments only carry the five-way ledgers; Solana is counted as untracked.
+  const feeCache=new Map();
+  const feeSources=()=>{
+    const rows=it=>(function*(){for(const row of it)yield JSON.parse(row.data);})();
+    const sources=evmTestnets.map(net=>({key:net.key,name:net.name,mainnet:!!net.mainnet,tokens:publicIndex.listings(net.key),trades:rows(publicIndex.tradeRows(net.key)),launchFees:publicIndex.launchFees(net.key),feePayouts:publicIndex.feePayouts(net.key)}));
+    if(solanaIndex)sources.push({key:solanaIndex.network.key,name:solanaIndex.network.name,mainnet:!!solanaIndex.network.mainnet,tokens:solanaIndex.listings().map(t=>({...t,model:t.model??'solana-curve'})),trades:[],launchFees:{complete:true,rows:[]},feePayouts:[]});
     return sources;
   };
   function indexedMarket(network,address){
@@ -501,6 +517,12 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/public/analytics'){
           const sources=analyticsSources();
           try{return send(200,protocolAnalytics({sources,prices:priceSnapshot(),period:url.searchParams.get('period')??'7d',network:url.searchParams.get('network')??'all'}));}catch(error){return send(400,{error:error.message});}
+        }
+        if(url.pathname==='/api/public/fees'){
+          // Cached 30 s per period and network: each answer reads every trade row.
+          const period=url.searchParams.get('period')??'7d',network=url.searchParams.get('network')??'all',key=period+'|'+network,hit=feeCache.get(key);
+          if(hit&&Date.now()-hit.at<30_000)return send(200,hit.body);
+          try{const body=feeAnalytics({sources:feeSources(),priceHistory,prices:priceSnapshot(),period,network});if(feeCache.size>40)feeCache.clear();feeCache.set(key,{at:Date.now(),body});return send(200,body);}catch(error){return send(400,{error:error.message});}
         }
         if(url.pathname==='/api/public/tokenized-equity'){const view=tokenizedEquity.describeNetwork(url.searchParams.get('network')??'',url.searchParams.get('provider'));return view?send(200,{...view,live:false,note:'Tokenized stocks are disabled until each capability is verified with the provider. Nothing here is an official partnership.'}):send(404,{error:'No tokenized-stock provider is designated for this network.'});}
         if(url.pathname==='/api/graduation/status')return send(200,graduationKeeper.status());
@@ -699,7 +721,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
   bootPhase('listening');
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();await v2Keeper.close();solanaRewards?.stop();await solanaV2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);clearInterval(memoryTimer);try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();await v2Keeper.close();solanaRewards?.stop();await solanaV2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);clearInterval(memoryTimer);clearTimeout(priceHistoryStart);clearInterval(priceHistoryTimer);try{priceHistory.close();}catch{};try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

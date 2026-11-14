@@ -51,7 +51,7 @@ test('localhost API exercises launch, trading, fee payout and request protection
     assert.match(await page.text(), /Start something new/);
     assert.equal((await fetch(`${base}/launch`)).status,200);
     assert.equal((await fetch(`${base}/analytics`)).status,200);
-    assert.equal((await fetch(`${base}/analytics-view.mjs`)).status,200);
+    assert.equal((await fetch(`${base}/analytics-view.mjs`)).status,200);assert.equal((await fetch(`${base}/fee-analytics-view.mjs`)).status,200);
     assert.equal((await fetch(`${base}/v2-rewards-view.mjs`)).status,200);
     // No V2 deployment is pinned yet: the Rewards section has nothing to show and stays hidden.
     {const r=await(await fetch(`${base}/api/public/v2-rewards`)).json();assert.equal(r.deployed,false);assert.deepEqual(r.chains,[]);assert.equal(r.keeper.enabled,false);}
@@ -74,6 +74,9 @@ test('localhost API exercises launch, trading, fee payout and request protection
     const analytics=await (await fetch(`${base}/api/public/analytics`)).json();
     assert.equal(analytics.totals.trades,0,'simulation is excluded from public analytics');
     assert.equal((await fetch(`${base}/api/public/analytics?period=invalid`)).status,400);
+    const fees=await (await fetch(`${base}/api/public/fees?period=all`)).json();
+    assert.equal(fees.period,'all');assert.ok(fees.mainnet&&fees.testnet,'mainnet and test networks reported apart');assert.match(fees.basis,/never added to mainnet/);
+    assert.equal((await fetch(`${base}/api/public/fees?period=invalid`)).status,400);
     assert.equal((await fetch(`${base}/metadata.mjs`)).status,200);
     assert.equal((await fetch(`${base}/metadata-cache.mjs`)).status,200);
     assert.equal((await fetch(`${base}/launch-capabilities.mjs`)).status,200);
