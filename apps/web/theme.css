@@ -336,6 +336,9 @@ dialog::backdrop { background: var(--scrim); backdrop-filter: blur(6px); }
 
 /* Main content and footer */
 main { width: 100%; max-width: 1180px; margin: 0 auto; padding: 28px 24px 48px; flex: 1; }
+/* The page area is at least one screen tall, so the footer starts below the fold and never jumps down as a page's data
+   arrives (PageSpeed, 14 Nov: the footer moving was the layout shift on /, /launch and /analytics). */
+#main { min-height: 100vh; min-height: 100dvh; }
 .site-footer { width: 100%; max-width: 1180px; margin: 0 auto; padding: 0 24px 24px; color: var(--muted); font-size: 13px; }
 .footer-card { position: relative; overflow: hidden; border-radius: 28px; border: .67px solid var(--line); padding: 32px 28px 0;
   background: radial-gradient(ellipse 45% 60% at 100% 0%, var(--accent-glow), transparent 70%), linear-gradient(145deg, var(--panel-hi), var(--panel-lo) 82%); box-shadow: var(--shadow-card); }

@@ -1,3 +1,4 @@
+import { ensureChartLibrary } from './vendor-loader.mjs';
 import {h,icon,usdRate} from './ui.mjs';
 import {axisLabel,priceText,pctText,tipPosition,INTERVALS,fillGaps,defaultInterval,tradeMarkers,spacedLabels} from './chart-format.mjs';
 
@@ -222,6 +223,7 @@ export function terminalChart(ctx,token,q){
         status.textContent='Executed trades only. Nothing is shown until someone trades.';
         return;
       }
+      await ensureChartLibrary();
       if(!window.LightweightCharts)throw new Error('Chart library could not load.');
       overlay.hidden=true;
       const rebuild=!chart||chart.__interval!==interval;

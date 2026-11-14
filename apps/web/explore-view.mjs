@@ -413,8 +413,15 @@ export function createExplore(source) {
 }
 
 /** Placeholder while the first data loads: the Explore frame with shimmering cards. */
+/**
+ * The page's shape while tokens load: the Trending row and the Explore list at their real heights, so the real page
+ * replaces it without moving anything below (PageSpeed, 14 Nov).
+ */
 export function exploreSkeleton() {
   return h('div.explore', { 'aria-busy': 'true' }, h('h1.visually-hidden', 'Explore tokens'),
+    h('section.home-section.trending', { 'aria-hidden': 'true' }, h('div.section-head', h('div.section-title', h('h2', 'Trending'), h('span.section-sub', 'By 24h volume'))),
+      h('div.scroll-fade', h('ul.trend-track', Array.from({ length: 5 }, () => h('li.trend-card.trend-skeleton', h('div.tc-media.skeleton'), h('div.skeleton.trend-skeleton-line')))))),
     h('section.home-section.explore-section', h('div.explore-head', h('h2', 'Explore'), h('span.launched', 'Loading…')),
+      h('div.skeleton.explore-controls-skeleton', { 'aria-hidden': 'true' }),
       h('div.list-grid', Array.from({ length: 6 }, () => h('div.skeleton.list-skeleton', { 'aria-hidden': 'true' })))));
 }

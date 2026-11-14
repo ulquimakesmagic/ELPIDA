@@ -12,7 +12,7 @@ import { renderTermsPage } from './terms.mjs';
 // portfolio and the network/test-funds panel. Views live in launch-flow.mjs, token-page.mjs and
 // rewards-view.mjs and receive the shared `ctx` object below.
 import { TestnetWallet, evmWallets, chosenEvmWallet, requestEvmWallets } from './wallet.mjs';
-import { SolanaWallet, solanaWallets, chosenSolanaWallet } from './solana-wallet.mjs';
+import { SolanaWallet, solanaWallets, chosenSolanaWallet, ensureSolanaWeb3 } from './solana-wallet.mjs';
 import { browserWalletCatalog, walletIcon, onWalletsChanged } from './wallet-discovery.mjs';
 import { storage, $, $$, h, icon, short, number, compact, avatar, bar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, usdRate, toast, errorText, closeOnBackdrop, callout } from './ui.mjs';
 import { renderLaunch } from './launch-flow.mjs';
@@ -28,6 +28,10 @@ import { connectTradeStream, mergeTrades } from './live-trades.mjs';
 
 let config, evmWallet, solWallet, wallet;
 let mode = 'local', account = '0', state = null, busy = false, refreshRevision = 0, progressHook = null;
+// Whether every network's token list has been read once. Until then Explore shows its skeleton rather than an empty
+// list that fills in network by network: that filling-in pushed the list down and was most of the home page's layout
+// shift (PageSpeed, 14 Nov: CLS 0.83 on mobile, all from the Explore section).
+let discoveryReady = false;
 let allTokens = [], discoveryErrors = [], chainControls = [], connecting=false, recentBuys = [], liveTrades = null, stripDelay = 8000;
 
 async function api(path, body, renewed = false) {
@@ -123,16 +127,17 @@ async function refreshNow({ preserveInput = false,walletRead=false } = {}) {
     const indexed=[...results.flatMap(r=>r.status==='fulfilled'?r.value:[]),...solana];
     const merged=new Map(indexed.map(t=>[tokenKey(t.network,t.address),t]));
     for(const t of next.tokens??[]){const key=tokenKey(currentChain(),t.address);merged.set(key,{...overlayToken(merged.get(key),t),network:currentChain()});}
-    allTokens=pairTokenReferences([...merged.values()]);
+    allTokens=pairTokenReferences([...merged.values()]);discoveryReady=true;
     if(currentRoute.name==='explore'||currentRoute.name==='portfolio')rerender('background');
     refreshLastSale();
-  }else{allTokens=next.tokens;refreshLastSale();}
+  }else{allTokens=next.tokens;discoveryReady=true;refreshLastSale();}
   return state;
 }
 async function chooseChain(key){
   if(busy)throw new Error('Wait for the current request to finish.');
   if(key==='local')return useLocal();
   if(mode==='testnet'&&currentChain()===key)return;
+  if(key===config.solana.key)await ensureSolanaWeb3();
   wallet=key===config.solana.key?solWallet:evmWallet;
   wallet.select(key);wallet.address=null;wallet.signer=null;
   mode='testnet';state=null;
@@ -144,6 +149,7 @@ async function connect(key, walletId, {silent=false}={}) {
   const previousWallet = wallet, previousKey = wallet.net.key;
   let connected = false;
   try {
+    if (key === config.solana.key) await ensureSolanaWeb3();
     wallet = key === config.solana.key ? solWallet : evmWallet;
     wallet.select(key);
     await wallet.connect(walletId,{silent}); connected = true; mode = 'testnet';
@@ -332,6 +338,7 @@ function rerender(reason) {
   else if (r.name === 'rewards') view.replaceChildren(renderRewards(ctx));
   else if (r.name === 'docs') view.replaceChildren(renderDocs(ctx, r.section));
   else if (r.name === 'terms') view.replaceChildren(renderTermsPage(ctx));
+  else if (mode === 'testnet' && !discoveryReady && (!exploreView || !view.contains(exploreView.root))) { if (!view.querySelector('.explore[aria-busy]')) view.replaceChildren(exploreSkeleton()); }
   else if (!exploreView || !view.contains(exploreView.root)) {
     // One Explore controller per visit: later refreshes update its cards in place.
     closeExplore(); exploreView = createExplore(exploreSource); view.replaceChildren(exploreView.root); exploreView.setTrades(recentBuys);
@@ -482,7 +489,8 @@ async function init() {
   solWallet = new SolanaWallet(config, onWalletProgress);
   wallet = evmWallet;
   let saved = null; try { saved = localStorage.getItem('elpida:network'); } catch {}
-  if (saved === config.solana.key) wallet = solWallet; else if (saved && saved !== 'local') { try { evmWallet.select(saved); } catch {} }
+  // A visitor who left on Solana gets the Solana library before the first read; everyone else never downloads it.
+  if (saved === config.solana.key) { try { await ensureSolanaWeb3(); wallet = solWallet; } catch { wallet = evmWallet; } } else if (saved && saved !== 'local') { try { evmWallet.select(saved); } catch {} }
   // Public markets can be browsed without granting wallet access.
   if(saved!=='local'){mode='testnet';}
   if (location.pathname === '/analytics') history.replaceState({}, '', '/#/analytics');
