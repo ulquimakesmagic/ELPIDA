@@ -68,6 +68,7 @@
     "ethers": "6.17.0",
     "hardhat": "3.19.0",
     "lightweight-charts": "5.2.1",
+    "sharp": "0.34.5",
     "solc": "0.8.24",
     "solc-0.8.26": "npm:solc@0.8.26"
   }

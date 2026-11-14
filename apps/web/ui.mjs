@@ -85,13 +85,25 @@ export function bar(percent, done = false, label = 'Bonding curve progress') {
   return track;
 }
 export function safeImage(src) { try { return normalizeMetadata({ image: src }).image; } catch { return ''; } }
+/** Displayed size of each avatar style, in CSS pixels; the server sends a thumbnail at least twice that wide. */
+const AVATAR_SIZES = { 'tc-image': 256, 'koth-avatar': 96, 'lc-avatar': 82 };
+/**
+ * A logo stored on this server (`/api/content/<cid>`) as a small WebP thumbnail instead of the uploaded original, which
+ * can be megabytes (PageSpeed, 14 Nov). Other image URLs are returned unchanged.
+ */
+export function thumbnailUrl(src, cssPixels = 64) {
+  if (!/^\/api\/content\/[A-Za-z0-9]+$/.test(String(src))) return src;
+  return `${src}?w=${Math.min(512, Math.ceil(cssPixels * 2))}`;
+}
 export function avatar(token, cls = '') {
   const box = h(`div.avatar${cls ? '.' + cls : ''}`);
   const image = safeImage(token?.metadata?.image ?? token?.image ?? '');
   const initials = h('span.initials', { text: (token?.symbol || token?.name || '?').slice(0, 2).toUpperCase() });
   if (image) {
-    const img = h('img', { alt: '', src: image, referrerPolicy: 'no-referrer', loading: 'lazy' });
-    img.addEventListener('error', () => { img.replaceWith(initials); });
+    const thumb = thumbnailUrl(image, AVATAR_SIZES[cls] ?? 64);
+    const img = h('img', { alt: '', src: thumb, referrerPolicy: 'no-referrer', loading: 'lazy', decoding: 'async' });
+    // A thumbnail that fails falls back to the original once; an original that fails shows the initials.
+    img.addEventListener('error', () => { if (img.getAttribute('src') !== image) img.src = image; else img.replaceWith(initials); });
     box.append(img);
   } else box.append(initials);
   return box;
