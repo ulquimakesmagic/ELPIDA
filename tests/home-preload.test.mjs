@@ -38,3 +38,18 @@ test('the home page draws the first trending logos into the app\'s own loading s
   assert.equal(homeFirstScreen([]).match(/tc-media skeleton/g).length, 5);
   assert.deepEqual(trendingLogos({ sources: [{ network: 'x', tokens: [{ address: '0x1', volume24h: 2, image: 'https://example.com/a.png' }, { address: '0x2', volume24h: 1, image: '/api/content/bafkrei' + 'a'.repeat(52) }] }], limit: 3, now: 1 }), [null, a]);
 });
+
+test('a V2 token whose logo is only in its launch metadata gets its stored logo, never a network fetch', async () => {
+  const { storedMetadataImage, trendingLogos } = await import('../apps/api/home-preload.mjs');
+  const meta = 'bafkrei' + 'm'.repeat(52), logo = 'bafkrei' + 'l'.repeat(52);
+  const doc = { schema: 'elpida-token-v1', name: 'Iphone Duo', symbol: 'IDUO', image: `ipfs://${logo}` };
+  const records = new Map([[meta, { type: 'application/json', data: Buffer.from(JSON.stringify(doc)).toString('base64') }], [logo, { type: 'image/png', data: '' }]]);
+  const store = { get: cid => records.get(cid) ?? null };
+  assert.equal(storedMetadataImage(store, { metadataURI: `ipfs://${meta}` }), `/api/content/${logo}`);
+  assert.equal(storedMetadataImage(store, { metadataURI: 'ipfs://bafkrei' + 'x'.repeat(52) }), '', 'not stored here: nothing, no fetch');
+  assert.equal(storedMetadataImage({ get: () => ({ type: 'application/json', data: Buffer.from('{"schema":"other","image":"ipfs://x"}').toString('base64') }) }, { metadataURI: `ipfs://${meta}` }), '');
+  assert.equal(storedMetadataImage(store, {}), '');
+  const sources = [{ network: 'base-sepolia', tokens: [{ address: '0x1', volume24h: 5, metadataURI: `ipfs://${meta}`, metadata: {} }, { address: '0x2', volume24h: 1, image: '/api/content/bafkrei' + 'a'.repeat(52) }] }];
+  assert.deepEqual(trendingLogos({ sources, now: 1, limit: 2, imageOf: t => storedMetadataImage(store, t) }), [`/api/content/${logo}?w=512`, '/api/content/bafkrei' + 'a'.repeat(52) + '?w=512']);
+  assert.deepEqual(trendingLogos({ sources, now: 1, limit: 2 }), [null, '/api/content/bafkrei' + 'a'.repeat(52) + '?w=512'], 'without the store the first card keeps its shimmer');
+});
