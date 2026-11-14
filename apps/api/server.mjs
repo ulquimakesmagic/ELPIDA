@@ -105,6 +105,7 @@ resources.set('/analytics', ['index.html', 'text/html']);
 resources.set('/analytics-view.mjs', ['analytics-view.mjs', 'text/javascript']);
 resources.set('/v2-rewards-view.mjs', ['v2-rewards-view.mjs', 'text/javascript']);
 resources.set('/analytics-headline.mjs', ['analytics-headline.mjs', 'text/javascript']);
+resources.set('/fee-analytics-view.mjs', ['fee-analytics-view.mjs', 'text/javascript']);
 resources.set('/v2-launchpad.mjs', ['v2-launchpad.mjs', 'text/javascript']);
 resources.set('/metadata-cache.mjs', ['metadata-cache.mjs', 'text/javascript']);
 resources.set('/wallet-batch.mjs', ['wallet-batch.mjs', 'text/javascript']);
@@ -365,6 +366,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     return sources;
   };
   // Fee and revenue sources (analytics step 2): EVM V2 deployments only carry the five-way ledgers; Solana is counted as untracked.
+  const feeCache=new Map();
   const feeSources=()=>{
     const rows=it=>(function*(){for(const row of it)yield JSON.parse(row.data);})();
     const sources=evmTestnets.map(net=>({key:net.key,name:net.name,mainnet:!!net.mainnet,tokens:publicIndex.listings(net.key),trades:rows(publicIndex.tradeRows(net.key)),launchFees:publicIndex.launchFees(net.key),feePayouts:publicIndex.feePayouts(net.key)}));
@@ -517,7 +519,10 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           try{return send(200,protocolAnalytics({sources,prices:priceSnapshot(),period:url.searchParams.get('period')??'7d',network:url.searchParams.get('network')??'all'}));}catch(error){return send(400,{error:error.message});}
         }
         if(url.pathname==='/api/public/fees'){
-          try{return send(200,feeAnalytics({sources:feeSources(),priceHistory,prices:priceSnapshot(),period:url.searchParams.get('period')??'7d',network:url.searchParams.get('network')??'all'}));}catch(error){return send(400,{error:error.message});}
+          // Cached 30 s per period and network: each answer reads every trade row.
+          const period=url.searchParams.get('period')??'7d',network=url.searchParams.get('network')??'all',key=period+'|'+network,hit=feeCache.get(key);
+          if(hit&&Date.now()-hit.at<30_000)return send(200,hit.body);
+          try{const body=feeAnalytics({sources:feeSources(),priceHistory,prices:priceSnapshot(),period,network});if(feeCache.size>40)feeCache.clear();feeCache.set(key,{at:Date.now(),body});return send(200,body);}catch(error){return send(400,{error:error.message});}
         }
         if(url.pathname==='/api/public/tokenized-equity'){const view=tokenizedEquity.describeNetwork(url.searchParams.get('network')??'',url.searchParams.get('provider'));return view?send(200,{...view,live:false,note:'Tokenized stocks are disabled until each capability is verified with the provider. Nothing here is an official partnership.'}):send(404,{error:'No tokenized-stock provider is designated for this network.'});}
         if(url.pathname==='/api/graduation/status')return send(200,graduationKeeper.status());
