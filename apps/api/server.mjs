@@ -46,7 +46,7 @@ import { memoryReport } from './memory-report.mjs';
 import { Thumbnails, thumbWidth } from './thumbnails.mjs';
 import { PriceHistory, priceEntries } from './price-history.mjs';
 import { usdReferenceFor } from '../../packages/core/pairs.mjs';
-import { homePreloads, withPreloads } from './home-preload.mjs';
+import { trendingLogos, withPreloads, withFirstScreen } from './home-preload.mjs';
 import { getHeapStatistics } from 'node:v8';
 import { productionGuard, formatGuardReport, durableStorage } from './production-guard.mjs';
 import { PAGES, canonicalOrigin, renderPage, renderSitemap, renderRobots, renderLlms } from '../../packages/core/seo.mjs';
@@ -376,13 +376,15 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   };
   // The home page's first trending logos, ranked as the browser ranks them, named as preloads in the HTML (60 s cache).
   let homePreload={at:0,urls:[]};
+  /** The home HTML with the trending logos preloaded and drawn into its loading skeleton (the first five logos). */
+  function homePage(page){const logos=homeLogoPreloads();return withFirstScreen(withPreloads(page,logos.slice(0,2).filter(Boolean)),logos);}
   function homeLogoPreloads(){
     if(Date.now()-homePreload.at<60_000)return homePreload.urls;
     let urls=[];
     try{
       const sources=evmTestnets.map(net=>{const activity=new Map();return {network:net.key,tokens:publicIndex.listings(net.key,(e,t)=>{if(!activity.has(e))activity.set(e,indexedActivity(e.index.db));return activityOf(activity.get(e),t.address);})};});
       if(solanaIndex){const activity=indexedActivity(solanaIndex.db);sources.push({network:solanaIndex.network.key,solana:true,tokens:solanaIndex.listings().map(t=>({...t,...activityOf(activity,t.address)}))});}
-      urls=homePreloads({sources,prices:priceSnapshot()});
+      urls=trendingLogos({sources,prices:priceSnapshot(),limit:5});
     }catch(error){console.error(JSON.stringify({event:'home_preload_failed',message:String(error?.message??error).slice(0,200)}));}
     homePreload={at:Date.now(),urls};return urls;
   }
@@ -635,7 +637,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           // index.html and every import use) are immutable because a deploy changes the build id.
           if (resource[1] === 'text/html') {
             const page = staticAssets.html(await readFile(resolve(webRoot, resource[0]), 'utf8'));
-            return sendCompressed(req, res, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }, url.pathname === '/' ? withPreloads(page, homeLogoPreloads()) : page);
+            return sendCompressed(req, res, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }, url.pathname === '/' ? homePage(page) : page);
           }
           const out = staticAssets.serve(url.pathname, url.searchParams.get('v'));
           return sendCompressed(req, res, { 'Content-Type': `${resource[1]}; charset=utf-8`, 'Cache-Control': out.immutable ? IMMUTABLE : 'no-cache' }, out.body);

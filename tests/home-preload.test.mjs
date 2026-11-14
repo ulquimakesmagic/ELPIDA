@@ -23,3 +23,18 @@ test('the home page is still served with no indexed networks', async t => {
   const res = await fetch(app.url + '/'); assert.equal(res.status, 200);
   const html = await res.text(); assert.match(html, /<\/head>/); assert.doesNotMatch(html, /rel="preload" as="image"/);
 });
+
+test('the home page draws the first trending logos into the app\'s own loading skeleton, in rank order', async () => {
+  const { withFirstScreen, homeFirstScreen, trendingLogos } = await import('../apps/api/home-preload.mjs');
+  const page = '<main id="main"><div id="view" aria-busy="true">\n<!-- c -->\n<div class="page-head"><div><h1>Create</h1><p class="muted">Loading…</p></div></div>\n</div></main>';
+  const a = '/api/content/bafkrei' + 'a'.repeat(52) + '?w=512';
+  const out = withFirstScreen(page, [null, a]);
+  assert.doesNotMatch(out, /page-head/); assert.match(out, /<div class="explore" aria-busy="true">/);
+  const cards = out.match(/<li class="trend-card trend-skeleton">.*?<\/li>/g);
+  assert.equal(cards.length, 5); assert.match(cards[0], /tc-media skeleton/); assert.match(cards[1], new RegExp(`<img alt="" src="${a.replace(/[?]/g, '\\?')}" decoding="async" fetchpriority="high">`));
+  assert.equal(out.match(/list-skeleton/g).length, 6);
+  assert.equal(withFirstScreen(page, [null, null]), page, 'no logo of our own: the page is unchanged');
+  assert.equal(withFirstScreen('<div id="view"></div>', [a]), '<div id="view"></div>');
+  assert.equal(homeFirstScreen([]).match(/tc-media skeleton/g).length, 5);
+  assert.deepEqual(trendingLogos({ sources: [{ network: 'x', tokens: [{ address: '0x1', volume24h: 2, image: 'https://example.com/a.png' }, { address: '0x2', volume24h: 1, image: '/api/content/bafkrei' + 'a'.repeat(52) }] }], limit: 3, now: 1 }), [null, a]);
+});
