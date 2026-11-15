@@ -321,8 +321,13 @@ export function createExplore(source) {
     const list = trendingTokens(tokens, 10);
     trending.hidden = !list.length;
     if (!list.length) { trendTrack.replaceChildren(); trendCache.clear(); return; }
+    // Rebuild the looping copies in the same task as the refresh and keep the strip where it was. Rebuilding them a frame
+    // later (as before) painted the strip without its copies for a frame and snapped a scrolled strip back to its end,
+    // so every data refresh made the row jump (live site, 15 Nov: 20 cards, then 10, then 20 again).
+    const left = trendTrack.scrollLeft;
     reconcile(trendTrack, list, trendCache, (t, i) => trendCard(t, i + 1, ctx), (node, t, i) => node._update(t, i + 1));
-    requestAnimationFrame(() => { loopCopies(trendTrack); syncTrend(); });
+    if (trendTrack.isConnected) { loopCopies(trendTrack); trendTrack.scrollLeft = left; }
+    requestAnimationFrame(() => { if (!trendTrack.querySelector(':scope > .trend-copy')) loopCopies(trendTrack); syncTrend(); });
   }
   function drawChips(counts) {
     const nets = source.networks();
