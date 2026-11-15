@@ -23,3 +23,12 @@ test('wallet-signed theses reject tampering, spoofing, replay and lost holdings;
 test('Solana holder messages use verified Ed25519 signatures',async()=>{
  const {publicKey,privateKey}=generateKeyPairSync('ed25519'),author=new PublicKey(publicKey.export({format:'der',type:'spki'}).subarray(-32)).toBase58(),store=new HolderTheses({holding:async()=>true}),body={network:'solana-devnet',token:author,author,text:'A Solana thesis.'};const p=await store.prepare(body);await store.save({...body,nonce:p.nonce,signature:sign(null,Buffer.from(p.message),privateKey).toString('base64')});assert.equal(store.history(body).length,1);store.close();
 });
+
+test('V2 trades attributed by Elpida\'s factory or router keep a known cost basis; other routers do not', () => {
+ const me='0xf5b0', router='0x7777', trade=(side,tokenAmount,quoteAmount,accountBasis)=>({side,tokenAmount,quoteAmount,account:me,sender:router,accountBasis});
+ const p=positionSummary({trades:[trade('buy','100','10','launch first buy (factory buyer)'),trade('buy','100','30','Elpida router'),trade('sell','50','20','Elpida router')],balance:'150',price:0.5,supply:'1000'});
+ assert.equal(p.basisKnown,true); assert.equal(p.costQuote,'30.0'); assert.equal(p.realizedQuote,'10.0');
+ const other=positionSummary({trades:[trade('buy','100','10','transaction sender; trade went through another router')],balance:'100',price:0.5,supply:'1000'});
+ assert.equal(other.basisKnown,false,'a trade through another router is not trusted for cost basis');
+ assert.equal(positionSummary({trades:[trade('buy','100','10','Elpida router')],balance:'90',price:0.5,supply:'1000'}).basisKnown,false,'the balance must still match the trades');
+});
