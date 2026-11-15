@@ -11,6 +11,16 @@
 > `contracts, unit and full suite` and `solana program` checks on `main`; (2) create a Safe on Base for the treasury
 > and pick a guardian wallet for the launch stop; (3) a fresh, separate Base keeper key.
 
+## Solana devnet: USDC and TEST-MEME as ELPIDA V2 pairs, 16 November 2026
+
+No program upgrade. After this PR is merged and `git pull`, in your ELPIDA folder (PowerShell):
+
+`npm.cmd run solana:deploy -- --v2-pairs --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`
+
+It ends with `ELPIDA V2 USDC pair ready: …` and `ELPIDA V2 TEST-MEME pair ready: …` and rewrites
+`deployments/solana-devnet.json`; commit that on a branch and open a PR. Both curves run $50 → $250 in the pair asset
+(TEST-MEME at $50 per 500,000); the $10 fee stays in SOL.
+
 ## Solana devnet: tTSLAon as an ELPIDA V2 pair (test price), 15 November 2026
 
 Pyth publishes no TSLA price on Solana devnet (only crypto, forex and metals), so the devnet V2 stock pair runs on a

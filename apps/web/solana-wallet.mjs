@@ -122,6 +122,7 @@ export class SolanaWallet {
     // ELPIDA V2 SOL pair (docs/V2_0_SOLANA.md), when the deploy set it up: launched with `launch_v2`, never a Model 10 pick.
     const v2 = this.deployment.v2?.config ? [{ kind: 'native', key: 'sol-v2', symbol: 'SOL', name: 'SOL (wrapped automatically)', config: this.deployment.v2.config, v2: true },
       // V2 test stock pairs (15 November 2026, --v2-stocks): priced from their bound quote pricing at each launch.
+      ...(this.deployment.v2.pairs ?? []).map(x => ({ kind: x.kind, key: `${x.key}-v2`, symbol: x.symbol, name: x.name, config: x.config, v2: true, test: x.test, faucet: x.faucet ?? listed.find(p => p.mint === x.mint)?.faucet ?? null })),
       ...(this.deployment.v2.stocks ?? []).map(x => ({ kind: 'xstock', key: `${x.key}-v2`, symbol: x.symbol, name: x.name, config: x.config, v2: true, test: x.test, faucet: listed.find(p => p.mint === x.mint)?.faucet ?? '25', quotePricing: x.quotePricing }))] : [];
     const listedAll = [...listed, ...v2];
     const infos = await this.connection.getMultipleAccountsInfo(listedAll.map(p => new web3.PublicKey(p.config)));

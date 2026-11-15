@@ -137,9 +137,9 @@ export function renderLaunch(ctx) {
   const solanaV2 = () => (solana() ? ctx.wallet?.deployment?.v2 ?? null : null);
   const v2Offered = () => !!draft.chain && draft.chain !== 'local' && (solana() ? !!solanaV2() : !!v2Deployment(net()));
   // On Solana: the SOL pair and, once the deploy sets them up (--v2-stocks, test networks), the V2 test stock pairs.
-  const solanaV2Stocks = () => (solanaV2()?.stocks?.length ?? 0) > 0;
-  const v2Pairs = () => (solana() ? ['native', ...(solanaV2Stocks() ? ['xstock'] : [])] : V2_PAIRS);
-  const solanaV2Only = () => (solanaV2Stocks() ? 'V2 test launches on Solana pair with SOL or a test stock.' : 'V2 test launches on Solana pair with SOL.');
+  const solanaV2Kinds = () => ['native', ...(solanaV2()?.pairs ?? []).map(p => p.kind), ...((solanaV2()?.stocks?.length ?? 0) > 0 ? ['xstock'] : [])];
+  const v2Pairs = () => (solana() ? solanaV2Kinds() : V2_PAIRS);
+  const solanaV2Only = () => `V2 test launches on Solana pair with ${solanaV2Kinds().map(k => ({ native: 'SOL', usdc: 'USDC', token: 'the test paired token', xstock: 'a test stock' })[k]).join(', ')}.`;
   // Model 10 is retired from the launch page (Malik, 9 November 2026): ELPIDA V2 is the only model wherever its
   // launchpad exists. Model 10 tokens keep trading. The local simulation keeps its own test curve.
   const v2Chosen = () => v2Offered();
@@ -194,7 +194,10 @@ export function renderLaunch(ctx) {
   function startCap() {
     const asset = selectedAsset(), curve = asset?.curve;
     if (!curve || !(curve.vt > 0)) return '';
-    const quote = curve.vq * 1e9 / curve.vt, usd = asset.symbol === 'USDC' ? 1 : asset.id === 'native' && freshPrice(launchPrice()) ? launchPrice().usd : null;
+    // USD per pair asset: USDC is $1; SOL/native at the launch price; a stock at its price (Solana V2 quote pricing).
+    const usd = asset.symbol === 'USDC' ? 1 : (asset.id === 'native' || draft.pair === 'native') && freshPrice(launchPrice()) ? launchPrice().usd
+      : draft.pair === 'xstock' && asset.stockPrice?.usd > 0 ? asset.stockPrice.usd : null;
+    const quote = curve.vq * 1e9 / curve.vt;
     const testNote = draft.chain === 'local' ? ' · simulation' : draft.chain && !net()?.mainnet ? ' · test size' : '';
     return usd !== null ? `$${number(quote * usd, 0)} market cap${testNote}` : `USD market cap unavailable${testNote}`;
   }
