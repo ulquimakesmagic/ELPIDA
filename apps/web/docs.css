@@ -212,6 +212,7 @@
 .op-card { padding: 16px 18px; }
 .op-card .tk-table th, .op-card .tk-table td { padding-left: 10px; padding-right: 10px; }
 .op-table td { height: 44px; }
+.op-table td.op-why { white-space: normal; min-width: 260px; }
 .op-net { display: inline-flex; align-items: center; gap: 6px; white-space: nowrap; }
 .op-net .asset-icon { width: 16px; height: 16px; border-radius: 50%; }
 .op-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; margin: 0; font-size: 13px; }
