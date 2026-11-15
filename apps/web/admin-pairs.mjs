@@ -56,7 +56,7 @@ export function solanaStockPairs(w) {
     const [pill, why] = state(cfg);
     return h('tr', h('td', h('span.op-net', assetIcon(cfg.symbol, true, { provider: cfg.test ? 'ondo-test' : 'ondo', name: cfg.name }), cfg.symbol, cfg.test ? h('span.chip.chip-xs.chip-test', 'Test') : null)),
       h('td', link(cfg.quoteMint.toBase58())), h('td', link(cfg.address.toBase58())),
-      h('td', h(`span.op-pill.${pill === 'offered' ? 'op-ok' : 'op-warn'}`, pill)), h('td.small.muted', why));
+      h('td', h(`span.op-pill.${pill === 'offered' ? 'op-ok' : 'op-warn'}`, pill)), h('td.small.muted.op-why', why));
   });
   const authority = w.deployment?.upgradeAuthority;
   return h('section.tk-card.op-card', h('h2.tk-h', 'Tokenized stocks on Solana'),
@@ -89,7 +89,7 @@ export function renderPairs(ctx, { connect }) {
     if (ctx.mode === 'testnet' && net?.kind === 'solana') {
       if (!w.deployment) { root.replaceChildren(card('Trading pairs', h('p.small.muted', `The Solana program is not deployed on ${net.name} yet.`))); return; }
       if (!w.configs) { root.replaceChildren(card('Trading pairs', h('p.small.muted', 'Loading the Solana pair configs…'))); w.loadConfig?.().then(draw, fail); return; }
-      root.replaceChildren(h('header.op-head', h('div', h('h1', h('span.op-net', chainIcon(net.key), `Trading pairs · ${net.name}`)), h('p.small.muted', `Program ${short(w.deployment.programId)}`))), error, h('div.op-grid', solanaStockPairs(w)));
+      root.replaceChildren(h('header.op-head', h('div', h('h1', h('span.op-net', chainIcon(net.key), `Trading pairs · ${net.name}`)), h('p.small.muted', `Program ${short(w.deployment.programId)}`))), error, solanaStockPairs(w));
       return;
     }
     if (ctx.mode !== 'testnet' || !net) { root.replaceChildren(card('Trading pairs', h('p.small.muted', 'Pair approvals are per network. Connect a wallet on Base, Ethereum, BNB Chain, Robinhood Chain or Solana in Network and funds, then come back here.'))); return; }
