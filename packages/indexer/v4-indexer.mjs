@@ -70,7 +70,11 @@ export class V4Indexer extends EvmIndexer {
       await this.scanRange(height, end, full && end === target);
     }
     if (full && (tip ? tip.height : this.fromBlock - 1) < target) this.lastFull = Date.now();
-    await this.backfillFactoryEvents();
+    // A back-fill read that the RPC refuses (rate limit, range) must never stop live indexing: it is retried next scan.
+    // On 15 Nov sepolia.base.org kept refusing it and the whole Base V2 index reported 'retrying', which hid holders'
+    // positions on every Base V2 token page.
+    try { await this.backfillFactoryEvents(); this.backfillError = null; }
+    catch (error) { this.backfillError = String(error?.shortMessage ?? error?.message ?? error).slice(0, 200); }
     this.head = head; this.lastError = null;
     return this.status();
   }
@@ -79,7 +83,7 @@ export class V4Indexer extends EvmIndexer {
    * blocks already indexed, a few batches per scan so normal indexing is never held up. Resumable: the next block to
    * read is kept in `backfills`.
    */
-  async backfillFactoryEvents(maxBatches = 20) {
+  async backfillFactoryEvents(maxBatches = 5) {
     const names = ['LaunchFeePaid'].filter(n => { try { return !!this.interfaces.factory.getEvent(n); } catch { return false; } });
     if (!names.length) return;
     this.db.exec('CREATE TABLE IF NOT EXISTS backfills (name TEXT PRIMARY KEY, next INTEGER NOT NULL)');
@@ -105,6 +109,8 @@ export class V4Indexer extends EvmIndexer {
   }
   /** Whether every backfill has reached the indexed tip (analytics show launch fees as incomplete until then). */
   backfillComplete() {
+    // A deployment whose factory has no LaunchFeePaid event (Model 11) has nothing to back-fill.
+    try { if (!this.interfaces.factory.getEvent('LaunchFeePaid')) return true; } catch { return true; }
     const tip = this.tip(); if (!tip) return true;
     try { const row = this.db.prepare("SELECT next FROM backfills WHERE name='LaunchFeePaid'").get(); return !!row && row.next > tip.height; } catch { return false; }
   }

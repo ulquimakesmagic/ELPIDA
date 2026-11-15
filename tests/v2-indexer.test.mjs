@@ -62,7 +62,13 @@ test('V2 launches, trades and fee ledgers are indexed for the site', async t => 
   index.db.prepare("DELETE FROM events WHERE json_extract(data,'$.name')='LaunchFeePaid'").run();
   index.db.prepare('DELETE FROM backfills').run();
   assert.equal(index.launchFees().length, 0); assert.equal(index.backfillComplete(), false);
-  await index.backfillFactoryEvents();
+  // An RPC that refuses the back-fill read (15 Nov, sepolia.base.org) must not stop live indexing or mark it failing.
+  const getLogs = index.provider.getLogs.bind(index.provider);
+  index.provider.getLogs = async filter => { if (filter.topics?.[0] === index.interfaces.factory.getEvent('LaunchFeePaid').topicHash) throw new Error('no backend is currently healthy'); return getLogs(filter); };
+  await index.scan();
+  assert.equal(index.status().error, null, 'live indexing carries on'); assert.match(index.backfillError, /no backend/); assert.equal(index.backfillComplete(), false);
+  index.provider.getLogs = getLogs;
+  for (let i = 0; i < 10 && !index.backfillComplete(); i++) await index.backfillFactoryEvents();
   assert.deepEqual(index.launchFees(), fees); assert.equal(index.backfillComplete(), true);
   // Analytics step 2: fees counted from the trades equal the hook's own running total, and the payouts equal its shares.
   const tradeRows = index.db.prepare('SELECT data FROM trades').all().map(r => JSON.parse(r.data));

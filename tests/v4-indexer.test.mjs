@@ -49,6 +49,7 @@ test('v4 indexer: launches, every trade path once with its fee, holders and cand
   const viaTest = await swap(f, l, { signer: other, buy: true, amount: parseEther('0.03') });
   const index = f.index();
   await index.sync();
+  assert.equal(index.backfillComplete(), true, 'a Model 11 factory has no launch fee event, so nothing is waiting to be back-filled');
   const [row] = index.listings();
   assert.equal(row.model, V4_MODEL); assert.equal(row.curveModel, 11); assert.equal(row.pair, 'native'); assert.equal(row.quoteSymbol, 'ETH');
   assert.equal(row.poolId, v4PoolId(v4PoolKey(l.key[0], l.key[1], l.key[4])));
