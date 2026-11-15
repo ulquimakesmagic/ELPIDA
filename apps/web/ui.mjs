@@ -87,8 +87,6 @@ export function bar(percent, done = false, label = 'Bonding curve progress') {
 export function safeImage(src) { try { return normalizeMetadata({ image: src }).image; } catch { return ''; } }
 /** Displayed size of each avatar style, in CSS pixels; the server sends a thumbnail at least twice that wide. */
 const AVATAR_SIZES = { 'tc-image': 256, 'koth-avatar': 96, 'lc-avatar': 82 };
-/** Logo boxes large enough to show the whole picture (stretched to the square) rather than a square crop. */
-const FIT_WHOLE = new Set(['tc-image', 'lc-avatar', 'avatar-lg', 'avatar-xl']);
 /**
  * A logo stored on this server (`/api/content/<cid>`) as a small WebP thumbnail instead of the uploaded original, which
  * can be megabytes (PageSpeed, 14 Nov). Other image URLs are returned unchanged.
@@ -117,11 +115,8 @@ export function avatar(token, cls = '', { priority = false } = {}) {
     const thumb = thumbnailUrl(image, AVATAR_SIZES[cls] ?? 64);
     const img = h('img', { alt: '', src: thumb, referrerPolicy: 'no-referrer', loading: priority ? 'eager' : 'lazy', decoding: 'async' });
     if (priority) img.setAttribute('fetchpriority', 'high');
-    // Card-sized logos show the whole picture stretched to fill the square (Malik, 15 Nov): nothing cropped, no fill
-    // behind it. Small round avatars keep filling their circle with a crop.
-    if (FIT_WHOLE.has(cls)) box.classList.add('fit-whole');
     // A thumbnail that fails falls back to the original once; an original that fails shows the initials.
-    img.addEventListener('error', () => { if (img.getAttribute('src') !== image) img.src = image; else { box.classList.remove('fit-whole'); img.replaceWith(initials); } });
+    img.addEventListener('error', () => { if (img.getAttribute('src') !== image) img.src = image; else img.replaceWith(initials); });
     box.append(img);
   } else box.append(initials);
   return box;
