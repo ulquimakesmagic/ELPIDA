@@ -46,7 +46,7 @@ import { memoryReport } from './memory-report.mjs';
 import { Thumbnails, thumbWidth } from './thumbnails.mjs';
 import { PriceHistory, priceEntries } from './price-history.mjs';
 import { usdReferenceFor } from '../../packages/core/pairs.mjs';
-import { trendingLogos, withPreloads, withFirstScreen, storedMetadataImage } from './home-preload.mjs';
+import { trendingCards, withPreloads, withFirstScreen, storedMetadataImage } from './home-preload.mjs';
 import { getHeapStatistics } from 'node:v8';
 import { productionGuard, formatGuardReport, durableStorage } from './production-guard.mjs';
 import { PAGES, canonicalOrigin, renderPage, renderSitemap, renderRobots, renderLlms } from '../../packages/core/seo.mjs';
@@ -375,19 +375,18 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     return sources;
   };
   // The home page's first trending logos, ranked as the browser ranks them, named as preloads in the HTML (60 s cache).
-  let homePreload={at:0,urls:[]};
-  /** The home HTML with the trending logos preloaded and drawn into its loading skeleton (the first five logos). */
-  function homePage(page){const logos=homeLogoPreloads();return withFirstScreen(withPreloads(page,logos.slice(0,2).filter(Boolean)),logos);}
-  function homeLogoPreloads(){
-    if(Date.now()-homePreload.at<60_000)return homePreload.urls;
-    let urls=[];
+  // The home page's first trending cards, ranked as the browser ranks them: worked out in the background every minute and
+  // served from memory, so the page itself never waits for it (it read every index on the request path before).
+  let homeCards=[];
+  function homePage(page){return withFirstScreen(withPreloads(page,homeCards.slice(0,2).map(c=>c.src).filter(Boolean)),homeCards);}
+  function refreshHomeCards(){
     try{
       const sources=evmTestnets.map(net=>{const activity=new Map();return {network:net.key,tokens:publicIndex.listings(net.key,(e,t)=>{if(!activity.has(e))activity.set(e,indexedActivity(e.index.db));return activityOf(activity.get(e),t.address);})};});
       if(solanaIndex){const activity=indexedActivity(solanaIndex.db);sources.push({network:solanaIndex.network.key,solana:true,tokens:solanaIndex.listings().map(t=>({...t,...activityOf(activity,t.address)}))});}
-      urls=trendingLogos({sources,prices:priceSnapshot(),limit:5,imageOf:t=>storedMetadataImage(metadataStore,t)});
+      homeCards=trendingCards({sources,prices:priceSnapshot(),limit:5,imageOf:t=>storedMetadataImage(metadataStore,t)});
     }catch(error){console.error(JSON.stringify({event:'home_preload_failed',message:String(error?.message??error).slice(0,200)}));}
-    homePreload={at:Date.now(),urls};return urls;
   }
+  const homeCardsStart=port===0?null:setTimeout(refreshHomeCards,5_000),homeCardsTimer=port===0?null:setInterval(refreshHomeCards,60_000);homeCardsStart?.unref?.();homeCardsTimer?.unref?.();
   function indexedMarket(network,address){
     if(network==='local'){const token=runtime.indexer.listings().find(t=>t.address===address.toLowerCase());if(!token)throw new Error('Token not indexed.');return {token,index:runtime.indexer.indexFor?.(address)??runtime.indexer,sol:false};}
     if(network.startsWith('solana-')){if(!solanaIndex||solanaIndex.network.key!==network||solanaIndex.status().error||!solanaIndex.status().lastSuccess||Date.now()-Date.parse(solanaIndex.status().lastSuccess)>180000)throw new Error('Network not indexed.');const token=solanaIndex.token(address);if(!token)throw new Error('Token not indexed.');return {token,index:solanaIndex,sol:true};}
@@ -739,7 +738,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
   bootPhase('listening');
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();await v2Keeper.close();solanaRewards?.stop();await solanaV2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);clearInterval(memoryTimer);clearTimeout(priceHistoryStart);clearInterval(priceHistoryTimer);try{priceHistory.close();}catch{};try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();await v2Keeper.close();solanaRewards?.stop();await solanaV2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);clearInterval(memoryTimer);clearTimeout(priceHistoryStart);clearInterval(priceHistoryTimer);clearTimeout(homeCardsStart);clearInterval(homeCardsTimer);try{priceHistory.close();}catch{};try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
