@@ -253,6 +253,9 @@ function marketActivity(ctx,token,q,{addressUrl,isCreator,me,info,onCounts,onHol
     if(selected==='chat'){chatView=holderChat(ctx,token);content.replaceChildren(chatView.element);return;}
     if(selected==='info'){content.replaceChildren(info);return;}
     try{const fetched=await fetchKind(selected==='traders'?'trades':selected);if(current!==revision||!panel.isConnected)return;
+      // A live reload carries the newest list, so the tab count follows it instead of keeping the first load's figure.
+      const kind=selected==='traders'?'trades':selected,count=kind==='trades'?`${fetched.length}${fetched.length>=100?'+':''}`:kind==='holders'?`${walletHolders(fetched,token).length}${fetched.length>=50?'+':''}`:null;
+      if(count!==null&&counts[kind]!==count){counts={...counts,[kind]:count};onCounts({trades:counts.trades,holders:counts.holders});drawTabs();}
       if(selected==='trades'){onTrades?.(fetched);
         const all=filterTrades(filterByWho(fetched,who,{creator:token.creator,me}),side),rows=all.slice(0,shown);
         total.textContent=`${all.length} of ${fetched.length}${fetched.length>=100?'+':''} recent trades`;
