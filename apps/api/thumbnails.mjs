@@ -54,8 +54,7 @@ export class Thumbnails {
    */
   async get(cid, record, width) {
     if (!CID.test(String(cid)) || !THUMB_WIDTHS.includes(width) || !RESIZABLE.has(record?.type)) return null;
-    // '-fit': the whole picture inside the square (15 Nov), not the earlier square crop, so old files are not reused.
-    const key = `${cid}-${width}-fit`;
+    const key = `${cid}-${width}`;
     if (this.failed.has(cid)) return null;
     const hit = this.memory.get(key);
     if (hit) { this.remember(key, hit); return hit; }
@@ -68,7 +67,7 @@ export class Thumbnails {
         const input = Buffer.from(record.data, 'base64');
         const bytes = await sharp(input, { animated: false, limitInputPixels: 40_000_000 })
           .rotate()
-          .resize({ width, height: width, fit: 'inside', withoutEnlargement: true })
+          .resize({ width, height: width, fit: 'cover', withoutEnlargement: true })
           .webp({ quality: 80, effort: 4 })
           .toBuffer();
         // A thumbnail that is not smaller than the original is no help: serve the original.

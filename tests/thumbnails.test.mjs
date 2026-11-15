@@ -26,7 +26,7 @@ test('a large logo becomes a small WebP, kept on disk and reused; the original i
   const meta = await sharp(out).metadata();
   assert.equal(meta.format, 'webp'); assert.ok(meta.width <= 256 && meta.height <= 256);
   assert.ok(out.length * 50 < png.length, `${out.length} bytes instead of ${png.length}`);
-  assert.deepEqual(readdirSync(dir), [`${cid}-256-fit.webp`]);
+  assert.deepEqual(readdirSync(dir), [`${cid}-256.webp`]);
   const again = new Thumbnails({ dir, loadSharp: async () => { loads++; return sharp; } });
   assert.deepEqual(await again.get(cid, record, 256), out, 'read back from disk');
   assert.equal(loads, 1, 'the image library is not even loaded for a cached thumbnail');
@@ -63,11 +63,4 @@ test('logos Elpida served under its old Railway address load from this site; oth
   assert.equal(ownImagePath('https://other.up.railway.app/assets/x.png'), 'https://other.up.railway.app/assets/x.png');
   assert.equal(ownImagePath('http://elpida-production.up.railway.app/assets/x.png'), 'http://elpida-production.up.railway.app/assets/x.png');
   assert.equal(ownImagePath('https://elpida-production.up.railway.app/admin'), 'https://elpida-production.up.railway.app/admin');
-});
-
-test('a wide logo keeps its whole picture: fitted inside the square, never cropped', async () => {
-  const wide = await sharp({ create: { width: 900, height: 300, channels: 3, background: '#4a8' } }).png({ compressionLevel: 0 }).toBuffer();
-  const thumbs = new Thumbnails({ dir: null, loadSharp: async () => sharp });
-  const meta = await sharp(await thumbs.get(rawCid(wide), { type: 'image/png', data: wide.toString('base64') }, 256)).metadata();
-  assert.deepEqual([meta.width, meta.height], [256, 85]);
 });
