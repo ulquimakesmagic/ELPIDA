@@ -11,6 +11,30 @@
 > `contracts, unit and full suite` and `solana program` checks on `main`; (2) create a Safe on Base for the treasury
 > and pick a guardian wallet for the launch stop; (3) a fresh, separate Base keeper key.
 
+## Solana devnet: tTSLAon as an ELPIDA V2 pair (test price), 15 November 2026
+
+Pyth publishes no TSLA price on Solana devnet (only crypto, forex and metals), so the devnet V2 stock pair runs on a
+**round test price**, like the EVM test stocks: the test build gains `set_test_stock_price` (upgrade authority only,
+PDA `["test-price", mint]`) and `read_price` accepts that account in the test build only. The mainnet build has neither.
+tTSLAon is priced at $410; each launch starts at $50 of market cap, like the SOL pair; the $10 fee stays in SOL.
+
+| Build | Size | SHA256 (Solana CLI 2.3.13) |
+|---|---|---|
+| test (`--features testnet`, devnet) | 1,177,704 bytes | `2153ae3b5d6c482c67e4b6fb63283cab92cda5668fc9d4d943d4d6e78cb37418` |
+
+In your ELPIDA folder (PowerShell), after `git pull`:
+
+1. `certutil -hashfile contracts\solana\build\elpida_launchpad.so SHA256` must print the hash above.
+2. Upgrade the program and set up the pair in one run (the deployer wallet needs about 10 devnet SOL while the
+   upgrade buffer is written; most of it comes back):
+   `npm.cmd run solana:deploy -- --upgrade --stock-pairs --v2-stocks --keypair "C:\Users\HomePC\Desktop\OneForAll\ELPIDA\elpida-v1\local-data\solana-deployer.json"`
+   It ends with `ELPIDA V2 tTSLAon pair ready: … (test price $410).` and rewrites `deployments/solana-devnet.json`.
+3. Commit and push `deployments/solana-devnet.json` on a branch and open a PR, so the site offers the pair.
+
+Then on elpida.fun (Solana Devnet): Create → Tokenized stock → tTSLAon, pay the first buy in tTSLAon (Operator panel →
+Test funds → Get 25 tTSLAon). Not yet for stock-pair tokens: the keeper's trader airdrop and holder rounds (their
+shares accrue in tTSLAon in the reward vaults) and the flywheel.
+
 ## Move hosting from Railway to Oracle Cloud (free), 13 November 2026
 
 Full runbook: `docs/ORACLE_HOSTING.md`. Railway stays live until the cut-over, and can be brought back in minutes.

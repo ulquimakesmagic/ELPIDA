@@ -153,6 +153,8 @@ export const DISCRIMINATORS = {
   updateCurveConfig: [23, 123, 231, 253, 103, 196, 100, 218],
   setPricing: [52, 200, 157, 192, 18, 134, 57, 123],
   setQuotePricing: [213, 232, 6, 111, 126, 174, 223, 196],
+  setTestStockPrice: [135, 110, 207, 18, 167, 238, 44, 80],
+  TestStockPrice: [50, 76, 224, 85, 168, 37, 210, 164],
   PricingConfig: [126, 131, 53, 131, 89, 154, 123, 85],
   PriceUpdateV2: [34, 241, 35, 99, 157, 126, 244, 205],
   reopenCurve: [133, 7, 138, 0, 67, 115, 150, 12],
@@ -389,10 +391,31 @@ export function parsePriceUpdate(raw) {
   const hex = [...bytes.subarray(41, 73)].map(b => b.toString(16).padStart(2, '0')).join('');
   return { feedId: hex, price: view.getBigInt64(73, true), conf: view.getBigUint64(81, true), exponent: view.getInt32(89, true), publishTime: Number(view.getBigInt64(93, true)) };
 }
+/**
+ * Parses a test stock's round test price (`set_test_stock_price`, test build only), in the shape of `parsePriceUpdate`.
+ * The program treats it as current at every read, so `publishTime` is now. Returns null when it is not one.
+ */
+export function parseTestStockPrice(raw, now = Math.floor(Date.now() / 1000)) {
+  const bytes = raw ? new Uint8Array(raw) : null;
+  if (!bytes || bytes.length < 8 + 32 + 32 + 8 + 4 + 8 + 1 || !DISCRIMINATORS.TestStockPrice.every((b, i) => bytes[i] === b)) return null;
+  const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const hex = [...bytes.subarray(40, 72)].map(b => b.toString(16).padStart(2, '0')).join('');
+  return { feedId: hex, price: view.getBigInt64(72, true), conf: 0n, exponent: view.getInt32(80, true), publishTime: now, updatedAt: Number(view.getBigInt64(84, true)), test: true };
+}
 /** USD (6 decimals) to quote base units at an oracle price, rounded up like the program's `usd_to_quote`. */
 export function usdToQuote(usdE6, { price, exponent }, decimals = 9) {
   const num = BigInt(usdE6) * 10n ** BigInt(decimals - exponent), den = BigInt(price) * 1_000_000n;
   return (num + den - 1n) / den;
+}
+/**
+ * A V2 stock pair's starting virtual reserve, as `stock_start_quote` computes it: `startFdvUsdE6` of the stock at its
+ * price times the mint's multiplier, then ceil(start x virtualToken / supply).
+ */
+export function stockVirtualQuote(startFdvUsdE6, { price, exponent }, multiplierE12, decimals, virtualToken) {
+  const adjusted = BigInt(price) * BigInt(multiplierE12) / 1_000_000_000_000n;
+  if (adjusted <= 0n) throw new Error('The stock price is unavailable.');
+  const start = usdToQuote(startFdvUsdE6, { price: adjusted, exponent }, decimals);
+  return (start * BigInt(virtualToken) + TOKEN_SUPPLY - 1n) / TOKEN_SUPPLY;
 }
 /** Oracle-sized virtual SOL reserve for a $startFdv curve: ceil(fdvLamports x virtualToken / supply). */
 export function virtualQuoteForFdv(startFdvUsdE6, oracle, virtualToken) {
@@ -595,6 +618,7 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
   const pricingPda = config => PublicKey.findProgramAddressSync([enc('pricing'), key(config).toBytes()], programId)[0];
   /** V2 stock pairs: the stock's own USD pricing (PDA ["quote-pricing", config]). */
   const quotePricingPda = config => PublicKey.findProgramAddressSync([enc('quote-pricing'), key(config).toBytes()], programId)[0];
+  const testPricePda = mint => PublicKey.findProgramAddressSync([enc('test-price'), key(mint).toBytes()], programId)[0];
   const migrationPda = mint => PublicKey.findProgramAddressSync([enc('pump-migration'), key(mint).toBytes()], programId)[0];
   const partnerPda = creator => PublicKey.findProgramAddressSync([enc('partner'), key(creator).toBytes()], programId)[0];
   const ataWith = (owner, mint, program) => PublicKey.findProgramAddressSync([key(owner).toBytes(), key(program).toBytes(), key(mint).toBytes()], ataProgram)[0];
@@ -868,6 +892,15 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
         concat(DISCRIMINATORS.setQuotePricing, feed, u32(maxAgeSecs), u16(maxConfBps), u64(0n), u64(BigInt(startFdvUsdE6)), PublicKey.default.toBytes()));
     },
     quotePricingFor: config => quotePricingPda(config),
+    /** Test build only, upgrade authority: the round test price of a test stock (PDA ["test-price", mint]). */
+    setTestStockPrice({ authority, quoteMint, feedId, price, exponent }) {
+      const feed = Uint8Array.from(String(feedId).replace(/^0x/, '').match(/../g).map(b => parseInt(b, 16)));
+      if (feed.length !== 32) throw new Error('feedId must be 32 bytes of hex.');
+      const e = new Uint8Array(12), view = new DataView(e.buffer); view.setBigInt64(0, BigInt(price), true); view.setInt32(8, exponent, true);
+      return ix([meta(authority, true, true), meta(quoteMint), meta(testPricePda(quoteMint), true), meta(programId), meta(programDataAddress), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.setTestStockPrice, feed, e));
+    },
+    testPriceFor: mint => testPricePda(mint),
     /** Decodes a PricingConfig account, or null when the bytes are not one. */
     decodePricing(raw) {
       const bytes = raw ? new Uint8Array(raw) : null;
@@ -1208,6 +1241,26 @@ export function mintControls(data, owner, toBase58 = bytes => bytes) {
     offset += 4 + len;
   }
   return controls;
+}
+
+/**
+ * A Token-2022 mint's ScaledUiAmount multiplier in effect at `now`, 12 decimals (1.0 without the extension), as
+ * `stock_mint_terms` reads it: shares per token for an Ondo-shaped stock.
+ */
+export function mintMultiplierE12(data, owner, now = Math.floor(Date.now() / 1000)) {
+  const one = 1_000_000_000_000n;
+  if (String(owner) !== TOKEN_2022_PROGRAM || !data || data.length <= 165 || data[165] !== 1) return one;
+  for (let offset = 166; offset + 4 <= data.length;) {
+    const kind = data[offset] | (data[offset + 1] << 8), len = data[offset + 2] | (data[offset + 3] << 8), value = data.subarray(offset + 4, offset + 4 + len);
+    if (kind === 0) break;
+    if (kind === 25 && value.length >= 56) {
+      const v = new DataView(value.buffer, value.byteOffset, value.byteLength), at = Number(v.getBigInt64(40, true));
+      const m = now >= at ? v.getFloat64(48, true) : v.getFloat64(32, true);
+      return Number.isFinite(m) && m > 0 && m <= 1000 ? BigInt(Math.round(m * 1e12)) : one;
+    }
+    offset += 4 + len;
+  }
+  return one;
 }
 
 /** Test-only helpers: SPL and Token-2022 mints standing in for USDC, xStocks and other pair assets. */

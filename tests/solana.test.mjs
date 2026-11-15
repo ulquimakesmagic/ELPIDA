@@ -20,6 +20,7 @@ import {
   harvestableLp, harvestNow, MPL_TOKEN_METADATA, MAX_LAUNCH_URI, GRADUATION_GRACE_SECS, validMetadataUri, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint, PYTH_RECEIVER, SOL_USD_FEED_ID, SOL_USD_PRICE_ACCOUNT, parsePriceUpdate, usdToQuote, virtualQuoteForFdv,
   RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, VENUE_RAYDIUM, raydiumCreationCost, raydiumQuote, raydiumBuybackAmount,
   V2, v2FeeBps, v2Owed, validV2Symbol, POOL_SIZE_V2, V2_WITHDRAW_COMPUTE_UNITS, V2_DIST,
+  parseTestStockPrice,
 } from '../packages/solana/client.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { buildSolanaRound, verifySolanaProof } from '../packages/solana/v2-rounds.mjs';
@@ -147,7 +148,9 @@ test.after(() => {
 const balance = async address => f.client.tokenAmount((await f.connection.getAccountInfo(address))?.data);
 const pool = async mint => f.client.decodePool((await f.connection.getAccountInfo(f.client.poolPda(mint))).data);
 const failsWith = async (promise, pattern) => {
-  try { await promise; } catch (error) { assert.match(`${error.message} ${(error.logs ?? []).join(' ')}`, pattern); return; }
+  // A failure reported after sending (no simulation logs) names the program error in decimal ({"Custom":6035}); the
+  // patterns use the logs' hex form (0x1793), so both are matched.
+  try { await promise; } catch (error) { const text = `${error.message} ${(error.logs ?? []).join(' ')}`; assert.match(`${text} ${[...text.matchAll(/"Custom":(\d+)/g)].map(m => `0x${Number(m[1]).toString(16)}`).join(' ')}`, pattern); return; }
   assert.fail(`expected failure matching ${pattern}`);
 };
 const txOf = signature => f.connection.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
@@ -1676,6 +1679,33 @@ test('Solana V2 stock pairs (Ondo stand-in): priced from the share price × the 
   const rewardBefore = await balance(f.client.quoteAta(f.rewardWallet.publicKey, config));
   await send(f.connection, f.outsider, [f.client.computeBudget(), f.client.withdrawV2Fees({ payer: f.outsider.publicKey, config, mint, reward: f.rewardWallet.publicKey })], [], 1);
   assert.ok(await balance(f.client.quoteAta(f.rewardWallet.publicKey, config)) > (rewardBefore ?? 0n), 'the creator share is paid in the stock');
+});
+
+// Devnet tTSLAon (15 November 2026): Pyth has no TSLA price on devnet, so the test build accepts a round test price
+// the upgrade authority posts at ["test-price", mint] as a stock pair's quote pricing (the EVM test feed's counterpart).
+test('Solana V2 stock pair on a test price: authority-only test price, bound as quote pricing, launch priced from it', { skip }, async () => {
+  const spl = f.spl, t22 = new PublicKey(TOKEN_2022_PROGRAM), stock = Keypair.generate(), UNIT = 1_000_000_000n, FEED = 'ab'.repeat(32);
+  await send(f.connection, f.authority, await spl.createStockMint2022Ixs(f.connection, f.authority.publicKey, stock.publicKey, 9, f.client.faucetAuthority, f.authority.publicKey, 1), [stock]);
+  const params = curveParams({ startFdv: 50, endFdv: 250, quoteDecimals: 9, launchFee: '0.01', baseFeeBps: 100, snipeStartBps: 9_000, snipeWindowSecs: 60, maxCreatorBuyBps: 300 });
+  await send(f.connection, f.authority, [f.client.computeBudget(), f.client.addV2Config({ authority: f.authority.publicKey, quoteMint: stock.publicKey, treasury: f.treasury, params, quoteTokenProgram: t22 })], [], 1);
+  const config = { address: f.client.configV2For(stock.publicKey), quoteMint: stock.publicKey, treasury: f.treasury, quoteTokenProgram: t22 };
+  const cfg = f.client.decodeConfig((await f.connection.getAccountInfo(config.address)).data);
+  await send(f.connection, f.creator, [f.client.testUsdcFaucet({ user: f.creator.publicKey, mint: stock.publicKey, tokenProgram: t22, amount: 10n * UNIT })]);
+  const setPrice = (who, price = 41_000n) => send(f.connection, who, [f.client.setTestStockPrice({ authority: who.publicKey, quoteMint: stock.publicKey, feedId: FEED, price, exponent: -2 })], [], 1);
+  await failsWith(setPrice(f.outsider), /0x1770/);
+  await failsWith(setPrice(f.authority, 0n), /0x1774/);
+  await setPrice(f.authority);
+  const testPrice = f.client.testPriceFor(stock.publicKey), info = await f.connection.getAccountInfo(testPrice);
+  const parsed = parseTestStockPrice(info.data);
+  assert.equal(parsed.feedId, FEED); assert.equal(parsed.price, 41_000n); assert.equal(parsed.exponent, -2);
+  const setQuote = feedId => send(f.connection, f.authority, [f.client.setQuotePricing({ authority: f.authority.publicKey, config: config.address, quoteMint: stock.publicKey, priceUpdate: testPrice, feedId, startFdvUsdE6: 50_000_000n })], [], 1);
+  await failsWith(setQuote('cd'.repeat(32)), /0x1789/, 'another feed id is refused');
+  await setQuote(FEED);
+  const mint = Keypair.generate();
+  await send(f.connection, f.creator, [f.client.computeBudget(), f.client.launchV2({ uri: TEST_URI, creator: f.creator.publicKey, config, mint: mint.publicKey, name: 'Test price', symbol: 'TPRICE', feeBps: 200, firstBuy: 0n, reward: f.creator.publicKey, stockPriceUpdate: testPrice })], [mint], 1);
+  // $50 at $410 a share: 50/410 of a token of starting value.
+  const start = (50_000_000n * 10n ** 11n + 41_000n * 1_000_000n - 1n) / (41_000n * 1_000_000n), expected = (start * cfg.virtualToken + TOKEN_SUPPLY - 1n) / TOKEN_SUPPLY;
+  assert.equal((await pool(mint.publicKey)).virtualQuote, expected, 'priced from the test price');
 });
 
 test('Solana V2 SOL pair: graduates into Raydium; Raydium fees are burned (token side) and split five ways (SOL side)', { skip: raySkip }, async () => {

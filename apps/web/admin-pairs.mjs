@@ -48,13 +48,15 @@ export function testStockControls(wallet, run, fail) {
 export function solanaStockPairs(w) {
   const configs = [...(w.configs?.values() ?? [])].filter(cfg => cfg.kind === 'xstock');
   const link = (address, label = short(address)) => h('a.mono', { href: w.addressUrl(address), target: '_blank', rel: 'noopener noreferrer' }, label);
-  const state = cfg => !cfg.lockedPool ? ['blocked', 'The mint is not an issuer-controlled Token-2022 stock, so it has no venue on Solana.']
+  const state = cfg => !cfg.v2 && w.deployment?.v2?.config ? ['retired', 'Model 10 curve pair. New launches use ELPIDA V2; its tokens keep trading.']
+    : cfg.v2 && !cfg.stockPrice?.fresh ? ['blocked', 'No current price for this stock, so a launch cannot be priced. Rerun the deploy with --v2-stocks.']
+    : !cfg.lockedPool ? ['blocked', 'The mint is not an issuer-controlled Token-2022 stock, so it has no venue on Solana.']
     : cfg.controls?.paused ? ['paused', 'Its issuer paused every transfer. Launches and trades resume when it is lifted.']
     : cfg.controls?.hookProgram ? ['blocked', `Its issuer switched on transfer hook ${short(cfg.controls.hookProgram)}, which Elpida does not support yet.`]
-    : ['offered', 'Offered in the launch picker. Completes into Elpida\u2019s locked pool.'];
+    : ['offered', `Offered in the launch picker${cfg.v2 ? ' for ELPIDA V2' : ''}. Completes into Elpida\u2019s locked pool.${cfg.stockPrice?.test ? ` Priced at its round test price ($${cfg.stockPrice.usd}).` : ''}`];
   const rows = configs.map(cfg => {
     const [pill, why] = state(cfg);
-    return h('tr', h('td', h('span.op-net', assetIcon(cfg.symbol, true, { provider: cfg.test ? 'ondo-test' : 'ondo', name: cfg.name }), cfg.symbol, cfg.test ? h('span.chip.chip-xs.chip-test', 'Test') : null)),
+    return h('tr', h('td', h('span.op-net', assetIcon(cfg.symbol, true, { provider: cfg.test ? 'ondo-test' : 'ondo', name: cfg.name }), cfg.symbol, cfg.test ? h('span.chip.chip-xs.chip-test', 'Test') : null, cfg.v2 ? h('span.chip.chip-xs', 'V2') : null)),
       h('td', link(cfg.quoteMint.toBase58())), h('td', link(cfg.address.toBase58())),
       h('td', h(`span.op-pill.${pill === 'offered' ? 'op-ok' : 'op-warn'}`, pill)), h('td.small.muted.op-why', why));
   });
@@ -65,7 +67,7 @@ export function solanaStockPairs(w) {
     rows.length ? h('div.table-scroll', h('table.market-table.tk-table.op-table', h('thead', h('tr', ...['Stock', 'Mint', 'Pair config', 'State', 'Why'].map(l => h('th', { scope: 'col' }, l)))), h('tbody', rows)))
       : h('p.small.muted', `No stock pair is set up on ${w.net.name} yet.`),
     w.net.mainnet ? h('p.small', h('span.op-pill.op-warn', 'mainnet'), ' Real Ondo stocks stay off until Ondo answers on transfer hooks and the registry verifies each stock. Approval then goes through the Squads vault.')
-      : h('p.small.muted', 'To add the devnet stand-in (tTSLAon, no value): ', h('code', 'node scripts/solana-deploy.mjs --upgrade --stock-pairs --keypair <deploy key>'), '.'));
+      : h('p.small.muted', 'To add the devnet stand-in (tTSLAon, no value) as an ELPIDA V2 pair: ', h('code', 'node scripts/solana-deploy.mjs --upgrade --stock-pairs --v2-stocks --keypair <deploy key>'), '.'));
 }
 
 export function renderPairs(ctx, { connect }) {
@@ -89,6 +91,7 @@ export function renderPairs(ctx, { connect }) {
     if (ctx.mode === 'testnet' && net?.kind === 'solana') {
       if (!w.deployment) { root.replaceChildren(card('Trading pairs', h('p.small.muted', `The Solana program is not deployed on ${net.name} yet.`))); return; }
       if (!w.configs) { root.replaceChildren(card('Trading pairs', h('p.small.muted', 'Loading the Solana pair configs…'))); w.loadConfig?.().then(draw, fail); return; }
+      if ([...w.configs.values()].some(cfg => cfg.v2 && cfg.kind === 'xstock' && cfg.stockPrice === undefined)) { w.loadStockPrices?.().then(draw, fail); if (!w.stockPricesTried) { w.stockPricesTried = true; return; } }
       root.replaceChildren(h('header.op-head', h('div', h('h1', h('span.op-net', chainIcon(net.key), `Trading pairs · ${net.name}`)), h('p.small.muted', `Program ${short(w.deployment.programId)}`))), error, solanaStockPairs(w));
       return;
     }

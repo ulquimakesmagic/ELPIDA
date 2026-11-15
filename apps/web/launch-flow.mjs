@@ -136,7 +136,10 @@ export function renderLaunch(ctx) {
   // ELPIDA V2 on Solana: the SOL pair the deploy set up (`launch_v2`), graduating into a locked Raydium pool.
   const solanaV2 = () => (solana() ? ctx.wallet?.deployment?.v2 ?? null : null);
   const v2Offered = () => !!draft.chain && draft.chain !== 'local' && (solana() ? !!solanaV2() : !!v2Deployment(net()));
-  const v2Pairs = () => (solana() ? ['native'] : V2_PAIRS);
+  // On Solana: the SOL pair and, once the deploy sets them up (--v2-stocks, test networks), the V2 test stock pairs.
+  const solanaV2Stocks = () => (solanaV2()?.stocks?.length ?? 0) > 0;
+  const v2Pairs = () => (solana() ? ['native', ...(solanaV2Stocks() ? ['xstock'] : [])] : V2_PAIRS);
+  const solanaV2Only = () => (solanaV2Stocks() ? 'V2 test launches on Solana pair with SOL or a test stock.' : 'V2 test launches on Solana pair with SOL.');
   // Model 10 is retired from the launch page (Malik, 9 November 2026): ELPIDA V2 is the only model wherever its
   // launchpad exists. Model 10 tokens keep trading. The local simulation keeps its own test curve.
   const v2Chosen = () => v2Offered();
@@ -331,7 +334,7 @@ export function renderLaunch(ctx) {
     if (!stockCatalog() && pairs?.xstock?.assets?.length) loadStockCatalog().then(c => { if (c) draw(); });
     const pairGrid = h('div.choice-grid', { class: 'pair-grid', role: 'radiogroup', 'aria-label': 'Trading pair' }, PAIR_KINDS.map(kind => {
       const info = PAIR_INFO[kind], group = pairs?.[kind];
-      const reason = !draft.chain ? 'Choose a network first.' : v2Chosen() && !v2Pairs().includes(kind) ? (solana() ? 'V2 test launches on Solana pair with SOL.' : 'V2 test launches pair with the native coin, USDC or a test stock approved for V2.') : v4Chosen() && !V4_PAIRS.includes(kind) ? 'Model 11 test launches pair with the native coin, USDC or a test stock. Choose Model 10 above for this pair.' : !pairs ? 'Connect your wallet to see the assets on this network.' : group?.unavailable ?? (group?.assets.length ? null : 'Not available on this network.');
+      const reason = !draft.chain ? 'Choose a network first.' : v2Chosen() && !v2Pairs().includes(kind) ? (solana() ? solanaV2Only() : 'V2 test launches pair with the native coin, USDC or a test stock approved for V2.') : v4Chosen() && !V4_PAIRS.includes(kind) ? 'Model 11 test launches pair with the native coin, USDC or a test stock. Choose Model 10 above for this pair.' : !pairs ? 'Connect your wallet to see the assets on this network.' : group?.unavailable ?? (group?.assets.length ? null : 'Not available on this network.');
       const symbols = group?.assets.map(a => a.symbol).join(', ');
       const ownerSetup=kind==='usdc'&&!!reason&&draft.chain!=='local'&&!solana()&&connected()&&ctx.state?.pricing?.owner&&ctx.wallet.dex&&ctx.wallet.feeUsdc;
       const finish=ownerSetup?h('a.btn.btn-secondary.btn-sm',{href:'#/monkey?tab=pairs'},'Approve in the operator panel'):null;
@@ -372,7 +375,7 @@ export function renderLaunch(ctx) {
       const group = pairOptions()?.[draft.pair];
       if (!group?.assets.length) { error.textContent = group?.unavailable ?? 'Choose a trading pair.'; return false; }
       if (v4Chosen() && !V4_PAIRS.includes(draft.pair)) { error.textContent = 'Model 11 test launches pair with the native coin, USDC or a test stock.'; return false; }
-      if (v2Chosen() && !v2Pairs().includes(draft.pair)) { error.textContent = solana() ? 'V2 test launches on Solana pair with SOL.' : 'V2 test launches pair with the native coin, USDC or a test stock approved for V2.'; return false; }
+      if (v2Chosen() && !v2Pairs().includes(draft.pair)) { error.textContent = solana() ? solanaV2Only() : 'V2 test launches pair with the native coin, USDC or a test stock approved for V2.'; return false; }
       if (v2Chosen() && !(Number.isInteger(draft.feeBps ?? V2.defaultFeeBps) && (draft.feeBps ?? V2.defaultFeeBps) >= minFeeBps() && (draft.feeBps ?? V2.defaultFeeBps) <= V2.maxFeeBps)) { error.textContent = `Choose a trading fee from ${(minFeeBps() / 100).toFixed(2)}% to 4.00%.`; return false; }
       if (!group.assets.some(a => a.id === draft.quoteAsset)) { draft.quoteAsset = group.assets[0].id; save(); }
       return true;
