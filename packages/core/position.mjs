@@ -1,9 +1,13 @@
 import {parseUnits,formatUnits} from 'ethers';
 const units=v=>parseUnits(typeof v==='number'?v.toFixed(18):String(v??'0'),18);
 // Weighted-average cost in the trading-pair asset. Never reconstruct historical USD prices.
+// Trades whose account the indexer read from Elpida's own contracts (the factory names the launch buyer; the Elpida router's
+// event names the trader and recipient): the swap's sender is the factory or router, never the wallet, and that is expected.
+// Before 15 Nov every V2 and Model 11 trade failed the sender check, so every position showed 'Unknown cost basis'.
+const ATTRIBUTED=new Set(['launch first buy (factory buyer)','Elpida router']);
 export function positionSummary({trades,balance,price,supply,untrackedTransfers=false}){
  let held=0n,cost=0n,realized=0n,unknown=untrackedTransfers;
- for(const t of trades){const n=units(t.tokenAmount),q=units(t.quoteAmount);if(n<=0n||q<0n||t.accountBasis&&String(t.sender).toLowerCase()!==String(t.account).toLowerCase()){unknown=true;continue;}
+ for(const t of trades){const n=units(t.tokenAmount),q=units(t.quoteAmount);if(n<=0n||q<0n||t.accountBasis&&!ATTRIBUTED.has(t.accountBasis)&&String(t.sender).toLowerCase()!==String(t.account).toLowerCase()){unknown=true;continue;}
   if(t.side==='buy'){held+=n;cost+=q;}else if(t.side==='sell'){if(n>held){unknown=true;held=0n;cost=0n;continue;}const removed=held?cost*n/held:0n;held-=n;cost-=removed;realized+=q-removed;}
  }
  const actual=units(balance),spot=units(typeof price==='string'&&/^\d+\.\d+$/.test(price)?price.replace(/(\.\d{18})\d+$/, '$1'):price),total=units(supply);if(actual!==held)unknown=true;
