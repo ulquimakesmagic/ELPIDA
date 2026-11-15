@@ -203,6 +203,11 @@ details.tech .kv dd { font-weight: 500; word-break: break-all; }
 .figure strong { font-size: var(--text-md); font-weight: 600; }
 .avatar { width: 44px; height: 44px; border-radius: var(--radius-md); background: var(--surface-2); display: grid; place-items: center; overflow: hidden; flex: none; color: var(--ink-3); border: 1px solid var(--line); }
 .avatar img { width: 100%; height: 100%; object-fit: cover; }
+/* Card-sized logos (ui.mjs FIT_WHOLE): the whole picture, fitted, over a blurred copy that fills the square. */
+.avatar.fit-whole { position: relative; }
+.avatar.fit-whole > img { grid-area: 1 / 1; }
+.avatar.fit-whole > img:not(.avatar-backdrop) { object-fit: contain; position: relative; }
+.avatar.fit-whole > .avatar-backdrop { object-fit: cover; filter: blur(16px) saturate(1.15); transform: scale(1.2); opacity: .65; pointer-events: none; }
 .avatar-lg { width: 72px; height: 72px; border-radius: 14px; }
 .avatar .initials { font-family: var(--font-display); font-weight: 650; font-size: var(--text-md); color: var(--ink-2); }
 .avatar-lg .initials { font-size: var(--text-2xl); }
