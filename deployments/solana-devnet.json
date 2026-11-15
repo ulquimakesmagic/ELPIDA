@@ -89,7 +89,7 @@
     "usdcMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
   },
   "deployer": "FeUWFps7CYtrXNXosirwJCfFQM5Na6PamEV6hpFcKaH8",
-  "recordedAt": "2026-11-09T19:56:32.612Z",
+  "recordedAt": "2026-11-15T23:21:04.981Z",
   "build": "testnet",
   "betaGate": null,
   "v2": {
@@ -132,7 +132,26 @@
       "pool": "5QYRTeSXweZXLRcMocdJcDZ6HCUJCzPgK8HZYvjoMiwo",
       "wsol": "So11111111111111111111111111111111111111112",
       "createdTx": "3upJD65HeKE7c6g5nnscR9rfhVv4risQp8vMCQo3cq64Eb35v5ubuQZH8U6bzcFoQ5nWtMzWzB9w6WiXqosp6bSR"
-    }
+    },
+    "stocks": [
+      {
+        "kind": "xstock",
+        "key": "test-ondo-tsla",
+        "symbol": "tTSLAon",
+        "name": "Elpida test Ondo-style TSLA stock (no value)",
+        "mint": "HE4LBuPDgFQCHT88Z4UMh62xKoJaTAQuzNHjAvCkHjYd",
+        "decimals": 9,
+        "tokenProgram": "TokenzQdBNbLqP5VEhdkAS6EPFLC1PHnBqCXEpPxuEb",
+        "test": true,
+        "config": "DeBjg5R13JoM8cP35ejvbZtZSN3ED9qcSW5C5hQqc3Ya",
+        "quotePricing": {
+          "priceAccount": "4rYQUNdG5xdgYFuqNJTkCKjp6c4SqjKMNAfnCtUHvHs4",
+          "feedId": "1c852495b752166d80d737b3dc730c79668a52493109ba130231b4bdad6bcec4",
+          "testPriceUsd": "410",
+          "startFdvUsdE6": "50000000"
+        }
+      }
+    ]
   },
   "upgradeAuthority": "FeUWFps7CYtrXNXosirwJCfFQM5Na6PamEV6hpFcKaH8"
 }
