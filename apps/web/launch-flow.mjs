@@ -206,7 +206,7 @@ export function renderLaunch(ctx) {
     if (!(buy > 0) || !curve) return null;
     // Same virtual-reserve curve the contracts use: tokens = Vt × net / (Vq + net), net of the base fee.
     // The creator's first buy always pays the 1.25% base fee; the anti-snipe fee applies to other traders only.
-    const tax=solana()?0:Number(draft.taxBuy??0);
+    const tax=solana()||v2Chosen()||v4Chosen()?0:Number(draft.taxBuy??0);
     if(!Number.isFinite(tax)||tax<0||tax>10)return null;
     if (v2Chosen()) {
       // V2: virtual token 1.25 B and virtual quote = start × 5/4 (Model 10's is start × 10/9 at the same test start), the
@@ -405,7 +405,9 @@ export function renderLaunch(ctx) {
       settings.append(callout('', 'info', 'Holder payouts are weighted by each wallet’s eligible token balance at the recorded snapshot, not by total supply.'));
     } else settings.append(allocationEditor());
     const canTax = local ? !!ctx.config.taxLaunch?.available : !!ctx.wallet?.net?.taxDeployment;
-    const taxControls = !solana() ? h('section.stack',h('h3','Optional token tax'),
+    // The optional token tax belongs to Model 10's tax curves. V2 (and Model 11) have their own trading fee, chosen in the
+    // Trading pair step, and ignore any tax, so the section is not shown for them (Malik, 15 Nov: no longer needed).
+    const taxControls = !solana() && !v2Chosen() && !v4Chosen() ? h('section.stack',h('h3','Optional token tax'),
       field({label:'Buy tax (%)',control:input('taxBuy',{type:'number',min:'0',max:'10',step:'0.01',disabled:!canTax})}),
       field({label:'Sell tax (%)',control:input('taxSell',{type:'number',min:'0',max:'10',step:'0.01',disabled:!canTax})}),
       h('p.hint',canTax?'0–10% per side, fixed at launch. Additional tax splits 30% to Elpida and 70% to your wallet allocations. The 1.25% curve fee remains 50/50. After migration, the token tax and V2 pool fee apply. Creator tax rewards after migration are paid in your launched token.':'Tax launches require the verified V2 tax factory deployment. Available in the local DEX rehearsal; existing public V3 factories cannot create transfer-tax tokens.')) : null;
@@ -415,7 +417,7 @@ export function renderLaunch(ctx) {
       taxControls, grid, settings, error,
     ], validate: () => {
       error.textContent = '';
-      try { buildPolicy(); const tax=taxPolicy({buy:draft.taxBuy,sell:draft.taxSell,recipients:draft.recipients,owner:ctx.state?.wallet});
+      try { buildPolicy(); const tax=v2Chosen()||v4Chosen()?null:taxPolicy({buy:draft.taxBuy,sell:draft.taxSell,recipients:draft.recipients,owner:ctx.state?.wallet});
         if(tax&&(!canTax||draft.rewardMode!=='creator'))throw new Error('Tax launches require a verified V2 deployment and creator wallet allocations.');return true; } catch (e) { error.textContent = errorText(e); return false; }
     } };
   }
@@ -444,7 +446,7 @@ export function renderLaunch(ctx) {
   }
   function buildPolicy() {
     const policy = normalizeRewardPolicy({ mode: draft.rewardMode, threshold: draft.threshold, minimumHolding: draft.minimumHolding, minimumHoldingUsd: draft.minimumHoldingUsd || '0', vestingDays: draft.vestingDays, rewardToken: draft.rewardToken, recipients: draft.recipients }, draft.chain || 'local');
-    const taxed=!solana()&&(Number(draft.taxBuy)>0||Number(draft.taxSell)>0)&&!!ctx.wallet?.net?.taxDeployment;
+    const taxed=!solana()&&!v2Chosen()&&!v4Chosen()&&(Number(draft.taxBuy)>0||Number(draft.taxSell)>0)&&!!ctx.wallet?.net?.taxDeployment;
     const split=v2Splits()&&policy.recipients.length<=8;
     if (split && policy.recipients.length > 1 && policy.recipients.slice(1).some(r => !r.target)) throw new Error('Enter a wallet address for every recipient after the first (the first can stay empty for your connected wallet).');
     if (draft.chain !== 'local' && policy.mode === 'exclusive') {
