@@ -5,7 +5,6 @@ import { usdReferenceFor } from '/pairs.mjs';
 import { exploreHash, overlayToken, tokenKey, pairTokenReferences } from './discovery.mjs';
 import { createExplore, exploreSkeleton } from './explore-view.mjs';
 import { assetIcon, chainIcon, chainSelector } from './chain-ui.mjs';
-import { renderAnalytics } from './analytics-view.mjs';
 import { initConsent } from './consent.mjs';
 import { renderTermsPage } from './terms.mjs';
 // Elpida web app shell: environment (local simulation or public testnet), wallets, routing, discovery,
@@ -15,13 +14,6 @@ import { TestnetWallet, evmWallets, chosenEvmWallet, requestEvmWallets } from '.
 import { SolanaWallet, solanaWallets, chosenSolanaWallet, ensureSolanaWeb3 } from './solana-wallet.mjs';
 import { browserWalletCatalog, walletIcon, onWalletsChanged } from './wallet-discovery.mjs';
 import { storage, $, $$, h, icon, short, number, compact, avatar, bar, pricing, fmtPrice, fmtValue, progressOf, lifecycle, usdRate, toast, errorText, closeOnBackdrop, callout } from './ui.mjs';
-import { renderLaunch } from './launch-flow.mjs';
-import { renderDocs } from './docs-view.mjs';
-import { renderToken } from './token-page.mjs';
-import { renderRewards } from './rewards-view.mjs';
-import { allocationClaimView, xResultView, xResultBanner } from './creator-split.mjs';
-import { portfolioView } from './portfolio-view.mjs';
-import { renderAdmin } from './admin-view.mjs';
 import { initShell, renderLastSale, syncSearch } from './shell.mjs';
 import { startResilience } from './resilience.mjs';
 import { connectTradeStream, mergeTrades } from './live-trades.mjs';
@@ -275,6 +267,28 @@ function route() {
   if (changed) { window.scrollTo({ top: 0 }); if (next.name !== 'launch'&&!['top-search-input','sheet-search-input'].includes(document.activeElement?.id)) $('#main').focus({ preventScroll: true }); }
   if(next.name==='explore'&&pendingSearchReveal&&exploreView){pendingSearchReveal=false;exploreView.setQuery(exploreView.query,{reveal:true});}
 }
+// Pages other than Explore load when first opened (15 Nov 2026): the home page no longer downloads and parses the token
+// page, launch flow, operator panel, analytics, docs, rewards and portfolio code (about 120 KB compressed) before it can
+// draw. Each module is fetched once; while it arrives the page shows its loading state, then draws as before. They are
+// also fetched in the background once the home page is idle, or as soon as a visitor points at a link, so opening a
+// page stays instant.
+const PAGES = {
+  analytics: () => import('./analytics-view.mjs'), launch: () => import('./launch-flow.mjs'), docs: () => import('./docs-view.mjs'),
+  token: () => import('./token-page.mjs'), rewards: () => import('./rewards-view.mjs'), split: () => import('./creator-split.mjs'),
+  portfolio: () => import('./portfolio-view.mjs'), admin: () => import('./admin-view.mjs'),
+};
+const pageModules = {}, pageLoads = {};
+function loadPage(name) {
+  pageLoads[name] ??= PAGES[name]().then(m => { pageModules[name] = m; return m; }, error => { delete pageLoads[name]; throw error; });
+  return pageLoads[name];
+}
+/** The page module if it is loaded; otherwise starts loading it, redraws when it arrives, and returns null. */
+function page(name) {
+  if (pageModules[name]) return pageModules[name];
+  loadPage(name).then(() => rerender('route'), error => toast(errorText(error), 'error'));
+  return null;
+}
+function preloadPages() { for (const name of Object.keys(PAGES)) loadPage(name).catch(() => {}); }
 let launchView = null, analyticsView = null, exploreView = null;
 const freshPrice = p => !!p && p.status === 'fresh' && Number.isFinite(p.usd) && nowSeconds() - p.updatedAt <= (p.maxAge ?? 180);
 /** What the Explore view reads from the app; it never touches wallets or routing directly. */
@@ -299,17 +313,17 @@ function rerender(reason) {
   const r = currentRoute;
   if(r.name==='analytics'){
     view.setAttribute('aria-busy','false');
-    if(!analyticsView||!view.contains(analyticsView.root)){analyticsView=renderAnalytics({api});view.replaceChildren(analyticsView.root);}
+    if(!analyticsView||!view.contains(analyticsView.root)){const m=page('analytics');if(!m){view.replaceChildren(loadingView());return;}analyticsView=m.renderAnalytics({api});view.replaceChildren(analyticsView.root);}
     return;
   }
   analyticsView?.dispose();analyticsView=null;
   if (r.name !== 'explore') closeExplore();
   if(r.name==='notfound'){view.setAttribute('aria-busy','false');view.replaceChildren(notFoundView());return;}
   // The operator panel loads its own data; a background refresh must not reset it mid-read.
-  if(r.name==='admin'){view.setAttribute('aria-busy','false');if(reason==='route'||!view.querySelector('.op')||view.querySelector('.op-signin'))view.replaceChildren(renderAdmin(ctx,{connect:connectCurrent}));return;}
+  if(r.name==='admin'){view.setAttribute('aria-busy','false');if(reason==='route'||!view.querySelector('.op')||view.querySelector('.op-signin')){const m=page('admin');view.replaceChildren(m?m.renderAdmin(ctx,{connect:connectCurrent}):loadingView());}return;}
   if (r.name === 'launch') {
     // The launch flow owns its own state; a data refresh only updates balances and connection status.
-    if (!launchView || reason === 'route' && !view.contains(launchView.root)) { launchView = renderLaunch(ctx); view.replaceChildren(launchView.root); }
+    if (!launchView || reason === 'route' && !view.contains(launchView.root)) { const m = page('launch'); if (!m) { launchView = null; view.replaceChildren(loadingView()); return; } launchView = m.renderLaunch(ctx); view.replaceChildren(launchView.root); }
     else launchView.update?.();
     return;
   }
@@ -317,6 +331,9 @@ function rerender(reason) {
   if(r.name==='rewards'&&!r.claim&&!r.xResult&&(mode!=='testnet'||!wallet.address)){view.replaceChildren(h('div.empty',h('h1',r.name==='rewards'?'Rewards':'Portfolio'),h('p','Connect your wallet to see your '+r.name+'.'),h('p.small.muted','Connecting lets you interact—it does not give us access to your funds.'),h('button.btn.btn-primary',{type:'button',on:{click:connectCurrent}},'Connect wallet')));return;}
   // The server may have drawn the Explore skeleton with the first trending logos already in it: keep it until data arrives.
   if (!state) { closeExplore(); if (!(currentRoute.name === 'explore' && view.querySelector('.explore[aria-busy]'))) view.replaceChildren(loadingView()); return; }
+  const needs = r.name === 'token' ? 'token' : r.name === 'portfolio' ? 'portfolio' : r.name === 'rewards' ? (r.claim || r.xResult ? 'split' : 'rewards') : r.name === 'docs' ? 'docs' : null;
+  const mod = needs ? page(needs) : null;
+  if (needs && !mod) { closeExplore(); view.replaceChildren(loadingView()); return; }
   if (r.name === 'token') {
     // Keep the editor and wallet-signing state intact while a holder is writing.
     const previous = reason === 'background' ? {
@@ -327,17 +344,17 @@ function rerender(reason) {
       slippage: view.querySelector('#trade-slippage')?.value,
       focused: document.activeElement?.id,
     } : null;
-    view.replaceChildren(renderToken(ctx, r.address));
+    view.replaceChildren(mod.renderToken(ctx, r.address));
     if (previous) {
       restoreTradeDraft(previous,{input:view.querySelector('#trade-amount'),slippage:view.querySelector('#trade-slippage'),panel:view.querySelector('.tk-trade')});
       if (previous.focused) document.getElementById(previous.focused)?.focus({ preventScroll: true });
     }
   }
-  else if (r.name === 'portfolio') view.replaceChildren(portfolioView(ctx, { connect: connectCurrent, rerender: () => rerender('route') }));
-  else if (r.name === 'rewards' && r.claim) view.replaceChildren(allocationClaimView(ctx, { address: r.claim, network: r.network, xResult: r.xResult }));
-  else if (r.name === 'rewards' && r.xResult) view.replaceChildren(xResultView(r.xResult));
-  else if (r.name === 'rewards') view.replaceChildren(renderRewards(ctx));
-  else if (r.name === 'docs') view.replaceChildren(renderDocs(ctx, r.section));
+  else if (r.name === 'portfolio') view.replaceChildren(mod.portfolioView(ctx, { connect: connectCurrent, rerender: () => rerender('route') }));
+  else if (r.name === 'rewards' && r.claim) view.replaceChildren(mod.allocationClaimView(ctx, { address: r.claim, network: r.network, xResult: r.xResult }));
+  else if (r.name === 'rewards' && r.xResult) view.replaceChildren(mod.xResultView(r.xResult));
+  else if (r.name === 'rewards') view.replaceChildren(mod.renderRewards(ctx));
+  else if (r.name === 'docs') view.replaceChildren(mod.renderDocs(ctx, r.section));
   else if (r.name === 'terms') view.replaceChildren(renderTermsPage(ctx));
   else if (mode === 'testnet' && !discoveryReady && (!exploreView || !view.contains(exploreView.root))) { if (!view.querySelector('.explore[aria-busy]')) view.replaceChildren(exploreSkeleton()); }
   else if (!exploreView || !view.contains(exploreView.root)) {
@@ -486,6 +503,10 @@ async function init() {
     $('#footer-note').textContent = 'Solana mainnet beta: real funds, new contracts. Other networks are test networks with no monetary value.';
     $('#how-network-note').textContent = 'Solana runs as a mainnet beta with real funds and new, unaudited contracts; launching is invite-only while the beta gate is on. The other networks are test networks.';
   }
+  // Other pages' code: fetched as soon as a visitor points at or focuses a link, otherwise once the home page has settled.
+  const warm = event => { if (event.isTrusted && event.target?.closest?.('a[href^="#/"]')) preloadPages(); };
+  document.addEventListener('pointerover', warm, { passive: true }); document.addEventListener('focusin', warm);
+  setTimeout(() => (window.requestIdleCallback ?? (f => setTimeout(f, 0)))(preloadPages, { timeout: 5000 }), 9000);
   // Never hold Explore in its skeleton for long: a network that never answers must not hide the others' tokens.
   setTimeout(() => { if (!discoveryReady) { discoveryReady = true; if (currentRoute.name === 'explore') rerender('background'); } }, 8000);
   evmWallet = new TestnetWallet(config, onWalletProgress);

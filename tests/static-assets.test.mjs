@@ -41,3 +41,12 @@ test('index.html preloads the import graph and versions its scripts and styleshe
     assert.notEqual(contentVersion(files), version, 'any content change changes the build id');
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('the home page does not download other pages\' code: the app imports them on demand', async () => {
+  const { readFileSync } = await import('node:fs');
+  const { staticImports } = await import('../apps/api/static-assets.mjs');
+  const eager = staticImports(readFileSync(new URL('../apps/web/app.mjs', import.meta.url), 'utf8'), '/app.mjs');
+  for (const page of ['/token-page.mjs', '/launch-flow.mjs', '/admin-view.mjs', '/analytics-view.mjs', '/docs-view.mjs', '/rewards-view.mjs', '/portfolio-view.mjs', '/creator-split.mjs'])
+    assert.ok(!eager.includes(page), `${page} is not a static import of app.mjs`);
+  assert.ok(eager.includes('/explore-view.mjs'), 'Explore, the home page, stays eager');
+});
