@@ -148,7 +148,9 @@ test.after(() => {
 const balance = async address => f.client.tokenAmount((await f.connection.getAccountInfo(address))?.data);
 const pool = async mint => f.client.decodePool((await f.connection.getAccountInfo(f.client.poolPda(mint))).data);
 const failsWith = async (promise, pattern) => {
-  try { await promise; } catch (error) { assert.match(`${error.message} ${(error.logs ?? []).join(' ')}`, pattern); return; }
+  // A failure reported after sending (no simulation logs) names the program error in decimal ({"Custom":6035}); the
+  // patterns use the logs' hex form (0x1793), so both are matched.
+  try { await promise; } catch (error) { const text = `${error.message} ${(error.logs ?? []).join(' ')}`; assert.match(`${text} ${[...text.matchAll(/"Custom":(\d+)/g)].map(m => `0x${Number(m[1]).toString(16)}`).join(' ')}`, pattern); return; }
   assert.fail(`expected failure matching ${pattern}`);
 };
 const txOf = signature => f.connection.getTransaction(signature, { commitment: 'confirmed', maxSupportedTransactionVersion: 0 });
