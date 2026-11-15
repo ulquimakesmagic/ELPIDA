@@ -53,3 +53,14 @@ test('a V2 token whose logo is only in its launch metadata gets its stored logo,
   assert.deepEqual(trendingLogos({ sources, now: 1, limit: 2, imageOf: t => storedMetadataImage(store, t) }), [`/api/content/${logo}?w=512`, '/api/content/bafkrei' + 'a'.repeat(52) + '?w=512']);
   assert.deepEqual(trendingLogos({ sources, now: 1, limit: 2 }), [null, '/api/content/bafkrei' + 'a'.repeat(52) + '?w=512'], 'without the store the first card keeps its shimmer');
 });
+
+test('server-drawn trending cards carry the rank, name and ticker, escaped', async () => {
+  const { homeFirstScreen, trendingCards } = await import('../apps/api/home-preload.mjs');
+  const a = '/api/content/bafkrei' + 'a'.repeat(52) + '?w=512';
+  const html = homeFirstScreen([{ src: a, name: 'Iphone <Duo>', symbol: 'I"DUO' }, { src: null, name: 'Elsewhere', symbol: 'ELS' }]);
+  assert.match(html, /<span class="rank-chip">#1<\/span><div class="tc-band"><h3 class="tc-name">Iphone &lt;Duo&gt;<\/h3><span class="tc-ticker">\$I&quot;DUO<\/span><\/div>/);
+  assert.match(html, /<div class="tc-media skeleton"><\/div>/, 'a logo on another host keeps the plain shimmer (same size as the app\'s skeleton)');
+  assert.doesNotMatch(html, /<Duo>/);
+  const cards = trendingCards({ sources: [{ network: 'x', tokens: [{ address: '0x1', volume24h: 1, image: a.split('?')[0], metadata: { name: 'Eren', symbol: 'EREN' } }] }], now: 1 });
+  assert.deepEqual(cards, [{ src: a, name: 'Eren', symbol: 'EREN' }]);
+});
