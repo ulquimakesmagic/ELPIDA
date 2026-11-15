@@ -8,6 +8,57 @@ const CHUNK = 950;
 
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 
+// Network failures worth retrying: rate limits, dropped connections, timeouts (Node's fetch reports these as
+// "fetch failed" with the reason in error.cause).
+export const transientNetworkError = error => /429|fetch failed|ECONNRESET|ETIMEDOUT|EAI_AGAIN|timed? ?out|socket hang up|UND_ERR/i
+  .test(`${error?.message ?? error} ${error?.cause?.message ?? ''} ${error?.cause?.code ?? ''}`);
+
+/** Runs `read` again after a transient network failure, backing off; other errors are thrown at once. */
+export async function withNetworkRetry(read, { tries = 6, delayMs = 1500 } = {}) {
+  for (let attempt = 1; ; attempt++) {
+    try { return await read(); }
+    catch (error) {
+      if (!transientNetworkError(error) || attempt >= tries) throw error;
+      await sleep(delayMs * attempt);
+    }
+  }
+}
+
+const READ_SLICE = 128 * 1024;
+
+/**
+ * Reads an account's data in 128 KiB slices, retrying dropped reads, so a 1.2 MB program buffer can be read over
+ * a slow or unsteady connection (one 1.6 MB base64 response was what kept failing with "fetch failed").
+ * Reads `length` bytes, or the whole account when `length` is omitted. Returns { owner, lamports, data } or null.
+ */
+export async function readAccountData(connection, key, { length, sliceSize = READ_SLICE, retry } = {}) {
+  const parts = [];
+  let first = null;
+  for (let offset = 0; length == null || offset < length; offset += sliceSize) {
+    const size = length == null ? sliceSize : Math.min(sliceSize, length - offset);
+    const info = await withNetworkRetry(() => connection.getAccountInfo(key, { commitment: 'confirmed', dataSlice: { offset, length: size } }), retry);
+    if (!info) return null;
+    first ??= info;
+    parts.push(Buffer.from(info.data));
+    if (info.data.length < size) break; // the RPC clamps a slice at the end of the account
+  }
+  return { owner: first.owner, lamports: first.lamports, data: Buffer.concat(parts) };
+}
+
+/** True when the account's data is exactly `size` bytes, read with two one-byte slices instead of the whole account. */
+async function hasDataLength(connection, key, size, retry) {
+  const at = offset => withNetworkRetry(() => connection.getAccountInfo(key, { commitment: 'confirmed', dataSlice: { offset, length: 1 } }), retry);
+  const [last, past] = await Promise.all([size > 0 ? at(size - 1) : null, at(size)]);
+  return (size === 0 || last?.data.length === 1) && past?.data.length === 0;
+}
+
+/** The loader-v3 buffer header (variant, Some(authority), authority) and lamports, read without the program bytes. */
+async function bufferHeader(connection, key, retry) {
+  const info = await withNetworkRetry(() => connection.getAccountInfo(key, { commitment: 'confirmed', dataSlice: { offset: 0, length: 37 } }), retry);
+  if (!info || info.owner.toBase58() !== LOADER_V3 || info.data.length < 37 || info.data[0] !== 1 || info.data[4] !== 1) return null;
+  return { authority: new PublicKey(info.data.subarray(5, 37)), lamports: info.lamports };
+}
+
 /** Confirms by polling (no websocket, so scripts exit cleanly and public devnet limits are kinder). */
 export async function confirmByPolling(connection, signature, lastValidBlockHeight) {
   for (let poll = 0; ; poll++) {
@@ -69,19 +120,24 @@ export async function deploymentCost(connection, elfLength, { reuseBuffer = fals
   return (reuseBuffer ? program + Math.max(0, programData - buffer) : programData + buffer + program) + 20_000_000;
 }
 
-const isOurBuffer = (info, authority, size) => info && info.owner.toBase58() === LOADER_V3 && info.data.length === size
-  && info.data[0] === 1 && info.data[4] === 1 && new PublicKey(info.data.subarray(5, 37)).equals(authority);
+const isOurBuffer = async (connection, key, authority, size, retry) => {
+  const header = await bufferHeader(connection, key, retry);
+  return !!header?.authority.equals(authority) && hasDataLength(connection, key, size, retry);
+};
 
 /**
  * Finds a buffer this deployer already created for this program size, so an interrupted upload resumes
  * instead of paying rent for a second buffer. Checks the remembered address first, then the deployer's
  * oldest recent transactions (the buffer is created right after funding).
  */
-export async function findExistingBuffer(connection, authority, elfLength, remembered) {
+export async function findExistingBuffer(connection, authority, elfLength, remembered, { retry } = {}) {
   const loader = loaderV3(web3);
   const size = loader.BUFFER_HEADER + elfLength;
   if (remembered) {
-    try { const key = new PublicKey(remembered); if (isOurBuffer(await connection.getAccountInfo(key), authority, size)) return key; } catch {}
+    // A network failure here is thrown, not treated as "no buffer": that would pay rent for a second buffer.
+    let key = null;
+    try { key = new PublicKey(remembered); } catch {}
+    if (key && await isOurBuffer(connection, key, authority, size, retry)) return key;
   }
   const signatures = (await connection.getSignaturesForAddress(authority, { limit: 1000 }, 'confirmed')).filter(item => !item.err).reverse();
   for (const { signature } of signatures.slice(0, 8)) {
@@ -90,7 +146,7 @@ export async function findExistingBuffer(connection, authority, elfLength, remem
       const info = ix.parsed?.info;
       if (ix.program === 'system' && ix.parsed?.type === 'createAccount' && info?.owner === LOADER_V3 && info.space === size) {
         const key = new PublicKey(info.newAccount);
-        if (isOurBuffer(await connection.getAccountInfo(key), authority, size)) return key;
+        if (await isOurBuffer(connection, key, authority, size, retry)) return key;
       }
     }
     await sleep(300);
@@ -102,10 +158,10 @@ export async function findExistingBuffer(connection, authority, elfLength, remem
  * Uploads `elf` into a loader-v3 buffer owned by `payer`. Resumable: reuses an existing buffer of the
  * right size and only sends chunks whose bytes differ, at a throttled rate that fits public RPC limits.
  */
-export async function uploadToBuffer({ connection, payer, elf, sendsPerSecond = 3, rememberedBuffer, onBuffer = () => {}, onProgress = () => {} }) {
+export async function uploadToBuffer({ connection, payer, elf, sendsPerSecond = 3, rememberedBuffer, onBuffer = () => {}, onProgress = () => {}, retry, roundWaitMs }) {
   const loader = loaderV3(web3);
   const bufferSize = loader.BUFFER_HEADER + elf.length;
-  let buffer = await findExistingBuffer(connection, payer.publicKey, elf.length, rememberedBuffer);
+  let buffer = await findExistingBuffer(connection, payer.publicKey, elf.length, rememberedBuffer, { retry });
   if (buffer) onProgress(`Resuming with existing program buffer ${buffer.toBase58()}.`);
   else {
     const bufferKeypair = Keypair.generate();
@@ -119,28 +175,33 @@ export async function uploadToBuffer({ connection, payer, elf, sendsPerSecond = 
   onBuffer(buffer.toBase58());
   const total = Math.ceil(elf.length / CHUNK);
   for (let round = 1; ; round++) {
-    const data = (await connection.getAccountInfo(buffer, 'confirmed')).data.subarray(loader.BUFFER_HEADER);
+    const account = await readAccountData(connection, buffer, { length: bufferSize, retry });
+    if (!account) throw new Error(`Program buffer ${buffer.toBase58()} was not found. Run the deploy again.`);
+    const data = account.data.subarray(loader.BUFFER_HEADER);
     const missing = [];
     for (let offset = 0; offset < elf.length; offset += CHUNK) {
       const end = Math.min(offset + CHUNK, elf.length);
       if (!data.subarray(offset, end).equals(elf.subarray(offset, end))) missing.push(offset);
     }
+    if (round > 1 || missing.length < total) onProgress(`${total - missing.length} of ${total} program chunks are in the buffer.`);
     if (!missing.length) break;
     if (round > 6) throw new Error(`${missing.length} program chunks still failed to upload. Run the deploy again to resume.`);
     onProgress(`Uploading ${missing.length} of ${total} program chunks${round > 1 ? ` (retry round ${round})` : ''}…`);
-    let latest = await connection.getLatestBlockhash('confirmed');
+    let latest = await withNetworkRetry(() => connection.getLatestBlockhash('confirmed'), retry);
     let fetchedAt = Date.now();
+    let dropped = 0;
     for (const [index, offset] of missing.entries()) {
-      if (Date.now() - fetchedAt > 30_000) { latest = await connection.getLatestBlockhash('confirmed'); fetchedAt = Date.now(); }
+      if (Date.now() - fetchedAt > 30_000) { latest = await withNetworkRetry(() => connection.getLatestBlockhash('confirmed'), retry); fetchedAt = Date.now(); }
       const tx = new Transaction({ feePayer: payer.publicKey, ...latest }).add(loader.write(buffer, payer.publicKey, offset, elf.subarray(offset, offset + CHUNK)));
       tx.sign(payer);
       try { await connection.sendRawTransaction(tx.serialize(), { skipPreflight: true, maxRetries: 3 }); }
-      catch (error) { if (!/429|fetch failed|ECONNRESET/i.test(String(error.message))) throw error; await sleep(3000); }
-      if ((index + 1) % 50 === 0) onProgress(`  sent ${index + 1} of ${missing.length}…`);
+      catch (error) { if (!transientNetworkError(error)) throw error; dropped++; await sleep(3000); }
+      if ((index + 1) % 50 === 0) onProgress(`  sent ${index + 1} of ${missing.length}${dropped ? ` (${dropped} dropped by the network so far)` : ''}…`);
       await sleep(1000 / sendsPerSecond);
     }
+    if (dropped) onProgress(`${dropped} of ${missing.length} chunk sends were dropped by the network; the next round sends them again.`);
     onProgress('Waiting for the uploaded chunks to confirm…');
-    await sleep(Math.min(20_000, 4000 + missing.length * 20));
+    await sleep(roundWaitMs ?? Math.min(20_000, 4000 + missing.length * 20));
   }
   onProgress('All program chunks uploaded.');
   return buffer;
@@ -170,7 +231,7 @@ export async function deployProgram({ connection, payer, programKeypair, elf, ..
 /** Reads the deployed program data: upgrade authority and whether its bytes already equal `elf`. */
 export async function programStatus(connection, programId, elf) {
   const client = createElpidaSolana(web3, programId);
-  const info = await connection.getAccountInfo(client.programDataAddress, 'confirmed');
+  const info = await readAccountData(connection, client.programDataAddress);
   if (!info) return { deployed: false };
   const loader = loaderV3(web3);
   const code = info.data.subarray(loader.PROGRAMDATA_HEADER);
@@ -247,12 +308,11 @@ export async function closeStaleBuffers({ connection, payer, elfLength, remember
   let reclaimed = 0;
   for (const address of candidates) {
     const key = new PublicKey(address);
-    const info = await connection.getAccountInfo(key, 'confirmed');
-    if (!info || info.owner.toBase58() !== LOADER_V3 || info.data[0] !== 1 || info.data[4] !== 1) continue;
-    if (!new PublicKey(info.data.subarray(5, 37)).equals(payer.publicKey) || info.data.length === wanted) continue;
-    onProgress(`Closing stale program buffer ${address} (reclaims ${(info.lamports / web3.LAMPORTS_PER_SOL).toFixed(3)} SOL)…`);
+    const header = await bufferHeader(connection, key);
+    if (!header?.authority.equals(payer.publicKey) || await hasDataLength(connection, key, wanted)) continue;
+    onProgress(`Closing stale program buffer ${address} (reclaims ${(header.lamports / web3.LAMPORTS_PER_SOL).toFixed(3)} SOL)…`);
     await send(connection, payer, [loader.close({ account: key, recipient: payer.publicKey, authority: payer.publicKey })]);
-    reclaimed += info.lamports;
+    reclaimed += header.lamports;
   }
   return reclaimed;
 }
@@ -373,7 +433,7 @@ export async function rejectsTestInstructions({ connection, payer, programId }) 
 /** The program's current upgrade authority, or null when the program is immutable. */
 export async function upgradeAuthority(connection, programId) {
   const client = createElpidaSolana(web3, programId);
-  const info = await connection.getAccountInfo(client.programDataAddress);
+  const info = await withNetworkRetry(() => connection.getAccountInfo(client.programDataAddress, { commitment: 'confirmed', dataSlice: { offset: 0, length: 45 } }));
   if (!info || info.owner.toBase58() !== LOADER_V3) throw new Error('Program data not found on this cluster.');
   return info.data[12] === 1 ? new PublicKey(info.data.subarray(13, 45)) : null;
 }
