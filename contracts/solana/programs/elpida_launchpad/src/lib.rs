@@ -450,6 +450,24 @@ pub mod elpida_launchpad {
     }
 
     #[cfg(feature = "testnet")]
+    /// TEST NETWORKS ONLY (15 November 2026): a round test price for a test stock (PDA ["test-price", quote mint]), the
+    /// Solana counterpart of the EVM test stocks' total-return feed. Pyth publishes no TSLA price on devnet, so the
+    /// devnet tTSLAon V2 pair binds this account as its quote pricing instead. Upgrade authority only; `read_price`
+    /// accepts it only in the test build, and the mainnet build has neither this instruction nor that branch.
+    pub fn set_test_stock_price(ctx: Context<SetTestStockPrice>, feed_id: [u8; 32], price: i64, exponent: i32) -> Result<()> {
+        test_networks_only()?;
+        require!(price > 0 && (-18..=0).contains(&exponent), ElpidaError::InvalidParams);
+        let t = &mut ctx.accounts.test_price;
+        t.mint = ctx.accounts.quote_mint.key();
+        t.feed_id = feed_id;
+        t.price = price;
+        t.exponent = exponent;
+        t.updated_at = Clock::get()?.unix_timestamp;
+        t.bump = ctx.bumps.test_price;
+        Ok(())
+    }
+
+    #[cfg(feature = "testnet")]
     /// `max_fee`: the most lamports the creator accepts for the SOL creation fee (price movement guard).
     /// `fee_in_usdc`: pay the USD fee in USDC instead; the four USDC accounts follow in remaining accounts.
     /// `uri`: the token's IPFS metadata document (`ipfs://…`), written once into immutable Metaplex metadata.
@@ -1876,6 +1894,13 @@ fn load_pricing(info: &AccountInfo, config: &Pubkey) -> Result<Option<PricingCon
 /// message: feed id 32, price i64, conf u64, exponent i32, publish time i64.
 pub fn read_price(info: &AccountInfo, p: &PricingConfig, now: i64) -> Result<OraclePrice> {
     require_keys_eq!(info.key(), p.price_feed, ElpidaError::PriceUnavailable);
+    // Test build only: a test stock's round test price (`set_test_stock_price`), always current, like the EVM test feed.
+    #[cfg(feature = "testnet")]
+    if *info.owner == crate::ID {
+        let t = TestStockPrice::try_deserialize(&mut &info.try_borrow_data()?[..]).map_err(|_| error!(ElpidaError::PriceUnavailable))?;
+        require!(t.feed_id == p.feed_id && t.price > 0 && (-18..=0).contains(&t.exponent), ElpidaError::PriceUnavailable);
+        return Ok(OraclePrice { price: t.price, exponent: t.exponent, publish_time: now });
+    }
     require_keys_eq!(*info.owner, PYTH_RECEIVER, ElpidaError::PriceUnavailable);
     let data = info.try_borrow_data()?;
     require!(data.len() >= 101 && data[..8] == PRICE_UPDATE_V2 && data[40] == 1, ElpidaError::PriceUnavailable);
@@ -2898,6 +2923,32 @@ pub struct PricingConfig {
     pub start_fdv_usd_e6: u64,
     pub usdc_mint: Pubkey,
     pub bump: u8,
+}
+
+/// A test stock's round test price (PDA ["test-price", mint]); test build only (`set_test_stock_price`).
+#[account]
+#[derive(InitSpace)]
+pub struct TestStockPrice {
+    pub mint: Pubkey,
+    pub feed_id: [u8; 32],
+    pub price: i64,
+    pub exponent: i32,
+    pub updated_at: i64,
+    pub bump: u8,
+}
+
+#[derive(Accounts)]
+pub struct SetTestStockPrice<'info> {
+    #[account(mut)]
+    pub authority: Signer<'info>,
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(init_if_needed, payer = authority, space = 8 + TestStockPrice::INIT_SPACE, seeds = [b"test-price", quote_mint.key().as_ref()], bump)]
+    pub test_price: Box<Account<'info, TestStockPrice>>,
+    #[account(constraint = program.programdata_address()? == Some(program_data.key()) @ ElpidaError::Unauthorized)]
+    pub program: Program<'info, crate::program::ElpidaLaunchpad>,
+    #[account(constraint = program_data.upgrade_authority_address == Some(authority.key()) @ ElpidaError::Unauthorized)]
+    pub program_data: Box<Account<'info, ProgramData>>,
+    pub system_program: Program<'info, System>,
 }
 
 #[derive(Accounts)]

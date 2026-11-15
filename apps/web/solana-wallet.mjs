@@ -1,6 +1,6 @@
 import { ensureSolanaLibrary } from './vendor-loader.mjs';
 import { nowSeconds } from './clock.mjs';
-import { createElpidaSolana, v2Owed, ownFeeBps, validV2Symbol, V2, quoteBuy, quoteSell, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, tradeFeeBps, lockedPoolVenue, mintControls, testConversionOut, decodeTestConversion, STATUS_TRADING, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut, VENUE_RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, raydiumQuote, raydiumCreationCost, raydiumBuybackAmount } from '/elpida-solana.mjs';
+import { createElpidaSolana, v2Owed, ownFeeBps, validV2Symbol, V2, quoteBuy, quoteSell, poolStats, parseAmount, formatAmount, explainError, TOKEN_DECIMALS, TOKEN_SUPPLY, parsePriceUpdate, parseTestStockPrice, mintMultiplierE12, stockVirtualQuote, usdToQuote, virtualQuoteForFdv, PYTH_RECEIVER, POOL_SIZE, STATUS_GRADUATED, STATUS_MIGRATED, STATUS_LOCKED, tradeFeeBps, lockedPoolVenue, mintControls, testConversionOut, decodeTestConversion, STATUS_TRADING, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, PUMPSWAP_COMPUTE_UNITS, PUMPSWAP_FEES, WSOL_MINT, harvestNow, withdrawOut, VENUE_RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, raydiumQuote, raydiumCreationCost, raydiumBuybackAmount } from '/elpida-solana.mjs';
 import {normalizeMetadata,withSavedMetadata} from './metadata.mjs';
 import {prepareUploadProof} from './upload-proof.mjs';
 import { PAIR_LIMITS, SOLANA_LAUNCH_KINDS, usdReferenceFor } from '/pairs.mjs';
@@ -120,7 +120,9 @@ export class SolanaWallet {
       { kind: 'native', key: 'sol', symbol: 'SOL', name: 'SOL (wrapped automatically)', config: c.configFor(new web3.PublicKey(WSOL_MINT)).toBase58() },
     ]);
     // ELPIDA V2 SOL pair (docs/V2_0_SOLANA.md), when the deploy set it up: launched with `launch_v2`, never a Model 10 pick.
-    const v2 = this.deployment.v2?.config ? [{ kind: 'native', key: 'sol-v2', symbol: 'SOL', name: 'SOL (wrapped automatically)', config: this.deployment.v2.config, v2: true }] : [];
+    const v2 = this.deployment.v2?.config ? [{ kind: 'native', key: 'sol-v2', symbol: 'SOL', name: 'SOL (wrapped automatically)', config: this.deployment.v2.config, v2: true },
+      // V2 test stock pairs (15 November 2026, --v2-stocks): priced from their bound quote pricing at each launch.
+      ...(this.deployment.v2.stocks ?? []).map(x => ({ kind: 'xstock', key: `${x.key}-v2`, symbol: x.symbol, name: x.name, config: x.config, v2: true, test: x.test, faucet: listed.find(p => p.mint === x.mint)?.faucet ?? '25', quotePricing: x.quotePricing }))] : [];
     const listedAll = [...listed, ...v2];
     const infos = await this.connection.getMultipleAccountsInfo(listedAll.map(p => new web3.PublicKey(p.config)));
     this.configs = new Map();
@@ -130,13 +132,14 @@ export class SolanaWallet {
       const config = { address: new web3.PublicKey(p.config), ...c.decodeConfig(info.data), symbol: p.symbol, name: p.name ?? p.symbol, kind: p.kind, key: p.key, test: !!p.test, faucet: p.faucet ?? null };
       if (config.modelVersion !== (p.v2 ? V2.modelVersion : 3)) return;
       config.v2 = !!p.v2;
+      config.quotePricingRecord = p.quotePricing ?? null;
       config.wsol = config.quoteMint.toBase58() === WSOL_MINT;
       this.configs.set(p.config, config);
     });
     if (!this.configs.size) throw new Error('The Solana SOL pair is not set up. Upgrade the program and run the deploy again (solana-upgrade.cmd, then npm.cmd run solana:deploy).');
     const mints = await this.connection.getMultipleAccountsInfo([...this.configs.values()].map(cfg => cfg.quoteMint));
     // Issuer-controlled quotes (Ondo stocks) complete into the program's own locked pool, in the completing buy.
-    [...this.configs.values()].forEach((cfg, i) => { cfg.quoteTokenProgram = mints[i]?.owner ?? c.tokenProgram; cfg.lockedPool = lockedPoolVenue(mints[i]?.data, mints[i]?.owner?.toBase58()); cfg.controls = mintControls(mints[i]?.data, mints[i]?.owner?.toBase58(), b => new web3.PublicKey(b).toBase58()); });
+    [...this.configs.values()].forEach((cfg, i) => { cfg.quoteTokenProgram = mints[i]?.owner ?? c.tokenProgram; cfg.lockedPool = lockedPoolVenue(mints[i]?.data, mints[i]?.owner?.toBase58()); cfg.controls = mintControls(mints[i]?.data, mints[i]?.owner?.toBase58(), b => new web3.PublicKey(b).toBase58()); cfg.multiplierE12 = mintMultiplierE12(mints[i]?.data, mints[i]?.owner?.toBase58(), nowSeconds()); });
     const all = [...this.configs.values()];
     const launch = all.find(cfg => cfg.kind === 'native' && !cfg.v2) ?? all[0];
     this.programConfig = launch; this.decimals = launch.quoteDecimals;
@@ -171,6 +174,7 @@ export class SolanaWallet {
     const usd = Number(oracle.price) * 10 ** oracle.exponent, age = nowSeconds() - oracle.publishTime;
     this.price = { symbol: 'SOL', usd, updatedAt: oracle.publishTime, source: 'Pyth SOL/USD (verified on-chain)', maxAge: bound.maxAgeSecs, status: age <= bound.maxAgeSecs && Number(oracle.conf) * 10000 <= Number(oracle.price) * bound.maxConfBps ? 'fresh' : 'stale' };
     this.usdPricing = { oracle, priceFeed: bound.priceFeed };
+    await this.loadStockPrices().catch(() => {});
     await this.loadConversionPrices().catch(() => {});
     return this.usdPricing;
   }
@@ -198,19 +202,43 @@ export class SolanaWallet {
     return {
       priced: !!priced, priceFeed: priced?.priceFeed ?? null, usdcMint: priced && !priced.usdcMint.equals(web3.PublicKey.default) ? priced.usdcMint : null, usdcFee: priced?.feeUsdE6 ?? 0n,
       fee: priced ? usdToQuote(priced.feeUsdE6, oracle, 9) : cfg.launchFee,
-      virtualQuote: priced && priced.startFdvUsdE6 > 0n ? virtualQuoteForFdv(priced.startFdvUsdE6, oracle, cfg.virtualToken) : cfg.virtualQuote,
+      virtualQuote: cfg.v2 && cfg.kind === 'xstock' ? (cfg.stockPrice?.fresh ? stockVirtualQuote(cfg.quotePricing.startFdvUsdE6, cfg.stockPrice, cfg.multiplierE12 ?? 1_000_000_000_000n, cfg.quoteDecimals, cfg.virtualToken) : null)
+        : priced && priced.startFdvUsdE6 > 0n ? virtualQuoteForFdv(priced.startFdvUsdE6, oracle, cfg.virtualToken) : cfg.virtualQuote,
+      stockPriceFeed: cfg.v2 && cfg.kind === 'xstock' && cfg.stockPrice?.fresh ? cfg.quotePricing.priceFeed : null,
     };
+  }
+  /**
+   * V2 stock pairs: each one's bound quote pricing and its price account (a test build's round test price, or Pyth),
+   * read the way `stock_start_quote` reads them, so the launch preview starts where the program will.
+   */
+  async loadStockPrices() {
+    const stocks = [...(this.configs?.values() ?? [])].filter(cfg => cfg.v2 && cfg.kind === 'xstock');
+    if (!stocks.length) return;
+    const qps = await this.connection.getMultipleAccountsInfo(stocks.map(cfg => this.client.quotePricingFor(cfg.address)));
+    stocks.forEach((cfg, i) => { cfg.quotePricing = this.client.decodePricing(qps[i]?.data); cfg.stockPrice = null; });
+    const bound = stocks.filter(cfg => cfg.quotePricing);
+    if (!bound.length) return;
+    const infos = await this.connection.getMultipleAccountsInfo(bound.map(cfg => cfg.quotePricing.priceFeed));
+    bound.forEach((cfg, i) => {
+      const info = infos[i], owner = info?.owner.toBase58();
+      const px = owner === PYTH_RECEIVER ? parsePriceUpdate(info.data) : owner === this.client.programId.toBase58() ? parseTestStockPrice(info.data, nowSeconds()) : null;
+      if (!px || px.feedId !== cfg.quotePricing.feedId) return;
+      const fresh = nowSeconds() - px.publishTime <= cfg.quotePricing.maxAgeSecs;
+      cfg.stockPrice = { ...px, usd: Number(px.price) * 10 ** px.exponent, fresh, source: px.test ? `${cfg.symbol} round test price (no value)` : `Pyth ${cfg.symbol} (on-chain)` };
+    });
   }
   /** Launchable trading assets by kind, the same structure as every other network (packages/core/pairs.mjs). */
   pairOptions() {
-    const all = [...(this.configs?.values() ?? [])].filter(cfg => !cfg.v2);
+    // Where ELPIDA V2 is set up it is the only launch model (9 November 2026), so its pairs are the ones offered.
+    const v2 = !!this.deployment?.v2?.config, all = [...(this.configs?.values() ?? [])].filter(cfg => !!cfg.v2 === v2);
     const asset = cfg => {
       const d = cfg.quoteDecimals, id = cfg.address.toBase58();
       // The creation fee is always lamports (SOL), whatever the pair.
       // Oracle-priced SOL pair: the $10 fee in SOL and the $-sized virtual reserve at the current Pyth price.
       const terms = this.launchTerms(cfg);
       return { id, symbol: cfg.symbol, name: cfg.name, decimals: d, test: cfg.test, wsol: cfg.wsol, ...(cfg.kind === 'xstock' ? { stock: { provider: cfg.test ? 'ondo-test' : 'ondo' }, lockedPool: true } : {}), feeAmount: formatAmount(terms.fee, 9), feeSymbol: 'SOL', usdPriced: terms.priced,
-        curve: { vq: Number(terms.virtualQuote) / 10 ** d, vt: Number(cfg.virtualToken) / 10 ** TOKEN_DECIMALS, cap: Number(cfg.curveSupply) / 10 ** TOKEN_DECIMALS, feeBps: cfg.baseFeeBps },
+        ...(cfg.stockPrice ? { stockPrice: { usd: cfg.stockPrice.usd, source: cfg.stockPrice.source, test: !!cfg.stockPrice.test } } : {}),
+        curve: { vq: Number(terms.virtualQuote ?? 0n) / 10 ** d, vt: Number(cfg.virtualToken) / 10 ** TOKEN_DECIMALS, cap: Number(cfg.curveSupply) / 10 ** TOKEN_DECIMALS, feeBps: cfg.baseFeeBps },
         faucet: cfg.test && cfg.faucet ? { label: `Get ${Number(cfg.faucet).toLocaleString()} ${cfg.symbol}`, action: 'faucet', body: { asset: id } } : cfg.wsol && this.net.gasFaucet ? { label: 'Get devnet SOL', href: this.net.gasFaucet } : null };
     };
     const group = kind => {
@@ -635,10 +663,12 @@ export class SolanaWallet {
       const options = this.pairOptions()[kind];
       if (!options) throw new Error('Choose a trading pair.');
       if (!options.assets.length) throw new Error(options.unavailable);
-      // ELPIDA V2 (SOL pair only on Solana): the creator's own fee, a 3% first-buy cap, any-case tickers.
+      // ELPIDA V2 on Solana: the SOL pair and, on test networks, the V2 test stock pairs; the creator's own fee, a 3%
+      // first-buy cap, any-case tickers.
       const v2Launch = body.model === 'v2-hook';
-      config = v2Launch ? [...this.configs.values()].find(cfg => cfg.v2) : this.configs.get(String(body.quoteAsset ?? '')) ?? this.configs.get(options.assets[0].id);
-      if (v2Launch && (!config || kind !== 'native')) throw new Error(config ? 'ELPIDA V2 on Solana pairs with SOL.' : `ELPIDA V2 is not set up on ${this.net.name} yet.`);
+      config = this.configs.get(String(body.quoteAsset ?? '')) ?? this.configs.get(options.assets[0].id);
+      if (v2Launch && !config?.v2) throw new Error(this.deployment?.v2?.config ? 'Choose a V2 trading pair.' : `ELPIDA V2 is not set up on ${this.net.name} yet.`);
+      if (!v2Launch && config?.v2) throw new Error('This pair launches with ELPIDA V2.');
       if (config.kind !== kind) throw new Error('Choose an asset for this trading pair.');
       const v2Fee = v2Launch ? Number(body.feeBps ?? V2.defaultFeeBps) : null;
       if (v2Launch && !(Number.isInteger(v2Fee) && v2Fee >= config.baseFeeBps && v2Fee <= V2.maxFeeBps)) throw new Error(`Choose a trading fee from ${(config.baseFeeBps / 100).toFixed(2)}% to 4.00%.`);
@@ -650,7 +680,7 @@ export class SolanaWallet {
       // transaction first, then the launch spends exactly what arrived. A conversion whose launch then failed is
       // remembered in this browser and reused, so SOL is never converted twice.
       const payNative = body.firstBuyPayment === 'native' && Number(body.nativeBuy) > 0;
-      if (payNative && (v2Launch || config.kind !== 'xstock' || this.net.mainnet)) throw new Error(this.net.mainnet ? this.conversionUnavailable(config) : 'Paying the first purchase in SOL is for stock pairs.');
+      if (payNative && (config.kind !== 'xstock' || this.net.mainnet)) throw new Error(this.net.mainnet ? this.conversionUnavailable(config) : 'Paying the first purchase in SOL is for stock pairs.');
       const ckey = `elpida:launch-conversion:v1:${this.net.key}:${this.deployment.programId}:${this.address}:${config.quoteMint.toBase58()}`;
       const pending = payNative ? pendingConversion(localStorage, ckey) : null, nativeLamports = payNative && pending === null ? parseAmount(String(body.nativeBuy), 9) : 0n;
       let conv = null;
@@ -666,6 +696,7 @@ export class SolanaWallet {
       const terms = this.launchTerms(config), inUsdc = body.feeCurrency === 'usdc';
       if (!terms.priced) throw new Error(`USD pricing is not active for this pair on ${this.net.name} yet. The team turns it on with the Solana deploy script.`);
       if (this.price?.status !== 'fresh') throw new Error('The on-chain SOL/USD price is stale or uncertain right now. Wait a moment and refresh before launching.');
+      if (v2Launch && config.kind === 'xstock' && !terms.stockPriceFeed) throw new Error(`The ${config.symbol} price is not available right now, so the launch cannot be priced. Nothing was submitted.`);
       if (inUsdc && !terms.usdcMint) throw new Error('Paying the fee in USDC is not available for this pair.');
       // A 1% cap above the quoted SOL fee: the launch fails instead of overcharging if SOL drops before it lands.
       const maxFee = inUsdc ? 0n : terms.fee * 101n / 100n + 1n;
@@ -702,7 +733,7 @@ export class SolanaWallet {
         firstBuy = await this.quoteBalance(this.publicKey, config) - before;
         if (firstBuy <= 0n) throw new Error(`The conversion confirmed but no ${config.symbol} arrived. Nothing else was submitted.`);
         try { localStorage.setItem(ckey, JSON.stringify({ amount: String(firstBuy), at: Date.now() })); } catch {}
-        q = quoteBuy(fresh, firstBuy, config.baseFeeBps, config.baseFeeBps);
+        q = quoteBuy(fresh, firstBuy, launchFee, launchFee);
         this.onProgress?.(`Converted into ${formatAmount(firstBuy, d)} ${config.symbol}. It is your first purchase; continue with the launch…`);
       } else if (pending !== null) this.onProgress?.(`Using the ${formatAmount(pending, d)} ${config.symbol} you converted earlier. No new conversion is needed…`);
       // Token details are published first: the program writes this IPFS URI into immutable Metaplex
@@ -726,7 +757,7 @@ export class SolanaWallet {
         this.client.computeBudget(),
         ...await this.wrapFor(config, q.gross),
         v2Launch
-          ? this.client.launchV2({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, feeBps: v2Fee, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, priceUpdate: terms.priceFeed, maxFee, usdc })
+          ? this.client.launchV2({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, feeBps: v2Fee, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, priceUpdate: terms.priceFeed, maxFee, usdc, stockPriceUpdate: terms.stockPriceFeed })
           : this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, legacy: !withMetadata, partnerTiers, priceUpdate: terms.priceFeed, maxFee, usdc }),
         ...(config.wsol ? [this.client.unwrapSol(this.publicKey)] : []),
       ], remote ? [] : [mint], `Confirm your token launch in your wallet ($10 fee: ${inUsdc ? `${formatAmount(terms.usdcFee, 6)} USDC` : `${formatAmount(terms.fee, 9)} SOL, at most ${formatAmount(maxFee, 9)} SOL`})…`, remote ? [remote] : []);

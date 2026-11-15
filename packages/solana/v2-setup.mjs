@@ -68,3 +68,56 @@ export async function ensureV2({ connection, payer, programId, treasury, cluster
     usdPricing, distributors, flywheelVault: client.v2VaultPda('flywheel').toBase58(), keeper: operator.toBase58(),
   };
 }
+
+/**
+ * Round test prices of the devnet test stocks (USD), as on the EVM test networks (packages/core/pairs.mjs EVM_TEST_PAIRS).
+ * Pyth publishes no stock prices on Solana devnet, so the test build takes these instead (`set_test_stock_price`).
+ */
+export const V2_TEST_STOCK_PRICES = Object.freeze({ tTSLAon: '410' });
+
+/** A fixed, recognisable feed id for a test price: sha256("elpida-test-price:<symbol>/USD"). Not a Pyth feed. */
+export async function testStockFeedId(symbol) {
+  const { createHash } = await import('node:crypto');
+  return createHash('sha256').update(`elpida-test-price:${symbol}/USD`).digest('hex');
+}
+
+/** Curve parameters of a V2 stock pair: ×5 like the SOL pair; the quote pricing sizes each launch in dollars. */
+export function v2StockParams({ decimals, launchFeeSol }) {
+  return curveParams({ startFdv: '50', endFdv: '250', quoteDecimals: decimals, launchFee: launchFeeSol, baseFeeBps: V2.mainnetMinFeeBps, snipeStartBps: V2.snipeStartBps, snipeWindowSecs: V2.snipeWindowSecs, maxCreatorBuyBps: V2.firstBuyCapBps });
+}
+
+/**
+ * Test networks only (15 November 2026): a V2 pair for each recorded test stock (`stocks`: the deploy record's xstock
+ * pairs). Each gets the V2 config, the $10 fee priced from SOL/USD, its round test price and that price bound as its
+ * quote pricing, so a launch starts at the same dollar market cap as the SOL pair. Idempotent; reposts the test price.
+ */
+export async function ensureV2Stocks({ connection, payer, programId, treasury, cluster, oracle, pricing, stocks, onProgress = () => {} }) {
+  if (cluster === 'mainnet') throw new Error('V2 test stock pairs are for test networks only.');
+  const client = createElpidaSolana(web3, programId), out = [];
+  for (const stock of stocks) {
+    const usd = V2_TEST_STOCK_PRICES[stock.symbol];
+    if (!usd) { onProgress(`${stock.symbol}: no test price is defined, skipped.`); continue; }
+    const mint = new PublicKey(stock.mint), mintInfo = await connection.getAccountInfo(mint);
+    if (!mintInfo) throw new Error(`${stock.symbol} mint ${stock.mint} not found on this cluster.`);
+    const tokenProgram = mintInfo.owner, config = client.configV2For(mint);
+    if (!await connection.getAccountInfo(config)) {
+      onProgress(`Creating the ELPIDA V2 ${stock.symbol} pair (1.00% minimum fee, ×5 curve, 3% first-buy cap)…`);
+      await send(connection, payer, [client.computeBudget(), client.addV2Config({ authority: payer.publicKey, quoteMint: mint, treasury: new PublicKey(treasury), params: v2StockParams({ decimals: stock.decimals, launchFeeSol: pricing.launchFee }), quoteTokenProgram: tokenProgram })]);
+    } else onProgress(`ELPIDA V2 ${stock.symbol} pair already exists.`);
+    if (client.decodeConfig((await connection.getAccountInfo(config)).data).modelVersion !== 4) throw new Error(`${config.toBase58()} is not a V2 config.`);
+    // The $10 fee in SOL at Pyth SOL/USD, like every pair; the curve itself is sized by the stock's price below.
+    if (oracle) await ensurePricing({ connection, payer, programId, config: config.toBase58(), oracle: { ...oracle, startFdvUsdE6: '0' }, onProgress: m => onProgress(`V2 ${stock.symbol}: ${m}`) });
+    const feedId = await testStockFeedId(stock.symbol), testPrice = client.testPriceFor(mint), price = BigInt(Math.round(Number(usd) * 100));
+    onProgress(`Posting the ${stock.symbol} round test price ($${usd})…`);
+    await send(connection, payer, [client.setTestStockPrice({ authority: payer.publicKey, quoteMint: mint, feedId, price, exponent: -2 })]);
+    const startFdvUsdE6 = V2_START_FDV_USD_E6[cluster] ?? V2_START_FDV_USD_E6.devnet;
+    const bound = client.decodePricing((await connection.getAccountInfo(client.quotePricingFor(config)))?.data);
+    if (!bound || !bound.priceFeed.equals(testPrice) || bound.feedId !== feedId || bound.startFdvUsdE6 !== BigInt(startFdvUsdE6)) {
+      onProgress(`Binding the test price as ${stock.symbol}'s quote pricing ($${Number(startFdvUsdE6) / 1e6} starting market cap)…`);
+      await send(connection, payer, [client.setQuotePricing({ authority: payer.publicKey, config, quoteMint: mint, priceUpdate: testPrice, feedId, startFdvUsdE6 })]);
+    }
+    out.push({ kind: 'xstock', key: stock.key, symbol: stock.symbol, name: stock.name, mint: stock.mint, decimals: stock.decimals, tokenProgram: tokenProgram.toBase58(), test: true,
+      config: config.toBase58(), quotePricing: { priceAccount: testPrice.toBase58(), feedId, testPriceUsd: usd, startFdvUsdE6 } });
+  }
+  return out;
+}
