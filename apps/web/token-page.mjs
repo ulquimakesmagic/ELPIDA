@@ -434,7 +434,11 @@ export function tradePanel(ctx, token, { dex, solana }) {
         fee.textContent=routed()?'Included in route':`${compactTradeAmount(result.fee)} ${result.feeSymbol??q}`;
         minOut.textContent = `${compactTradeAmount(Number(routed()?result.output:result.out) * (1 - (routed()?1:Number(slippage.value)) / 100))} ${side === 'buy' ? token.symbol : currency()}`;
         feeNote.textContent = routed() ? (solana ? `One transaction: SOL converts through ${result.via ?? 'the conversion pool'}, then trades. Each hop keeps a 1% margin; any unused ${q} stays in your wallet.` : (result.execution==='v4'?`${native} converts through the conversion pool, then trades on the Uniswap v4 pool. Each hop keeps a 1% margin. One confirmation if your wallet batches calls, otherwise separate steps; any extra ${q} stays in your wallet.`:'Native routes protect each hop with 1% slippage. Any unused pair asset stays in your wallet. Requires funded conversion liquidity and a verified native router or atomic-capable wallet.')) : result.antiSnipeActive ? `Launch protection is active: the fee is ${number(result.feeBps / 100, 2)}% right now and falls to this token's ${number((token.feeBps ?? 125) / 100, 2)}% by the end of the first minute. The amount above ${number((token.feeBps ?? 125) / 100, 2)}% is added to the token's locked liquidity.` : result.completesCurve ? `This purchase completes the curve. Only ${number(result.spend, 4)} ${q} will be charged.` : '';
-      } catch (e) { if (rev !== revision) return; out.textContent = '—'; fee.textContent = '—'; minOut.textContent = '—'; error.textContent = errorText(e); }
+      } catch (e) {
+        if (rev !== revision) return; out.textContent = '—'; fee.textContent = '—'; minOut.textContent = '—'; error.textContent = errorText(e);
+        // No pool converts the native coin on this network yet (15 Nov, Base Sepolia tTSLAon): one tap trades in the pair asset.
+        if (routed() && /no funded/i.test(error.textContent)) error.append(' ', h('button.link-button', { type: 'button', on: { click: () => { if (submitting) return; settlement = 'pair'; setSide(side); } } }, `Trade in ${q} instead`));
+      }
     }, 300);
   }
   amount.addEventListener('input', quote);
