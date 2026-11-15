@@ -54,7 +54,7 @@ export function homeFirstScreen(items) {
     const item = typeof items[i] === 'string' ? { src: items[i] } : items[i] ?? {}, src = item.src;
     const band = item.name ? `<span class="rank-chip">#${i + 1}</span><div class="tc-band"><h3 class="tc-name">${esc(item.name)}</h3>${item.symbol ? `<span class="tc-ticker">$${esc(item.symbol)}</span>` : ''}</div>` : '';
     return src
-      ? `<li class="trend-card trend-skeleton"><div class="tc-media"><div class="avatar tc-image fit-whole"><img alt="" src="${src}" decoding="async"${i < 2 ? ' fetchpriority="high"' : ''}></div>${band}</div><div class="skeleton trend-skeleton-line"></div></li>`
+      ? `<li class="trend-card trend-skeleton"><div class="tc-media"><div class="avatar tc-image fit-whole"><img class="avatar-backdrop" alt="" aria-hidden="true" src="${src}" decoding="async"><img alt="" src="${src}" decoding="async"${i < 2 ? ' fetchpriority="high"' : ''}></div>${band}</div><div class="skeleton trend-skeleton-line"></div></li>`
       : '<li class="trend-card trend-skeleton"><div class="tc-media skeleton"></div><div class="skeleton trend-skeleton-line"></div></li>';
   };
   return '<div class="explore" aria-busy="true"><h1 class="visually-hidden">Explore tokens</h1>'
