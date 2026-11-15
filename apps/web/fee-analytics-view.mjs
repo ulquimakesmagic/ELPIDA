@@ -24,31 +24,12 @@ const SPLIT = { creator: '30% V2 · 50% M10', traderAirdrop: '30% V2', holderRew
 const usd = n => n > 0 && n < 1 ? '$' + n.toFixed(n < 0.01 ? 4 : 2) : n < 1000 ? '$' + Math.round(n).toLocaleString() : '$' + compact(n);
 
 export function feesSection({ api }) {
-  let scope = null, data = null, revision = 0, period = '7d', network = 'all', metric = 'feesUsd';
+  let scope = null, data = null, revision = 0, period = '7d', network = 'all';
   const root = h('section.panel.analytics-fees', { hidden: true }), status = h('p.small.muted', { role: 'status' });
   const scopes = h('div.analytics-filters', { 'aria-label': 'Mainnet or test networks' });
   function tile(title, value, note, glyph, definition) {
     return h('div.tile.analytics-metric', h('p.an-tile-label', icon(glyph, 'icon-sm'), title), h('strong', value), h('p.small.muted', note),
       h('details.analytics-definition', h('summary', 'What this counts'), h('p.small', definition)));
-  }
-  const METRICS = [['feesUsd', 'Fees generated'], ['revenueUsd', 'Elpida revenue'], ['creatorUsd', 'Creators\' share'], ['withdrawnUsd', 'Paid out']];
-  const SVG = 'http://www.w3.org/2000/svg', svgEl = (tag, attrs) => { const n = document.createElementNS(SVG, tag); for (const [k, v] of Object.entries(attrs)) n.setAttribute(k, v); return n; };
-  const when = t => new Date(t * 1000).toLocaleDateString(undefined, { month: 'short', day: 'numeric', timeZone: 'UTC', ...(period === '24h' ? { hour: 'numeric' } : {}) });
-  /** Bars for the chosen metric (SVG attributes only: the CSP forbids inline styles), with the same figures as a table. */
-  function chart(g, tag) {
-    const series = g.series ?? [], values = series.map(b => b[metric] ?? 0), max = Math.max(...values, 0), label = METRICS.find(m => m[0] === metric)[1];
-    const tabs = h('div.analytics-filters', { 'aria-label': 'Chart metric' }, METRICS.map(([key, text]) => h('button.btn.btn-secondary.btn-sm', { type: 'button', 'aria-pressed': String(key === metric), on: { click: () => { metric = key; draw(); } } }, text)));
-    const svg = svgEl('svg', { viewBox: '0 0 900 200', role: 'img', 'aria-label': `${label} per ${period === '24h' ? 'hour' : period === 'all' ? 'week' : 'day'}${tag}`, class: 'fee-chart' });
-    const w = 900 / Math.max(1, series.length);
-    series.forEach((b, i) => { const v = values[i], hgt = max > 0 ? Math.max(v > 0 ? 2 : 0, v / max * 180) : 0;
-      const bar = svgEl('rect', { x: (i * w + w * 0.15).toFixed(1), y: (190 - hgt).toFixed(1), width: (w * 0.7).toFixed(1), height: hgt.toFixed(1), rx: 3, class: 'fee-bar' });
-      bar.append(svgEl('title', {})); bar.firstChild.textContent = `${when(b.timestamp)}: ${usd(v)}`; svg.append(bar); });
-    svg.append(svgEl('line', { x1: 0, x2: 900, y1: 190, y2: 190, class: 'analytics-gridline' }));
-    const table = h('details.analytics-definition', h('summary', 'Show as a table'), h('div.analytics-table-scroll', h('table.analytics-table',
-      h('thead', h('tr', h('th', { scope: 'col' }, period === '24h' ? 'Hour (UTC)' : period === 'all' ? 'Week from (UTC)' : 'Day (UTC)'), h('th', { scope: 'col' }, label))),
-      h('tbody', series.filter(b => b[metric]).map(b => h('tr', h('td', when(b.timestamp)), h('td', usd(b[metric]))))))));
-    return h('div.fee-chart-card', tabs, max > 0 ? svg : h('p.small.muted', `No ${label.toLowerCase()} in this period.`),
-      series.length ? h('div.analytics-axis', h('span', when(series[0].timestamp)), h('span', `Peak ${usd(max)}`), h('span', when(series.at(-1).timestamp))) : null, max > 0 ? table : null);
   }
   function monthsTable(g, tag) {
     if (!g.months?.length) return null;
@@ -80,7 +61,6 @@ export function feesSection({ api }) {
         tile('Elpida revenue', usd(g.revenueUsd), `${usd(g.launchFeesUsd)} launch fees + ${usd(g.shares.treasury.earnedUsd)} trading-fee share${tag}`, 'circle-dollar-sign', DEFINITIONS.revenue),
         tile('Paid to creators', usd(g.shares.creator.withdrawnUsd), `of ${usd(g.shares.creator.earnedUsd)} earned · selected period${tag}`, 'user-round', DEFINITIONS.creators),
         tile('Launch fees', usd(g.launchFeesUsd), `${number(g.launches)} launches paid · selected period${tag}`, 'sparkles', DEFINITIONS.launch)),
-      chart(g, tag),
       h('h3', 'Where the fees went'),
       h('p.small.muted', 'Earned is each share of the fees generated in the period. Withdrawn is what the V2 hook or a Model 10 curve sent out in the period. Still owed is what they hold today, at today\'s price. The columns are never added together.'),
       h('div.analytics-table-scroll', h('table.analytics-table', h('caption.visually-hidden', `V2 fee shares${tag}`),

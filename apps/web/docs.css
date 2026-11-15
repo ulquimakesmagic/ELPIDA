@@ -311,7 +311,3 @@
   .analytics-fees .analytics-table th, .analytics-fees .analytics-table td { padding-left: 8px; padding-right: 8px; font-size: 13px; }
 }
 .analytics-fees .share-basis { display: block; font-weight: 400; font-size: 12px; }
-.analytics-fees .fee-chart-card { display: grid; gap: 10px; }
-.analytics-fees .fee-chart { width: 100%; height: auto; display: block; }
-.analytics-fees .fee-bar { fill: var(--accent, #b6f36a); }
-.analytics-fees .fee-bar:hover { opacity: .8; }
