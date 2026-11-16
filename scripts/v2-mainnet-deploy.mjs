@@ -238,10 +238,18 @@ export async function verifyDeployment({ provider, plan, record, recordPath }) {
  * batch by impersonation, verify, then launch a token and check it starts at $20,000 and that the guardian can stop
  * new launches. Returns { record, checks, launch }.
  */
+/**
+ * The Hardhat network a rehearsal runs on. A fork keeps the real chain's ID (8453 for Base): Hardhat would otherwise
+ * report its default 31337, and the preflight `network` check rightly refuses a plan for another chain.
+ */
+export const rehearsalNetwork = (plan, fork) => (fork
+  ? { network: 'localCancun', override: { chainId: Number(plan.chainId), forking: { url: fork, enabled: true } } }
+  : 'localCancun');
+
 export async function rehearse({ plan: given, fork = null, log = () => {}, recordPath, stocks = [], findHolder = null }) {
   const { network } = await import('hardhat');
   const { BrowserProvider } = await import('ethers');
-  const connection = await network.create(fork ? { network: 'localCancun', override: { forking: { url: fork, enabled: true } } } : 'localCancun');
+  const connection = await network.create(rehearsalNetwork(given, fork));
   const provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 }); provider.pollingInterval = 10;
   try {
     const signers = await Promise.all([0, 1, 2, 3, 4].map(i => provider.getSigner(i))), addrs = await Promise.all(signers.map(s => s.getAddress()));

@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readPlan, planHash, approvalFor, rehearse, preflight, APPROVAL_STATEMENT } from '../scripts/v2-mainnet-deploy.mjs';
+import { readPlan, planHash, approvalFor, rehearse, preflight, rehearsalNetwork, APPROVAL_STATEMENT } from '../scripts/v2-mainnet-deploy.mjs';
 
 const PLAN = new URL('../deployments/plans/base-mainnet.json', import.meta.url);
 
@@ -100,4 +100,16 @@ test('a pasted recovery phrase is refused at once and never echoed', async () =>
   const phrase = 'alpha bravo charlie delta echo foxtrot golf hotel india juliet kilo lima';
   for (const input of [phrase, `\x1b[200~${phrase}\x1b[201~`, `${phrase} mike november oscar papa quebec romeo sierra tango uniform victor whiskey xray`])
     assert.throws(() => deployerKey(input), e => /recovery phrase/.test(e.message) && !/alpha|bravo|lima/.test(e.message));
+});
+
+test('a fork rehearsal runs under the real chain ID, so the network preflight passes (Base fork reported 31337)', async () => {
+  const base = JSON.parse(readFileSync(join(process.cwd(), 'deployments', 'plans', 'base-mainnet.json'), 'utf8'));
+  const forked = rehearsalNetwork(base, 'https://base.example/rpc');
+  assert.equal(forked.override.chainId, 8453);
+  assert.deepEqual(forked.override.forking, { url: 'https://base.example/rpc', enabled: true });
+  assert.equal(rehearsalNetwork(base, null), 'localCancun', 'a local rehearsal keeps the default chain');
+  // Hardhat accepts the chain ID override and reports it (forking itself needs a real RPC, so it is left out here).
+  const { network } = await import('hardhat');
+  const connection = await network.create({ network: forked.network, override: { chainId: forked.override.chainId } });
+  try { assert.equal(Number(await connection.provider.request({ method: 'eth_chainId' })), 8453); } finally { await connection.close(); }
 });
