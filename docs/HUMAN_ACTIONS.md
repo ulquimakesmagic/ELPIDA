@@ -11,30 +11,32 @@
 > `contracts, unit and full suite` and `solana program` checks on `main`; (2) create a Safe on Base for the treasury
 > and pick a guardian wallet for the launch stop; (3) a fresh, separate Base keeper key.
 
-## Base mainnet: no tokenized-stock pairs at launch, 16 November 2026
+## Base mainnet: Coinbase stocks as pairs, 16 November 2026
 
 Neither Ondo (docs.ondo.finance/addresses: Ethereum, BNB Chain, HyperEVM, Robinhood Chain, Solana) nor xStocks issues
-stocks on Base, so new Base mainnet launches pair with ETH or USDC only (`STOCK_PAIRS_OFF` in packages/core/pairs.mjs).
-The launch flow hides the stock pair and stock reward assets on chain 8453, the wallet refuses a stock-paired launch,
-the operator panel refuses stock approvals, and `scripts/stock-list.mjs base` exits. Base Sepolia keeps its test
-stocks.
+stocks on Base. Base stock pairs were switched off (`STOCK_PAIRS_OFF` in packages/core/pairs.mjs) until the Coinbase
+stocks passed the fork rehearsal below; Base is now off that list. A stock is still only a pair once its registry
+capabilities are switched on and the Base Safe has approved it.
 
 **Decided (Malik, 16 Nov): Base uses Coinbase Tokenized Stocks** (10 B20 tokens with Chainlink total-return feeds; no
-adapter needed, `approvePricedQuote` takes them directly). To turn them on:
-1. You: the fork rehearsal on **Foundry's anvil**, which spends nothing. The stocks are B20 precompiles: a Hardhat
-   fork (`--fork`) deploys and launches fine but cannot run the stocks ("missing revert data", 16 Nov). Anvil from
-   Foundry v1.8.4+ runs them natively. Base mainnet activated Cobalt on 30 Sep and Foundry's built-in Base schedule
-   stops at Beryl, so pass `--hardfork base:Cobalt`. In PowerShell, from your ELPIDA folder:
-   - Window 1 (leave it running):
-     `$key = ((Get-Content .env | Select-String '^ALCHEMY_API_KEY=').Line -split '=', 2)[1].Trim().Trim('"')`
-     `anvil --fork-url "https://base-mainnet.g.alchemy.com/v2/$key" --hardfork base:Cobalt`
-   - Window 2:
-     `node scripts/v2-mainnet-deploy.mjs rehearse --plan deployments/plans/base-mainnet.json --node http://127.0.0.1:8545 --stocks config/stocks/candidates/base-coinbase.json`
-   Send Claude the output. `anvil --version` must show 1.8.4 or later (`foundryup` updates it).
-2. Claude: record the rehearsal as evidence in config/tokenized-equity-registry.json (launchQuote, graduatedPool) and
-   remove the 8453 entry from `STOCK_PAIRS_OFF`.
-3. You: `STOCK_LIST_RPC_URL=<rpc> node scripts/stock-list.mjs base config/stocks/candidates/base-coinbase.json`, then
-   approve the list from the Base Safe after the Base mainnet deploy.
+adapter needed, `approvePricedQuote` takes them directly).
+1. Done (16 Nov): the fork rehearsal on Foundry's anvil (the stocks are B20 precompiles, which a Hardhat fork cannot
+   run). All ten launched at $20,000, returned 97.51% on a buy and full sell, graduated at ×5 (about $30,930 raised
+   each, some bought in chunks) and traded after. Evidence: docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json.
+   To repeat it: in one PowerShell window
+   `$key = ((Get-Content .env | Select-String '^ALCHEMY_API_KEY=').Line -split '=', 2)[1].Trim().Trim('"')`
+   `$block = [Convert]::ToInt64((Invoke-RestMethod -Method Post -Uri "https://base-mainnet.g.alchemy.com/v2/$key" -ContentType 'application/json' -Body '{"jsonrpc":"2.0","id":1,"method":"eth_blockNumber","params":[]}').result, 16) - 5`
+   `& "$HOME\.foundry\bin\anvil.exe" --fork-url "https://base-mainnet.g.alchemy.com/v2/$key" --fork-block-number $block --hardfork base:Cobalt --compute-units-per-second 100 --retries 10 --fork-retry-backoff 2000`
+   and in another
+   `node scripts/v2-mainnet-deploy.mjs rehearse --plan deployments/plans/base-mainnet.json --node http://127.0.0.1:8545 --stocks config/stocks/candidates/base-coinbase.json`
+   (add `--only NVDAc,TSLAc` to re-run some; a full run can exhaust Alchemy's free tier).
+2. Done (16 Nov): the registry records launch quote and graduated pool for the ten (fork evidence, no written
+   confirmation from Coinbase), and Base is out of `STOCK_PAIRS_OFF`.
+3. You, after the Base mainnet deploy: `STOCK_LIST_RPC_URL=<rpc> node scripts/stock-list.mjs base config/stocks/candidates/base-coinbase.json`
+   (it checks each feed's description), then approve the list from the Base Safe.
+4. You, when stock pairs should go live: set `ELPIDA_TOKENIZED_EQUITY=1`, `ELPIDA_TOKENIZED_EQUITY_COINBASE_LAUNCH_QUOTE=1`
+   and `ELPIDA_TOKENIZED_EQUITY_COINBASE_GRADUATED_POOL=1` on the service. The production guard refuses these for the
+   mainnet beta, so this waits until you lift that rule.
 
 ## Solana devnet: creator vaults (splits, X and website allocations, holder strategies), 16 November 2026
 

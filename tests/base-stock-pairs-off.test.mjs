@@ -1,4 +1,4 @@
-// Base mainnet launches pair with ETH or USDC only (Malik, 16 November 2026): no tokenized-stock provider issues on Base.
+// Stock pairs per chain. Base was ETH/USDC only until the Coinbase stocks passed a fork rehearsal (16 November 2026).
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
@@ -8,16 +8,39 @@ const { stockApprovalGate } = await import('../apps/web/stock-approval.mjs');
 
 const ready = { symbol: 'NVDAc', address: '0x' + '1'.repeat(40), feed: '0x' + '2'.repeat(40), capabilities: { launchQuote: { enabled: true }, graduatedPool: { enabled: true } } };
 
-test('stock pairs are off on Base mainnet only', () => {
-  assert.match(stockPairsOff(8453), /not offered on Base/);
-  assert.match(stockPairsOff('8453'), /ETH or USDC/);
-  for (const id of [1, 56, 84532, 11155111, 97, null, undefined]) assert.equal(stockPairsOff(id), null);
+test('no chain has stock pairs switched off since Base passed its fork rehearsal (16 November 2026)', () => {
+  for (const id of [8453, '8453', 1, 56, 84532, 11155111, 97, null, undefined]) assert.equal(stockPairsOff(id), null);
+  assert.deepEqual(Object.keys(STOCK_PAIRS_OFF), []);
   assert.ok(Object.isFrozen(STOCK_PAIRS_OFF));
 });
 
-test('the operator panel cannot approve a stock on Base, even a fully verified one', () => {
-  assert.match(stockApprovalGate(ready, { mainnet: true, chainId: 8453 }), /not offered on Base/);
-  assert.equal(stockApprovalGate(ready, { mainnet: true, chainId: 1 }), null);
+test('on Base the operator panel approves only a stock whose launch quote and graduated pool are both on', () => {
+  assert.equal(stockApprovalGate(ready, { mainnet: true, chainId: 8453 }), null);
+  const off = { ...ready, capabilities: { launchQuote: { enabled: true }, graduatedPool: { enabled: false, reason: 'Graduated liquidity pool is verified but not switched on.' } } };
+  assert.match(stockApprovalGate(off, { mainnet: true, chainId: 8453 }), /not switched on/);
+});
+
+test('the Base Coinbase stocks have fork evidence for launch quote and graduated pool, and stay off until switched on', async () => {
+  const registry = JSON.parse(readFileSync(new URL('../config/tokenized-equity-registry.json', import.meta.url), 'utf8'));
+  const { createTokenizedEquity } = await import('../packages/core/tokenized-equity.mjs');
+  const evidence = JSON.parse(readFileSync(new URL('../docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json', import.meta.url), 'utf8'));
+  const coinbase = registry.assets.filter(a => a.network === 'base' && a.provider === 'coinbase');
+  assert.equal(coinbase.length, 10);
+  for (const a of coinbase) {
+    const run = evidence.stocks.find(s => s.address.toLowerCase() === a.address.toLowerCase());
+    assert.ok(run?.graduated && run.startMcapUsd > 19_960 && run.startMcapUsd < 20_060 && run.raisedUsd > 30_000, `${a.symbol} rehearsal`);
+    for (const capability of ['launchQuote', 'graduatedPool']) {
+      const rec = registry.verification.find(v => v.network === 'base' && v.provider === 'coinbase' && v.capability === capability && v.address.toLowerCase() === a.address.toLowerCase());
+      assert.ok(rec && rec.verifiedAt === '2026-11-16' && /base-coinbase-stock-rehearsal-2026-11-16\.json/.test(rec.evidence) && /no written provider confirmation/.test(rec.evidence), `${a.symbol} ${capability}`);
+    }
+  }
+  assert.ok(registry.verification.every(v => ['launchQuote', 'graduatedPool'].includes(v.capability)), 'nothing else is claimed');
+  // Evidence alone switches nothing on: the global flag and each capability flag are still needed.
+  const t = createTokenizedEquity(registry), nvda = t.assets().find(a => a.network === 'base' && a.symbol === 'NVDAc');
+  assert.match(t.capabilityState(nvda, 'launchQuote').reason, /switched off on this deployment/);
+  const on = createTokenizedEquity(registry, { env: { ELPIDA_TOKENIZED_EQUITY: '1', ELPIDA_TOKENIZED_EQUITY_COINBASE_LAUNCH_QUOTE: '1', ELPIDA_TOKENIZED_EQUITY_COINBASE_GRADUATED_POOL: '1' } });
+  assert.equal(on.capabilityState(on.assets().find(a => a.symbol === 'NVDAc' && a.network === 'base'), 'graduatedPool').enabled, true);
+  assert.equal(on.capabilityState(on.assets().find(a => a.symbol === 'NVDAc' && a.network === 'base'), 'secondaryTrading').enabled, false);
 });
 
 test('the launch flow, the EVM wallet and the stock-list script all consult the gate', () => {
