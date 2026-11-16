@@ -129,7 +129,7 @@ test('--node: the stock rehearsal runs on a dev node someone else started (as wi
   writeFileSync(join(dir, 'node.rehearsal.json'), JSON.stringify({ planSha256: 'an earlier run', contracts: {}, txs: {} }));
   // The stock is held only by the Uniswap v4 PoolManager and no explorer is given: the PoolManager lends it on the fork.
   const lines = [];
-  const r = await rehearse({ plan, node: `http://${address}:${port}`, local: true, recordPath: join(dir, 'node.rehearsal.json'), stocks: [{ mock: true, price: 412.5, inPoolManager: true }], log: m => lines.push(m) });
+  const r = await rehearse({ plan, node: `http://${address}:${port}`, local: true, recordPath: join(dir, 'node.rehearsal.json'), stocks: [{ mock: true, price: 412.5, inPoolManager: true, inPoolManagerUsd: 7_900 }], log: m => lines.push(m) });
   assert.ok(lines.some(m => /funded from the Uniswap v4 PoolManager/.test(m)), lines.join('\n'));
   assert.equal(r.checks.failed.length, 0, JSON.stringify(r.checks.failed));
   assert.ok(r.verified.every(c => c.ok));
@@ -138,7 +138,9 @@ test('--node: the stock rehearsal runs on a dev node someone else started (as wi
   // Graduation with the stock as the pair: past the ×5 milestone, then trading in the graduated pool.
   assert.ok(r.stocks[0].graduation?.ok, JSON.stringify(r.stocks[0].graduation));
   assert.ok(r.stocks[0].graduation.raisedUsd > 30_000 && r.stocks[0].graduation.raisedUsd < 32_500, `raised $${r.stocks[0].graduation.raisedUsd}`);
-  assert.ok(lines.some(m => /^ok {3}graduation mSTK: graduated at the ×5 milestone/.test(m)), lines.join('\n'));
+  // The PoolManager held only $7,900 (like SNDKc on Base): the stock went back into it with each buy, so chunks reached it.
+  assert.ok(r.stocks[0].graduation.chunks > 4, `bought in ${r.stocks[0].graduation.chunks} chunks`);
+  assert.ok(lines.some(m => /^ok {3}graduation mSTK: graduated at the ×5 milestone, raising .* \(bought in \d+ chunks\)/.test(m)), lines.join('\n'));
   assert.equal(r.guardianPaused, true);
 });
 
