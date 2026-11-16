@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readPlan, planHash, approvalFor, rehearse, preflight, rehearsalNetwork, APPROVAL_STATEMENT } from '../scripts/v2-mainnet-deploy.mjs';
+import { readPlan, planHash, approvalFor, rehearse, preflight, rehearsalNetwork, devRpc, blockscoutHolder, APPROVAL_STATEMENT } from '../scripts/v2-mainnet-deploy.mjs';
 
 const PLAN = new URL('../deployments/plans/base-mainnet.json', import.meta.url);
 
@@ -112,4 +112,42 @@ test('a fork rehearsal runs under the real chain ID, so the network preflight pa
   const { network } = await import('hardhat');
   const connection = await network.create({ network: forked.network, override: { chainId: forked.override.chainId } });
   try { assert.equal(Number(await connection.provider.request({ method: 'eth_chainId' })), 8453); } finally { await connection.close(); }
+});
+
+test('--node: the stock rehearsal runs on a dev node someone else started (as with anvil for Base B20 stocks)', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'elpida-node-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  // An HTTP JSON-RPC dev node standing in for `anvil --fork-url … --hardfork base:Cobalt`.
+  const { network } = await import('hardhat');
+  const server = await network.createServer('localCancun', '127.0.0.1', 0), { address, port } = await server.listen();
+  t.after(() => server.close());
+  const { plan } = readPlan(PLAN, { local: true });
+  const r = await rehearse({ plan, node: `http://${address}:${port}`, local: true, recordPath: join(dir, 'node.rehearsal.json'), stocks: [{ mock: true, price: 412.5 }] });
+  assert.equal(r.checks.failed.length, 0, JSON.stringify(r.checks.failed));
+  assert.ok(r.verified.every(c => c.ok));
+  assert.ok(r.launch.startMcapUsd >= 20_000 * 0.999 && r.launch.startMcapUsd <= 20_000 * 1.002, `starts at $${r.launch.startMcapUsd}`);
+  assert.ok(r.stocks[0].ok, JSON.stringify(r.stocks[0]));
+  assert.equal(r.guardianPaused, true);
+});
+
+test('devRpc falls back to the anvil_ name when a node does not know the hardhat_ alias', async () => {
+  const sent = [];
+  const anvilOnly = { send: async (method, params) => { sent.push(method); if (method.startsWith('hardhat_')) throw Object.assign(new Error('the method hardhat_impersonateAccount does not exist/is not available'), { error: { code: -32601 } }); return true; } };
+  assert.equal(await devRpc(anvilOnly, 'impersonateAccount', ['0x0000000000000000000000000000000000000001']), true);
+  assert.deepEqual(sent, ['hardhat_impersonateAccount', 'anvil_impersonateAccount']);
+  const broken = { send: async () => { throw new Error('connection refused'); } };
+  await assert.rejects(devRpc(broken, 'setBalance', []), /connection refused/, 'a real failure is not retried under another name');
+});
+
+test('blockscoutHolder prefers a plain wallet and falls back to a contract holder (Coinbase stock holders are mostly contracts)', async t => {
+  const realFetch = globalThis.fetch; t.after(() => { globalThis.fetch = realFetch; });
+  const wallet = '0x00000000000000000000000000000000000000a1', contract = '0x00000000000000000000000000000000000000c1';
+  const respond = items => { globalThis.fetch = async () => ({ ok: true, json: async () => ({ items }) }); };
+  const balances = new Map([[wallet.toLowerCase(), 50n], [contract.toLowerCase(), 10n ** 12n]]);
+  const provider = { call: async tx => '0x' + (balances.get(('0x' + tx.data.slice(-40)).toLowerCase()) ?? 0n).toString(16).padStart(64, '0'), getNetwork: async () => ({ chainId: 8453n }), _getConnection: () => ({}) };
+  const find = blockscoutHolder('https://base.blockscout.com', provider);
+  respond([{ address: { hash: contract, is_contract: true } }, { address: { hash: wallet, is_contract: false } }]);
+  assert.equal(await find('0x00000000000000000000000000000000000000f0', 40n), wallet, 'a wallet with enough comes first');
+  assert.equal(await find('0x00000000000000000000000000000000000000f0', 10n ** 6n), contract, 'otherwise a contract holder with enough');
+  respond([{ address: { hash: wallet, is_contract: false } }]);
+  assert.equal(await find('0x00000000000000000000000000000000000000f0', 10n ** 6n), null);
 });

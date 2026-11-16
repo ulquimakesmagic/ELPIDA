@@ -21,9 +21,16 @@ stocks.
 
 **Decided (Malik, 16 Nov): Base uses Coinbase Tokenized Stocks** (10 B20 tokens with Chainlink total-return feeds; no
 adapter needed, `approvePricedQuote` takes them directly). To turn them on:
-1. You: a Base mainnet archive RPC (Alchemy free tier), then the fork rehearsal, which spends nothing:
-   `node scripts/v2-mainnet-deploy.mjs rehearse --plan deployments/plans/base-mainnet.json --fork <rpc> --stocks config/stocks/candidates/base-coinbase.json`
-   Send Claude the output.
+1. You: the fork rehearsal on **Foundry's anvil**, which spends nothing. The stocks are B20 precompiles: a Hardhat
+   fork (`--fork`) deploys and launches fine but cannot run the stocks ("missing revert data", 16 Nov). Anvil from
+   Foundry v1.8.4+ runs them natively. Base mainnet activated Cobalt on 30 Sep and Foundry's built-in Base schedule
+   stops at Beryl, so pass `--hardfork base:Cobalt`. In PowerShell, from your ELPIDA folder:
+   - Window 1 (leave it running):
+     `$key = ((Get-Content .env | Select-String '^ALCHEMY_API_KEY=').Line -split '=', 2)[1].Trim().Trim('"')`
+     `anvil --fork-url "https://base-mainnet.g.alchemy.com/v2/$key" --hardfork base:Cobalt`
+   - Window 2:
+     `node scripts/v2-mainnet-deploy.mjs rehearse --plan deployments/plans/base-mainnet.json --node http://127.0.0.1:8545 --stocks config/stocks/candidates/base-coinbase.json`
+   Send Claude the output. `anvil --version` must show 1.8.4 or later (`foundryup` updates it).
 2. Claude: record the rehearsal as evidence in config/tokenized-equity-registry.json (launchQuote, graduatedPool) and
    remove the 8453 entry from `STOCK_PAIRS_OFF`.
 3. You: `STOCK_LIST_RPC_URL=<rpc> node scripts/stock-list.mjs base config/stocks/candidates/base-coinbase.json`, then
