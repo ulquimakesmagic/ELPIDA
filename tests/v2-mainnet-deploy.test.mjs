@@ -6,7 +6,7 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readPlan, planHash, approvalFor, rehearse, preflight, rehearsalNetwork, devRpc, blockscoutHolder, APPROVAL_STATEMENT } from '../scripts/v2-mainnet-deploy.mjs';
+import { readPlan, planHash, approvalFor, rehearse, preflight, rehearsalNetwork, devRpc, blockscoutHolder, minedOrExplained, APPROVAL_STATEMENT } from '../scripts/v2-mainnet-deploy.mjs';
 
 const PLAN = new URL('../deployments/plans/base-mainnet.json', import.meta.url);
 
@@ -161,4 +161,19 @@ test('blockscoutHolder prefers a plain wallet and falls back to a contract holde
   await assert.rejects(find('0x00000000000000000000000000000000000000f0', 10n ** 6n), /none of the explorer's 1 listed holders has enough/);
   globalThis.fetch = async () => ({ ok: false, status: 403 });
   await assert.rejects(find('0x00000000000000000000000000000000000000f0', 1n), /HTTP 403/, 'says why the explorer gave nothing');
+});
+
+test('a rehearsal transaction that is never mined fails with its step and hash instead of hanging', async () => {
+  const sent = [];
+  const stuck = {
+    waitForTransaction: async () => { throw Object.assign(new Error('timeout'), { code: 'TIMEOUT' }); },
+    send: async method => { sent.push(method); return null; },
+    getTransaction: async () => ({ nonce: 7, maxFeePerGas: 1000n }),
+  };
+  await assert.rejects(minedOrExplained(stuck, '0xabc', 'treasury approval', { waitMs: 1 }), /treasury approval: transaction 0xabc was not mined within 0 s \(pending, nonce 7, max fee 1000\)/);
+  assert.deepEqual(sent, ['evm_mine'], 'one evm_mine nudge before giving up');
+  const reverted = { waitForTransaction: async () => ({ status: 0 }), send: async () => null };
+  await assert.rejects(minedOrExplained(reverted, '0xdef', 'buy'), /buy: transaction 0xdef reverted/);
+  const fine = { waitForTransaction: async () => ({ status: 1, logs: [] }), send: async () => null };
+  assert.equal((await minedOrExplained(fine, '0x1', 'sell')).status, 1);
 });
