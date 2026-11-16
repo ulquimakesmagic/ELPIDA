@@ -15,5 +15,6 @@
   "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
   "confirmations": 2,
   "minDeployerBalance": "0.01",
-  "notes": "Fill treasury (the Base Safe), keeper (a fresh keeper wallet) and guardian (the launch-stop wallet). PoolManager: Uniswap's v4 deployment on Base. usdFeed and usdc are checked on chain by `check` (description ETH / USD, fresh answer; 6-decimal USDC). minFeeBps 100 and dailyLaunchCap 500 are proposals for Malik to confirm."
+  "notes": "Fill treasury (the Base Safe), keeper (a fresh keeper wallet) and guardian (the launch-stop wallet). PoolManager: Uniswap's v4 deployment on Base. usdFeed and usdc are checked on chain by `check` (description ETH / USD, fresh answer; 6-decimal USDC). minFeeBps 100 and dailyLaunchCap 500 are proposals for Malik to confirm. explorerApi: Blockscout, only to find an existing stock holder to impersonate on a fork (`rehearse --fork <rpc> --stocks config/stocks/candidates/base-coinbase.json`; Coinbase stocks, decided 16 Nov 2026).",
+  "explorerApi": "https://base.blockscout.com"
 }
