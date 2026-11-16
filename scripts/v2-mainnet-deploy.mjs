@@ -325,12 +325,12 @@ export async function rehearse({ plan: given, fork = null, node = null, local = 
     const startMcap = 1e9 / priceTokensPerEth * ethUsd;
     // Real tokenized stocks on a fork (Malik, 13 November: Ondo stocks on mainnet): each one approved by the treasury,
     // launched against, bought and sold through the router, so the pool and the router are shown to hold and move it.
-    const stockResults = [];
+    const stockResults = [], forkBlock = stocks.length ? await provider.getBlockNumber() : null;
     for (const s of stocks) stockResults.push(await rehearseStock({ provider, signer: signers[0], plan, record, art, stock: s, findHolder, log }));
     // The guardian can stop new launches.
     await (await new Contract(record.contracts.factory, ['function pauseLaunches()'], signers.find((_, i) => addrs[i] === plan.guardian) ?? signers[4]).pauseLaunches()).wait();
     const paused = await new Contract(record.contracts.factory, FACTORY_READ, provider).launchesPaused();
-    return { record, checks, verified, launch: { token: launched.args.token, startMcapUsd: startMcap }, stocks: stockResults, guardianPaused: paused };
+    return { record, checks, verified, launch: { token: launched.args.token, startMcapUsd: startMcap }, stocks: stockResults, forkBlock, guardianPaused: paused };
   } finally { provider.destroy(); await connection?.close(); }
 }
 
@@ -365,12 +365,50 @@ export async function minedOrExplained(provider, hash, what, { waitMs = REHEARSA
   return receipt;
 }
 
+/**
+ * Graduation with a stock as the pair (fork only): borrow about $35,000 of the stock, buy past the ×5 milestone (the curve
+ * raises about $31,000), check the launch is graduated, then sell and buy once more in the graduated pool.
+ */
+async function graduateStockCurve({ provider, signer, record, art, stock, token, holder, me, priceUsd, unit, launchedToken, step, log }) {
+  const g = { ok: false };
+  try {
+    const need = BigInt(Math.ceil(35_000 / priceUsd * 1e6)) * unit / 1_000_000n, lent = await token.balanceOf(holder);
+    if (lent < need) {
+      g.error = `the lender holds $${(Number(lent) / Number(unit) * priceUsd).toFixed(0)} of ${stock.symbol}, not the $35,000 graduation needs (set ELPIDA_STOCK_HOLDER_${String(stock.symbol).toUpperCase()} to a larger holder)`;
+      log(`FAIL graduation ${stock.symbol}: ${g.error}`); return g;
+    }
+    step('borrowing $35,000 of it and buying past the ×5 milestone (fork only)');
+    await sendAs(provider, holder, stock.address, new Interface(ERC20_RW).encodeFunctionData('transfer', [me, need]), `graduation funds from ${holder}`);
+    const router = new Contract(record.contracts.router, ROUTER_TRADE, signer), hook = new Contract(record.contracts.hook, art.hook.abi, provider), launched = new Contract(launchedToken, ERC20_RW, signer);
+    const deadline = async () => (await provider.getBlock('latest')).timestamp + 600;
+    await sent(provider, new Contract(stock.address, ERC20_RW, signer).approve(record.contracts.router, need), 'approve the router for graduation');
+    const receipt = await sent(provider, router.buy(launchedToken, need, 1n, me, await deadline()), 'graduating buy');
+    const milestone = receipt.logs.map(l => { try { return hook.interface.parseLog(l); } catch { return null; } }).find(e => e?.name === 'Milestone');
+    if (!milestone) throw new Error('the buy did not reach the milestone');
+    if (!(await hook.launchOf(launchedToken)).graduated) throw new Error('the milestone fired but the launch is not marked graduated');
+    g.raisedUsd = Math.round(Number(milestone.args.saleQuote) / Number(unit) * priceUsd);
+    // Trading continues in the graduated pool: sell a tenth of the tokens, then buy back with a little stock.
+    step('selling and buying in the graduated pool');
+    const tenth = (await launched.balanceOf(me)) / 10n, before = await token.balanceOf(me);
+    await sent(provider, launched.approve(record.contracts.router, tenth), 'approve the router (graduated sell)');
+    await sent(provider, router.sell(launchedToken, tenth, 1n, me, await deadline()), 'graduated sell');
+    const got = (await token.balanceOf(me)) - before;
+    if (got <= 0n) throw new Error('the graduated sell returned nothing');
+    await sent(provider, new Contract(stock.address, ERC20_RW, signer).approve(record.contracts.router, got / 2n), 'approve the router (graduated buy)');
+    await sent(provider, router.buy(launchedToken, got / 2n, 1n, me, await deadline()), 'graduated buy');
+    g.ok = g.raisedUsd > 30_000 && g.raisedUsd < 32_500;
+    g.detail = `graduated at the ×5 milestone, raising $${g.raisedUsd.toLocaleString('en-US')} of ${stock.symbol} into the locked pool; a sell and a buy then traded in the graduated pool`;
+    log(`${g.ok ? 'ok  ' : 'FAIL'} graduation ${stock.symbol}: ${g.detail}`);
+  } catch (e) { g.error = String(e.shortMessage ?? e.message).slice(0, 300); log(`FAIL graduation ${stock.symbol}: ${g.error}`); }
+  return g;
+}
+
 /** Sends as an impersonated account (fork only) and waits with the time limit. */
 const sendAs = async (provider, from, to, data, what) => minedOrExplained(provider, await provider.send('eth_sendTransaction', [{ from, to, data }]), what);
 /** A signer's contract call, waited with the time limit. */
 const sent = async (provider, txPromise, what) => minedOrExplained(provider, (await txPromise).hash, what);
 
-export async function rehearseStock({ provider, signer, plan, record, art, stock, findHolder, log = () => {} }) {
+export async function rehearseStock({ provider, signer, plan, record, art, stock, findHolder, graduate = true, log = () => {} }) {
   const out = { symbol: stock.symbol, address: stock.address, feed: stock.feed, ok: false };
   const step = what => log(`  ${stock.symbol}: ${what}`);
   try {
@@ -424,6 +462,7 @@ export async function rehearseStock({ provider, signer, plan, record, art, stock
     out.ok = out.startMcapUsd >= 20_000 * 0.998 && out.startMcapUsd <= 20_000 * 1.003 && back > 95 && back < 100;
     out.detail = `starts at $${out.startMcapUsd.toFixed(0)}, a ${stock.symbol} buy and full sell returned ${back}% after both fees`;
     log(`${out.ok ? 'ok  ' : 'FAIL'} stock ${stock.symbol}: ${out.detail}`);
+    if (out.ok && graduate) out.graduation = await graduateStockCurve({ provider, signer, record, art, stock, token, holder, me, priceUsd, unit, launchedToken: launched.args.token, step, log });
   } catch (e) { out.error = String(e.shortMessage ?? e.message).slice(0, 300); log(`FAIL stock ${stock.symbol}: ${out.error}`); }
   return out;
 }
@@ -491,9 +530,9 @@ async function main() {
     print(r.checks); print(r.verified);
     console.log(`rehearsal launch ${r.launch.token}: starts at $${r.launch.startMcapUsd.toFixed(2)}; guardian stop works: ${r.guardianPaused}`);
     if (r.stocks.length) {
-      const evidence = { network: plan.key, chainId: plan.chainId, at: new Date().toISOString(), scope: 'LOCAL FORK ONLY: nothing was sent to the public chain', gitCommit: gitCommit(), stocks: r.stocks };
+      const evidence = { network: plan.key, chainId: plan.chainId, at: new Date().toISOString(), scope: 'LOCAL FORK ONLY: nothing was sent to the public chain', via: arg('node') ? 'a dev node forking the chain (--node)' : 'a Hardhat fork (--fork)', forkBlock: r.forkBlock, gitCommit: gitCommit(), stocks: r.stocks };
       saveJson(join(root, 'deployments', `${plan.key}-stock-rehearsal.json`), evidence);
-      console.log(`${r.stocks.filter(s => s.ok).length} of ${r.stocks.length} stocks passed. Evidence: deployments/${plan.key}-stock-rehearsal.json`);
+      console.log(`${r.stocks.filter(s => s.ok).length} of ${r.stocks.length} stocks passed launch, buy and sell; ${r.stocks.filter(s => s.graduation?.ok).length} graduated. Evidence: deployments/${plan.key}-stock-rehearsal.json`);
     }
     return;
   }

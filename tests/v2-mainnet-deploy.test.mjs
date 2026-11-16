@@ -135,6 +135,10 @@ test('--node: the stock rehearsal runs on a dev node someone else started (as wi
   assert.ok(r.verified.every(c => c.ok));
   assert.ok(r.launch.startMcapUsd >= 20_000 * 0.999 && r.launch.startMcapUsd <= 20_000 * 1.002, `starts at $${r.launch.startMcapUsd}`);
   assert.ok(r.stocks[0].ok, JSON.stringify(r.stocks[0]));
+  // Graduation with the stock as the pair: past the ×5 milestone, then trading in the graduated pool.
+  assert.ok(r.stocks[0].graduation?.ok, JSON.stringify(r.stocks[0].graduation));
+  assert.ok(r.stocks[0].graduation.raisedUsd > 30_000 && r.stocks[0].graduation.raisedUsd < 32_500, `raised $${r.stocks[0].graduation.raisedUsd}`);
+  assert.ok(lines.some(m => /^ok {3}graduation mSTK: graduated at the ×5 milestone/.test(m)), lines.join('\n'));
   assert.equal(r.guardianPaused, true);
 });
 
