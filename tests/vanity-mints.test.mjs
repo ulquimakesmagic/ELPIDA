@@ -87,11 +87,24 @@ test('the pool reserves single-use keys, never stores them in plaintext and sign
     assert.throws(() => pool.sign({ id: r.id, wallet: wallet.toBase58(), message: message.toString('base64') }), /expired/, 'destroyed after signing');
     // Rate limit per wallet (2 per hour), then expiry of an unused reservation.
     const second = pool.reserve({ wallet: wallet.toBase58(), address: '1.2.3.4' });
+    {
+      // ELPIDA V2 (16 November 2026): a V2 launch with the creator vault in the same transaction is signed; a vault
+      // instruction for another creator is not.
+      const client = createElpidaSolana(web3, new web3.PublicKey(PROGRAM)), m2 = new web3.PublicKey(second.mint);
+      const config = { address: web3.Keypair.generate().publicKey, quoteMint: web3.Keypair.generate().publicKey, treasury: web3.Keypair.generate().publicKey };
+      const v2 = (creatorOfVault = wallet) => new web3.Transaction({ feePayer: wallet, recentBlockhash: base58(randomBytes(32)) }).add(client.computeBudget(),
+        client.launchV2({ creator: wallet, config, mint: m2, name: 'Hope', symbol: 'hope', feeBps: 200, firstBuy: 0n, reward: client.creatorVaultFor(m2), uri: URI }),
+        client.createCreatorVault({ creator: creatorOfVault, config, mint: m2, mode: 0, rows: [{ kind: 0, wallet, shareBps: 10_000 }] })).serializeMessage();
+      assert.throws(() => pool.sign({ id: second.id, wallet: wallet.toBase58(), message: v2(other).toString('base64') }), /only sign an Elpida launch/);
+      assert.equal(pool.sign({ id: second.id, wallet: wallet.toBase58(), message: v2().toString('base64') }).mint, second.mint);
+      // Used, so it never returns; a fresh key keeps the counts below as they were.
+      const g = grind('h', 100_000); pool.add(g.seed, g.pubkey);
+    }
     assert.ok(second.id);
     assert.match(pool.reserve({ wallet: wallet.toBase58(), address: '1.2.3.4' }).reason, /limit/);
     clock += 61_000;
     assert.throws(() => pool.sign({ id: second.id, wallet: wallet.toBase58(), message: launchMessage({ wallet, mint: new web3.PublicKey(second.mint) }).toString('base64') }), /expired/);
-    assert.equal(pool.status().available, 2, 'an unused, expired reservation returns its key to the pool');
+    assert.equal(pool.status().available, 2, 'a used reservation does not come back (one fresh key was added)');
     // A restart keeps the remaining encrypted keys; a different key cannot open them.
     assert.equal(new VanityMintPool({ path, key: pool.key, programId: PROGRAM, suffix: 'h', autoStart: false }).status().available, 2);
     assert.equal(new VanityMintPool({ path: join(dir, 'other.json'), key: randomBytes(32), programId: PROGRAM, suffix: 'h', autoStart: false }).status().available, 0);

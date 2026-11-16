@@ -188,8 +188,13 @@ export class SolanaWallet {
     const stocks = [...(this.configs?.values() ?? [])].filter(cfg => cfg.kind === 'xstock');
     for (const cfg of stocks) cfg.usdReference = null;
     if (this.net.mainnet || !stocks.length || !(this.price?.usd > 0)) return;
+    // A test stock with a round test price (the V2 quote pricing every launch is sized from) is valued at that price,
+    // so launches, trades and market caps agree; the conversion pool's drifting rate is used only without one.
+    const tested = new Map(stocks.filter(cfg => cfg.stockPrice?.test && cfg.stockPrice.usd > 0).map(cfg => [cfg.quoteMint.toBase58(), cfg.stockPrice.usd]));
     const infos = await this.connection.getMultipleAccountsInfo(stocks.map(cfg => this.client.testConversionPda(cfg.quoteMint)));
     stocks.forEach((cfg, i) => {
+      const round = tested.get(cfg.quoteMint.toBase58());
+      if (round) { cfg.usdReference = { ...this.price, symbol: cfg.symbol, usd: round, source: `Devnet round test price: ${cfg.symbol} $${round} (no monetary value)` }; return; }
       const conv = decodeTestConversion(infos[i]?.data);
       if (!conv || conv.solReserve <= 0n || conv.quoteReserve <= 0n) return;
       const solPerStock = Number(conv.solReserve) / 1e9 / (Number(conv.quoteReserve) / 10 ** cfg.quoteDecimals);
@@ -370,7 +375,7 @@ export class SolanaWallet {
         // `complete`: the curve sold out; `graduated`: its liquidity is now in the locked PumpSwap pool.
         complete, graduated: pool.status === STATUS_MIGRATED || pool.status === STATUS_LOCKED, lockedPool: pool.status === STATUS_LOCKED, completedAt: Number(pool.graduatedAt),
         // ELPIDA V2 pools keep a five-way fee ledger instead: the creator's 30% owed, and everything else owed.
-        ...(pool.v2 ? (() => { const owed = v2Owed(pool.v2).map(x => (x > 0n ? x : 0n)); return { v2: true, creatorFees: formatAmount(owed[0], d), protocolFees: formatAmount(owed.slice(1).reduce((a, b) => a + b, 0n), d) }; })()
+        ...(pool.v2 ? (() => { const owed = v2Owed(pool.v2).map(x => (x > 0n ? x : 0n)); return { v2: true, solanaV2: true, network: this.net.key, v2FeeBps: Number(ownFeeBps(config, pool)), creatorFees: formatAmount(owed[0], d), protocolFees: formatAmount(owed.slice(1).reduce((a, b) => a + b, 0n), d) }; })()
           : { protocolFees: formatAmount(pool.protocolFees, d), creatorFees: formatAmount(pool.creatorFees, d) }), liquidityLocked: true,
         // Early-partner tier fixed at launch, and tokens its buybacks burned on the curve (LP-fee burns added below).
         buybackBps: pool.buybackBps, burned: formatAmount(pool.buybackBurned, TOKEN_DECIMALS),
@@ -390,6 +395,12 @@ export class SolanaWallet {
       }
       return token;
     }));
+    // 24h buys, sells and change come from the server's index (the chain alone has no recent-trade counts).
+    try {
+      const listed = await fetch(`/api/public/tokens?network=${encodeURIComponent(this.net.key)}`, { cache: 'no-store' }).then(r => (r.ok ? r.json() : []));
+      const byAddress = new Map((Array.isArray(listed) ? listed : []).map(t => [t.address, t]));
+      for (const t of tokens) { const x = byAddress.get(t.address); if (x) Object.assign(t, { buys24h: x.buys24h, sells24h: x.sells24h, volume24hUsd: x.volume24hUsd, priceChange24h: x.priceChange24h }); }
+    } catch {}
     if(readOnly)return {tokens,balance:'0',nativeBalance:'0',disconnected:true};
     const [treasury, lamports] = await Promise.all([this.connection.getBalance(launchConfig.treasury), this.connection.getBalance(this.publicKey)]);
     const pairBalances = {};
@@ -734,6 +745,8 @@ export class SolanaWallet {
       try { reward = new web3.PublicKey(String(body.reward || this.address).trim()); } catch { throw new Error('Enter a valid Solana creator reward wallet.'); }
       // Price-aware terms read from chain just before signing: the program recomputes them at execution.
       await this.loadPrice();
+      // A V2 stock launch is priced from the stock's bound price, read again now so a page left open still launches.
+      if (v2Launch && config.kind === 'xstock') await this.loadStockPrices().catch(() => {});
       const terms = this.launchTerms(config), inUsdc = body.feeCurrency === 'usdc';
       if (!terms.priced) throw new Error(`USD pricing is not active for this pair on ${this.net.name} yet. The team turns it on with the Solana deploy script.`);
       if (this.price?.status !== 'fresh') throw new Error('The on-chain SOL/USD price is stale or uncertain right now. Wait a moment and refresh before launching.');

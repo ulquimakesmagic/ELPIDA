@@ -17,6 +17,10 @@ import { Worker, isMainThread, parentPort, workerData } from 'node:worker_thread
 export const BASE58 = '123456789ABCDEFGHJKLMNPQRSTUVWXYZabcdefghijkmnopqrstuvwxyz';
 const PKCS8_PREFIX = Buffer.from('302e020100300506032b657004220420', 'hex');
 const LAUNCH_DISCRIMINATOR = Buffer.from([153, 241, 93, 225, 22, 69, 74, 61]);
+// ELPIDA V2 launches (same creator and mint positions), and the creator vault a V2 launch may create in the same
+// transaction (creator first, mint second).
+const LAUNCH_V2_DISCRIMINATOR = Buffer.from([174, 154, 226, 122, 140, 148, 156, 150]);
+const CREATOR_VAULT_DISCRIMINATOR = Buffer.from([11, 247, 198, 52, 69, 10, 169, 118]);
 const LAUNCH_MINT_INDEX = 4, LAUNCH_CREATOR_INDEX = 0;
 const SYSTEM_PROGRAM = '11111111111111111111111111111111';
 /** A Solana address: 32-44 base58 characters that decode to exactly 32 bytes. */
@@ -209,8 +213,10 @@ export class VanityMintPool {
     if (signerKeys[0] !== wallet || !signerKeys.includes(r.mint)) throw Object.assign(new Error('The launch must be paid by your wallet and signed by the reserved mint.'), { status: 400 });
     // A durable-nonce message (System AdvanceNonceAccount) would never expire; only recent-blockhash launches are signed.
     if (parsed.instructions.some(ix => ix.program === SYSTEM_PROGRAM && ix.data.length >= 4 && ix.data.readUInt32LE(0) === 4)) throw Object.assign(new Error('Durable-nonce launches cannot use a reserved mint address.'), { status: 400 });
-    const uses = parsed.instructions.filter(ix => ix.accounts.includes(r.mint) || ix.program === r.mint);
-    const launch = uses.length === 1 && uses[0].program === this.programId && uses[0].data.subarray(0, 8).equals(LAUNCH_DISCRIMINATOR) ? uses[0] : null;
+    const ours = (ix, d) => ix.program === this.programId && ix.data.subarray(0, 8).equals(d);
+    const vault = ix => ours(ix, CREATOR_VAULT_DISCRIMINATOR) && ix.accounts[0] === wallet && ix.accounts[1] === r.mint;
+    const uses = parsed.instructions.filter(ix => (ix.accounts.includes(r.mint) || ix.program === r.mint) && !vault(ix));
+    const launch = uses.length === 1 && (ours(uses[0], LAUNCH_DISCRIMINATOR) || ours(uses[0], LAUNCH_V2_DISCRIMINATOR)) ? uses[0] : null;
     if (!launch || launch.accounts[LAUNCH_MINT_INDEX] !== r.mint || launch.accounts[LAUNCH_CREATOR_INDEX] !== wallet) throw Object.assign(new Error('The reserved mint can only sign an Elpida launch for your wallet.'), { status: 400 });
     const privateKey = createPrivateKey({ key: Buffer.concat([PKCS8_PREFIX, r.seed]), format: 'der', type: 'pkcs8' });
     const signature = edSign(null, bytes, privateKey);
