@@ -89,7 +89,7 @@
     "usdcMint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU"
   },
   "deployer": "FeUWFps7CYtrXNXosirwJCfFQM5Na6PamEV6hpFcKaH8",
-  "recordedAt": "2026-11-15T23:21:04.981Z",
+  "recordedAt": "2026-11-16T12:33:45.375Z",
   "build": "testnet",
   "betaGate": null,
   "v2": {
@@ -151,7 +151,34 @@
           "startFdvUsdE6": "50000000"
         }
       }
-    ]
+    ],
+    "pairs": [
+      {
+        "kind": "usdc",
+        "key": "usdc",
+        "symbol": "USDC",
+        "name": "Circle test USDC (no value)",
+        "mint": "4zMMC9srt5Ri5X14GAgXhaHii3GnPAEERYPJgZJDncDU",
+        "decimals": 6,
+        "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "test": true,
+        "config": "989TbRA8NrxCXjPndhse6hZyKEfbZ3hFsW7rVu695NNx",
+        "faucet": null
+      },
+      {
+        "kind": "token",
+        "key": "test-meme",
+        "symbol": "TEST-MEME",
+        "name": "Elpida test paired token (no value)",
+        "mint": "Hq5U44c1tJehw8eJFeozCnb6HHqHw47K4hkYWaS3d5ZD",
+        "decimals": 6,
+        "tokenProgram": "TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA",
+        "test": true,
+        "config": "BehxwntCGeLVgMV9ZTAupwgEYntq9avZj8PEB4jMkjtR",
+        "faucet": "6000000"
+      }
+    ],
+    "creatorVaults": true
   },
   "upgradeAuthority": "FeUWFps7CYtrXNXosirwJCfFQM5Na6PamEV6hpFcKaH8"
 }
