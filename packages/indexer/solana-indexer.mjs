@@ -196,6 +196,9 @@ export class SolanaIndexer {
           ...(x.devHoldingRaw !== undefined ? { devHoldingRaw: x.devHoldingRaw.toString(), devHoldingPct: supplyPercent(x.devHoldingRaw, TOKEN_SUPPLY) } : {}),
           ...(x.launchSignature ? { launchHash: x.launchSignature } : {}),
           metadataURI: x.metadataURI ?? '',
+          // ELPIDA V2 pools: the token's own fee (on the curve and in the locked pool) and the creator's lifetime 30%.
+          ...(pool.v2 ? { v2: true, solanaV2: true, feeBps: pool.v2.feeBps, v2Accrued: formatAmount(pool.v2.accrued, d),
+            creatorFeesLifetime: formatAmount(pool.v2.accrued * 3_000n / 10_000n, d), creatorFeesPaid: formatAmount(pool.v2.paid[0], d) } : {}),
         }));
       }
       this.db.exec('COMMIT');

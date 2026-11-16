@@ -454,7 +454,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/creator-fees'){
           if(chatLimit(false))return send(429,{error:'Fee history is busy. Retry shortly.'});
           const network=url.searchParams.get('network')??'local',address=url.searchParams.get('token'),{index,sol}=indexedMarket(network,address);
-          return send(200,sol?{status:'unavailable'}:creatorFeeTotals.read({index,provider:index.provider},address));
+          // Solana V2: the creator's lifetime 30% from the pool's own ledger (owed plus paid), in the pair asset.
+          if(sol){const t=index.token(address);return send(200,t?.v2&&t.creatorFeesLifetime!=null?{status:'ready',indexedBlock:'latest',assets:[{symbol:t.quoteSymbol,amount:t.creatorFeesLifetime}]}:{status:'unavailable'});}
+          return send(200,creatorFeeTotals.read({index,provider:index.provider},address));
         }
         if(url.pathname==='/api/chat'){
           if(chatLimit(false))return send(429,{error:'Chat is busy. Retry shortly.'});
@@ -489,7 +491,9 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           const holders=sol?await index.holders(i.token):index.holders(i.token,Number.MAX_SAFE_INTEGER),balances=new Map();for(const h of holders)balances.set(h.address,formatUnits(parseUnits(balances.get(h.address)??'0',18)+parseUnits(h.balance,18),18));
           let position=null;
           if(author){const balance=await heldBalance(i),rows=sol?index.db.prepare("SELECT data FROM trades WHERE mint=? AND json_extract(data,'$.account')=? ORDER BY slot,idx").iterate(i.token,i.author):index.db.prepare("SELECT data FROM trades WHERE address=? AND lower(json_extract(data,'$.account'))=? ORDER BY height,idx").iterate(i.token,i.author),trades=[];for(const r of rows){if(trades.length>=100000)throw new Error('Position history exceeds review capacity.');trades.push(JSON.parse(r.data));}
-            const tradeHashes=new Set(trades.map(t=>t.hash));let untrackedTransfers=sol;if(!sol)for(const r of index.db.prepare("SELECT tx,data FROM events WHERE lower(json_extract(data,'$.address'))=? AND json_extract(data,'$.name')='Transfer'").iterate(i.token)){const event=JSON.parse(r.data);if(event.args.slice(0,2).some(a=>String(a).toLowerCase()===i.author)&&!tradeHashes.has(r.tx)){untrackedTransfers=true;break;}}
+            const tradeHashes=new Set(trades.map(t=>t.hash));// Solana has no transfer index here; the summary still marks the basis unknown when the wallet's balance differs from
+            // what its trades add up to, which is what a transfer in or out does.
+            let untrackedTransfers=false;if(!sol)for(const r of index.db.prepare("SELECT tx,data FROM events WHERE lower(json_extract(data,'$.address'))=? AND json_extract(data,'$.name')='Transfer'").iterate(i.token)){const event=JSON.parse(r.data);if(event.args.slice(0,2).some(a=>String(a).toLowerCase()===i.author)&&!tradeHashes.has(r.tx)){untrackedTransfers=true;break;}}
             position=positionSummary({trades,balance,price:token.spotPrice??'0',supply:token.supply??'1000000000',untrackedTransfers});balances.set(i.author,balance);
           }
           const feed=theses.list(network,i.token).map(r=>({...r,balance:balances.get(r.author)??(sol?null:'0')})).filter(r=>r.balance===null||Number(r.balance)>0).sort((a,b)=>Number(b.balance??-1)-Number(a.balance??-1)||a.author.localeCompare(b.author)).slice(0,100);
@@ -574,7 +578,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(solanaMatch&&url.searchParams.get('network')?.startsWith('solana-')){
           if(!solanaIndex||url.searchParams.get('network')!==solanaIndex.network.key)return send(404,{error:'No public Solana index for this network.'});
           if(!solanaMatch[1]){const activity=indexedActivity(solanaIndex.db),burns=solanaRewards?.burnedByToken()??new Map();return send(200,solanaIndex.listings().map(t=>({...t,priceChange24h:indexedChange(solanaIndex.db,t),...activityOf(activity,t.address),...solanaBurn(burns,t.address)})));}
-          const token=solanaIndex.token(solanaMatch[1]);if(!token)return send(404,{error:'Token not indexed yet. Check indexer status and retry.'});
+          const indexedToken=solanaIndex.token(solanaMatch[1]);if(!indexedToken)return send(404,{error:'Token not indexed yet. Check indexer status and retry.'});
+          const token=solanaMatch[2]?indexedToken:{...indexedToken,priceChange24h:indexedChange(solanaIndex.db,indexedToken),...activityOf(indexedActivity(solanaIndex.db),indexedToken.address)};
           return send(200,solanaMatch[2]==='trades'?solanaIndex.trades(token.address,listLimit(url,100)):solanaMatch[2]==='candles'?solanaIndex.candles(token.address,Number(url.searchParams.get('interval')??60),listLimit(url,100)):solanaMatch[2]==='holders'?await solanaIndex.holders(token.address):token);
         }
         // One wallet's indexed balances on every EVM testnet, for the cross-chain Portfolio. Balances come from Transfer
