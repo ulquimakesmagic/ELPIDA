@@ -183,3 +183,11 @@ test('a rehearsal transaction that is never mined fails with its step and hash i
   const fine = { waitForTransaction: async () => ({ status: 1, logs: [] }), send: async () => null };
   assert.equal((await minedOrExplained(fine, '0x1', 'sell')).status, 1);
 });
+
+test('rehearse --only re-runs named stocks and refuses a name that is not in the list', async () => {
+  const { spawnSync } = await import('node:child_process');
+  const run = only => spawnSync(process.execPath, ['scripts/v2-mainnet-deploy.mjs', 'rehearse', '--plan', 'deployments/plans/base-mainnet.json', '--node', 'http://127.0.0.1:1', '--stocks', 'config/stocks/candidates/base-coinbase.json', '--only', only], { encoding: 'utf8', timeout: 60_000 });
+  assert.match(run('GOOGLc,NOPE').stderr, /--only names a stock that is not in .*base-coinbase\.json: GOOGLC, NOPE/);
+  // Known names pass the filter and the run goes on to the node (unreachable here), so the error is about the node.
+  assert.doesNotMatch(run('googlc, TSLAc').stderr, /--only names a stock/);
+});

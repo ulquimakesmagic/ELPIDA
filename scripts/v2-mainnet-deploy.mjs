@@ -527,7 +527,10 @@ async function main() {
   console.log(`plan ${plan.key} (${plan.name}), sha256 ${hash}`);
   if (cmd === 'rehearse') {
     // --stocks <config/stocks/candidates/….json>: also launch against each real stock on the fork (fork only).
-    const stocksFile = arg('stocks'), stocks = stocksFile ? JSON.parse(readFileSync(stocksFile, 'utf8')).map(s => ({ ...s, holder: process.env[`ELPIDA_STOCK_HOLDER_${String(s.symbol).toUpperCase()}`] ?? null })) : [];
+    const stocksFile = arg('stocks'), only = arg('only') ? new Set(arg('only').split(',').map(x => x.trim().toUpperCase()).filter(Boolean)) : null;
+    // --only AMZNc,TSLAc re-runs some stocks (each run makes many RPC calls through the fork).
+    const stocks = (stocksFile ? JSON.parse(readFileSync(stocksFile, 'utf8')) : []).filter(s => !only || only.has(String(s.symbol).toUpperCase())).map(s => ({ ...s, holder: process.env[`ELPIDA_STOCK_HOLDER_${String(s.symbol).toUpperCase()}`] ?? null }));
+    if (only && stocks.length !== only.size) throw new Error(`--only names a stock that is not in ${stocksFile}: ${[...only].join(', ')}`);
     if (stocks.length && !live) throw new Error('--stocks needs --fork <rpc> or --node <dev node forking the chain>: real stocks exist only on the real chain.');
     if (arg('fork') && arg('node')) throw new Error('Use --fork <rpc> or --node <dev node>, not both.');
     if (stocks.some(s => !s.holder) && !plan.explorerApi) throw new Error('The plan has no explorerApi (a Blockscout URL) to find stock holders; set ELPIDA_STOCK_HOLDER_<SYMBOL> per stock.');
