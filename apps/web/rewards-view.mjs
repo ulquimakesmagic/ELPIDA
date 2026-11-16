@@ -3,11 +3,12 @@ import { nowSeconds } from './clock.mjs';
 // (threshold progress, completed holder distributions, claims, identity verification, vesting).
 import { $, h, icon, short, number, avatar, callout, errorText, toast, copyButton } from './ui.mjs';
 
+/** Removed 16 November 2026: still named for tokens that chose it before. */
+const RETIRED_STRATEGIES = { buyback: { name: 'Buy back and vest to holders (retired)', glyph: 'hourglass' } };
 export const STRATEGIES = {
   creator: { name: 'Creator wallets', glyph: 'wallet' },
   holders: { name: 'Share fees with holders', glyph: 'users' },
   paired: { name: 'Buy a reward token for holders', glyph: 'coins' },
-  buyback: { name: 'Buy back and vest to holders', glyph: 'hourglass' },
   exclusive: { name: 'Wallet, X and website allocations', glyph: 'badge-check' },
 };
 const amount = (value, symbol) => `${number(value, 6)} ${symbol}`;
@@ -58,7 +59,7 @@ function feesSection(ctx, mine) {
 }
 
 function treasury(ctx, row, data) {
-  const strategy = STRATEGIES[row.policy.mode] ?? { name: row.policy.mode, glyph: 'gift' };
+  const strategy = STRATEGIES[row.policy.mode] ?? RETIRED_STRATEGIES[row.policy.mode] ?? { name: row.policy.mode, glyph: 'gift' };
   const automated = ['holders', 'paired', 'buyback'].includes(row.policy.mode);
   const busyButton = (label, action, cls = 'btn-secondary') => h(`button.btn.btn-sm.${cls}`, { type: 'button', on: { click: async e => { const b = e.currentTarget; b.disabled = true; try { const r = await action(); if (r?.message) toast(r.message, { kind: 'success' }); await ctx.refresh(); } catch (err) { toast(errorText(err), { kind: 'error' }); b.disabled = false; } } } }, label);
   const group = (title, glyph, items, emptyText) => h('div.treasury-group', h('h4', icon(glyph, 'icon-sm'), title, h('span.count', items.length ? `(${items.length})` : '')), items.length ? items : h('p.empty-note', emptyText));

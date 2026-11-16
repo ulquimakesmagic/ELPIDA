@@ -2,7 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {Contract,ZeroAddress,id,parseUnits} from 'ethers';
 import {createRuntime} from '../apps/api/curve-runtime.mjs';
-test('reward treasury runs wallet allocations, identity escrow, holder payouts, conversion and vesting',async t=>{
+test('reward treasury runs wallet allocations, identity escrow, holder payouts, and conversion',async t=>{
  const r=await createRuntime({seed:false,dex:true});t.after(()=>r.close());
  const creator=r.config.accounts[0].address,trader=r.config.accounts[1].address;
  // Native pricing: launches pair with ETH (the creator half of the 1.25% first-buy fee funds the vault).
@@ -39,16 +39,8 @@ test('reward treasury runs wallet allocations, identity escrow, holder payouts, 
   assert.ok(await stock.balanceOf(creator)>before);assert.equal(r.rewards.record(token).epochs,1);
   assert.equal(await stock.balanceOf(r.rewards.record(token).vault.target),0n);
  });
- await t.test('buybacks create linear vesting, claim only unlocked tokens and do not replay',async()=>{
-  const {token}=await launch('VEST',{mode:'buyback',threshold:'0.001',minimumHolding:'1',vestingDays:30});
-  const v=r.rewards.record(token).vault;assert.equal(await v.grantCount(),1n);const grant=await v.grants(0);assert.ok(grant.total>0n);
-  const asset=new Contract(token,r.config.contracts.token.abi,r.provider),before=await asset.balanceOf(creator);
-  await r.provider.send('evm_increaseTime',[15*86400]);await r.provider.send('evm_mine',[]);
-  await r.transact('reward-claim',{token,grant:0});const midway=await asset.balanceOf(creator)-before;
-  assert.ok(midway>grant.total*49n/100n&&midway<grant.total*51n/100n);
-  await r.provider.send('evm_increaseTime',[16*86400]);await r.provider.send('evm_mine',[]);await r.transact('reward-claim',{token,grant:0});
-  assert.equal((await v.grants(0)).claimed,grant.total);assert.equal(await asset.balanceOf(creator)-before,grant.total);
-  await r.transact('reward-claim',{token,grant:0});assert.equal(await asset.balanceOf(creator)-before,grant.total);
+ await t.test('buy back and vest is no longer offered to new launches (removed 16 November 2026)',async()=>{
+  await assert.rejects(launch('VEST',{mode:'buyback',threshold:'0.001',minimumHolding:'1',vestingDays:30}),/no longer offered/);
  });
  // Time travel for vesting also expires the pricing feed; the simulated keeper must publish again.
  await r.updatePrice(2500);
@@ -73,5 +65,5 @@ test('reward treasury runs wallet allocations, identity escrow, holder payouts, 
   assert.equal(r.indexer.listings().find(t=>t.address===stockPair.token).quoteSymbol,'TEST-STOCK');assert.equal(r.indexer.listings().find(t=>t.address===stockPair.token).pair,'xstock');
   await assert.rejects(r.transact('launch',{name:'Wrong kind',symbol:'WRONG',pair:'token',quoteToken:r.rewards.stock.target,firstBuy:'0.01'}),/graduated Elpida token/);assert.equal(r.rewards.record(stockPair.token).epochs,1);
  });
- const dashboard=await r.rewards.dashboard();assert.equal(dashboard.rows.length,7);assert.equal(dashboard.localOnly,true);assert.equal(dashboard.xVerificationConfigured,false);
+ const dashboard=await r.rewards.dashboard();assert.equal(dashboard.rows.length,6);assert.equal(dashboard.localOnly,true);assert.equal(dashboard.xVerificationConfigured,false);
 });

@@ -502,6 +502,7 @@ export async function pairUsd(w, asset) {
 
 async function creatorStrategyVault(w, d, { mode, threshold, thresholdUsd, minimumHolding, minimumHoldingUsd, vestingDays, rewardAsset, feeAsset, feeDecimals }) {
   const m = STRATEGY_MODES[mode];
+  if (mode === 'buyback') throw new Error('Buy back and vest is no longer offered. Choose another creator reward strategy.');
   if (m === undefined) throw new Error('Choose a holder strategy. Nothing was submitted.');
   const keeper = w.config.v2Keeper;
   if (!keeper?.address || !keeper.active) throw new Error('Holder strategies need the Elpida V2 keeper, which is not running on this server. Nothing was submitted.');

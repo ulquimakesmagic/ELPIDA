@@ -35,7 +35,7 @@ export class RewardEngine {
  async init(){this.stock=await new ContractFactory(this.stockArtifact.abi,this.stockArtifact.evm.bytecode.object,this.executor).deploy();await this.stock.waitForDeployment();}
  assets(){return [...this.tokens.map(t=>({address:t.address,symbol:t.symbol,pairKind:'token',kind:'elpida',pair:t.pair,pairEligible:t.pair==='native'&&t.graduated===true,quoteAddress:t.quoteAddress||ZeroAddress})),{address:this.stock.target,symbol:'TEST-STOCK',name:'Simulated stock (test only, not an issued xStock)',pairKind:'xstock',kind:'simulation',pair:'native',pairEligible:true,quoteAddress:ZeroAddress}];}
  async prepare(input,owner,pair,source=ZeroAddress){
-  const policy=normalizeRewardPolicy(input,'local');
+  const policy=normalizeRewardPolicy(input,'local',{allowRetired:!!this.replaying});
   if(policy.mode==='paired'){
    const asset=this.assets().find(a=>a.address.toLowerCase()===policy.rewardToken);if(!asset||(asset.address.toLowerCase()!==String(source).toLowerCase()&&asset.quoteAddress.toLowerCase()!==String(source).toLowerCase()))throw new Error('The reward token must use the same source asset as this launch. Simulated stocks are bought with the native coin.');
   }
