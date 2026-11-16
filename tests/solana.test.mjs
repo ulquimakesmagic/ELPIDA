@@ -20,10 +20,10 @@ import {
   harvestableLp, harvestNow, MPL_TOKEN_METADATA, MAX_LAUNCH_URI, GRADUATION_GRACE_SECS, validMetadataUri, liquidityUnits, withdrawOut, isqrt, PUMP_AMM_PROGRAM, PUMP_GLOBAL_CONFIG, TOKEN_2022_PROGRAM, TOKEN_PROGRAM, MIGRATE_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, TEST_FAUCET_MAX_WHOLE, WSOL_MINT, splTestMint, PYTH_RECEIVER, SOL_USD_FEED_ID, SOL_USD_PRICE_ACCOUNT, parsePriceUpdate, usdToQuote, virtualQuoteForFdv,
   RAYDIUM, RAYDIUM_MIGRATE_COMPUTE_UNITS, VENUE_RAYDIUM, raydiumCreationCost, raydiumQuote, raydiumBuybackAmount,
   V2, v2FeeBps, v2Owed, validV2Symbol, POOL_SIZE_V2, V2_WITHDRAW_COMPUTE_UNITS, V2_DIST,
-  parseTestStockPrice,
+  parseTestStockPrice, creatorRowDue,
 } from '../packages/solana/client.mjs';
 import { solanaPairTemplates } from '../packages/core/pairs.mjs';
-import { buildSolanaRound, verifySolanaProof } from '../packages/solana/v2-rounds.mjs';
+import { buildSolanaRound, buildCreatorRound, verifySolanaProof } from '../packages/solana/v2-rounds.mjs';
 import { ensureV2, v2Genesis, v2SolParams } from '../packages/solana/v2-setup.mjs';
 import { SolanaV2Keeper, configuredSolanaV2Keeper, snapshotHolderRound } from '../apps/api/v2-keeper-solana.mjs';
 import { SolanaV2Rewards, decodeV2Round } from '../apps/api/v2-rewards-solana.mjs';
@@ -1935,6 +1935,7 @@ test('Solana V2 stablecoin payouts: a distributor converts unpromised SOL to USD
   const poolKey = Keypair.generate();
   await send(f.connection, f.authority, [f.client.computeBudget(RAYDIUM_MIGRATE_COMPUTE_UNITS), ...f.client.createStablePool({ creator: f.authority.publicKey, pool: poolKey.publicKey, usdcMint: usdc.publicKey, solAmount: 2_000_000_000n, usdcAmount: 300_000_000n })], [poolKey]);
   const r = f.client.raydiumStablePool(poolKey.publicKey, usdc.publicKey);
+  f.stable = { usdc: usdc.publicKey, pool: poolKey.publicKey };
   // The vault gets 1 SOL more (anyone may send SOL to it); none of it is promised to a round yet.
   const vault = f.client.distVault(kind);
   await send(f.connection, f.authority, [web3.SystemProgram.transfer({ fromPubkey: f.authority.publicKey, toPubkey: vault, lamports: 1_000_000_000 })]);
@@ -1963,4 +1964,94 @@ test('Solana V2 stablecoin payouts: a distributor converts unpromised SOL to USD
   const other = Keypair.generate();
   await send(f.connection, f.authority, await f.spl.createMintIxs(f.connection, f.authority.publicKey, other.publicKey, 6, f.authority.publicKey), [other]);
   await failsWith(convert(keeper, 10_000_000n, 1n, { usdcMint: other.publicKey }), /0x178d|0x1792|ConstraintAddress|0x7d/);
+});
+
+// Creator vaults (16 November 2026): what happens to a V2 token's creator 30% on Solana, fixed at launch.
+test('Solana creator vault: allocations (wallet now, X and website once bound), holder rounds, reward-token swaps', { skip: raySkip }, async () => {
+  const wsol = new PublicKey(WSOL_MINT), user = Keypair.generate(), keeper = f.v2Operator, payee = Keypair.generate();
+  assert.ok(keeper, 'the V2 rewards test set up the airdrop distributor and its operator');
+  await airdrop(f.connection, user.publicKey, 30 * web3.LAMPORTS_PER_SOL);
+  const config = { address: f.client.configV2For(wsol), quoteMint: wsol, treasury: f.treasury };
+  const launchWith = async (vault, { reward } = {}) => {
+    const mint = Keypair.generate(), m = mint.publicKey;
+    await send(f.connection, user, [f.client.computeBudget(), ...f.client.wrapSol(user.publicKey, SOL / 100n),
+      f.client.launchV2({ uri: TEST_URI, creator: user.publicKey, config, mint: m, name: 'Vault', symbol: 'vault', feeBps: 200, firstBuy: SOL / 100n, reward: reward ?? f.client.creatorVaultFor(m), priceUpdate: f.oracles.fresh, maxFee: SOL }),
+      ...(vault ? [f.client.createCreatorVault({ creator: user.publicKey, config, mint: m, ...vault })] : [])], [mint], 1);
+    return m;
+  };
+  const trade = async mint => {
+    await afterV2Window(mint);
+    await send(f.connection, user, [f.client.computeBudget(), ...f.client.wrapSol(user.publicKey, SOL), f.client.buy({ buyer: user.publicKey, config, mint, grossIn: SOL, minTokensOut: 1n }), f.client.unwrapSol(user.publicKey)]);
+    await send(f.connection, f.outsider, [f.client.computeBudget(V2_WITHDRAW_COMPUTE_UNITS), f.client.withdrawV2Fees({ payer: f.outsider.publicKey, config, mint, reward: f.client.creatorVaultFor(mint) })], [], 1);
+    return balance(f.client.ata(f.client.creatorVaultFor(mint), wsol));
+  };
+  const rows = [{ kind: 0, label: '', wallet: payee.publicKey, shareBps: 5_000 }, { kind: 1, label: 'x:elpida_fun', shareBps: 3_000 }, { kind: 2, label: 'domain:community.org', shareBps: 2_000 }];
+
+  // Terms: a vault only for a token that named it as its reward account, rows adding to 100%, identity rows unbound.
+  const plain = await launchWith(null, { reward: user.publicKey });
+  await failsWith(send(f.connection, user, [f.client.createCreatorVault({ creator: user.publicKey, config, mint: plain, mode: 0, rows })], [], 1), /0x17a3/);
+  const fresh = await launchWith(null);
+  await failsWith(send(f.connection, f.outsider, [f.client.createCreatorVault({ creator: f.outsider.publicKey, config, mint: fresh, mode: 0, rows })], [], 1), /0x1770/);
+  await failsWith(send(f.connection, user, [f.client.createCreatorVault({ creator: user.publicKey, config, mint: fresh, mode: 0, rows: rows.map((r, i) => i ? r : { ...r, shareBps: 4_000 }) })], [], 1), /0x17a3/);
+  await failsWith(send(f.connection, user, [f.client.createCreatorVault({ creator: user.publicKey, config, mint: fresh, mode: 0, rows: rows.map((r, i) => i === 1 ? { ...r, wallet: payee.publicKey } : r) })], [], 1), /0x17a3/);
+
+  // Allocation: the wallet row is paid now; the X row waits until the operator binds its owner's wallet, once.
+  const mint = await launchWith({ mode: 0, rows });
+  const v0 = f.client.decodeCreatorVault((await f.connection.getAccountInfo(f.client.creatorVaultFor(mint))).data);
+  assert.equal(v0.mode, 0); assert.equal(v0.operator.toBase58(), keeper.publicKey.toBase58());
+  assert.deepEqual(v0.rows.map(r => [r.kind, r.label, r.shareBps]), [[0, '', 5000], [1, 'x:elpida_fun', 3000], [2, 'domain:community.org', 2000]]);
+  const held = await trade(mint);
+  assert.ok(held > 0n, 'the creator 30% landed in the vault');
+  const claimRow = (row, wallet) => send(f.connection, f.outsider, [f.client.claimCreatorRow({ payer: f.outsider.publicKey, mint, quoteMint: wsol, row, wallet })], [], 1);
+  await claimRow(0, payee.publicKey);
+  assert.equal(await balance(f.client.ata(payee.publicKey, wsol)), held * 5_000n / 10_000n);
+  await failsWith(claimRow(0, payee.publicKey), /0x1797/, 'nothing more is owed yet');
+  const xOwner = Keypair.generate();
+  await failsWith(claimRow(1, xOwner.publicKey), /0x17a4/);
+  const bind = (who, row, wallet) => send(f.connection, who, [f.client.bindCreatorRow({ operator: who.publicKey, mint, row, wallet })], [], 1);
+  await failsWith(bind(f.outsider, 1, xOwner.publicKey), /0x1770/);
+  await failsWith(bind(keeper, 0, xOwner.publicKey), /0x17a3/, 'a wallet row is never rebound');
+  await bind(keeper, 1, xOwner.publicKey);
+  await failsWith(bind(keeper, 1, f.outsider.publicKey), /0x17a3/, 'bound once');
+  await failsWith(claimRow(1, f.outsider.publicKey), /0x17a3/, 'paid only to the bound wallet');
+  await claimRow(1, xOwner.publicKey);
+  assert.equal(await balance(f.client.ata(xOwner.publicKey, wsol)), held * 3_000n / 10_000n);
+  const v1 = f.client.decodeCreatorVault((await f.connection.getAccountInfo(f.client.creatorVaultFor(mint))).data);
+  assert.equal(creatorRowDue(v1, v1.rows[2], await balance(f.client.ata(f.client.creatorVaultFor(mint), wsol))), held * 2_000n / 10_000n, 'the website share is still held');
+
+  // Share with holders: the operator posts a funded round; each leaf pays once, to its own wallet.
+  const hMint = await launchWith({ mode: 1, threshold: 1_000n, minimumHolding: 1n });
+  const hHeld = await trade(hMint);
+  const [a, b] = [Keypair.generate().publicKey, Keypair.generate().publicKey];
+  const list = buildCreatorRound({ programId: f.programId, mint: hMint, round: 0, asset: wsol }, [[a, hHeld / 3n], [b, hHeld / 3n]]);
+  const postRound = (who, l, round = 0) => send(f.connection, who, [f.client.postCreatorRoot({ operator: who.publicKey, mint: hMint, payoutMint: wsol, round, root: l.root, total: l.total, recipients: l.recipients, manifestUri: 'ipfs://x' })], [], 1);
+  await failsWith(postRound(f.outsider, list), /0x1770/);
+  await failsWith(postRound(keeper, list, 1), /0x17a3/, 'rounds are posted in order');
+  await failsWith(postRound(keeper, { ...list, total: hHeld + 1n }), /0x179b/);
+  await postRound(keeper, list);
+  const claimLeaf = (row, over = {}) => send(f.connection, f.outsider, [f.client.claimCreator({ payer: f.outsider.publicKey, mint: hMint, payoutMint: wsol, round: 0, index: row.index, account: row.account, amount: row.amount, proof: row.proof, ...over })], [], 1);
+  await failsWith(claimLeaf(list.rows[0], { amount: list.rows[0].amount + 1n }), /0x179c/);
+  await claimLeaf(list.rows[0]);
+  await failsWith(claimLeaf(list.rows[0]), /0x179d/);
+  assert.equal(await balance(f.client.ata(a, wsol)), list.rows[0].amount);
+  const second = buildCreatorRound({ programId: f.programId, mint: hMint, round: 1, asset: wsol }, [[a, hHeld - list.total + 1n]]);
+  await failsWith(postRound(keeper, second, 1), /0x179b/, 'what round 0 still owes stays promised');
+
+  // Buy a reward token: the operator swaps the vault's SOL into USDC on Raydium, then pays a USDC round.
+  assert.ok(f.stable, 'the stablecoin test opened a WSOL/USDC pool');
+  const usdc = f.stable.usdc;
+  await failsWith(launchWith({ mode: 2, threshold: 1_000n, payoutMint: wsol }), /0x17a3/, 'a reward asset other than the pair asset');
+  const rMint = await launchWith({ mode: 2, threshold: 1_000n, payoutMint: usdc });
+  const rHeld = await trade(rMint);
+  const swap = (who, amountIn, minOut) => send(f.connection, who, [f.client.computeBudget(400_000), f.client.creatorSwapRaydium({ operator: who.publicKey, mint: rMint, quoteMint: wsol, payoutMint: usdc, pool: f.stable.pool, amountIn, minOut })], [], 1);
+  await failsWith(swap(f.outsider, rHeld, 1n), /0x1770/);
+  await failsWith(swap(keeper, rHeld + 1n, 1n), /0x17a3/);
+  await failsWith(swap(keeper, rHeld, 10n ** 15n), /0x1777|0x177e|Slippage|ExceededSlippage|custom program error/);
+  await swap(keeper, rHeld, 1n);
+  const got = await balance(f.client.ata(f.client.creatorVaultFor(rMint), usdc));
+  assert.ok(got > 0n, 'USDC bought');
+  const rList = buildCreatorRound({ programId: f.programId, mint: rMint, round: 0, asset: usdc }, [[b, got]]);
+  await send(f.connection, keeper, [f.client.postCreatorRoot({ operator: keeper.publicKey, mint: rMint, payoutMint: usdc, round: 0, root: rList.root, total: rList.total, recipients: 1, manifestUri: 'ipfs://y' })], [], 1);
+  await send(f.connection, f.outsider, [f.client.claimCreator({ payer: f.outsider.publicKey, mint: rMint, payoutMint: usdc, round: 0, ...rList.rows[0] })], [], 1);
+  assert.equal(await balance(f.client.ata(b, usdc)), got);
 });

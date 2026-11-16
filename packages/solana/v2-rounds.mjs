@@ -17,6 +17,12 @@ export function solanaPayoutLeaf({ programId, kind, round, asset }, { index, acc
   return keccak(keccak(concat([enc('elpida-v2'), keyBytes(programId), Uint8Array.of(kind), u32(round), keyBytes(asset), u32(index), keyBytes(account), u64(amount)])));
 }
 
+/** The program's `creator_leaf` (creator-vault rounds, 16 November 2026): keccak(keccak("elpida-creator" | program |
+ * mint | round | payout asset | index | account | amount)). */
+export function creatorPayoutLeaf({ programId, mint, round, asset }, { index, account, amount }) {
+  return keccak(keccak(concat([enc('elpida-creator'), keyBytes(programId), keyBytes(mint), u32(round), keyBytes(asset), u32(index), keyBytes(account), u64(amount)])));
+}
+
 /** The program's `verify_proof` (sorted pairs). */
 export function verifySolanaProof(proof, root, leaf) {
   let node = leaf;
@@ -28,7 +34,7 @@ export function verifySolanaProof(proof, root, leaf) {
  * Builds one round's list for one asset. `payouts`: [[account, amount]] (accounts are PublicKeys; amounts in base
  * units, all positive, each account once). Returns { root, total, recipients, rows: [{ index, account, amount, proof }] }.
  */
-export function buildSolanaRound({ programId, kind, round, asset }, payouts) {
+export function buildSolanaRound({ programId, kind, round, asset, leaf = solanaPayoutLeaf, mint }, payouts) {
   const rows = [...payouts].map(([account, amount], index) => ({ index, account, amount: BigInt(amount) }));
   if (!rows.length) throw new Error('A round needs at least one payout.');
   const seen = new Set();
@@ -38,7 +44,7 @@ export function buildSolanaRound({ programId, kind, round, asset }, payouts) {
     if (seen.has(k)) throw new Error(`Duplicate payee ${k}.`);
     seen.add(k);
   }
-  const leaves = rows.map(r => solanaPayoutLeaf({ programId, kind, round, asset }, r));
+  const leaves = rows.map(r => leaf({ programId, kind, round, asset, mint }, r));
   const layers = [leaves];
   while (layers.at(-1).length > 1) {
     const prev = layers.at(-1), next = [];
@@ -61,6 +67,11 @@ export function buildSolanaRound({ programId, kind, round, asset }, payouts) {
     recipients: rows.length,
     rows: rows.map(r => ({ ...r, proof: proofOf(r.index) })),
   };
+}
+
+/** A creator vault's round list (`post_creator_root`): as `buildSolanaRound`, leaves bound to the token's mint. */
+export function buildCreatorRound({ programId, mint, round, asset }, payouts) {
+  return buildSolanaRound({ programId, round, asset, mint, leaf: creatorPayoutLeaf }, payouts);
 }
 
 /** When `round` of a distributor ({ period, genesis }) starts: calendar months for period 0 (UTC), else fixed periods. */
