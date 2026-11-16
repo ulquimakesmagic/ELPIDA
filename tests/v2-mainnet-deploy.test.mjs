@@ -127,7 +127,10 @@ test('--node: the stock rehearsal runs on a dev node someone else started (as wi
   await rpc.send('hardhat_setCode', [keeper, '0xef0100' + '11'.repeat(20)]); rpc.destroy();
   // A record left by an earlier rehearsal of another plan (another test Safe) must not stop this one.
   writeFileSync(join(dir, 'node.rehearsal.json'), JSON.stringify({ planSha256: 'an earlier run', contracts: {}, txs: {} }));
-  const r = await rehearse({ plan, node: `http://${address}:${port}`, local: true, recordPath: join(dir, 'node.rehearsal.json'), stocks: [{ mock: true, price: 412.5 }] });
+  // The stock is held only by the Uniswap v4 PoolManager and no explorer is given: the PoolManager lends it on the fork.
+  const lines = [];
+  const r = await rehearse({ plan, node: `http://${address}:${port}`, local: true, recordPath: join(dir, 'node.rehearsal.json'), stocks: [{ mock: true, price: 412.5, inPoolManager: true }], log: m => lines.push(m) });
+  assert.ok(lines.some(m => /funded from the Uniswap v4 PoolManager/.test(m)), lines.join('\n'));
   assert.equal(r.checks.failed.length, 0, JSON.stringify(r.checks.failed));
   assert.ok(r.verified.every(c => c.ok));
   assert.ok(r.launch.startMcapUsd >= 20_000 * 0.999 && r.launch.startMcapUsd <= 20_000 * 1.002, `starts at $${r.launch.startMcapUsd}`);
@@ -155,5 +158,7 @@ test('blockscoutHolder prefers a plain wallet and falls back to a contract holde
   assert.equal(await find('0x00000000000000000000000000000000000000f0', 40n), wallet, 'a wallet with enough comes first');
   assert.equal(await find('0x00000000000000000000000000000000000000f0', 10n ** 6n), contract, 'otherwise a contract holder with enough');
   respond([{ address: { hash: wallet, is_contract: false } }]);
-  assert.equal(await find('0x00000000000000000000000000000000000000f0', 10n ** 6n), null);
+  await assert.rejects(find('0x00000000000000000000000000000000000000f0', 10n ** 6n), /none of the explorer's 1 listed holders has enough/);
+  globalThis.fetch = async () => ({ ok: false, status: 403 });
+  await assert.rejects(find('0x00000000000000000000000000000000000000f0', 1n), /HTTP 403/, 'says why the explorer gave nothing');
 });

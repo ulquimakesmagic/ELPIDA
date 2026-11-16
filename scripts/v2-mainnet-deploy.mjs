@@ -289,10 +289,11 @@ export async function rehearse({ plan: given, fork = null, node = null, local = 
       Object.assign(plan, { chainId: Number((await provider.getNetwork()).chainId), treasury: safe, keeper: addrs[3], guardian: addrs[4], poolManager: await deployMock('PoolManager', [addrs[0]]), usdFeed: await deployMock('MockUsdFeed', [2500n * 10n ** 8n]), usdc: await deployMock('MockUSDC', []) });
       if (usdcDecimals(plan) !== 6) await (await new Contract(plan.usdc, ['function setDecimals(uint8)'], signers[0]).setDecimals(usdcDecimals(plan))).wait();
       if (nativeSymbol(plan) !== 'ETH') await (await new Contract(plan.usdFeed, ['function setDescription(string)'], signers[0]).setDescription(`${nativeSymbol(plan)} / USD`)).wait();
-      // Local stand-ins for `{ mock: true, price }` stocks (tests): an issuer-controlled stock and its feed, held by signer 1.
+      // Local stand-ins for `{ mock: true, price }` stocks (tests): an issuer-controlled stock and its feed, held by signer 1
+      // (or, with `inPoolManager: true`, only by the PoolManager, to exercise the PoolManager fallback).
       for (const s of stocks.filter(x => x.mock)) {
-        s.address = await deployMock('MockIssuerStock', []); s.feed = await deployMock('MockUsdFeed', [BigInt(Math.round(s.price * 1e8))]); s.holder = addrs[1]; s.symbol = 'mSTK';
-        await (await new Contract(s.address, ['function mint(address,uint256)'], signers[0]).mint(addrs[1], 10n ** 24n)).wait();
+        s.address = await deployMock('MockIssuerStock', []); s.feed = await deployMock('MockUsdFeed', [BigInt(Math.round(s.price * 1e8))]); s.holder = s.inPoolManager ? null : addrs[1]; s.symbol = 'mSTK';
+        await (await new Contract(s.address, ['function mint(address,uint256)'], signers[0]).mint(s.inPoolManager ? plan.poolManager : addrs[1], 10n ** 24n)).wait();
         await (await new Contract(s.feed, ['function setDescription(string)'], signers[0]).setDescription('mSTK / USD')).wait();
       }
     } else if (!plan.treasury || !plan.keeper || !plan.guardian) {
@@ -360,9 +361,17 @@ export async function rehearseStock({ provider, signer, plan, record, art, stock
     await provider.waitForTransaction(await provider.send('eth_sendTransaction', [{ from: plan.treasury, to: record.contracts.factory, data: approve }]));
     // About $300 of the stock from an existing holder (fork only).
     const want = BigInt(Math.ceil(300 / priceUsd * 1e6)) * unit / 1_000_000n;
-    const holder = stock.holder ?? (findHolder ? await findHolder(stock.address, want) : null);
-    if (!holder) throw new Error('no holder to fund the test (set ELPIDA_STOCK_HOLDER_<SYMBOL>)');
-    await devRpc(provider, 'impersonateAccount', [holder]); await devRpc(provider, 'setBalance', [holder, '0x' + (10n ** 18n).toString(16)]);
+    // Who lends the stock on the fork: ELPIDA_STOCK_HOLDER_<SYMBOL>, else a holder from the explorer, else the Uniswap v4
+    // PoolManager (it holds every v4 pool's tokens, and the stocks trade in Uniswap pools on Base).
+    let holder = stock.holder ?? null; const why = [];
+    if (!holder && findHolder) { try { holder = await findHolder(stock.address, want); } catch (e) { why.push(String(e.message).slice(0, 120)); } }
+    if (!holder && plan.poolManager) {
+      if ((await token.balanceOf(plan.poolManager)) >= want) { holder = plan.poolManager; log(`  ${stock.symbol}: funded from the Uniswap v4 PoolManager (fork only)`); }
+      else why.push('the Uniswap v4 PoolManager holds too little');
+    }
+    if (!holder) throw new Error(`no holder to fund the test (${why.join('; ') || 'no explorer'}); set ELPIDA_STOCK_HOLDER_${String(stock.symbol).toUpperCase()}`);
+    // Gas for the lender, added to what it holds (the PoolManager's own ETH backs native pools on the fork).
+    await devRpc(provider, 'impersonateAccount', [holder]); await devRpc(provider, 'setBalance', [holder, '0x' + ((await provider.getBalance(holder)) + 10n ** 18n).toString(16)]);
     const data = new Interface(ERC20_RW).encodeFunctionData('transfer', [me, want]);
     await provider.waitForTransaction(await provider.send('eth_sendTransaction', [{ from: holder, to: stock.address, data }]));
     if ((await token.balanceOf(me)) < want) throw new Error('the holder transfer did not arrive (transfer restricted?)');
@@ -394,13 +403,13 @@ export async function rehearseStock({ provider, signer, plan, record, art, stock
 /** A holder of `address` with at least `want`, from a Blockscout explorer (read only; impersonated on the fork only). */
 export const blockscoutHolder = (explorer, provider) => async (address, want) => {
   const r = await fetch(`${explorer.replace(/\/$/, '')}/api/v2/tokens/${address}/holders`, { signal: AbortSignal.timeout(30000), headers: { accept: 'application/json' } });
-  if (!r.ok) return null;
+  if (!r.ok) throw new Error(`the explorer's holder list answered HTTP ${r.status}`);
   const token = new Contract(address, ERC20_RW, provider);
   // Plain wallets first; then contracts (every sampled holder of a Coinbase stock on Base was a contract). Both are only
   // impersonated on the local fork.
   const items = ((await r.json()).items ?? []).slice(0, 25), ordered = [...items.filter(it => !it.address?.is_contract), ...items.filter(it => it.address?.is_contract)];
   for (const it of ordered) { const a = it.address?.hash; if (a && await token.balanceOf(a) >= want) return a; }
-  return null;
+  throw new Error(`none of the explorer's ${items.length} listed holders has enough`);
 };
 
 export function deployerKey(input) {
