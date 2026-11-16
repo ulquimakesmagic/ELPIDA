@@ -10,11 +10,12 @@ import { keepFresh } from './creator-split.mjs';
 const MODE_NAMES = { allocation: 'Wallet, X and website allocations', holders: 'Share fees with holders', paired: 'Buy a reward token for holders' };
 
 export function solanaCreatorVaultCard(ctx, token) {
-  if (!String(token?.network ?? '').startsWith('solana') || !token?.solanaV2) return null;
+  const network = token?.network ?? ctx.wallet?.net?.key;
+  if (!String(network ?? '').startsWith('solana') || !token?.v2) return null;
   const decimals = Number(token.quoteDecimals ?? 9), symbol = token.quoteSymbol ?? 'SOL';
   const body = h('div.stack'), flow = h('div.stack'), error = h('p.error-text', { role: 'alert' }), title = h('h2.tk-h', icon('coins', 'icon-sm'), 'Creator rewards');
   const card = h('section.tk-card.tk-split.tk-alloc', { hidden: true, id: 'allocations', 'aria-label': 'Creator rewards' }, h('div.tk-alloc-head', title), body, flow, error);
-  const connected = () => !!ctx.wallet?.address && String(ctx.wallet?.net?.key ?? '') === token.network;
+  const connected = () => !!ctx.wallet?.address && String(ctx.wallet?.net?.key ?? '') === network;
   const fmt = (raw, d = decimals) => number(Number(BigInt(raw ?? 0)) / 10 ** d, 6);
   let busy = false;
   const act = async fn => { if (busy) return; busy = true; error.textContent = ''; try { await fn(); } catch (e) { error.textContent = errorText(e); } finally { busy = false; } };
@@ -24,7 +25,7 @@ export function solanaCreatorVaultCard(ctx, token) {
     flow.replaceChildren(h('p.small.muted', 'Getting a verification request…'));
     act(async () => {
       if (!connected()) throw new Error('Connect the Solana wallet that should receive this share.');
-      const c = await ctx.api('v2-identity/challenge', { network: token.network, vault: token.address, index: r.index, wallet: ctx.wallet.address, token: token.address });
+      const c = await ctx.api('v2-identity/challenge', { network, vault: token.address, index: r.index, wallet: ctx.wallet.address, token: token.address });
       const sign = () => ctx.wallet.signText(c.message);
       if (c.kind === 'domain') {
         flow.replaceChildren(h('p.small', `Add this TXT record to ${c.target}'s DNS, then check it. It proves you control the website; the share will pay ${short(ctx.wallet.address)}.`),
