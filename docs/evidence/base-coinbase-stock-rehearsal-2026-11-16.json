@@ -1,0 +1,183 @@
+{
+  "_note": "Fork rehearsal of the ELPIDA V2 contracts with the ten Coinbase Tokenized Stocks on Base mainnet (chain 8453), run by Malik on 16 November 2026 and transcribed from the console output. LOCAL FORK ONLY: nothing was sent to the public chain. B20 stocks are precompiles, so the fork ran on Foundry anvil 1.8.6 with --hardfork base:Cobalt (a Hardhat fork cannot execute them).",
+  "network": "base",
+  "chainId": 8453,
+  "date": "2026-11-16",
+  "result": "PASS",
+  "block": 58372950,
+  "blockNote": "Fork block of run-b (the eight stocks, read from that run's deployments/base-mainnet-stock-rehearsal.json forkBlock). Run-a (AAPLc, AMZNc) forked the latest block the same evening; its number was overwritten by run-b and is not recorded.",
+  "tool": "scripts/v2-mainnet-deploy.mjs rehearse --plan deployments/plans/base-mainnet.json --node http://127.0.0.1:8545 --stocks config/stocks/candidates/base-coinbase.json",
+  "fork": "anvil 1.8.6 --fork-url <Base mainnet RPC (Alchemy)> --hardfork base:Cobalt",
+  "runs": {
+    "run-a": {
+      "branch": "base-graduation-chunks",
+      "commit": "084b8ae",
+      "note": "AAPLc and AMZNc; the run then lost its Alchemy connection at GOOGLc (every B20 call failed with \"missing revert data\") and those stocks were re-run"
+    },
+    "run-b": {
+      "branch": "base-rehearse-only",
+      "commit": "e37cb16",
+      "note": "--only the other eight; anvil pinned to a block (--fork-block-number), --compute-units-per-second 100 --retries 10"
+    }
+  },
+  "deployment": "Each run deployed V2 (create2, factory, airdrop, holder, flywheel, hook, router) with a 2-of-2 test Safe and local wallets on the fork only, passed every preflight check against the real PoolManager, ETH/USD feed and USDC, launched at $20,005-20,015 and the guardian pause worked.",
+  "perStock": "Treasury approvePricedQuote(stock, Chainlink feed, maxAge 345600) by impersonation; about $300 lent by the Uniswap v4 PoolManager (fork only); launch paired with the stock, no first buy, $10 fee in ETH; after 61 s, buy with half and sell everything back; then buy past the x5 milestone with stock borrowed in chunks, check the launch is graduated, and sell and buy once more in the graduated pool.",
+  "stocks": [
+    {
+      "symbol": "AAPLc",
+      "address": "0xb200000000000000000000C2e324d24d7eEcd1fb",
+      "feed": "0x787f13dEa48Db0897CbCDD985de77809D837F988",
+      "run": "run-a",
+      "priceUsd": 351.96,
+      "startMcapUsd": 20002,
+      "roundTripReturnedPct": 97.51,
+      "graduated": true,
+      "raisedUsd": 30915,
+      "graduationChunks": 1,
+      "launchQuote": "ok",
+      "graduatedPool": "ok"
+    },
+    {
+      "symbol": "AMZNc",
+      "address": "0xb200000000000000000000d9192b6B456483C2E8",
+      "feed": "0x06A8E4b3aBB3B7543d8396FB2B763d22820cB295",
+      "run": "run-a",
+      "priceUsd": 257.69,
+      "startMcapUsd": 20008,
+      "roundTripReturnedPct": 97.51,
+      "graduated": true,
+      "raisedUsd": 30923,
+      "graduationChunks": 2,
+      "launchQuote": "ok",
+      "graduatedPool": "ok"
+    },
+    {
+      "symbol": "GOOGLc",
+      "address": "0xb2000000000000000000002D0BA3164cc74f58B7",
+      "feed": "0x5bF49E0ffA937CE2FfF033c739aD7C634c4D34F2",
+      "run": "run-b",
+      "priceUsd": 284.59,
+      "startMcapUsd": 20013,
+      "roundTripReturnedPct": 97.51,
+      "graduated": true,
+      "raisedUsd": 30931,
+      "graduationChunks": 1,
+      "launchQuote": "ok",
+      "graduatedPool": "ok"
+    },
+    {
+      "symbol": "METAc",
+      "address": "0xb2000000000000000000008bC8786B856E61707C",
+      "feed": "0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D",
+      "run": "run-b",
+      "priceUsd": 626.94,
+      "startMcapUsd": 20010,
+      "roundTripReturnedPct": 97.51,
+      "graduated": true,
+      "raisedUsd": 30927,
+      "graduationChunks": 1,
+      "launchQuote": "ok",
+      "graduatedPool": "ok"
+    },
+    {
+      "symbol": "MSFTc",
+      "address": "0xB200000000000000000000Ab99cFa739E253872B",
+      "feed": "0xeB10A6c9aa7E537aEd766C08c35Dae35B321b18c",
+      "run": "run-b",
+      "priceUsd": 518.22,
+      "startMcapUsd": 20001,
+      "roundTripReturnedPct": 97.51,
+      "graduated": true,
+      "raisedUsd": 30912,
+      "graduationChunks": 2,
+      "launchQuote": "ok",
+      "graduatedPool": "ok"
+    },
+    {
+      "symbol": "MSTRc",
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "feed": "0xB3cE282CD188b35DA0E38D8Bc7d58e33173D202a",
+      "run": "run-b",
+      "priceUsd": 102.96,
+      "startMcapUsd": 20018,
+      "roundTripReturnedPct": 97.51,
+      "graduated": true,
+      "raisedUsd": 30939,
+      "graduationChunks": 1,
+      "launchQuote": "ok",
+      "graduatedPool": "ok"
+    },
+    {
+      "symbol": "NVDAc",
+      "address": "0xb20000000000000000000078ee7ce2fE4908108C",
+      "feed": "0x04689a41629776563E6822F76f2e57D148d28513",
+      "run": "run-b",
+      "priceUsd": 157.18,
+      "startMcapUsd": 20019,
+      "roundTripReturnedPct": 97.51,
+      "graduated": true,
+      "raisedUsd": 30941,
+      "graduationChunks": 1,
+      "launchQuote": "ok",
+      "graduatedPool": "ok"
+    },
+    {
+      "symbol": "SNDKc",
+      "address": "0xb200000000000000000000397293Cb8cda9a10c5",
+      "feed": "0x388b0dC46C0Fb05A74BeE0994fa5b02c6Fcca2eA",
+      "run": "run-b",
+      "priceUsd": 814.1,
+      "startMcapUsd": 20015,
+      "roundTripReturnedPct": 97.51,
+      "graduated": true,
+      "raisedUsd": 30934,
+      "graduationChunks": 5,
+      "launchQuote": "ok",
+      "graduatedPool": "ok"
+    },
+    {
+      "symbol": "SPCXc",
+      "address": "0xb2000000000000000000007b9fcbd005511aCBd5",
+      "feed": "0x6A634B235903C4ad6376892180d6fF8612e3Fa68",
+      "run": "run-b",
+      "priceUsd": 136.88,
+      "startMcapUsd": 20013,
+      "roundTripReturnedPct": 97.51,
+      "graduated": true,
+      "raisedUsd": 30932,
+      "graduationChunks": 1,
+      "launchQuote": "ok",
+      "graduatedPool": "ok"
+    },
+    {
+      "symbol": "TSLAc",
+      "address": "0xb2000000000000000000001e800a7f5189430cD0",
+      "feed": "0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4",
+      "run": "run-b",
+      "priceUsd": 379.05,
+      "startMcapUsd": 20006,
+      "roundTripReturnedPct": 97.51,
+      "graduated": true,
+      "raisedUsd": 30921,
+      "graduationChunks": 2,
+      "launchQuote": "ok",
+      "graduatedPool": "ok"
+    }
+  ],
+  "notChecked": [
+    "written confirmation from Coinbase (none obtained)",
+    "issuer transfer-policy changes or pauses (the fork used the policies in force at the fork block)",
+    "feed descriptions (checked by scripts/stock-list.mjs before the Safe approves the list)",
+    "reward conversion and distribution in a stock"
+  ],
+  "checks": [
+    "V2 deploy on the fork with a 2-of-2 test Safe: every preflight check passed against the real Uniswap v4 PoolManager, Chainlink ETH/USD feed and USDC",
+    "the Safe batch wired the hook, USD pricing, USDC at $25,000 virtual, the guardian and the daily launch cap",
+    "a native ETH launch started at $20,000 and the guardian pause stopped launches",
+    "each of the ten stocks: symbol and Chainlink feed read, treasury approvePricedQuote with maxAge 345600",
+    "each: a launch paired with the stock started within 0.1% of $20,000",
+    "each: after the 60 s anti-snipe window, a buy with the stock and a full sell returned 97.51% after both fees",
+    "each: buying past the x5 milestone graduated the launch, raising $30,912 to $30,941 into the locked pool",
+    "each: a sell and a buy then traded in the graduated pool"
+  ]
+}

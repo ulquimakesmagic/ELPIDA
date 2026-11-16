@@ -18,15 +18,15 @@ Code: `getAsset(network, provider, address)` throws if the provider is not expli
 
 ## Verified capability matrix
 
-"Documented" means a provider page says something relevant. "Verified" would mean we tested it against the real contracts and have written provider confirmation. **Nothing is verified**, so every cell is OFF in code. The matrix records what stands in the way.
+"Documented" means a provider page says something relevant. "Verified" means we tested it against the real contracts and have written provider confirmation. The one exception so far: on 16 November 2026 Malik accepted a fork rehearsal against the real Base contracts, without written confirmation from Coinbase, as the verification for the Coinbase stocks' **launch quote** and **graduated pool** (`docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json`; the registry's `verification` records say so). Every cell is still OFF in code until the global flag and that capability's flag are set, and the production guard refuses those flags for the mainnet beta. The matrix records what stands in the way.
 
 Legend: ? = unknown from the pages read. The six capabilities are independent flags per asset.
 
 | Capability | Ethereum / Solana (xStocks) | Robinhood Chain | BNB (bStocks) | Base (Coinbase) |
 |---|---|---|---|---|
-| Launch quote reserve | OFF. Addresses not retrievable; transfer rules for non-whitelisted contracts ? | OFF. Addresses only in a live onchain table; chain id ? | OFF. No address list found | OFF. Addresses published; issuer transfer policy must allow the curve contract (`isAuthorized`) |
+| Launch quote reserve | OFF. Addresses not retrievable; transfer rules for non-whitelisted contracts ? | OFF. Addresses only in a live onchain table; chain id ? | OFF. No address list found | Fork-verified 16 Nov 2026 (all ten: launch at $20,000, buy and full sell returned 97.51%); OFF until flagged. Issuer policies can still change |
 | Secondary trading | OFF. Third-party venues exist (Luno); DEX status ? | OFF. DEX availability ? | OFF. Binance spot documented; DEX ? | OFF. Page names Aerodrome, 1inch, 0x, Aave etc.; not tested by us |
-| Graduated pool | OFF. Solana: PumpSwap refuses permanent-delegate mints; Meteora DAMM v2 path unbuilt | OFF. No known pool venue | OFF. PancakeSwap tradability ? | OFF. Raw-balance pool accounting vs multiplier untested |
+| Graduated pool | OFF. Solana: PumpSwap refuses permanent-delegate mints; Meteora DAMM v2 path unbuilt | OFF. No known pool venue | OFF. PancakeSwap tradability ? | Fork-verified 16 Nov 2026 (all ten graduated at ×5, raising about $30,930 each, and traded after); OFF until flagged |
 | Reward conversion | OFF. Needs a verified pool and a fresh price | OFF | OFF | OFF. Chainlink feeds exist and are documented |
 | Reward distribution | OFF. Whitelisting of recipient wallets ? | OFF. Sequencer filtering and pause roles | OFF. Issuer rules ? | OFF. Blocklist policy can revert transfers; handled by the ledger |
 | Issuance / redemption | Not an Elpida feature. KYC/AML, whitelisted wallets, 24/5 | Not an Elpida feature. Authorised Participants (KYB), Mon 02:00 to Sat 02:00 CET | Not an Elpida feature. Via Binance | Not an Elpida feature. Authorized Participants only |

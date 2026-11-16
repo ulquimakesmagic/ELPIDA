@@ -2566,7 +2566,188 @@
       "verified": false
     }
   ],
-  "verification": [],
+  "verification": [
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "launchQuote",
+      "address": "0xb200000000000000000000C2e324d24d7eEcd1fb",
+      "symbol": "AAPLc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): a V2 launch paired with AAPLc started at $20,002; a buy and full sell returned 97.51% after both fees. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "graduatedPool",
+      "address": "0xb200000000000000000000C2e324d24d7eEcd1fb",
+      "symbol": "AAPLc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): the AAPLc-paired curve graduated at the x5 milestone, raising $30,915 of AAPLc into the locked pool, and traded in the graduated pool. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "launchQuote",
+      "address": "0xb200000000000000000000d9192b6B456483C2E8",
+      "symbol": "AMZNc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): a V2 launch paired with AMZNc started at $20,008; a buy and full sell returned 97.51% after both fees. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "graduatedPool",
+      "address": "0xb200000000000000000000d9192b6B456483C2E8",
+      "symbol": "AMZNc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): the AMZNc-paired curve graduated at the x5 milestone, raising $30,923 of AMZNc into the locked pool, and traded in the graduated pool. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "launchQuote",
+      "address": "0xb2000000000000000000002D0BA3164cc74f58B7",
+      "symbol": "GOOGLc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): a V2 launch paired with GOOGLc started at $20,013; a buy and full sell returned 97.51% after both fees. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "graduatedPool",
+      "address": "0xb2000000000000000000002D0BA3164cc74f58B7",
+      "symbol": "GOOGLc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): the GOOGLc-paired curve graduated at the x5 milestone, raising $30,931 of GOOGLc into the locked pool, and traded in the graduated pool. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "launchQuote",
+      "address": "0xb2000000000000000000008bC8786B856E61707C",
+      "symbol": "METAc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): a V2 launch paired with METAc started at $20,010; a buy and full sell returned 97.51% after both fees. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "graduatedPool",
+      "address": "0xb2000000000000000000008bC8786B856E61707C",
+      "symbol": "METAc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): the METAc-paired curve graduated at the x5 milestone, raising $30,927 of METAc into the locked pool, and traded in the graduated pool. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "launchQuote",
+      "address": "0xB200000000000000000000Ab99cFa739E253872B",
+      "symbol": "MSFTc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): a V2 launch paired with MSFTc started at $20,001; a buy and full sell returned 97.51% after both fees. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "graduatedPool",
+      "address": "0xB200000000000000000000Ab99cFa739E253872B",
+      "symbol": "MSFTc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): the MSFTc-paired curve graduated at the x5 milestone, raising $30,912 of MSFTc into the locked pool, and traded in the graduated pool. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "launchQuote",
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "symbol": "MSTRc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): a V2 launch paired with MSTRc started at $20,018; a buy and full sell returned 97.51% after both fees. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "graduatedPool",
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "symbol": "MSTRc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): the MSTRc-paired curve graduated at the x5 milestone, raising $30,939 of MSTRc into the locked pool, and traded in the graduated pool. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "launchQuote",
+      "address": "0xb20000000000000000000078ee7ce2fE4908108C",
+      "symbol": "NVDAc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): a V2 launch paired with NVDAc started at $20,019; a buy and full sell returned 97.51% after both fees. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "graduatedPool",
+      "address": "0xb20000000000000000000078ee7ce2fE4908108C",
+      "symbol": "NVDAc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): the NVDAc-paired curve graduated at the x5 milestone, raising $30,941 of NVDAc into the locked pool, and traded in the graduated pool. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "launchQuote",
+      "address": "0xb200000000000000000000397293Cb8cda9a10c5",
+      "symbol": "SNDKc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): a V2 launch paired with SNDKc started at $20,015; a buy and full sell returned 97.51% after both fees. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "graduatedPool",
+      "address": "0xb200000000000000000000397293Cb8cda9a10c5",
+      "symbol": "SNDKc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): the SNDKc-paired curve graduated at the x5 milestone, raising $30,934 of SNDKc into the locked pool, and traded in the graduated pool. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "launchQuote",
+      "address": "0xb2000000000000000000007b9fcbd005511aCBd5",
+      "symbol": "SPCXc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): a V2 launch paired with SPCXc started at $20,013; a buy and full sell returned 97.51% after both fees. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "graduatedPool",
+      "address": "0xb2000000000000000000007b9fcbd005511aCBd5",
+      "symbol": "SPCXc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): the SPCXc-paired curve graduated at the x5 milestone, raising $30,932 of SPCXc into the locked pool, and traded in the graduated pool. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "launchQuote",
+      "address": "0xb2000000000000000000001e800a7f5189430cD0",
+      "symbol": "TSLAc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): a V2 launch paired with TSLAc started at $20,006; a buy and full sell returned 97.51% after both fees. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    },
+    {
+      "network": "base",
+      "provider": "coinbase",
+      "capability": "graduatedPool",
+      "address": "0xb2000000000000000000001e800a7f5189430cD0",
+      "symbol": "TSLAc",
+      "verifiedAt": "2026-11-16",
+      "evidence": "Fork rehearsal on Base mainnet (anvil, base:Cobalt): the TSLAc-paired curve graduated at the x5 milestone, raising $30,921 of TSLAc into the locked pool, and traded in the graduated pool. docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json. Local fork only; no written provider confirmation (fork evidence accepted by Malik, 16 Nov)."
+    }
+  ],
   "graduation": {
     "rule": "on-completion",
     "decidedBy": "Malik",
