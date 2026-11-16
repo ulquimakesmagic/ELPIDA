@@ -11,6 +11,24 @@
 > `contracts, unit and full suite` and `solana program` checks on `main`; (2) create a Safe on Base for the treasury
 > and pick a guardian wallet for the launch stop; (3) a fresh, separate Base keeper key.
 
+## Base mainnet: no tokenized-stock pairs at launch, 16 November 2026
+
+Neither Ondo (docs.ondo.finance/addresses: Ethereum, BNB Chain, HyperEVM, Robinhood Chain, Solana) nor xStocks issues
+stocks on Base, so new Base mainnet launches pair with ETH or USDC only (`STOCK_PAIRS_OFF` in packages/core/pairs.mjs).
+The launch flow hides the stock pair and stock reward assets on chain 8453, the wallet refuses a stock-paired launch,
+the operator panel refuses stock approvals, and `scripts/stock-list.mjs base` exits. Base Sepolia keeps its test
+stocks.
+
+**Decided (Malik, 16 Nov): Base uses Coinbase Tokenized Stocks** (10 B20 tokens with Chainlink total-return feeds; no
+adapter needed, `approvePricedQuote` takes them directly). To turn them on:
+1. You: a Base mainnet archive RPC (Alchemy free tier), then the fork rehearsal, which spends nothing:
+   `node scripts/v2-mainnet-deploy.mjs rehearse --plan deployments/plans/base-mainnet.json --fork <rpc> --stocks config/stocks/candidates/base-coinbase.json`
+   Send Claude the output.
+2. Claude: record the rehearsal as evidence in config/tokenized-equity-registry.json (launchQuote, graduatedPool) and
+   remove the 8453 entry from `STOCK_PAIRS_OFF`.
+3. You: `STOCK_LIST_RPC_URL=<rpc> node scripts/stock-list.mjs base config/stocks/candidates/base-coinbase.json`, then
+   approve the list from the Base Safe after the Base mainnet deploy.
+
 ## Solana devnet: creator vaults (splits, X and website allocations, holder strategies), 16 November 2026
 
 A program upgrade. A V2 launch can now send the creator's 30% to a creator vault fixed at launch: split between up to 8

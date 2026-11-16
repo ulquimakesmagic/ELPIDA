@@ -13,8 +13,11 @@ export const STOCK_FEED_MAX_AGE = 4 * 86_400;
 const TOKEN_ABI = ['function symbol() view returns(string)', 'function decimals() view returns(uint8)'];
 const FEED_ABI = ['function decimals() view returns(uint8)', 'function description() view returns(string)', 'function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)'];
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
-/** "TSLAon" → "TSLA": the underlying ticker, for matching the feed's description ("TSLAon / USD" or "TSLA / USD"). */
-export const underlying = symbol => String(symbol).replace(/on$/, '').toUpperCase();
+/**
+ * "TSLAon" → "TSLA" (Ondo) and "NVDAc" → "NVDA" (Coinbase on Base): the underlying ticker, for matching the feed's
+ * description ("TSLAon / USD", "NVDAc / USD" or "TSLA / USD"). Only a lower-case suffix is removed, so "BAC" stays "BAC".
+ */
+export const underlying = symbol => String(symbol).replace(/(on|c)$/, '').toUpperCase();
 
 /**
  * Checks one candidate { symbol, name?, address, feed, maxAge? } on chain. `Contract` and `provider` are ethers'.
@@ -35,7 +38,7 @@ export async function verifyStock({ Contract, provider, now }, c) {
     if (onSymbol !== symbol) return fail(`the token's symbol is ${onSymbol}, not ${symbol}`);
     if (Number(decimals) < 6 || Number(decimals) > 18) return fail(`unsupported decimals ${decimals}`);
     if (Number(feedDecimals) > 18) return fail(`unsupported feed decimals ${feedDecimals}`);
-    if (!new RegExp(`(^|[^A-Z])${underlying(symbol).replace('.', '\\.')}(ON)?\\s*/\\s*USD`, 'i').test(description)) return fail(`the feed is "${description}", not ${underlying(symbol)} / USD`);
+    if (!new RegExp(`(^|[^A-Z])${underlying(symbol).replace('.', '\\.')}(ON|C)?\\s*/\\s*USD`, 'i').test(description)) return fail(`the feed is "${description}", not ${underlying(symbol)} / USD`);
     const [id, answer, , updatedAt, answered] = round;
     if (!(answer > 0n) || !(id > 0n) || answered < id || Number(updatedAt) <= 0 || Number(updatedAt) > now + 60) return fail('the feed has no valid answer');
     return { ok: true, stock: { symbol, name: c.name ?? null, address: c.address, decimals: Number(decimals), feed: c.feed, feedDecimals: Number(feedDecimals), feedDescription: description, maxAge,

@@ -76,6 +76,18 @@ export const PAIR_LIMITS = {
 };
 
 /**
+ * Mainnet chains where new launches may not pair with, or reward holders in, a tokenized stock (Malik, 16 November
+ * 2026). Keyed by chain id. Base: neither Ondo (docs.ondo.finance/addresses) nor xStocks issues there, so stock pairing
+ * stays out of the launch flow until a provider is chosen and verified. The code stays; only the launch flow hides it.
+ * Testnets (Base Sepolia's labelled test stocks) are unaffected.
+ */
+export const STOCK_PAIRS_OFF = Object.freeze({
+  8453: 'Tokenized stock pairs are not offered on Base yet. Choose ETH or USDC; stock pairs come to Base once a stock provider there is verified.',
+});
+/** Why new stock-paired launches are off on this chain id, or null when they are allowed. */
+export function stockPairsOff(chainId) { return STOCK_PAIRS_OFF[Number(chainId)] ?? null; }
+
+/**
  * Designated tokenized-stock provider per network (mainnet and test keys). One provider each; there is no
  * fallback to another. Live capabilities are tracked in config/tokenized-equity-registry.json and are off
  * until verified. Display names only; nothing here implies a partnership.

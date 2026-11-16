@@ -122,7 +122,7 @@ export function renderPairs(ctx, { connect }) {
 
     const view = loadRegistry(net.key), approvedSet = new Set(approved.map(a => a.address.toLowerCase()));
     const stockRows = (view?.assets ?? []).map(record => {
-      const done = approvedSet.has(record.address), gate = done ? null : stockApprovalGate(record, { mainnet: true }) ?? (net.mainnet ? null : 'Mainnet only.');
+      const done = approvedSet.has(record.address), gate = done ? null : stockApprovalGate(record, { mainnet: true, chainId: net.chainId }) ?? (net.mainnet ? null : 'Mainnet only.');
       return h('tr', h('td', h('span.op-net', assetIcon(record.symbol, true, { provider: 'ondo', name: record.underlying }), record.symbol)), h('td.small', record.underlying),
         h('td', done ? h('span.op-pill.op-ok', 'approved') : gate ? h('span.op-pill.op-warn', { title: gate }, 'blocked') : h('span.op-pill.op-ok', 'ready')),
         h('td.small.muted', done ? '' : gate ?? ''),
