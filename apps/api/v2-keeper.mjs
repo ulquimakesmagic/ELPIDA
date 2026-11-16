@@ -1,4 +1,4 @@
-// ELPIDA V2.0 keeper (test networks only until the V2 contracts are audited and Malik approves mainnet). One worker
+// ELPIDA V2.0 keeper (test networks; on the mainnet site, fee collection and creator rewards only). One worker
 // per network with a pinned V2 deployment, signing with the dedicated keeper key (ELPIDA_V2_KEEPER_KEY), which is the
 // operator of the distributors and the flywheel vault. It never holds reward funds; it only:
 //  - pays every V2 token's fees into the five recipients, daily (hook.withdrawFees; anyone may call it);
@@ -13,6 +13,7 @@ import { airdropRound, holderRound, flywheelOrders, personalFunder, boundedFunde
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { testnetDexes } from '../../packages/core/uniswap.mjs';
 import { payoutStable } from '../../packages/core/payout-stable.mjs';
+import { serverRpcUrl } from '../../packages/core/mainnets.mjs';
 import { holderDistribution } from '../web/reward-policy.mjs';
 import { KeeperLease, safeError } from '../../packages/core/keeper-lease.mjs';
 
@@ -652,22 +653,31 @@ export function etherscanFunder(chainId, apiKey, fetchImpl = fetch) {
 }
 
 /**
- * The server's keeper: on only with ELPIDA_V2_KEEPER_KEY, on test networks with a pinned V2 deployment. Funding links
+ * The server's keeper: on only with ELPIDA_V2_KEEPER_KEY, on networks with a pinned V2 deployment. Funding links
  * need ELPIDA_EXPLORER_API_KEY (Etherscan multichain); without it only creator transfers link wallets.
+ * On the mainnet site (17 Nov) the networks are mainnets: the keeper runs as 'mainnet' (fee collection and creator
+ * rewards only; distributions stay off), uses the private RPC, and skips a network whose plan names another keeper.
  */
 export function configuredV2Keeper({ env, networks, indexFor, prices, path, publicUrl, log }) {
   const key = env.ELPIDA_V2_KEEPER_KEY;
-  const nets = networks.filter(n => !n.mainnet && n.v2?.shared?.hook && n.v2.shared.airdrop);
   const valid = !!key && /^(0x)?[0-9a-fA-F]{64}$/.test(key);
+  const pinned = networks.filter(n => n.v2?.shared?.hook && n.v2.shared.airdrop), mainnet = pinned.some(n => n.mainnet);
+  if (mainnet && pinned.some(n => !n.mainnet)) throw new Error('The V2 keeper runs either test networks or mainnets, not both.');
+  const own = valid ? lower(new Wallet(key).address) : null;
+  const nets = pinned.filter(n => {
+    if (!n.mainnet) return true;
+    if (own && lower(n.v2.shared.keeper ?? '') === own) return true;
+    log?.({ event: 'v2_keeper_skipped', chain: n.key, reason: 'ELPIDA_V2_KEEPER_KEY is not the keeper named in the deployment plan' }); return false;
+  });
   // With the key set but no V2 pinned yet, the keeper is idle but its address is public, so the operator panel deploys
   // the reward contracts with the keeper as operator (not the operator's own wallet).
   const idleAddress = valid ? getAddress(new Wallet(key).address) : null;
   if (!valid || !nets.length) return { enabled: false, address: idleAddress, status: () => ({ enabled: false, state: valid ? 'waiting_for_v2_deployment' : 'not_configured', keeper: idleAddress }), manifest: () => null, start() { return this; }, close: async () => {} };
-  const address = new Wallet(key).address, oracles = usdOracles(env);
+  const address = new Wallet(key).address, oracles = usdOracles(env, nets);
   // Extra exchange or service wallets that must never link the wallets they fund (comma-separated addresses).
   const ignoredFunders = new Set(String(env.ELPIDA_FUNDER_IGNORE ?? '').split(',').map(x => x.trim().toLowerCase()).filter(x => /^0x[0-9a-f]{40}$/.test(x)));
   const workers = nets.map(net => {
-    const provider = new JsonRpcProvider(net.rpcUrl, undefined, { cacheTimeout: -1, batchMaxCount: 1 }), d = net.v2.shared;
+    const provider = new JsonRpcProvider(serverRpcUrl(net, env), undefined, { cacheTimeout: -1, batchMaxCount: 1 }), d = net.v2.shared;
     return { chain: net.key, net, provider, signer: Object.assign(new NonceManager(new Wallet(key, provider)), { address }), deployment: { ...d, poolManager: net.v4?.poolManager },
       dex: testnetDexes[net.key]?.enabled ? testnetDexes[net.key] : null, usdc: payoutStable(net, oracles)?.address ?? null,
       index: () => indexFor(net.key), funderOf: env.ELPIDA_EXPLORER_API_KEY ? etherscanFunder(net.chainId, env.ELPIDA_EXPLORER_API_KEY) : null, ignoredFunders,
@@ -679,8 +689,9 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
   // and the distributions switch (default on for test networks; the first mainnet release keeps them off).
   const conf = Number(env.ELPIDA_KEEPER_CONFIRMATIONS), confirmations = Number.isInteger(conf) && conf >= 1 && conf <= 64 ? conf : undefined;
   const dailyGas = /^\d+(\.\d{1,18})?$/.test(String(env.ELPIDA_V2_KEEPER_DAILY_GAS ?? '')) ? parseEther(env.ELPIDA_V2_KEEPER_DAILY_GAS) : undefined;
-  const distributions = env.ELPIDA_V2_DISTRIBUTIONS === 'off' ? false : env.ELPIDA_V2_DISTRIBUTIONS === 'on' ? true : undefined;
-  const keeper = new V2Keeper({ workers, path, publicUrl, log, gasTarget, gasShareBps, confirmations, dailyGas, ...(distributions === undefined ? {} : { distributions }) });
+  // The first mainnet release never distributes, whatever ELPIDA_V2_DISTRIBUTIONS says (the production guard refuses 'on').
+  const distributions = mainnet ? false : env.ELPIDA_V2_DISTRIBUTIONS === 'off' ? false : env.ELPIDA_V2_DISTRIBUTIONS === 'on' ? true : undefined;
+  const keeper = new V2Keeper({ workers, path, publicUrl, log, gasTarget, gasShareBps, confirmations, dailyGas, network: mainnet ? 'mainnet' : 'testnet', ...(distributions === undefined ? {} : { distributions }) });
   keeper.enabled = true; keeper.address = getAddress(address);
   return keeper;
 }

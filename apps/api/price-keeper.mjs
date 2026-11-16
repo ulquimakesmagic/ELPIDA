@@ -1,22 +1,24 @@
 // Display prices never authorize a payment. EVM factories independently validate their USD oracle.
 import { Interface } from 'ethers';
 import { evmTestnets } from '../../packages/core/networks.mjs';
+import { serverRpcUrl } from '../../packages/core/mainnets.mjs';
 import {parsePriceUpdate,PYTH_RECEIVER} from '../../packages/solana/client.mjs';
 import { usdOracles,SOLANA_ORACLES } from '../../packages/core/usd-oracles.mjs';
 const oracleAbi=new Interface(['function decimals() view returns(uint8)','function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)']);
 export const PRICE_MAX_AGE = 180;
-export const CHAIN_ASSET = Object.freeze({local:'ETH','base-sepolia':'ETH','ethereum-sepolia':'ETH','bnb-testnet':'BNB','robinhood-testnet':'ETH','solana-devnet':'SOL','solana-localnet':'SOL','solana-mainnet':'SOL'});
+export const CHAIN_ASSET = Object.freeze({local:'ETH','base-sepolia':'ETH','ethereum-sepolia':'ETH','bnb-testnet':'BNB','robinhood-testnet':'ETH','solana-devnet':'SOL','solana-localnet':'SOL','solana-mainnet':'SOL','base-mainnet':'ETH'});
 export function validatePrice(value, now = Date.now()/1000) {
   const usd=Number(value?.usd), updatedAt=Number(value?.updatedAt);
   if(!Number.isFinite(usd)||usd<=0||!Number.isSafeInteger(updatedAt)||updatedAt<=0||updatedAt>now+5||now-updatedAt>(value.maxAge??PRICE_MAX_AGE))throw new Error('Price is unavailable or stale.');
   return {...value,usd,updatedAt};
 }
 export class PriceKeeper {
-  constructor({fetcher=fetch,now=()=>Date.now()/1000,pythApiKey=process.env.PYTH_API_KEY,oracles=usdOracles()}={}){this.fetcher=fetcher;this.now=now;this.pythApiKey=pythApiKey;this.oracles=oracles;this.values={};this.chainValues={};this.ids={};this.lastAttempt=-Infinity;}
+  // `networks`: the EVM networks this server runs (testnets, or the mainnets on the mainnet site); `env` for private RPCs.
+  constructor({fetcher=fetch,now=()=>Date.now()/1000,pythApiKey=process.env.PYTH_API_KEY,networks=evmTestnets,env=process.env,oracles=usdOracles(env,networks)}={}){this.fetcher=fetcher;this.now=now;this.pythApiKey=pythApiKey;this.networks=networks;this.env=env;this.oracles=oracles;this.values={};this.chainValues={};this.ids={};this.lastAttempt=-Infinity;}
   async json(url){const headers=url.startsWith('https://pyth.dourolabs.app/')?{Authorization:'Bearer '+this.pythApiKey}:undefined;const r=await this.fetcher(url,{headers,signal:AbortSignal.timeout(8000)});if(!r.ok)throw new Error('Price source unavailable');return r.json();}
   async readOracle(net){
     const oracle=this.oracles[net.key];if(!oracle?.available)return;
-    const r=await this.fetcher(net.rpcUrl,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(['latestRoundData','decimals'].map((name,i)=>({id:i,jsonrpc:'2.0',method:'eth_call',params:[{to:oracle.feed,data:oracleAbi.encodeFunctionData(name)},'latest']}))),signal:AbortSignal.timeout(8000)});
+    const r=await this.fetcher(serverRpcUrl(net,this.env),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(['latestRoundData','decimals'].map((name,i)=>({id:i,jsonrpc:'2.0',method:'eth_call',params:[{to:oracle.feed,data:oracleAbi.encodeFunctionData(name)},'latest']}))),signal:AbortSignal.timeout(8000)});
     if(!r.ok)throw new Error('RPC unavailable');const data=await r.json();
     const round=oracleAbi.decodeFunctionResult('latestRoundData',data.find(x=>x.id===0)?.result),d=Number(oracleAbi.decodeFunctionResult('decimals',data.find(x=>x.id===1)?.result)[0]);
     if(round[0]<=0n||round[1]<=0n||round[4]<round[0]||d>18)throw new Error('Invalid oracle');
@@ -58,7 +60,7 @@ export class PriceKeeper {
         const data=await this.json(`https://api.coingecko.com/api/v3/simple/price?ids=${missing.map(s=>names[s]).join(',')}&vs_currencies=usd&include_last_updated_at=true`);
         for(const s of missing){try{this.values[s]=validatePrice({symbol:s,usd:data[names[s]]?.usd,updatedAt:data[names[s]]?.last_updated_at,source:'CoinGecko'},this.now());}catch{}}
       }catch{}}
-      await Promise.allSettled([...evmTestnets.map(net=>this.readOracle(net)),this.readSolanaOracle()]);
+      await Promise.allSettled([...this.networks.map(net=>this.readOracle(net)),this.readSolanaOracle()]);
       return this.snapshot();
     })();
     try{return await this.pending;}finally{this.pending=null;}

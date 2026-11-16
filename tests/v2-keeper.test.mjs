@@ -145,7 +145,7 @@ test('with the key set and no V2 pinned yet, the keeper is idle but its address 
   assert.equal(bad.address, null);
   const pinned = configuredV2Keeper({ env: { ELPIDA_V2_KEEPER_KEY: key }, networks: [{ ...net, v2: { shared: { hook: A(1), airdrop: A(2), holder: A(3), flywheel: A(4), router: A(5), factory: A(6) } } }], indexFor: () => null, prices: () => ({}), path: ':memory:' });
   assert.equal(pinned.enabled, true); assert.equal(pinned.address, idle.address);
-  assert.equal(configuredV2Keeper({ env: { ELPIDA_V2_KEEPER_KEY: key }, networks: [{ ...net, mainnet: true, v2: { shared: { hook: A(1), airdrop: A(2) } } }], indexFor: () => null, prices: () => ({}), path: ':memory:' }).enabled, false, 'never on mainnet');
+  assert.equal(configuredV2Keeper({ env: { ELPIDA_V2_KEEPER_KEY: key }, networks: [{ ...net, mainnet: true, v2: { shared: { hook: A(1), airdrop: A(2) } } }], indexFor: () => null, prices: () => ({}), path: ':memory:' }).enabled, false, 'never on a mainnet whose deployment names no keeper (tests/mainnet-site.test.mjs covers the named keeper)');
 });
 
 test('keeper status: each job\'s latest run, with the error text when it failed', async () => {

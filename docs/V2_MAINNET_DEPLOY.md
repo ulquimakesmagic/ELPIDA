@@ -70,8 +70,8 @@ Safe app → Apps → Transaction Builder → load `base-mainnet-safe-batch.json
 ELPIDA_MAINNET_RPC_URL=<Base RPC> node scripts/v2-mainnet-deploy.mjs verify --plan deployments/plans/base-mainnet.json
 ```
 
-When the record says `"status": "ready"`, the site's network entry is added in a separate PR (mainnet labels, the
-keeper with `ELPIDA_V2_DISTRIBUTIONS` unset so distributions stay off, the deploy block for the indexer).
+When the record says `"status": "ready"`, commit `deployments/base-mainnet.json`: the mainnet site (`ELPIDA_MODE=mainnet`,
+`docs/MAINNET_SITE.md`) lists Base from the record alone (V2 contracts, deploy block, keeper; distributions stay off).
 
 ## 7. Publish the source on BaseScan
 
