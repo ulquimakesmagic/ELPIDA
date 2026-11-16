@@ -363,7 +363,7 @@ export class SolanaWallet {
       // Cost to finish the curve at the base fee (what it costs once the anti-snipe minute is over).
       const remainingBuy = complete ? 0n : quoteBuy(pool, MAX_U64, ownFeeBps(config, pool), ownFeeBps(config, pool)).gross;
       const token = {
-        address, pool: pool.pubkey.toBase58(), name: pool.name, symbol: pool.symbol, creator: pool.creator.toBase58(), reward: pool.reward.toBase58(),
+        address, pool: pool.pubkey.toBase58(), config: pool.config.toBase58(), name: pool.name, symbol: pool.symbol, creator: pool.creator.toBase58(), reward: pool.reward.toBase58(),
         created: Number(pool.createdAt)*1000, metadata:await readMetadata(metadataKey(this.deployment.programId,address)), migrationPending:false, pair: config.kind ?? 'native', url: this.addressUrl(address), decimals: TOKEN_DECIMALS, quoteSymbol: config.symbol, quoteDecimals: d, dex: this.venueOf(config), usdReference: config.wsol ? this.price : config.usdReference ?? usdReferenceFor({ pair: config.kind ?? 'native' }, null),
         reserve: formatAmount(pool.realQuote, d), liquidityBonus: formatAmount(pool.liquidityBonus, d), lockedLiquidity: formatAmount(stats.lockedLiquidity, d),
         sold: formatAmount(pool.sold, TOKEN_DECIMALS), circulatingSupply: formatAmount(pool.sold, TOKEN_DECIMALS), saleCap: formatAmount(pool.curveSupply, TOKEN_DECIMALS),
