@@ -60,10 +60,12 @@ const ROUTER_READ = ['function hook() view returns(address)', 'function poolMana
 export const planHash = text => createHash('sha256').update(text).digest('hex');
 
 /** `local`: a rehearsal on a local chain fills the wallets and mocks itself, so they may still be blank. */
-export function readPlan(path, { local = false } = {}) {
+export function readPlan(path, { local = false, forkRehearsal = false } = {}) {
   const text = readFileSync(path, 'utf8'), plan = JSON.parse(text);
   const required = ['key', 'name', 'chainId', 'treasury', 'keeper', 'guardian', 'poolManager', 'usdFeed', 'usdc', 'feedMaxAge', 'minFeeBps', 'dailyLaunchCap', 'startMcapUsd'];
-  for (const k of local ? required.filter(k => !['treasury', 'keeper', 'guardian', 'poolManager', 'usdFeed', 'usdc'].includes(k)) : required)
+  // A local rehearsal mocks every external address; a fork rehearsal uses the real ones but may stand in the roles.
+  const optional = local ? ['treasury', 'keeper', 'guardian', 'poolManager', 'usdFeed', 'usdc'] : forkRehearsal ? ['treasury', 'keeper', 'guardian'] : [];
+  for (const k of required.filter(k => !optional.includes(k)))
     if (plan[k] === undefined || plan[k] === null || plan[k] === '') throw new Error(`The plan has no ${k}. Fill it in before anything runs.`);
   if (!/^[a-z0-9-]+$/.test(plan.key)) throw new Error('The plan key must be lowercase letters, digits and dashes.');
   return { plan, text, hash: planHash(text) };
@@ -256,6 +258,11 @@ export async function rehearse({ plan: given, fork = null, log = () => {}, recor
         await (await new Contract(s.address, ['function mint(address,uint256)'], signers[0]).mint(addrs[1], 10n ** 24n)).wait();
         await (await new Contract(s.feed, ['function setDescription(string)'], signers[0]).setDescription('mSTK / USD')).wait();
       }
+    } else if (!plan.treasury || !plan.keeper || !plan.guardian) {
+      // A fork rehearsal before the real Safe and wallets exist: a 2-of-2 test Safe and local wallets on the fork only.
+      // The real PoolManager, feed, USDC and stocks are still the plan's. The real deploy still requires every role.
+      plan.treasury ||= await deployMock('MockSafe', [[addrs[1], addrs[2]], 2]); plan.keeper ||= addrs[3]; plan.guardian ||= addrs[4];
+      log('Fork rehearsal with a test Safe and wallets (the plan has none yet). The real deploy needs them filled in.');
     }
     const checks = await preflight({ provider, plan, deployer: addrs[0] });
     if (checks.failed.length) throw new Error(`Preflight failed: ${checks.failed.map(c => `${c.check} (${c.detail})`).join('; ')}`);
@@ -388,7 +395,7 @@ export async function askHidden(prompt) {
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2), arg = n => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : null; };
   const planPath = arg('plan'); if (!cmd || !planPath) { console.log('usage: node scripts/v2-mainnet-deploy.mjs check|rehearse|deploy|verify --plan deployments/plans/<key>.json [--fork <rpc>]'); process.exit(2); }
-  const { plan, hash } = readPlan(planPath, { local: cmd === 'rehearse' && !arg('fork') }), recordPath = join(root, 'deployments', `${plan.key}.json`);
+  const { plan, hash } = readPlan(planPath, { local: cmd === 'rehearse' && !arg('fork'), forkRehearsal: cmd === 'rehearse' && !!arg('fork') }), recordPath = join(root, 'deployments', `${plan.key}.json`);
   const print = list => { for (const c of list) console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.check}${c.detail ? `: ${c.detail}` : ''}`); };
   console.log(`plan ${plan.key} (${plan.name}), sha256 ${hash}`);
   if (cmd === 'rehearse') {
