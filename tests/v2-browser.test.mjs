@@ -154,9 +154,10 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   await assert.rejects(launchV2(cw, { name: 'Strat', symbol: 'STRAT', feeBps: 300, rewardStrategy: { mode: 'holders', threshold: '0.01', minimumHolding: '1000' } }), /keeper, which is not running/);
   cw.config.v2Keeper = { address: await f.signers[3].getAddress(), active: true };
   await assert.rejects(launchV2(cw, { name: 'Strat', symbol: 'STRAT', feeBps: 300, rewardStrategy: { mode: 'paired', threshold: '0.01', minimumHolding: '0', rewardAsset: f.usdc.target } }), /no Uniswap v3 market/);
-  const strat = await launchV2(cw, { name: 'Strat', symbol: 'STRAT', feeBps: 300, rewardStrategy: { mode: 'buyback', threshold: '0.01', minimumHolding: '1000', vestingDays: 30 }, description: '', image: '' });
+  await assert.rejects(launchV2(cw, { name: 'Strat', symbol: 'STRAT', feeBps: 300, rewardStrategy: { mode: 'buyback', threshold: '0.01', minimumHolding: '1000', vestingDays: 30 } }), /no longer offered/);
+  const strat = await launchV2(cw, { name: 'Strat', symbol: 'STRAT', feeBps: 300, rewardStrategy: { mode: 'holders', threshold: '0.01', minimumHolding: '1000' }, description: '', image: '' });
   const s = await creatorStrategyState({ provider: f.provider, net, token: strat.token });
-  assert.equal(s.mode, 'buyback'); assert.equal(s.threshold, parseEther('0.01')); assert.equal(s.minimumHolding, parseEther('1000')); assert.equal(s.vesting, 30 * 86_400); assert.equal(s.roundCount, 0);
+  assert.equal(s.mode, 'holders'); assert.equal(s.threshold, parseEther('0.01')); assert.equal(s.minimumHolding, parseEther('1000')); assert.equal(s.vesting, 0); assert.equal(s.roundCount, 0);
   assert.equal(await creatorSplitState({ provider: f.provider, net, token: strat.token }), null, 'a strategy vault is not a split');
   // "Claim fees" on the token page shows for split and allocation tokens only.
   assert.equal(await allocationKind({ provider: f.provider, net, token: splitItem.address }), 'split');

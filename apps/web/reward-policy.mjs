@@ -1,9 +1,13 @@
-export const REWARD_MODES = ['creator','holders','paired','buyback','exclusive'];
-export function normalizeRewardPolicy(input = {}, chain = 'local') {
+// "Buy back and vest to holders" was removed on 16 November 2026 (every chain). New launches cannot choose it; a
+// simulation journal replay (`allowRetired`) still rebuilds the tokens that chose it before.
+export const REWARD_MODES = ['creator','holders','paired','exclusive'];
+export const RETIRED_REWARD_MODES = ['buyback'];
+export function normalizeRewardPolicy(input = {}, chain = 'local', { allowRetired = false } = {}) {
   if (typeof input === 'string') { try { input = JSON.parse(input); } catch { throw new Error('Invalid reward configuration.'); } }
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Invalid reward configuration.');
   const mode = input.mode ?? 'creator';
-  if (!REWARD_MODES.includes(mode)) throw new Error('Choose a creator reward strategy.');
+  if (RETIRED_REWARD_MODES.includes(mode) && !allowRetired) throw new Error('Buy back and vest is no longer offered. Choose another creator reward strategy.');
+  if (!REWARD_MODES.includes(mode) && !RETIRED_REWARD_MODES.includes(mode)) throw new Error('Choose a creator reward strategy.');
   const decimal = (value, fallback, positive = false) => {
     const s = String(value ?? fallback);
     if (!/^\d{1,18}(\.\d{1,6})?$/.test(s) || (positive && Number(s) <= 0)) throw new Error('Reward amounts must be positive numbers with at most six decimal places.');
