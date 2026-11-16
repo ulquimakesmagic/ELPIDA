@@ -294,7 +294,9 @@ export async function rehearse({ plan: given, fork = null, node = null, local = 
       // (or, with `inPoolManager: true`, only by the PoolManager, to exercise the PoolManager fallback).
       for (const s of stocks.filter(x => x.mock)) {
         s.address = await deployMock('MockIssuerStock', []); s.feed = await deployMock('MockUsdFeed', [BigInt(Math.round(s.price * 1e8))]); s.holder = s.inPoolManager ? null : addrs[1]; s.symbol = 'mSTK';
-        await (await new Contract(s.address, ['function mint(address,uint256)'], signers[0]).mint(s.inPoolManager ? plan.poolManager : addrs[1], 10n ** 24n)).wait();
+        // `inPoolManagerUsd` limits what the PoolManager holds, like AMZNc ($19,409) or SNDKc ($7,893) on Base.
+        const minted = s.inPoolManagerUsd ? BigInt(Math.round(s.inPoolManagerUsd / s.price * 1e6)) * 10n ** 12n : 10n ** 24n;
+        await (await new Contract(s.address, ['function mint(address,uint256)'], signers[0]).mint(s.inPoolManager ? plan.poolManager : addrs[1], minted)).wait();
         await (await new Contract(s.feed, ['function setDescription(string)'], signers[0]).setDescription('mSTK / USD')).wait();
       }
     } else if (!plan.treasury || !plan.keeper || !plan.guardian) {
@@ -366,27 +368,31 @@ export async function minedOrExplained(provider, hash, what, { waitMs = REHEARSA
 }
 
 /**
- * Graduation with a stock as the pair (fork only): borrow about $35,000 of the stock, buy past the ×5 milestone (the curve
- * raises about $31,000), check the launch is graduated, then sell and buy once more in the graduated pool.
+ * Graduation with a stock as the pair (fork only): buy past the ×5 milestone (the curve raises about $31,000) with stock
+ * borrowed in chunks, check the launch is graduated, then sell and buy once more in the graduated pool.
  */
 async function graduateStockCurve({ provider, signer, record, art, stock, token, holder, me, priceUsd, unit, launchedToken, step, log }) {
   const g = { ok: false };
   try {
-    const need = BigInt(Math.ceil(35_000 / priceUsd * 1e6)) * unit / 1_000_000n, lent = await token.balanceOf(holder);
-    if (lent < need) {
-      g.error = `the lender holds $${(Number(lent) / Number(unit) * priceUsd).toFixed(0)} of ${stock.symbol}, not the $35,000 graduation needs (set ELPIDA_STOCK_HOLDER_${String(stock.symbol).toUpperCase()} to a larger holder)`;
-      log(`FAIL graduation ${stock.symbol}: ${g.error}`); return g;
-    }
-    step('borrowing $35,000 of it and buying past the ×5 milestone (fork only)');
-    await sendAs(provider, holder, stock.address, new Interface(ERC20_RW).encodeFunctionData('transfer', [me, need]), `graduation funds from ${holder}`);
+    const need = BigInt(Math.ceil(35_000 / priceUsd * 1e6)) * unit / 1_000_000n, usd = raw => Number(raw) / Number(unit) * priceUsd;
     const router = new Contract(record.contracts.router, ROUTER_TRADE, signer), hook = new Contract(record.contracts.hook, art.hook.abi, provider), launched = new Contract(launchedToken, ERC20_RW, signer);
-    const deadline = async () => (await provider.getBlock('latest')).timestamp + 600;
-    await sent(provider, new Contract(stock.address, ERC20_RW, signer).approve(record.contracts.router, need), 'approve the router for graduation');
-    const receipt = await sent(provider, router.buy(launchedToken, need, 1n, me, await deadline()), 'graduating buy');
-    const milestone = receipt.logs.map(l => { try { return hook.interface.parseLog(l); } catch { return null; } }).find(e => e?.name === 'Milestone');
-    if (!milestone) throw new Error('the buy did not reach the milestone');
+    const stockAs = new Contract(stock.address, ERC20_RW, signer), deadline = async () => (await provider.getBlock('latest')).timestamp + 600;
+    // Borrow and buy in chunks of what the lender holds (fork only). With the PoolManager as lender, each buy pays the
+    // stock straight back into it (the curve's pool lives there), so a lender holding less than $35,000 still works.
+    step(`buying past the ×5 milestone with up to $35,000 of it, borrowed in chunks (fork only)`);
+    let spent = 0n, milestone = null, chunks = 0;
+    while (!milestone && spent < need && chunks < 25) {
+      const available = await token.balanceOf(holder), chunk = [need - spent, available * 9n / 10n].reduce((a, b) => (a < b ? a : b));
+      if (chunk * 100n < need) throw new Error(`the lender ran out after $${usd(spent).toFixed(0)}: it holds $${usd(available).toFixed(0)} of ${stock.symbol}; set ELPIDA_STOCK_HOLDER_${String(stock.symbol).toUpperCase()} to a larger holder`);
+      await sendAs(provider, holder, stock.address, new Interface(ERC20_RW).encodeFunctionData('transfer', [me, chunk]), `graduation funds from ${holder}`);
+      await sent(provider, stockAs.approve(record.contracts.router, chunk), 'approve the router for graduation');
+      const receipt = await sent(provider, router.buy(launchedToken, chunk, 1n, me, await deadline()), 'graduating buy');
+      milestone = receipt.logs.map(l => { try { return hook.interface.parseLog(l); } catch { return null; } }).find(e => e?.name === 'Milestone') ?? null;
+      spent += chunk; chunks++;
+    }
+    if (!milestone) throw new Error(`$${usd(spent).toFixed(0)} of buys in ${chunks} chunks did not reach the milestone`);
     if (!(await hook.launchOf(launchedToken)).graduated) throw new Error('the milestone fired but the launch is not marked graduated');
-    g.raisedUsd = Math.round(Number(milestone.args.saleQuote) / Number(unit) * priceUsd);
+    g.raisedUsd = Math.round(usd(milestone.args.saleQuote)); g.chunks = chunks;
     // Trading continues in the graduated pool: sell a tenth of the tokens, then buy back with a little stock.
     step('selling and buying in the graduated pool');
     const tenth = (await launched.balanceOf(me)) / 10n, before = await token.balanceOf(me);
@@ -394,10 +400,10 @@ async function graduateStockCurve({ provider, signer, record, art, stock, token,
     await sent(provider, router.sell(launchedToken, tenth, 1n, me, await deadline()), 'graduated sell');
     const got = (await token.balanceOf(me)) - before;
     if (got <= 0n) throw new Error('the graduated sell returned nothing');
-    await sent(provider, new Contract(stock.address, ERC20_RW, signer).approve(record.contracts.router, got / 2n), 'approve the router (graduated buy)');
+    await sent(provider, stockAs.approve(record.contracts.router, got / 2n), 'approve the router (graduated buy)');
     await sent(provider, router.buy(launchedToken, got / 2n, 1n, me, await deadline()), 'graduated buy');
     g.ok = g.raisedUsd > 30_000 && g.raisedUsd < 32_500;
-    g.detail = `graduated at the ×5 milestone, raising $${g.raisedUsd.toLocaleString('en-US')} of ${stock.symbol} into the locked pool; a sell and a buy then traded in the graduated pool`;
+    g.detail = `graduated at the ×5 milestone, raising $${g.raisedUsd.toLocaleString('en-US')} of ${stock.symbol} into the locked pool${chunks > 1 ? ` (bought in ${chunks} chunks)` : ''}; a sell and a buy then traded in the graduated pool`;
     log(`${g.ok ? 'ok  ' : 'FAIL'} graduation ${stock.symbol}: ${g.detail}`);
   } catch (e) { g.error = String(e.shortMessage ?? e.message).slice(0, 300); log(`FAIL graduation ${stock.symbol}: ${g.error}`); }
   return g;
