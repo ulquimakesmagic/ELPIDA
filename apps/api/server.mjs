@@ -5,7 +5,7 @@ import { feeAnalytics } from './fee-analytics.mjs';
 import { AdminAuth, parseAdminAddresses, sessionCookie, clearCookie } from './admin-auth.mjs';
 import { readTreasuries, operatorAddresses, cachedLoader } from './admin-overview.mjs';
 import { SiteAnalytics, cleanEvent, telemetryLimiter, restrictedJurisdictions } from './site-analytics.mjs';
-import { createElpidaSolana } from '../../packages/solana/client.mjs';
+import { createElpidaSolana, creatorRowDue } from '../../packages/solana/client.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
 import {configuredGraduationKeeper} from './graduation-keeper.mjs';
 import {configuredBuybackKeeper} from './buyback-keeper.mjs';
@@ -77,6 +77,7 @@ resources.set('/trade-filter.mjs',['trade-filter.mjs','text/javascript']);
 resources.set('/token-insights.mjs',['token-insights.mjs','text/javascript']);
 resources.set('/burn-labels.mjs',['burn-labels.mjs','text/javascript']);
 resources.set('/creator-split.mjs',['creator-split.mjs','text/javascript']);
+resources.set('/solana-creator-vault-view.mjs',['solana-creator-vault-view.mjs','text/javascript']);
 resources.set('/native-trade-router.mjs',['native-trade-router.mjs','text/javascript']);
 resources.set('/trade-draft.mjs',['trade-draft.mjs','text/javascript']);
 resources.set('/test-stock-liquidity-ui.mjs',['test-stock-liquidity-ui.mjs','text/javascript']);
@@ -197,7 +198,7 @@ export function solanaConfig() {
         const record = JSON.parse(readFileSync(file, 'utf8'));
         if (base58.test(record.programId) && record.cluster === net.cluster) deployment = { programId: record.programId, shared: false, build: record.build ?? 'testnet', usdPricing: record.usdPricing && base58.test(record.usdPricing.priceAccount ?? '') ? { priceAccount: record.usdPricing.priceAccount, feeUsdE6: String(record.usdPricing.feeUsdE6), startFdvUsdE6: String(record.usdPricing.startFdvUsdE6), maxAgeSecs: Number(record.usdPricing.maxAgeSecs), usdcMint: base58.test(record.usdPricing.usdcMint ?? '') ? record.usdPricing.usdcMint : null } : null, pairs: Array.isArray(record.pairs) ? record.pairs.filter(p => p && base58.test(p.config ?? '') && base58.test(p.mint ?? '') && ['native', 'usdc', 'xstock', 'token'].includes(p.kind)).map(({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test, wsol, faucet }) => ({ kind, key, symbol, name, mint, config, decimals, tokenProgram, test: !!test, wsol: !!wsol, faucet: faucet ?? null })) : null,
           // ELPIDA V2 SOL pair and distributors (npm run solana:deploy -- --v2): addresses and terms only.
-          v2: record.v2 && base58.test(record.v2.config ?? '') ? { config: record.v2.config, minFeeBps: Number(record.v2.minFeeBps), maxFeeBps: Number(record.v2.maxFeeBps), keeper: base58.test(record.v2.keeper ?? '') ? record.v2.keeper : null,
+          v2: record.v2 && base58.test(record.v2.config ?? '') ? { config: record.v2.config, creatorVaults: record.v2.creatorVaults === true, minFeeBps: Number(record.v2.minFeeBps), maxFeeBps: Number(record.v2.maxFeeBps), keeper: base58.test(record.v2.keeper ?? '') ? record.v2.keeper : null,
             flywheelVault: base58.test(record.v2.flywheelVault ?? '') ? record.v2.flywheelVault : null,
             // V2 test stock pairs (--v2-stocks): addresses, the bound test price and terms only.
             stocks: (Array.isArray(record.v2.stocks) ? record.v2.stocks : []).filter(x => [x?.config, x?.mint, x?.tokenProgram, x?.quotePricing?.priceAccount].every(v => base58.test(v ?? '')) && /^[A-Za-z0-9]{1,16}$/.test(x.symbol ?? ''))
@@ -337,7 +338,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     return {evm,solana:{network:solanaNet.key,name:solanaNet.name,state:solanaV2Keeper.enabled?'running':sol.state,address,balance,runs:solanaV2Keeper.enabled?sol.runs:[],jobs:solanaV2Keeper.enabled?sol.jobs??[]:[],airdropNext:sol.airdropNext??null,holderNext:sol.holderNext??null}};
   };
   // V2 X and website allocations: ownership checks, then the network's V2 keeper (the verifier) binds the payout wallet.
-  const v2Identities=new V2Identities({signerFor:key=>{const w=v2Keeper.workers?.find(x=>x.chain===key);return w?{signer:w.signer,chainId:w.net.chainId}:null;}});
+  const v2Identities=new V2Identities({signerFor:key=>{const w=v2Keeper.workers?.find(x=>x.chain===key);return w?{signer:w.signer,chainId:w.net.chainId}:null;},solanaKeeper:()=>solanaV2Keeper});
   let v2Keeper={enabled:false,status:()=>({enabled:false,state:'not_configured'}),manifest:()=>null,close:async()=>{}};
   queueMicrotask(()=>{if(port===0)return;try{v2Keeper=configuredV2Keeper({env:process.env,networks:evmTestnets,indexFor:key=>publicIndex.v2Index(key),prices:()=>priceSnapshot(),path:dataFile('v2-keeper.sqlite'),publicUrl:process.env.ELPIDA_PUBLIC_URL||'https://elpida.fun',log:e=>console.log(JSON.stringify(e))});if(v2Keeper.enabled){v2Keeper.start();console.log(JSON.stringify({event:'v2_keeper_started',keeper:v2Keeper.address}));}}catch(error){console.log(JSON.stringify({event:'subsystem_unavailable',subsystem:'v2Keeper',degraded:true,message:String(error.message).slice(0,120)}));}});
   const flywheelKeeper=port===0?{summary:()=>({enabled:false,state:'not_configured'}),close:async()=>{}}:soft('flywheelKeeper',()=>configuredFlywheelKeeper({env:process.env,publicIndex,dexes:testnetDexes,path:dataFile('flywheel-keeper.sqlite'),log:e=>console.log(JSON.stringify(e))}),()=>({summary:()=>({enabled:false,state:'unavailable'}),close:async()=>{}}));
@@ -371,7 +372,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     return sources;
   };
   // Fee and revenue sources (analytics step 2): EVM V2 deployments only carry the five-way ledgers; Solana is counted as untracked.
-  const feeCache=new Map();
+  const feeCache=new Map(),creatorVaultCache=new Map();
   const feeSources=()=>{
     const rows=it=>(function*(){for(const row of it)yield JSON.parse(row.data);})();
     const sources=evmTestnets.map(net=>({key:net.key,name:net.name,mainnet:!!net.mainnet,tokens:publicIndex.listings(net.key),trades:rows(publicIndex.tradeRows(net.key)),launchFees:publicIndex.launchFees(net.key),feePayouts:publicIndex.feePayouts(net.key)}));
@@ -547,6 +548,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/buyback/status')return send(200,buybackKeeper.status());
         if(url.pathname==='/api/public/flywheel')return send(200,flywheelKeeper.summary());
         if(url.pathname==='/api/public/v2-rewards'){const evm=v2Rewards.summary(priceSnapshot(),undefined,key=>publicIndex.listings(key).filter(t=>t.deploymentModel==='v2-hook')),sol=toJson(solanaRewards?.summary(priceSnapshot())??null);const chains=[...(evm.chains??[]),...(sol?[sol]:[])];return send(200,{...evm,deployed:chains.length>0,chains,keeper:{...v2Keeper.status(),solana:solanaV2Keeper.status()}});}
+        {const m=url.pathname.match(/^\/api\/public\/v2-rewards\/solana-creator-manifest\/([1-9A-HJ-NP-Za-km-z]{32,44})\/(\d{1,6})$/);if(m){const manifest=solanaV2Keeper.creatorManifest?.(m[1],m[2]);return manifest?send(200,manifest):send(404,{error:'No such creator round list.'});}}
         {const m=url.pathname.match(/^\/api\/public\/v2-rewards\/solana-manifest\/([01])\/(\d{1,6})$/);if(m){const manifest=solanaV2Keeper.manifest?.(m[1],m[2]);return manifest?send(200,manifest):send(404,{error:'No such Solana round list.'});}}
         {const m=url.pathname.match(/^\/api\/public\/v2-rewards\/manifest\/(\d+)\/(0x[0-9a-fA-F]{40})\/(\d+)\/(0x[0-9a-fA-F]{40})$/);if(m){const manifest=v2Keeper.manifest(m[1],m[2],m[3],m[4]);return manifest?send(200,manifest):send(404,{error:'No published payout list for that round.'});}}
         if(url.pathname==='/api/public/v2-rewards/payouts'){try{return send(200,v2Rewards.payouts(url.searchParams.get('wallet')));}catch(error){return send(400,{error:error.message});}}
@@ -570,6 +572,21 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           return send(200,list.sort((a,b)=>b.timestamp-a.timestamp).slice(0,limit));
         }
         if(url.pathname==='/api/public/quotes'){const data=publicIndex.quotes(url.searchParams.get('network')??'base-sepolia');return data?send(200,data):send(503,{error:'Trading pair index is catching up. Retry shortly.'});}
+        // Solana creator vaults (16 November 2026): a token's vault as the token page shows it (rows and what each is owed,
+        // or a holder strategy's threshold, gathered amount and rounds). Read from chain, cached 10 s.
+        {const m=url.pathname.match(/^\/api\/public\/solana-creator-vault\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);if(m){
+          const conn=solanaConnection();if(!conn||!solanaNet.deployment?.programId)return send(404,{error:'No public Solana deployment.'});
+          const hit=creatorVaultCache.get(m[1]);if(hit&&Date.now()-hit.at<10_000)return send(200,hit.data);
+          const client=createElpidaSolana(solanaWeb3,solanaNet.deployment.programId),mint=new solanaWeb3.PublicKey(m[1]),address=client.creatorVaultFor(mint),v=client.decodeCreatorVault((await conn.getAccountInfo(address))?.data);
+          if(!v){const data={vault:null};creatorVaultCache.set(m[1],{at:Date.now(),data});return send(200,data);}
+          const balanceOf=async owner_mint=>{const info=await conn.getAccountInfo(owner_mint);return client.tokenAmount((await conn.getAccountInfo(client.ata(address,owner_mint,info?.owner??new solanaWeb3.PublicKey(client.tokenProgram))))?.data);};
+          const [heldQuote,heldPayout]=await Promise.all([balanceOf(v.quoteMint),v.payoutMint.equals(v.quoteMint)?null:balanceOf(v.payoutMint)]);
+          const rounds=[];for(let r=Math.max(0,v.rounds-5);r<v.rounds;r++){const info=await conn.getAccountInfo(client.creatorRoundFor(mint,r));if(info){const d=info.data,dv=new DataView(d.buffer,d.byteOffset,d.byteLength);rounds.push({round:r,total:dv.getBigUint64(76,true).toString(),claimed:dv.getBigUint64(84,true).toString(),recipients:dv.getUint32(92,true)});}}
+          const data={vault:address.toBase58(),mode:['allocation','holders','paired'][v.mode]??String(v.mode),quoteMint:v.quoteMint.toBase58(),payoutMint:v.payoutMint.toBase58(),operator:v.operator.toBase58(),
+            threshold:v.threshold.toString(),minimumHolding:v.minimumHolding.toString(),thresholdUsd:Number(v.thresholdUsdE6)/1e6,minimumHoldingUsd:Number(v.minimumHoldingUsdE6)/1e6,
+            held:heldQuote.toString(),heldPayout:heldPayout?.toString()??null,reserved:v.reserved.toString(),roundCount:v.rounds,rounds:rounds.reverse(),
+            rows:v.rows.map(r=>{const[kind,...rest]=r.label.split(':');return {index:r.index,kind:r.kind===0?'wallet':kind==='x'?'x':'domain',target:r.kind===0?null:rest.join(':'),wallet:r.wallet?.toBase58()??null,bps:r.shareBps,claimed:r.claimed.toString(),due:creatorRowDue(v,r,heldQuote).toString()};})};
+          creatorVaultCache.set(m[1],{at:Date.now(),data});if(creatorVaultCache.size>500)creatorVaultCache.delete(creatorVaultCache.keys().next().value);return send(200,data);}}
         const solanaMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/([1-9A-HJ-NP-Za-km-z]{32,44})(?:\/(trades|candles|holders))?)?$/);
         if(solanaMatch&&url.searchParams.get('network')?.startsWith('solana-')){
           if(!solanaIndex||url.searchParams.get('network')!==solanaIndex.network.key)return send(404,{error:'No public Solana index for this network.'});

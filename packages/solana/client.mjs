@@ -971,7 +971,7 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
         meta(pool, true), meta(ata(pool, stockMint, stockProgram), true), meta(poolWsol, true), meta(quoteProgram), meta(payoutProgram), meta(ataProgram), meta(SystemProgram.programId)],
         concat(DISCRIMINATORS.creatorSwapTest, u64(amountIn), u64(minOut)))];
     },
-    decodeCreatorVault: data => decodeCreatorVault(data),
+    decodeCreatorVault: data => decodeCreatorVault(data, web3),
     /** Decodes a PricingConfig account, or null when the bytes are not one. */
     decodePricing(raw) {
       const bytes = raw ? new Uint8Array(raw) : null;
@@ -1334,8 +1334,12 @@ export function mintMultiplierE12(data, owner, now = Math.floor(Date.now() / 100
   return one;
 }
 
+/** Bytes of a creator vault account (8 + `CreatorVault::INIT_SPACE`). */
+export const CREATOR_VAULT_SIZE = 8 + 32 * 4 + 1 + 32 + 1 + 108 * 8 + 8 + 8 + 4 + 1;
+
 /** A creator vault (`create_creator_vault`), or null. Labels are UTF-8; mode 0 allocation, 1 holders, 2 reward token. */
-export function decodeCreatorVault(raw) {
+export function decodeCreatorVault(raw, { PublicKey } = {}) {
+  if (!PublicKey) throw new Error('decodeCreatorVault needs web3 ({ PublicKey }).');
   const b = raw ? new Uint8Array(raw) : null;
   if (!b || b.length < 8 + 32 * 4 + 1 + 32 + 1 + 108 * 8 + 21 || !DISCRIMINATORS.CreatorVault.every((x, i) => b[i] === x)) return null;
   const v = new DataView(b.buffer, b.byteOffset, b.byteLength), pk = o => new PublicKey(b.subarray(o, o + 32));

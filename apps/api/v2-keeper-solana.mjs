@@ -13,12 +13,17 @@
 //    and every leaf is then paid by the keeper (anyone may pay one). SOL is paid natively from the vault PDA.
 //    Holder weights come from daily holder snapshots (a wallet must appear in two to count), the Solana stand-in for
 //    EVM's transfer history.
+//  - creator vaults (daily, operator; 16 November 2026): for tokens whose creator chose "share fees with holders" or
+//    "buy a reward token", once the vault's unpromised fees reach the creator's threshold the keeper (reward tokens:
+//    first swaps them into the reward asset, Raydium or the devnet test pool) pays the token's holders pro rata, above
+//    the creator's minimum holding, as a posted round it then pays out. Allocation vaults need nothing from the keeper
+//    except binding verified X and website rows (apps/api/v2-identities.mjs).
 import { KeeperLease, safeError } from '../../packages/core/keeper-lease.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import * as web3 from '@solana/web3.js';
-import { createElpidaSolana, v2Owed, parseAmount, TOKEN_DECIMALS, quoteBuy, raydiumQuote, ownFeeBps, tradeFeeBps, POOL_SIZE_V2, STATUS_TRADING, STATUS_MIGRATED, WSOL_MINT, V2_DIST, V2_WITHDRAW_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, RAYDIUM_SWAP_COMPUTE_UNITS, explainError } from '../../packages/solana/client.mjs';
+import { createElpidaSolana, decodeCreatorVault, decodeTestConversion, testConversionOut, CREATOR_VAULT_SIZE, v2Owed, parseAmount, TOKEN_DECIMALS, quoteBuy, raydiumQuote, ownFeeBps, tradeFeeBps, POOL_SIZE_V2, STATUS_TRADING, STATUS_MIGRATED, WSOL_MINT, V2_DIST, V2_WITHDRAW_COMPUTE_UNITS, HARVEST_COMPUTE_UNITS, RAYDIUM_SWAP_COMPUTE_UNITS, explainError } from '../../packages/solana/client.mjs';
 import { send } from '../../packages/solana/deploy.mjs';
-import { buildSolanaRound, solanaRoundStart, solanaCurrentRound } from '../../packages/solana/v2-rounds.mjs';
+import { buildSolanaRound, buildCreatorRound, solanaRoundStart, solanaCurrentRound } from '../../packages/solana/v2-rounds.mjs';
 import { airdropRound, HOLDER_RULES, linkGroups, latestJobs } from '../../packages/core/v2-keeper-plan.mjs';
 import { allocateAirdrop, walletPayouts } from '../../packages/core/v2-airdrop.mjs';
 
@@ -63,7 +68,8 @@ export class SolanaV2Keeper {
       CREATE TABLE IF NOT EXISTS sv2_state(key TEXT PRIMARY KEY, value TEXT NOT NULL);
       CREATE TABLE IF NOT EXISTS sv2_runs(id INTEGER PRIMARY KEY, job TEXT NOT NULL, at INTEGER NOT NULL, status TEXT NOT NULL, detail TEXT);
       CREATE TABLE IF NOT EXISTS sv2_manifests(kind INTEGER NOT NULL, round INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(kind, round));
-      CREATE TABLE IF NOT EXISTS sv2_snapshots(day INTEGER NOT NULL, mint TEXT NOT NULL, holders TEXT NOT NULL, PRIMARY KEY(day, mint));`);
+      CREATE TABLE IF NOT EXISTS sv2_snapshots(day INTEGER NOT NULL, mint TEXT NOT NULL, holders TEXT NOT NULL, PRIMARY KEY(day, mint));
+      CREATE TABLE IF NOT EXISTS sv2_creator_manifests(mint TEXT NOT NULL, round INTEGER NOT NULL, data TEXT NOT NULL, PRIMARY KEY(mint, round));`);
     this.lease = new KeeperLease(this.db, 'sv2_lock', { now, ttl: leaseTtl });
     this.busy = false;
   }
@@ -88,7 +94,7 @@ export class SolanaV2Keeper {
       this.idle = null;
       const clean = job => { (this.checked ??= {})[job] = this.now(); };
       // With distributions off (the first mainnet release) only fees and harvests run; the other shares accrue.
-      const daily = this.distributions ? ['fees', 'harvest', 'sweep', 'snapshot', 'flywheel'] : ['fees', 'harvest'];
+      const daily = this.distributions ? ['fees', 'harvest', 'sweep', 'snapshot', 'flywheel', 'creatorVaults'] : ['fees', 'harvest'];
       for (const job of daily) { if (!this.due(job)) continue; try { await this[job](); clean(job); } catch (e) { this.record(job, 'failed', { error: e }); if (e.code === 'lease_lost') return; } }
       for (const job of this.distributions ? ['airdrop', 'holder'] : []) { try { await this[job](); clean(job); } catch (e) { this.record(job, 'failed', { error: e }); if (e.code === 'lease_lost') return; } }
     }
@@ -109,10 +115,28 @@ export class SolanaV2Keeper {
     return accounts.map(({ pubkey, account }) => ({ pubkey, ...this.client.decodePool(account.data) })).filter(p => p.v2 && p.config.equals(this.config));
   }
 
-  /** Daily: pays every pool's owed shares (creator, three vaults, treasury). */
+  /** Every V2 pool of every V2 pair (SOL, USDC, the test paired token, stocks). */
+  async allPools() {
+    const accounts = await this.connection.getProgramAccounts(this.client.programId, { filters: [{ dataSize: POOL_SIZE_V2 }] });
+    return accounts.map(({ pubkey, account }) => ({ pubkey, ...this.client.decodePool(account.data) })).filter(p => p.v2);
+  }
+
+  /** A V2 pair config as the builders take it (cached per address). */
+  async pairOf(address) {
+    this._pairs ??= new Map();
+    const k = address.toBase58();
+    if (!this._pairs.has(k)) {
+      const cfg = this.client.decodeConfig((await this.connection.getAccountInfo(address)).data), mint = await this.connection.getAccountInfo(cfg.quoteMint);
+      this._pairs.set(k, { address, quoteMint: cfg.quoteMint, treasury: cfg.treasury, quoteTokenProgram: mint?.owner ?? new PublicKey(this.client.tokenProgram), decimals: cfg.quoteDecimals, raw: cfg });
+    }
+    return this._pairs.get(k);
+  }
+
+  /** Daily: pays every V2 pool's owed shares (creator, three vaults, treasury), on every V2 pair. */
   async fees() {
-    const pair = await this.pair(), paid = [];
-    for (const p of await this.pools()) {
+    const paid = [];
+    for (const p of await this.allPools()) {
+      const pair = await this.pairOf(p.config);
       const owed = v2Owed(p.v2);
       if (!owed.some(v => v > 0n)) continue;
       try {
@@ -332,6 +356,96 @@ export class SolanaV2Keeper {
       this.set('holder:distributed', done); this.set('holder:next', round + 1);
       this.record('holder', 'ok', { round, tokens: stats, ...result });
     }
+  }
+
+  // ---------- creator vaults (16 November 2026) ----------
+
+  /** Every creator vault of the program, decoded, with its address. */
+  async creatorVaultsList() {
+    const accounts = await this.connection.getProgramAccounts(this.client.programId, { filters: [{ dataSize: CREATOR_VAULT_SIZE }] });
+    return accounts.map(({ pubkey, account }) => ({ address: pubkey, ...decodeCreatorVault(account.data, web3) })).filter(v => v.mint);
+  }
+
+  /** Token balance of `owner`'s associated account for `mint` (0 when it does not exist). */
+  async ataBalance(owner, mint) {
+    const info = await this.connection.getAccountInfo(mint), program = info?.owner ?? new PublicKey(this.client.tokenProgram);
+    const acc = await this.connection.getAccountInfo(this.client.ata(owner, mint, program));
+    return { amount: this.client.tokenAmount(acc?.data), program };
+  }
+
+  /**
+   * A reward vault's swap of `amountIn` of its pair asset into its reward asset, at a live quote less 3%: through the
+   * WSOL/USDC Raydium pool recorded for stablecoin payouts, or (test networks) the program's test conversion pool.
+   */
+  async creatorSwap(v, amountIn, quoteProgram, payoutProgram) {
+    const wsol = WSOL_MINT, q = v.quoteMint.toBase58(), out = v.payoutMint.toBase58();
+    if (this.usdc && ((q === wsol && out === this.usdc.mint.toBase58()) || (out === wsol && q === this.usdc.mint.toBase58()))) {
+      const r = this.client.raydiumPoolAccounts(this.usdc.pool, v.quoteMint, v.payoutMint), [a0, a1] = await this.connection.getMultipleAccountsInfo([r.vault0, r.vault1]);
+      const [r0, r1] = [this.client.tokenAmount(a0?.data), this.client.tokenAmount(a1?.data)], quoteIs0 = r.mint0.equals(v.quoteMint);
+      const { out: expect } = raydiumQuote(amountIn, quoteIs0 ? r0 : r1, quoteIs0 ? r1 : r0);
+      await this.sendTx(this.connection, this.payer, [this.client.computeBudget(400_000), this.client.creatorSwapRaydium({ operator: this.payer.publicKey, mint: v.mint, quoteMint: v.quoteMint, quoteProgram, payoutMint: v.payoutMint, payoutProgram, pool: this.usdc.pool, amountIn, minOut: expect * 97n / 100n })]);
+      return 'raydium';
+    }
+    const stock = q === wsol ? v.payoutMint : out === wsol ? v.quoteMint : null;
+    if (!stock || this.network === 'mainnet') throw new Error(`No swap route from ${q} to ${out} yet.`);
+    const pool = decodeTestConversion((await this.connection.getAccountInfo(this.client.testConversionPda(stock)))?.data);
+    if (!pool) throw new Error(`No test conversion pool for ${stock.toBase58()}.`);
+    const solIn = q === wsol, [rin, rout] = solIn ? [pool.solReserve, pool.quoteReserve] : [pool.quoteReserve, pool.solReserve];
+    const expect = testConversionOut(rin, rout, amountIn), stockProgram = solIn ? payoutProgram : quoteProgram;
+    await this.sendTx(this.connection, this.payer, [this.client.computeBudget(), ...this.client.creatorSwapTest({ operator: this.payer.publicKey, mint: v.mint, quoteMint: v.quoteMint, quoteProgram, payoutMint: v.payoutMint, payoutProgram, stockMint: stock, stockProgram, amountIn, minOut: expect * 97n / 100n })]);
+    return 'test-conversion';
+  }
+
+  /** Daily, operator: holder rounds of creator vaults that reached their threshold (reward vaults swap first). */
+  async creatorVaults() {
+    const index = this.index(), out = [];
+    if (!index) return;
+    for (const v of await this.creatorVaultsList()) {
+      if (v.mode === 0 || !v.operator.equals(this.payer.publicKey)) continue;
+      const mint = v.mint.toBase58();
+      try {
+        const quote = await this.ataBalance(v.address, v.quoteMint);
+        if (v.mode === 2) {
+          // The threshold is in the pair asset: swap once that much has gathered.
+          if (quote.amount < v.threshold) { out.push({ mint, waiting: 'below threshold' }); continue; }
+          const payoutInfo = await this.connection.getAccountInfo(v.payoutMint);
+          const route = await this.creatorSwap(v, quote.amount, quote.program, payoutInfo?.owner ?? new PublicKey(this.client.tokenProgram));
+          out.push({ mint, swapped: quote.amount, route });
+        }
+        const payout = await this.ataBalance(v.address, v.payoutMint), free = payout.amount - v.reserved;
+        if (free <= 0n || (v.mode === 1 && free < v.threshold)) { out.push({ mint, waiting: 'below threshold' }); continue; }
+        const pool = this.client.poolPda(v.mint), excluded = new Set([pool.toBase58(), v.address.toBase58(), this.client.lpAuthorityPda(v.mint).toBase58(), ...[V2_DIST.airdrop, V2_DIST.holder].map(k => this.client.distVault(k).toBase58())]);
+        const holders = (await index.allHolders(mint)).map(h => [h.address, parseAmount(String(h.balance), TOKEN_DECIMALS)]).filter(([a, b]) => a && !excluded.has(a) && b > 0n && b >= v.minimumHolding);
+        const weight = holders.reduce((t, [, b]) => t + b, 0n);
+        if (!weight) { out.push({ mint, waiting: 'no eligible holders' }); continue; }
+        const payouts = holders.map(([a, b]) => [new PublicKey(a), free * b / weight]).filter(([, x]) => x > 0n);
+        out.push({ mint, ...(await this.postCreator(v, payout.program, payouts)) });
+      } catch (e) { out.push({ mint, error: explainError(e) }); }
+    }
+    this.done('creatorVaults'); this.record('creatorVaults', 'ok', { vaults: out });
+  }
+
+  /** Posts a creator-vault round, publishes its list, then pays every leaf (anyone may pay one). */
+  async postCreator(v, payoutProgram, payouts) {
+    const round = v.rounds, list = buildCreatorRound({ programId: this.client.programId, mint: v.mint, round, asset: v.payoutMint }, payouts);
+    const manifest = { program: this.client.programId.toBase58(), mint: v.mint.toBase58(), round, asset: v.payoutMint.toBase58(), root: Buffer.from(list.root).toString('hex'), total: list.total.toString(),
+      rows: list.rows.map(r => ({ index: r.index, account: r.account.toBase58(), amount: r.amount.toString(), proof: r.proof.map(p => Buffer.from(p).toString('hex')) })) };
+    this.db.prepare('INSERT OR REPLACE INTO sv2_creator_manifests VALUES(?,?,?)').run(v.mint.toBase58(), round, JSON.stringify(manifest));
+    const uri = `${this.publicUrl}/api/public/v2-rewards/solana-creator-manifest/${v.mint.toBase58()}/${round}`;
+    await this.sendTx(this.connection, this.payer, [this.client.computeBudget(), this.client.postCreatorRoot({ operator: this.payer.publicKey, mint: v.mint, payoutMint: v.payoutMint, payoutProgram, round, root: list.root, total: list.total, recipients: list.recipients, manifestUri: uri })]);
+    let paid = 0, failed = 0;
+    for (const r of list.rows) {
+      try { await this.sendTx(this.connection, this.payer, [this.client.claimCreator({ payer: this.payer.publicKey, mint: v.mint, payoutMint: v.payoutMint, payoutProgram, round, index: r.index, account: r.account, amount: r.amount, proof: r.proof })]); paid++; }
+      catch (e) { if (/0x179d|already/i.test(`${e.message} ${(e.logs ?? []).join(' ')}`)) paid++; else failed++; }
+    }
+    return { round, recipients: list.recipients, total: list.total, paid, failed };
+  }
+
+  creatorManifest(mint, round) { const r = this.db.prepare('SELECT data FROM sv2_creator_manifests WHERE mint=? AND round=?').get(String(mint), Number(round)); return r ? JSON.parse(r.data) : null; }
+
+  /** Operator: binds a verified X or website row's payout wallet (called by the identity service after its checks). */
+  async bindCreatorRow(mint, row, wallet) {
+    await this.sendTx(this.connection, this.payer, [this.client.bindCreatorRow({ operator: this.payer.publicKey, mint: new PublicKey(mint), row, wallet: new PublicKey(wallet) })]);
   }
 
   /** Daily snapshots of one token's holders within [start, end). */

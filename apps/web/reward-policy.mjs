@@ -14,8 +14,9 @@ export function normalizeRewardPolicy(input = {}, chain = 'local') {
   if (Number(minimumHoldingUsd) > 100000) throw new Error('The USD minimum cannot exceed $100,000.');
   const vestingDays = Number(input.vestingDays ?? 30);
   if (!Number.isInteger(vestingDays) || vestingDays < 1 || vestingDays > 3650) throw new Error('Vesting must be between 1 and 3,650 days.');
-  const rewardToken = String(input.rewardToken ?? '').toLowerCase();
-  if (mode === 'paired' && !/^0x[0-9a-f]{40}$/.test(rewardToken)) throw new Error('Choose an approved reward token on this chain.');
+  // EVM addresses are compared lowercased; Solana mints are base58 and case-sensitive.
+  const solanaChain = String(chain).startsWith('solana'), rewardToken = solanaChain ? String(input.rewardToken ?? '') : String(input.rewardToken ?? '').toLowerCase();
+  if (mode === 'paired' && !(solanaChain ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(rewardToken) : /^0x[0-9a-f]{40}$/.test(rewardToken))) throw new Error('Choose an approved reward token on this chain.');
   const recipients = mode === 'creator' || mode === 'exclusive' ? (input.recipients ?? [{kind:'wallet',target:'',percent:100}]) : [];
   if (!Array.isArray(recipients) || recipients.length > 12 || ((mode === 'creator' || mode === 'exclusive') && !recipients.length)) throw new Error('Add between one and twelve recipients.');
   const seen = new Set();

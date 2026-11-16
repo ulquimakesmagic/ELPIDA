@@ -19,6 +19,7 @@ import {odometer} from './odometer.mjs';
 import {filterByWho,topTraders,safetyChecks,quickAmounts,walletHolders} from './token-insights.mjs';
 import {flywheelChip} from './burn-labels.mjs';
 import { creatorSplitCard, creatorStrategyCard, identityAllocationCard, claimFeesTag, creatorWalletCard } from './creator-split.mjs';
+import { solanaCreatorVaultCard } from './solana-creator-vault-view.mjs';
 export { exceedsRemaining };
 
 const metadataRequests = new Map();
@@ -201,7 +202,7 @@ export function renderToken(ctx, address) {
       h('div.tk-top', priceCard),
       // Allocations and splits sit right under the trade panel so recipients see them (Malik, 11 Nov); they stay hidden
       // for tokens whose creator share has no other recipients.
-      h('aside.tk-rail.stack', trade, identityAllocationCard(ctx, token), creatorSplitCard(ctx, token), creatorWalletCard(ctx, token), desk.position, curve, safety, v2Allocations ? null : creatorFeesStat, creatorStrategyCard(ctx, token)),
+      h('aside.tk-rail.stack', trade, identityAllocationCard(ctx, token), solanaCreatorVaultCard(ctx, token), creatorSplitCard(ctx, token), creatorWalletCard(ctx, token), desk.position, curve, safety, v2Allocations ? null : creatorFeesStat, creatorStrategyCard(ctx, token)),
       h('div.tk-rest.stack', activity)), mobileBar);
   async function loadCreatorFees(){if(!page.isConnected||v2Allocations)return;try{const result=await ctx.api(`creator-fees?network=${encodeURIComponent(token.network??ctx.currentChain())}&token=${encodeURIComponent(token.address)}`);if(!page.isConnected)return;if(result.status==='ready'){creatorFeesTotal.textContent=result.assets.filter(a=>Number(a.amount)>0).map(a=>`${number(a.amount,6)} ${a.symbol}`).join(' + ')||`0 ${q}`;creatorFeesStat.title=`Lifetime creator fees through indexed block ${result.indexedBlock}, including claimed amounts. Token and quote assets are shown separately.`;}else{creatorFeesTotal.textContent=result.status==='loading'?'Loading…':'Unavailable';}}catch{creatorFeesTotal.textContent='Unavailable';}if(page.isConnected)setTimeout(loadCreatorFees,15000);}
   queueMicrotask(loadCreatorFees);

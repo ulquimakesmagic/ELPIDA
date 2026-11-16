@@ -104,6 +104,8 @@ if (mainnet && !args.yes) {
 const statePath = `${root}local-data/solana-${args.cluster}-deploy-state.json`;
 const state = existsSync(statePath) ? JSON.parse(readFileSync(statePath, 'utf8')) : {};
 const deployed = (await connection.getAccountInfo(programId))?.executable;
+// True once the deployed program is this build (a fresh deploy, an upgrade, or already up to date).
+let programCurrent = !deployed;
 if (!deployed && !programKeypair) throw new Error(`Missing ${programKeyPath}. Deploying a new program needs its keypair; copy contracts/solana/keys from the folder it was created in (for example elpida-v1). Never share it.`);
 // Check the authority before uploading anything, so a wrong keypair spends no SOL.
 if (deployed && args.upgrade) {
@@ -139,6 +141,7 @@ if (!deployed) {
   console.log(result.alreadyDeployed ? 'Program already deployed.' : 'Program deployed.');
 } else {
   const status = await programStatus(connection, programId, elf);
+  programCurrent = status.upToDate;
   if (status.upToDate) console.log('Program already deployed and up to date.');
   else if (!args.upgrade) console.log('Program already deployed, but contracts/solana/build has a newer version. Run with --upgrade (solana-upgrade.cmd) to upgrade it.');
   else {
@@ -158,6 +161,7 @@ if (!deployed) {
       onProgress: message => console.log(message),
     });
     console.log('Program upgraded.');
+    programCurrent = true;
   }
 }
 
@@ -203,6 +207,9 @@ if (mainnet || args['beta-admin'] || args['invite-only'] || args.allow.length) {
 }
 // ELPIDA V2: needs the upgraded program and the upgrade authority (pairs and distributors are authority-only).
 let v2 = published?.v2 ?? null;
+// Creator vaults (16 November 2026): recorded once the deployed program is a build that has `create_creator_vault`,
+// so the launch form offers splits, X and website allocations and holder strategies on Solana.
+const hasCreatorVaults = Buffer.from(elf).includes('Instruction: CreateCreatorVault');
 if (args.v2) {
   if (!isAuthority) throw new Error('--v2 needs the upgrade authority: run it with the deployer keypair.');
   v2 = await ensureV2({ connection, payer, programId, treasury: args.treasury ?? payer.publicKey.toBase58(), cluster: args.cluster, keeper: args.keeper, oracle: SOLANA_ORACLES[args.cluster] ?? null, pricing, onProgress: message => console.log(message) });
@@ -236,7 +243,7 @@ const record = {
   build: mainnet ? 'mainnet' : 'testnet',
   betaGate: betaGate ? { enabled: betaGate.enabled, authority: betaGate.authority.toBase58() } : null,
   // ELPIDA V2 (step 4a): the V2 SOL pair and the distributors, when set up (--v2).
-  v2,
+  v2: v2 ? { ...v2, ...(hasCreatorVaults && programCurrent ? { creatorVaults: true } : {}) } : v2,
 };
 // Last step: hand the upgrade authority to a multisig. After this, upgrades and config changes go
 // through it (scripts/solana-beta.mjs prepares upgrade buffers and gate changes for Squads).

@@ -3,7 +3,10 @@
 // a payout wallet; then the V2 keeper, the allocation's verifier, binds that wallet (once). Websites prove control with a
 // DNS TXT record at _elpida.<domain>; X accounts with X sign-in (when the server has an X app: ELPIDA_X_CLIENT_ID and
 // ELPIDA_X_REDIRECT_URI). The same rules as the local simulation (apps/api/reward-engine.mjs).
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createPublicKey, verify as verifySignature } from 'node:crypto';
+import * as web3 from '@solana/web3.js';
+const { PublicKey } = web3;
+import { decodeCreatorVault } from '../../packages/solana/client.mjs';
 import { resolveTxt } from 'node:dns/promises';
 import { Contract, ZeroAddress, getAddress, isAddress, verifyMessage } from 'ethers';
 import { XVerification } from './x-verification.mjs';
@@ -11,6 +14,16 @@ import { XVerification } from './x-verification.mjs';
 const ALLOCATION = ['function IDENTITY_ALLOCATION_VERSION() view returns(uint256)', 'function verifier() view returns(address)', 'function rowCount() view returns(uint256)',
   'function row(uint256) view returns(string label,address wallet,uint16 share)', 'function bind(uint256,address)'];
 const TEN_MINUTES = 600_000;
+const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
+const solanaNetwork = n => String(n ?? '').startsWith('solana-');
+/** An ed25519 signature (base64 or hex) of `message` by a Solana wallet (base58). */
+function solanaSigned(message, signature, wallet) {
+  try {
+    const sig = /^[0-9a-f]{128}$/i.test(String(signature)) ? Buffer.from(signature, 'hex') : Buffer.from(String(signature ?? ''), 'base64');
+    const key = createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(new PublicKey(wallet).toBytes())]), format: 'der', type: 'spki' });
+    return sig.length === 64 && verifySignature(null, Buffer.from(message), key, sig);
+  } catch { return false; }
+}
 
 /** Where an owner lands after X sign-in: the token's claim page on the rewards screen (safe characters only). */
 /**
@@ -21,12 +34,13 @@ export const xResultLink = (back, result) => `${back}${back.includes('?') ? '&' 
   ? { x: 'verified', handle: String(result.handle ?? ''), wallet: String(result.wallet ?? '') }
   : { x: 'failed', reason: String(result.reason ?? 'X verification failed.').slice(0, 200) })}`;
 
-export const claimLink = c => (c?.token && /^[a-z0-9-]{1,40}$/.test(String(c.network)) && isAddress(c.token) ? { back: `/#/rewards?claim=${getAddress(c.token)}&network=${c.network}` } : { back: '/#/rewards' });
+export const claimLink = c => (c?.token && /^[a-z0-9-]{1,40}$/.test(String(c.network)) && (isAddress(c.token) || BASE58.test(String(c.token))) ? { back: `/#/rewards?claim=${isAddress(c.token) ? getAddress(c.token) : c.token}&network=${c.network}` } : { back: '/#/rewards' });
 
 export class V2Identities {
   /** `signerFor(networkKey)`: the V2 keeper on that network as { signer, chainId }, or null. */
-  constructor({ signerFor, x = new XVerification(), dnsResolver = resolveTxt, now = () => Date.now() }) {
-    Object.assign(this, { signerFor, x, dnsResolver, now });
+  /** `solanaKeeper()`: the Solana V2 keeper (operator of creator vaults; `bindCreatorRow`), or null. */
+  constructor({ signerFor, solanaKeeper = () => null, x = new XVerification(), dnsResolver = resolveTxt, now = () => Date.now() }) {
+    Object.assign(this, { signerFor, solanaKeeper, x, dnsResolver, now });
     this.challenges = new Map();
   }
 
@@ -34,6 +48,7 @@ export class V2Identities {
 
   /** The allocation row, checked: an Elpida identity allocation whose verifier is this server's keeper on `network`. */
   async row(network, vault, index) {
+    if (solanaNetwork(network)) return this.solanaRow(vault, index);
     const keeper = this.signerFor(String(network ?? ''));
     if (!keeper) throw new Error('The Elpida V2 keeper is not running on this network, so ownership cannot be verified yet.');
     if (!isAddress(vault) || !Number.isInteger(index) || index < 0 || index > 7) throw new Error('Choose an allocation of a V2 token.');
@@ -46,21 +61,37 @@ export class V2Identities {
     return { contract: c, chainId: keeper.chainId, kind, target, wallet: r.wallet };
   }
 
+  /** Solana: an X or website row of a creator vault (`vault`: the token's mint) operated by this server's keeper. */
+  async solanaRow(mint, index) {
+    const keeper = this.solanaKeeper();
+    if (!keeper?.enabled) throw new Error('The Elpida keeper is not running on Solana, so ownership cannot be verified yet.');
+    if (!BASE58.test(String(mint ?? '')) || !Number.isInteger(index) || index < 0 || index > 7) throw new Error('Choose an allocation of a V2 token.');
+    const v = decodeCreatorVault((await keeper.connection.getAccountInfo(keeper.client.creatorVaultFor(new PublicKey(mint))))?.data, web3);
+    if (!v || v.mode !== 0) throw new Error('That token has no allocation vault.');
+    if (!v.operator.equals(keeper.payer.publicKey)) throw new Error('This allocation is verified by another server.');
+    const r = v.rows.find(x => x.index === index);
+    if (!r) throw new Error('Allocation not found.');
+    const [kind, ...rest] = r.label.split(':'), target = rest.join(':');
+    if (!['x', 'domain'].includes(kind) || !target) throw new Error('Wallet allocations need no verification.');
+    return { solana: true, mint, chainId: 'solana', kind, target, wallet: r.wallet ? r.wallet.toBase58() : ZeroAddress };
+  }
+
   /** A signed claim for one X or website allocation: the message to sign and, for a website, the DNS record to add. */
   async challenge({ network, vault, index, wallet, token }) {
     index = Number(index);
-    if (!isAddress(wallet) || wallet === ZeroAddress) throw new Error('Connect the wallet that should receive this share.');
+    const sol = solanaNetwork(network);
+    if (sol ? !BASE58.test(String(wallet ?? '')) : !isAddress(wallet) || wallet === ZeroAddress) throw new Error('Connect the wallet that should receive this share.');
     const row = await this.row(network, vault, index);
     if (row.wallet !== ZeroAddress) throw new Error('This allocation already pays a verified wallet.');
     if (row.kind === 'x' && !this.x.enabled) throw new Error('X sign-in is not set up on this server yet. This share stays held until it is.');
     const now = this.now();
     for (const [k, c] of this.challenges) if (c.expires < now) this.challenges.delete(k);
     if (this.challenges.size > 1000) throw new Error('Too many verification requests right now. Try again in a few minutes.');
-    const nonce = randomBytes(24).toString('hex'), expires = now + TEN_MINUTES, w = getAddress(wallet).toLowerCase(), v = getAddress(vault).toLowerCase();
+    const nonce = randomBytes(24).toString('hex'), expires = now + TEN_MINUTES, w = sol ? String(wallet) : getAddress(wallet).toLowerCase(), v = sol ? String(vault) : getAddress(vault).toLowerCase();
     const txt = `elpida-claim=${nonce};wallet=${w};vault=${v}`;
-    const message = `Elpida ${row.kind} reward claim\nChain: ${row.chainId}\nVault: ${getAddress(vault)}\nIdentity: ${row.target}\nWallet: ${w}\nNonce: ${nonce}\nExpires: ${expires}`;
+    const message = `Elpida ${row.kind} reward claim\nChain: ${sol ? network : row.chainId}\nVault: ${sol ? vault : getAddress(vault)}\nIdentity: ${row.target}\nWallet: ${w}\nNonce: ${nonce}\nExpires: ${expires}`;
     // The token (optional) only shapes the link back to its claim page after X sign-in.
-    this.challenges.set(nonce, { network: String(network), vault: getAddress(vault), index, wallet: w, kind: row.kind, target: row.target, expires, txt, message, token: isAddress(token) ? getAddress(token) : null });
+    this.challenges.set(nonce, { network: String(network), vault: sol ? String(vault) : getAddress(vault), index, wallet: w, kind: row.kind, target: row.target, expires, txt, message, token: sol ? (BASE58.test(String(token ?? '')) ? String(token) : null) : isAddress(token) ? getAddress(token) : null });
     return { nonce, expires, message, kind: row.kind, target: row.target, ...(row.kind === 'domain' ? { name: `_elpida.${row.target}`, txt } : {}) };
   }
 
@@ -68,6 +99,7 @@ export class V2Identities {
     const c = this.challenges.get(String(nonce ?? ''));
     if (!c || c.expires < this.now()) throw new Error('This verification expired. Start again.');
     if (c.kind !== kind) throw new Error(kind === 'domain' ? 'Use X sign-in for an X account.' : 'Use the DNS check for a website.');
+    if (solanaNetwork(c.network)) { if (!solanaSigned(c.message, signature, c.wallet)) throw new Error('The signature does not match the payout wallet.'); return c; }
     let signer = ''; try { signer = verifyMessage(c.message, String(signature ?? '')).toLowerCase(); } catch { signer = ''; }
     if (signer !== c.wallet) throw new Error('The signature does not match the payout wallet.');
     return c;
@@ -103,6 +135,7 @@ export class V2Identities {
   async bind(c) {
     const row = await this.row(c.network, c.vault, c.index);
     if (row.wallet !== ZeroAddress) throw new Error('This allocation already pays a verified wallet.');
+    if (row.solana) { await this.solanaKeeper().bindCreatorRow(c.vault, c.index, c.wallet); return; }
     await (await row.contract.bind(c.index, c.wallet)).wait();
   }
 }
