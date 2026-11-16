@@ -7,7 +7,7 @@
 //  - an approval file for exactly that plan (its SHA-256) is merged in deployments/approvals/ (Malik's sign-off).
 //
 //   node scripts/v2-mainnet-deploy.mjs check    --plan deployments/plans/base-mainnet.json
-//   node scripts/v2-mainnet-deploy.mjs rehearse --plan deployments/plans/base-mainnet.json [--fork <rpc url>]
+//   node scripts/v2-mainnet-deploy.mjs rehearse --plan deployments/plans/base-mainnet.json [--fork <rpc url> | --node <dev node url>]
 //   node scripts/v2-mainnet-deploy.mjs deploy   --plan deployments/plans/base-mainnet.json
 //   node scripts/v2-mainnet-deploy.mjs verify   --plan deployments/plans/base-mainnet.json
 //
@@ -17,9 +17,11 @@
 // (deployments/<key>.json, resumable) and the Safe batch (deployments/<key>-safe-batch.json) for the treasury-only
 // wiring. After the Safe executes that batch, `verify` checks the wiring and marks the record ready.
 // `rehearse` runs the whole sequence on a local chain (mock PoolManager, feed, USDC and Safe), or on a fork of the real
-// network with --fork, without any key: the Safe's batch is sent by impersonation.
+// network with --fork, without any key: the Safe's batch is sent by impersonation. --node <url> rehearses on a dev node
+// you started (Foundry anvil forking the chain), for tokens Hardhat cannot run: Base's Coinbase stocks are B20
+// precompiles, so on Base use `anvil --fork-url <rpc> --hardfork base:Cobalt` (Foundry v1.8.4+) and --node.
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, renameSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -246,24 +248,52 @@ export const rehearsalNetwork = (plan, fork) => (fork
   ? { network: 'localCancun', override: { chainId: Number(plan.chainId), forking: { url: fork, enabled: true } } }
   : 'localCancun');
 
-export async function rehearse({ plan: given, fork = null, log = () => {}, recordPath, stocks = [], findHolder = null }) {
-  const { network } = await import('hardhat');
+/**
+ * A dev-node method by its Hardhat name (`hardhat_impersonateAccount`), falling back to Anvil's (`anvil_…`) on a node
+ * that does not know the Hardhat alias.
+ */
+export async function devRpc(provider, method, params) {
+  try { return await provider.send(`hardhat_${method}`, params); }
+  catch (error) {
+    if (!/method not found|not supported|does not exist|-32601|unknown variant/i.test(`${error?.message} ${error?.error?.message ?? ''} ${error?.error?.code ?? ''}`)) throw error;
+    return provider.send(`anvil_${method}`, params);
+  }
+}
+
+/**
+ * `node`: an already-running dev node to rehearse on instead of Hardhat's built-in one, for chains whose tokens Hardhat
+ * cannot run. Base's Coinbase stocks are B20 precompiles: a Hardhat fork has no code for them, while Foundry's anvil
+ * (v1.8.4+, `--hardfork base:Cobalt`) runs them natively. `local: true` deploys mocks on that node instead of using the
+ * real chain's addresses (tests).
+ */
+export async function rehearse({ plan: given, fork = null, node = null, local = !fork && !node, log = () => {}, recordPath, stocks = [], findHolder = null }) {
+  // Every rehearsal deploys afresh on its own chain: a record left by an earlier run (another test Safe, another fork)
+  // is not resumed. Only the real deploy resumes a record.
+  if (recordPath) for (const f of [recordPath, safeBatchPath(recordPath)]) rmSync(f, { force: true });
   const { BrowserProvider } = await import('ethers');
-  const connection = await network.create(rehearsalNetwork(given, fork));
-  const provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 }); provider.pollingInterval = 10;
+  let connection = null, provider;
+  if (node) {
+    provider = new JsonRpcProvider(node, undefined, { cacheTimeout: -1 });
+  } else {
+    const { network } = await import('hardhat');
+    connection = await network.create(rehearsalNetwork(given, fork));
+    provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 });
+  }
+  provider.pollingInterval = 10;
   try {
     const signers = await Promise.all([0, 1, 2, 3, 4].map(i => provider.getSigner(i))), addrs = await Promise.all(signers.map(s => s.getAddress()));
     const art = artifacts(), plan = { ...given, confirmations: 1 };
     const deployMock = async (name, args) => { const a = name === 'PoolManager' ? uniswapV4Artifact('PoolManager') : Object.values(compileV4({ includeMocks: true })).find(e => e[name]?.evm?.bytecode?.object)[name]; const c = await new ContractFactory(a.abi, a.bytecode ?? a.evm.bytecode.object, signers[0]).deploy(...args); await c.waitForDeployment(); return c.getAddress(); };
-    if (!fork) {
+    if (local) {
       const safe = await deployMock('MockSafe', [[addrs[1], addrs[2]], 2]);
       Object.assign(plan, { chainId: Number((await provider.getNetwork()).chainId), treasury: safe, keeper: addrs[3], guardian: addrs[4], poolManager: await deployMock('PoolManager', [addrs[0]]), usdFeed: await deployMock('MockUsdFeed', [2500n * 10n ** 8n]), usdc: await deployMock('MockUSDC', []) });
       if (usdcDecimals(plan) !== 6) await (await new Contract(plan.usdc, ['function setDecimals(uint8)'], signers[0]).setDecimals(usdcDecimals(plan))).wait();
       if (nativeSymbol(plan) !== 'ETH') await (await new Contract(plan.usdFeed, ['function setDescription(string)'], signers[0]).setDescription(`${nativeSymbol(plan)} / USD`)).wait();
-      // Local stand-ins for `{ mock: true, price }` stocks (tests): an issuer-controlled stock and its feed, held by signer 1.
+      // Local stand-ins for `{ mock: true, price }` stocks (tests): an issuer-controlled stock and its feed, held by signer 1
+      // (or, with `inPoolManager: true`, only by the PoolManager, to exercise the PoolManager fallback).
       for (const s of stocks.filter(x => x.mock)) {
-        s.address = await deployMock('MockIssuerStock', []); s.feed = await deployMock('MockUsdFeed', [BigInt(Math.round(s.price * 1e8))]); s.holder = addrs[1]; s.symbol = 'mSTK';
-        await (await new Contract(s.address, ['function mint(address,uint256)'], signers[0]).mint(addrs[1], 10n ** 24n)).wait();
+        s.address = await deployMock('MockIssuerStock', []); s.feed = await deployMock('MockUsdFeed', [BigInt(Math.round(s.price * 1e8))]); s.holder = s.inPoolManager ? null : addrs[1]; s.symbol = 'mSTK';
+        await (await new Contract(s.address, ['function mint(address,uint256)'], signers[0]).mint(s.inPoolManager ? plan.poolManager : addrs[1], 10n ** 24n)).wait();
         await (await new Contract(s.feed, ['function setDescription(string)'], signers[0]).setDescription('mSTK / USD')).wait();
       }
     } else if (!plan.treasury || !plan.keeper || !plan.guardian) {
@@ -272,11 +302,15 @@ export async function rehearse({ plan: given, fork = null, log = () => {}, recor
       plan.treasury ||= await deployMock('MockSafe', [[addrs[1], addrs[2]], 2]); plan.keeper ||= addrs[3]; plan.guardian ||= addrs[4];
       log('Fork rehearsal with a test Safe and wallets (the plan has none yet). The real deploy needs them filled in.');
     }
+    // The dev accounts are the well-known test keys. On a public chain such as Base they carry code others put there
+    // (EIP-7702 delegations), which anvil copies onto the fork: the keeper would then fail "is a plain wallet". Clear it
+    // on the fork only, so the stand-in roles are the plain wallets they stand in for.
+    for (const a of addrs) if ((await provider.getCode(a)) !== '0x') { await devRpc(provider, 'setCode', [a, '0x']); log(`Cleared code on test wallet ${a} (fork only).`); }
     const checks = await preflight({ provider, plan, deployer: addrs[0] });
     if (checks.failed.length) throw new Error(`Preflight failed: ${checks.failed.map(c => `${c.check} (${c.detail})`).join('; ')}`);
     const record = await deployPlan({ provider, signer: signers[0], plan, hash: planHash(JSON.stringify(plan)), approval: null, recordPath, art, log });
     // The Safe's batch, sent by impersonating the treasury.
-    await provider.send('hardhat_impersonateAccount', [plan.treasury]); await provider.send('hardhat_setBalance', [plan.treasury, '0x' + (10n ** 18n).toString(16)]);
+    await devRpc(provider, 'impersonateAccount', [plan.treasury]); await devRpc(provider, 'setBalance', [plan.treasury, '0x' + (10n ** 18n).toString(16)]);
     for (const tx of safeBatch(plan, record).transactions) { const hash = await provider.send('eth_sendTransaction', [{ from: plan.treasury, to: tx.to, data: tx.data }]); await provider.waitForTransaction(hash); }
     const verified = await verifyDeployment({ provider, plan, record, recordPath });
     if (verified.some(c => !c.ok)) throw new Error(`Verify failed: ${verified.filter(c => !c.ok).map(c => c.check).join('; ')}`);
@@ -296,7 +330,7 @@ export async function rehearse({ plan: given, fork = null, log = () => {}, recor
     await (await new Contract(record.contracts.factory, ['function pauseLaunches()'], signers.find((_, i) => addrs[i] === plan.guardian) ?? signers[4]).pauseLaunches()).wait();
     const paused = await new Contract(record.contracts.factory, FACTORY_READ, provider).launchesPaused();
     return { record, checks, verified, launch: { token: launched.args.token, startMcapUsd: startMcap }, stocks: stockResults, guardianPaused: paused };
-  } finally { provider.destroy(); await connection.close(); }
+  } finally { provider.destroy(); await connection?.close(); }
 }
 
 /**
@@ -322,14 +356,22 @@ export async function rehearseStock({ provider, signer, plan, record, art, stock
     const [, answer] = await new Contract(stock.feed, FEED, provider).latestRoundData(), feedDecimals = Number(await new Contract(stock.feed, FEED, provider).decimals());
     const priceUsd = Number(answer) / 10 ** feedDecimals;
     // Approve as the Safe would: impersonating the treasury on the fork.
-    await provider.send('hardhat_impersonateAccount', [plan.treasury]);
+    await devRpc(provider, 'impersonateAccount', [plan.treasury]);
     const approve = new Interface(['function approvePricedQuote(address,address,uint256)']).encodeFunctionData('approvePricedQuote', [stock.address, stock.feed, stock.maxAge ?? 4 * DAY]);
     await provider.waitForTransaction(await provider.send('eth_sendTransaction', [{ from: plan.treasury, to: record.contracts.factory, data: approve }]));
     // About $300 of the stock from an existing holder (fork only).
     const want = BigInt(Math.ceil(300 / priceUsd * 1e6)) * unit / 1_000_000n;
-    const holder = stock.holder ?? (findHolder ? await findHolder(stock.address, want) : null);
-    if (!holder) throw new Error('no holder to fund the test (set ELPIDA_STOCK_HOLDER_<SYMBOL>)');
-    await provider.send('hardhat_impersonateAccount', [holder]); await provider.send('hardhat_setBalance', [holder, '0x' + (10n ** 18n).toString(16)]);
+    // Who lends the stock on the fork: ELPIDA_STOCK_HOLDER_<SYMBOL>, else a holder from the explorer, else the Uniswap v4
+    // PoolManager (it holds every v4 pool's tokens, and the stocks trade in Uniswap pools on Base).
+    let holder = stock.holder ?? null; const why = [];
+    if (!holder && findHolder) { try { holder = await findHolder(stock.address, want); } catch (e) { why.push(String(e.message).slice(0, 120)); } }
+    if (!holder && plan.poolManager) {
+      if ((await token.balanceOf(plan.poolManager)) >= want) { holder = plan.poolManager; log(`  ${stock.symbol}: funded from the Uniswap v4 PoolManager (fork only)`); }
+      else why.push('the Uniswap v4 PoolManager holds too little');
+    }
+    if (!holder) throw new Error(`no holder to fund the test (${why.join('; ') || 'no explorer'}); set ELPIDA_STOCK_HOLDER_${String(stock.symbol).toUpperCase()}`);
+    // Gas for the lender, added to what it holds (the PoolManager's own ETH backs native pools on the fork).
+    await devRpc(provider, 'impersonateAccount', [holder]); await devRpc(provider, 'setBalance', [holder, '0x' + ((await provider.getBalance(holder)) + 10n ** 18n).toString(16)]);
     const data = new Interface(ERC20_RW).encodeFunctionData('transfer', [me, want]);
     await provider.waitForTransaction(await provider.send('eth_sendTransaction', [{ from: holder, to: stock.address, data }]));
     if ((await token.balanceOf(me)) < want) throw new Error('the holder transfer did not arrive (transfer restricted?)');
@@ -361,10 +403,13 @@ export async function rehearseStock({ provider, signer, plan, record, art, stock
 /** A holder of `address` with at least `want`, from a Blockscout explorer (read only; impersonated on the fork only). */
 export const blockscoutHolder = (explorer, provider) => async (address, want) => {
   const r = await fetch(`${explorer.replace(/\/$/, '')}/api/v2/tokens/${address}/holders`, { signal: AbortSignal.timeout(30000), headers: { accept: 'application/json' } });
-  if (!r.ok) return null;
+  if (!r.ok) throw new Error(`the explorer's holder list answered HTTP ${r.status}`);
   const token = new Contract(address, ERC20_RW, provider);
-  for (const it of ((await r.json()).items ?? []).slice(0, 25)) { const a = it.address?.hash; if (a && !it.address?.is_contract && await token.balanceOf(a) >= want) return a; }
-  return null;
+  // Plain wallets first; then contracts (every sampled holder of a Coinbase stock on Base was a contract). Both are only
+  // impersonated on the local fork.
+  const items = ((await r.json()).items ?? []).slice(0, 25), ordered = [...items.filter(it => !it.address?.is_contract), ...items.filter(it => it.address?.is_contract)];
+  for (const it of ordered) { const a = it.address?.hash; if (a && await token.balanceOf(a) >= want) return a; }
+  throw new Error(`none of the explorer's ${items.length} listed holders has enough`);
 };
 
 export function deployerKey(input) {
@@ -402,17 +447,19 @@ export async function askHidden(prompt) {
 
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2), arg = n => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : null; };
-  const planPath = arg('plan'); if (!cmd || !planPath) { console.log('usage: node scripts/v2-mainnet-deploy.mjs check|rehearse|deploy|verify --plan deployments/plans/<key>.json [--fork <rpc>]'); process.exit(2); }
-  const { plan, hash } = readPlan(planPath, { local: cmd === 'rehearse' && !arg('fork'), forkRehearsal: cmd === 'rehearse' && !!arg('fork') }), recordPath = join(root, 'deployments', `${plan.key}.json`);
+  const planPath = arg('plan'); if (!cmd || !planPath) { console.log('usage: node scripts/v2-mainnet-deploy.mjs check|rehearse|deploy|verify --plan deployments/plans/<key>.json [--fork <rpc> | --node <local dev node>]'); process.exit(2); }
+  const live = arg('fork') ?? arg('node');
+  const { plan, hash } = readPlan(planPath, { local: cmd === 'rehearse' && !live, forkRehearsal: cmd === 'rehearse' && !!live }), recordPath = join(root, 'deployments', `${plan.key}.json`);
   const print = list => { for (const c of list) console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.check}${c.detail ? `: ${c.detail}` : ''}`); };
   console.log(`plan ${plan.key} (${plan.name}), sha256 ${hash}`);
   if (cmd === 'rehearse') {
     // --stocks <config/stocks/candidates/….json>: also launch against each real stock on the fork (fork only).
     const stocksFile = arg('stocks'), stocks = stocksFile ? JSON.parse(readFileSync(stocksFile, 'utf8')).map(s => ({ ...s, holder: process.env[`ELPIDA_STOCK_HOLDER_${String(s.symbol).toUpperCase()}`] ?? null })) : [];
-    if (stocks.length && !arg('fork')) throw new Error('--stocks needs --fork <rpc>: real stocks exist only on the real chain.');
+    if (stocks.length && !live) throw new Error('--stocks needs --fork <rpc> or --node <dev node forking the chain>: real stocks exist only on the real chain.');
+    if (arg('fork') && arg('node')) throw new Error('Use --fork <rpc> or --node <dev node>, not both.');
     if (stocks.some(s => !s.holder) && !plan.explorerApi) throw new Error('The plan has no explorerApi (a Blockscout URL) to find stock holders; set ELPIDA_STOCK_HOLDER_<SYMBOL> per stock.');
-    const r = await rehearse({ plan, fork: arg('fork'), log: m => console.log(m), recordPath: join(dirname(recordPath), `${plan.key}.rehearsal.json`), stocks,
-      findHolder: plan.explorerApi ? (address, want) => blockscoutHolder(plan.explorerApi, new JsonRpcProvider(arg('fork'), undefined, { staticNetwork: true }))(address, want) : null });
+    const r = await rehearse({ plan, fork: arg('fork'), node: arg('node'), log: m => console.log(m), recordPath: join(dirname(recordPath), `${plan.key}.rehearsal.json`), stocks,
+      findHolder: plan.explorerApi ? (address, want) => blockscoutHolder(plan.explorerApi, new JsonRpcProvider(live, undefined, { staticNetwork: true }))(address, want) : null });
     print(r.checks); print(r.verified);
     console.log(`rehearsal launch ${r.launch.token}: starts at $${r.launch.startMcapUsd.toFixed(2)}; guardian stop works: ${r.guardianPaused}`);
     if (r.stocks.length) {
