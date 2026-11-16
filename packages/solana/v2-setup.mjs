@@ -121,3 +121,35 @@ export async function ensureV2Stocks({ connection, payer, programId, treasury, c
   }
   return out;
 }
+
+/**
+ * V2 starting and graduation market caps of the test USDC and paired-token pairs, in the pair asset: $50 → $250 like the
+ * SOL pair. TEST-MEME is valued at $50 per 500,000 (packages/core/pairs.mjs), so $50 is 500,000 TEST-MEME.
+ */
+export const V2_ASSET_CURVES = Object.freeze({ usdc: { startFdv: '50', endFdv: '250' }, token: { startFdv: '500000', endFdv: '2500000' } });
+
+/**
+ * Test networks only (16 November 2026): a V2 pair for the recorded USDC and paired-token pairs (`assets`: the deploy
+ * record's usdc/token pairs). Curves are sized in the pair asset (V2_ASSET_CURVES); the $10 fee is priced from SOL/USD.
+ * Idempotent.
+ */
+export async function ensureV2AssetPairs({ connection, payer, programId, treasury, cluster, oracle, pricing, assets, onProgress = () => {} }) {
+  if (cluster === 'mainnet') throw new Error('V2 USDC and paired-token pairs are set up on test networks only for now.');
+  const client = createElpidaSolana(web3, programId), out = [];
+  for (const asset of assets) {
+    const curve = V2_ASSET_CURVES[asset.kind];
+    if (!curve) continue;
+    const mint = new PublicKey(asset.mint), mintInfo = await connection.getAccountInfo(mint);
+    if (!mintInfo) throw new Error(`${asset.symbol} mint ${asset.mint} not found on this cluster.`);
+    const config = client.configV2For(mint);
+    if (!await connection.getAccountInfo(config)) {
+      onProgress(`Creating the ELPIDA V2 ${asset.symbol} pair (1.00% minimum fee, ×5 curve, 3% first-buy cap)…`);
+      const params = curveParams({ ...curve, quoteDecimals: asset.decimals, launchFee: pricing.launchFee, baseFeeBps: V2.mainnetMinFeeBps, snipeStartBps: V2.snipeStartBps, snipeWindowSecs: V2.snipeWindowSecs, maxCreatorBuyBps: V2.firstBuyCapBps });
+      await send(connection, payer, [client.computeBudget(), client.addV2Config({ authority: payer.publicKey, quoteMint: mint, treasury: new PublicKey(treasury), params, quoteTokenProgram: mintInfo.owner })]);
+    } else onProgress(`ELPIDA V2 ${asset.symbol} pair already exists.`);
+    if (client.decodeConfig((await connection.getAccountInfo(config)).data).modelVersion !== 4) throw new Error(`${config.toBase58()} is not a V2 config.`);
+    if (oracle) await ensurePricing({ connection, payer, programId, config: config.toBase58(), oracle: { ...oracle, startFdvUsdE6: '0' }, onProgress: m => onProgress(`V2 ${asset.symbol}: ${m}`) });
+    out.push({ kind: asset.kind, key: asset.key, symbol: asset.symbol, name: asset.name, mint: asset.mint, decimals: asset.decimals, tokenProgram: mintInfo.owner.toBase58(), test: true, config: config.toBase58(), faucet: asset.faucet ?? null });
+  }
+  return out;
+}

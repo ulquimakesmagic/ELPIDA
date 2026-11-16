@@ -31,7 +31,7 @@ import { solanaPairTemplates } from '../packages/core/pairs.mjs';
 import { solanaPricing } from '../packages/core/pricing.mjs';
 import { SOLANA_ORACLES } from '../packages/core/usd-oracles.mjs';
 import { createElpidaSolana, poolStats } from '../packages/solana/client.mjs';
-import { ensureV2, ensureV2Stocks } from '../packages/solana/v2-setup.mjs';
+import { ensureV2, ensureV2Stocks, ensureV2AssetPairs } from '../packages/solana/v2-setup.mjs';
 import { declaredProgramId } from '../packages/solana/program-id.mjs';
 import { savedTestAssets, mergedTestAssets } from '../packages/solana/deploy-record.mjs';
 import { deployProgram, upgradeProgram, upgradeCost, programStatus, deploymentCost, airdrop, findExistingBuffer, closeStaleBuffers, ensurePairConfigs, ensureBetaGate, rejectsTestInstructions, transferUpgradeAuthority, upgradeAuthority, ensurePricing } from '../packages/solana/deploy.mjs';
@@ -50,6 +50,7 @@ const { values: args } = parseArgs({ options: {
   'transfer-authority': { type: 'string' }, // hand the upgrade authority to this address (Squads vault) at the end
   yes: { type: 'boolean', default: false }, // required on mainnet: confirms spending real SOL
   v2: { type: 'boolean', default: false }, // ELPIDA V2: the V2 SOL pair and the reward distributors
+  'v2-pairs': { type: 'boolean', default: false }, // test networks: a V2 pair for the recorded USDC and paired-token pairs
   'v2-stocks': { type: 'boolean', default: false }, // test networks: a V2 pair for each recorded test stock, on its round test price
   keeper: { type: 'string' }, // with --v2: the server keeper's Solana address (distributor operator)
 } });
@@ -224,6 +225,16 @@ if (args['v2-stocks']) {
   if (!stocks.length) throw new Error('No test stock is recorded. Add tTSLAon first with --stock-pairs.');
   v2 = { ...v2, stocks: await ensureV2Stocks({ connection, payer, programId, treasury: args.treasury ?? payer.publicKey.toBase58(), cluster: args.cluster, oracle: SOLANA_ORACLES[args.cluster] ?? null, pricing, stocks, onProgress: message => console.log(message) }) };
   for (const s of v2.stocks) console.log(`ELPIDA V2 ${s.symbol} pair ready: ${s.config} (test price $${s.quotePricing.testPriceUsd}).`);
+}
+// V2 USDC and paired-token pairs (16 November 2026): test networks only, after V2 is set up.
+if (args['v2-pairs']) {
+  if (mainnet) throw new Error('--v2-pairs is for test networks only.');
+  if (!v2?.config) throw new Error('--v2-pairs needs ELPIDA V2 set up first (--v2 --keeper <address>).');
+  if (!isAuthority) throw new Error('--v2-pairs needs the upgrade authority: run it with the deployer keypair.');
+  const assets = pairs.filter(p => p.kind === 'usdc' || p.kind === 'token');
+  if (!assets.length) throw new Error('No USDC or paired-token pair is recorded on this cluster.');
+  v2 = { ...v2, pairs: await ensureV2AssetPairs({ connection, payer, programId, treasury: args.treasury ?? payer.publicKey.toBase58(), cluster: args.cluster, oracle: SOLANA_ORACLES[args.cluster] ?? null, pricing, assets, onProgress: message => console.log(message) }) };
+  for (const p of v2.pairs) console.log(`ELPIDA V2 ${p.symbol} pair ready: ${p.config}.`);
 }
 const startStats = poolStats({ ...config, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 }, config.quoteDecimals);
 const record = {

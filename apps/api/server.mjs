@@ -201,6 +201,9 @@ export function solanaConfig() {
           v2: record.v2 && base58.test(record.v2.config ?? '') ? { config: record.v2.config, creatorVaults: record.v2.creatorVaults === true, minFeeBps: Number(record.v2.minFeeBps), maxFeeBps: Number(record.v2.maxFeeBps), keeper: base58.test(record.v2.keeper ?? '') ? record.v2.keeper : null,
             flywheelVault: base58.test(record.v2.flywheelVault ?? '') ? record.v2.flywheelVault : null,
             // V2 test stock pairs (--v2-stocks): addresses, the bound test price and terms only.
+            // V2 USDC and paired-token pairs (--v2-pairs): addresses and terms only.
+            pairs: (Array.isArray(record.v2.pairs) ? record.v2.pairs : []).filter(x => ['usdc', 'token'].includes(x?.kind) && [x.config, x.mint, x.tokenProgram].every(v => base58.test(v ?? '')) && /^[A-Za-z0-9-]{1,16}$/.test(x.symbol ?? ''))
+              .map(x => ({ kind: x.kind, key: String(x.key ?? x.symbol), symbol: x.symbol, name: String(x.name ?? x.symbol).slice(0, 80), mint: x.mint, decimals: Number(x.decimals), tokenProgram: x.tokenProgram, test: x.test !== false, config: x.config, faucet: x.faucet ? String(x.faucet) : null })),
             stocks: (Array.isArray(record.v2.stocks) ? record.v2.stocks : []).filter(x => [x?.config, x?.mint, x?.tokenProgram, x?.quotePricing?.priceAccount].every(v => base58.test(v ?? '')) && /^[A-Za-z0-9]{1,16}$/.test(x.symbol ?? ''))
               .map(x => ({ kind: 'xstock', key: String(x.key ?? x.symbol), symbol: x.symbol, name: String(x.name ?? x.symbol).slice(0, 80), mint: x.mint, decimals: Number(x.decimals), tokenProgram: x.tokenProgram, test: x.test !== false, config: x.config,
                 quotePricing: { priceAccount: x.quotePricing.priceAccount, testPriceUsd: String(x.quotePricing.testPriceUsd ?? ''), startFdvUsdE6: String(x.quotePricing.startFdvUsdE6 ?? '') } })),
