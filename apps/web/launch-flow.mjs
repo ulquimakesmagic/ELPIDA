@@ -30,13 +30,13 @@ const STRATEGY_TEXT = {
   creator: 'Creator fees accumulate for one or more wallets you choose. Each wallet can claim its share.',
   holders: 'When the distribution threshold is reached, fees are paid to eligible holders in the trading asset, weighted by their holdings at a snapshot.',
   paired: 'At the threshold, creator fees buy a reward asset you choose and distribute it to eligible holders of your token.',
-  buyback: 'At the threshold, creator fees buy back your token and vest it to eligible holders over a period you set.',
   exclusive: 'Fees are allocated by percentage to wallets, X accounts or websites. X and website shares stay in the treasury until ownership is verified.',
 };
 const blankDraft = () => ({ name: '', symbol: '', description: '', image: '', imageUrl: '', website: '', twitter: '', telegram: '', discord: '', chain: '', pair: 'native', quoteAsset: '', rewardMode: 'creator', recipients: [{ kind: 'wallet', target: '', percent: '100' }], threshold: '0.01', minimumHolding: '0', minimumHoldingUsd: '20', thresholdUsd: '20', vestingDays: '30', rewardToken: '', feeCurrency:'native', firstBuy: '0', buyWith: 'pair', nativeBuy: '0', taxBuy:'0', taxSell:'0' });
 
 export function renderLaunch(ctx) {
   const draft = { ...blankDraft(), ...(storage.get(DRAFT_KEY) ?? {}) };
+  if (!STRATEGIES[draft.rewardMode]) draft.rewardMode = 'creator'; // a saved draft from before a strategy was removed
   if (draft.quoteToken && !draft.quoteAsset) draft.quoteAsset = draft.quoteToken; // drafts saved before pair kinds
   if (draft.launchModel === 'v11') draft.launchModel = 'v10'; // Model 11 drafts, from before it was retired (9 Nov 2026)
   if (!PAIR_KINDS.includes(draft.pair)) { draft.pair = 'native'; draft.quoteAsset = ''; draft.firstBuy = '0.01'; } // drafts from the USDC era
@@ -137,19 +137,32 @@ export function renderLaunch(ctx) {
   const solanaV2 = () => (solana() ? ctx.wallet?.deployment?.v2 ?? null : null);
   const v2Offered = () => !!draft.chain && draft.chain !== 'local' && (solana() ? !!solanaV2() : !!v2Deployment(net()));
   // On Solana: the SOL pair and, once the deploy sets them up (--v2-stocks, test networks), the V2 test stock pairs.
-  const solanaV2Stocks = () => (solanaV2()?.stocks?.length ?? 0) > 0;
-  const v2Pairs = () => (solana() ? ['native', ...(solanaV2Stocks() ? ['xstock'] : [])] : V2_PAIRS);
-  const solanaV2Only = () => (solanaV2Stocks() ? 'V2 test launches on Solana pair with SOL or a test stock.' : 'V2 test launches on Solana pair with SOL.');
+  const solanaV2Kinds = () => ['native', ...(solanaV2()?.pairs ?? []).map(p => p.kind), ...((solanaV2()?.stocks?.length ?? 0) > 0 ? ['xstock'] : [])];
+  const v2Pairs = () => (solana() ? solanaV2Kinds() : V2_PAIRS);
+  const solanaV2Only = () => `V2 test launches on Solana pair with ${solanaV2Kinds().map(k => ({ native: 'SOL', usdc: 'USDC', token: 'the test paired token', xstock: 'a test stock' })[k]).join(', ')}.`;
   // Model 10 is retired from the launch page (Malik, 9 November 2026): ELPIDA V2 is the only model wherever its
   // launchpad exists. Model 10 tokens keep trading. The local simulation keeps its own test curve.
   const v2Chosen = () => v2Offered();
   // V2 creator splits on public EVM networks: up to 8 wallets through an ownerless split contract (v2-launchpad.mjs).
-  const v2Splits = () => v2Chosen() && !solana() && draft.chain !== 'local' && !!ctx.config.contracts?.creatorAllocation?.bytecode;
+  // Solana: creator vaults (16 November 2026) once the deploy records the upgraded program (`v2.creatorVaults`).
+  const solanaCreatorVaults = () => solana() && !!solanaV2()?.creatorVaults;
+  const v2Splits = () => v2Chosen() && draft.chain !== 'local' && (solana() ? solanaCreatorVaults() : !!ctx.config.contracts?.creatorAllocation?.bytecode);
   // V2 holder strategies on public EVM networks: a strategy vault run by the server's V2 keeper (v2-launchpad.mjs).
-  const v2Strategies = () => v2Splits() && !!ctx.config.v2Keeper?.address && !!ctx.config.v2Keeper?.active;
-  const strategyAllowed = key => draft.chain === 'local' || key === 'creator' || (v2Strategies() && ['holders', 'paired', 'buyback', 'exclusive'].includes(key));
+  const v2Strategies = () => v2Splits() && (solana() ? !!solanaV2()?.keeper : !!ctx.config.v2Keeper?.address && !!ctx.config.v2Keeper?.active);
+  const strategyAllowed = key => draft.chain === 'local' || key === 'creator' || (v2Strategies() && ['holders', 'paired', 'exclusive'].includes(key) && !(solana() && key === 'paired' && !solanaRewardAssets().length));
   // Reward assets on public networks: the native coin and the approved pair assets, except the token's own pair asset.
-  const publicRewardAssets = () => [{ address: '0x0000000000000000000000000000000000000000', symbol: nativeSymbol() }, ...(ctx.wallet?.approvedQuotes ?? []).map(a => ({ address: a.address, symbol: `${a.symbol} · ${a.address.slice(0, 6)}…${a.address.slice(-4)}` }))]
+  // Solana reward assets: the swaps a creator vault can make (16 November 2026). A SOL pair can buy USDC (the recorded
+  // Raydium pool) or a test stock (the devnet conversion pool); a USDC or stock pair can buy SOL.
+  const WSOL = 'So11111111111111111111111111111111111111112';
+  const solanaRewardAssets = () => {
+    const v2 = solanaV2() ?? {}, usdc = v2.usdc?.mint && v2.usdc?.pool ? v2.usdc.mint : null, stocks = (v2.stocks ?? []).map(s => ({ address: s.mint, symbol: s.symbol }));
+    if (draft.pair === 'native') return [...(usdc ? [{ address: usdc, symbol: 'USDC' }] : []), ...stocks];
+    if (draft.pair === 'usdc' && usdc) return [{ address: WSOL, symbol: 'SOL' }];
+    if (draft.pair === 'xstock') return [{ address: WSOL, symbol: 'SOL' }];
+    return [];
+  };
+  const sameAsset = (a, b) => (solana() ? String(a ?? '') === String(b ?? '') : String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase());
+  const publicRewardAssets = () => solana() ? solanaRewardAssets() : [{ address: '0x0000000000000000000000000000000000000000', symbol: nativeSymbol() }, ...(ctx.wallet?.approvedQuotes ?? []).map(a => ({ address: a.address, symbol: `${a.symbol} · ${a.address.slice(0, 6)}…${a.address.slice(-4)}` }))]
     .filter(a => a.address.toLowerCase() !== String(draft.pair === 'native' ? '0x0000000000000000000000000000000000000000' : selectedAsset()?.address ?? '').toLowerCase());
   const v2Missing = () => !!draft.chain && draft.chain !== 'local' && !v2Offered();
   const modelsOffered = () => v4Offered() || v2Offered();
@@ -194,7 +207,10 @@ export function renderLaunch(ctx) {
   function startCap() {
     const asset = selectedAsset(), curve = asset?.curve;
     if (!curve || !(curve.vt > 0)) return '';
-    const quote = curve.vq * 1e9 / curve.vt, usd = asset.symbol === 'USDC' ? 1 : asset.id === 'native' && freshPrice(launchPrice()) ? launchPrice().usd : null;
+    // USD per pair asset: USDC is $1; SOL/native at the launch price; a stock at its price (Solana V2 quote pricing).
+    const usd = asset.symbol === 'USDC' ? 1 : (asset.id === 'native' || draft.pair === 'native') && freshPrice(launchPrice()) ? launchPrice().usd
+      : draft.pair === 'xstock' && asset.stockPrice?.usd > 0 ? asset.stockPrice.usd : null;
+    const quote = curve.vq * 1e9 / curve.vt;
     const testNote = draft.chain === 'local' ? ' · simulation' : draft.chain && !net()?.mainnet ? ' · test size' : '';
     return usd !== null ? `$${number(quote * usd, 0)} market cap${testNote}` : `USD market cap unavailable${testNote}`;
   }
@@ -388,8 +404,8 @@ export function renderLaunch(ctx) {
     const grid = h('div.choice-grid', { role: 'radiogroup', 'aria-label': 'Reward strategy' }, Object.entries(STRATEGIES).map(([key, s]) => h('label.choice', h('input', { type: 'radio', name: 'strategy', value: key, checked: draft.rewardMode === key, disabled: !strategyAllowed(key), on: { change: () => { draft.rewardMode = key; if (key === 'creator') draft.recipients = draft.recipients.map(r => ({ ...r, kind: 'wallet' })); save(); draw(); } } }),
       h('span.choice-title', icon(s.glyph), s.name), h('p', STRATEGY_TEXT[key]), !strategyAllowed(key) ? h('span.chip', 'Local simulation only') : null)));
     const settings = h('div.stack.reveal');
-    const automated = ['holders', 'paired', 'buyback'].includes(draft.rewardMode);
-    if (draft.rewardMode === 'paired' && !local && !publicRewardAssets().some(a => a.address.toLowerCase() === String(draft.rewardToken ?? '').toLowerCase())) draft.rewardToken = publicRewardAssets()[0]?.address.toLowerCase();
+    const automated = ['holders', 'paired'].includes(draft.rewardMode);
+    if (draft.rewardMode === 'paired' && !local && !publicRewardAssets().some(a => sameAsset(a.address, draft.rewardToken))) draft.rewardToken = solana() ? publicRewardAssets()[0]?.address : publicRewardAssets()[0]?.address.toLowerCase();
     // The USD threshold, with what it is worth in the pair today (fixed in the pair asset at launch).
     const thresholdHint = h('span'), drawThresholdHint = () => {
       const usd = draft.pair === 'usdc' ? 1 : draft.pair === 'native' && freshPrice(launchPrice()) ? launchPrice().usd : Number(selectedAsset()?.usd) > 0 ? Number(selectedAsset().usd) : null;
@@ -403,8 +419,7 @@ export function renderLaunch(ctx) {
           : field({ label: 'Distribution threshold', control: h('div.input-affix', input('thresholdUsd', { type: 'number', min: '0.01', max: '1000000', step: 'any', onInput: e => { draft.thresholdUsd = e.target.value; save(); drawThresholdHint(); } }), h('span.affix', 'USD')), hint: thresholdHint }),
         field({ label: 'Minimum token holding', control: h('div.input-affix', input('minimumHolding', { type: 'number', min: '0', step: 'any' }), h('span.affix', (draft.symbol || 'tokens').toUpperCase())), hint: 'Wallets holding less are skipped. Pools, the curve and treasuries never qualify.' })),
         field({ label: 'Minimum holding value', control: h('div.input-affix', input('minimumHoldingUsd', { type: 'number', min: '0', max: '100000', step: 'any', placeholder: '20' }), h('span.affix', 'USD')), hint: 'Holders must also hold at least this much in USD, converted to tokens at each distribution using a fresh price. The larger of the two minimums applies. If no fresh USD price exists for the pair, distributions wait instead of guessing.' }));
-      if (draft.rewardMode === 'paired') settings.append(field({ label: 'Reward asset', control: h('select.select', { on: { change: e => { draft.rewardToken = e.target.value.toLowerCase(); save(); drawPreview(); } } }, (local ? rewardData?.assets ?? [] : publicRewardAssets()).map(a => h('option', { value: a.address, selected: a.address.toLowerCase() === String(draft.rewardToken ?? '').toLowerCase() }, a.symbol))), hint: 'The asset holders receive. It can differ from the trading pair; if it is the same, fees are paid directly without a swap.' }));
-      if (draft.rewardMode === 'buyback') settings.append(field({ label: 'Vesting duration', control: h('div.input-affix', input('vestingDays', { type: 'number', min: '1', max: '3650', step: '1' }), h('span.affix', 'days')), hint: 'Bought-back tokens unlock linearly over this period for the eligible holders at each snapshot.' }));
+      if (draft.rewardMode === 'paired') settings.append(field({ label: 'Reward asset', control: h('select.select', { on: { change: e => { draft.rewardToken = solana() ? e.target.value : e.target.value.toLowerCase(); save(); drawPreview(); } } }, (local ? rewardData?.assets ?? [] : publicRewardAssets()).map(a => h('option', { value: a.address, selected: sameAsset(a.address, draft.rewardToken) }, a.symbol))), hint: 'The asset holders receive. It can differ from the trading pair; if it is the same, fees are paid directly without a swap.' }));
       settings.append(callout('', 'info', 'Holder payouts are weighted by each wallet’s eligible token balance at the recorded snapshot, not by total supply.'));
     } else settings.append(allocationEditor());
     const canTax = local ? !!ctx.config.taxLaunch?.available : !!ctx.wallet?.net?.taxDeployment;
@@ -416,7 +431,7 @@ export function renderLaunch(ctx) {
       h('p.hint',canTax?'0–10% per side, fixed at launch. Additional tax splits 30% to Elpida and 70% to your wallet allocations. The 1.25% curve fee remains 50/50. After migration, the token tax and V2 pool fee apply. Creator tax rewards after migration are paid in your launched token.':'Tax launches require the verified V2 tax factory deployment. Available in the local DEX rehearsal; existing public V3 factories cannot create transfer-tax tokens.')) : null;
     settings.append(h('div.summary-card', h('h4', 'Fixed at launch'), h('ul.fixed-list', h('li', 'The reward strategy and its settings'), h('li', 'Recipients and their percentages'), h('li', 'Your creator share of trading fees'))));
     return { body: [
-      local ? null : callout('', 'info', v2Splits() ? 'Your 30% creator share can go to one wallet or be split between up to 8 wallets. A split deploys a small contract with no owner that fixes the wallets and percentages for good; each wallet claims its own share on the token page. ' + (v2Strategies() ? 'Holder strategies and X or website allocations are run by the Elpida keeper: X and website shares stay held until their owners verify on the token page. Test networks only; not audited.' : 'Holder strategies and X or website allocations need the Elpida V2 keeper, which is not running on this server; they work in the local simulation.') : 'On public testnets, creator fees go to one creator wallet. Holder distributions, buybacks and X or website allocations are available in the local simulation until their contracts are deployed publicly.'),
+      local ? null : callout('', 'info', v2Splits() ? (solana() ? 'Your 30% creator share can go to one wallet, or into a creator vault fixed for good at launch: split between up to 8 wallets, X accounts and websites, or paid to holders. Each wallet claims its own share on the token page. ' : 'Your 30% creator share can go to one wallet or be split between up to 8 wallets. A split deploys a small contract with no owner that fixes the wallets and percentages for good; each wallet claims its own share on the token page. ') + (v2Strategies() ? 'Holder strategies and X or website allocations are run by the Elpida keeper: X and website shares stay held until their owners verify on the token page. Test networks only; not audited.' : 'Holder strategies and X or website allocations need the Elpida V2 keeper, which is not running on this server; they work in the local simulation.') : (solana() ? 'On this network creator fees go to one creator wallet until the Solana program with creator vaults is deployed here.' : 'On public testnets, creator fees go to one creator wallet. Holder distributions and X or website allocations are available in the local simulation until their contracts are deployed publicly.')),
       taxControls, grid, settings, error,
     ], validate: () => {
       error.textContent = '';
@@ -457,7 +472,7 @@ export function renderLaunch(ctx) {
       if (policy.recipients.length > 8) throw new Error('On test networks allocations have up to 8 recipients.');
       return policy;
     }
-    if (draft.chain !== 'local' && ['holders', 'paired', 'buyback'].includes(policy.mode)) {
+    if (draft.chain !== 'local' && ['holders', 'paired'].includes(policy.mode)) {
       if (!v2Strategies()) throw new Error('Holder strategies need ELPIDA V2 and its keeper on this network; they work in the local simulation now.');
       if (!(Number(draft.thresholdUsd) > 0)) throw new Error('Set a distribution threshold in USD above zero.');
       return policy;
@@ -538,7 +553,7 @@ export function renderLaunch(ctx) {
       h('div.review',
         block('Token', 0, row('Name', draft.name), row('Symbol', `$${draft.symbol.toUpperCase()}`), row('Description', draft.description), row('Logo', draft.image ? (draft.image.startsWith('data:') ? 'Uploaded image' : draft.image) : '—'), row('Links', ['website', 'twitter', 'telegram', 'discord'].filter(k => draft[k]).map(k => ({ website: 'Website', twitter: 'X', telegram: 'Telegram', discord: 'Discord' })[k]).join(', ') || 'None')),
         block('Network and trading pair', 1, ...(modelsOffered() ? [row('Launch model', modelName())] : []), ...(v2Chosen() ? [row('Trading fee', `${feePercent()}% on every trade, fixed for good`), row('Fee split', '30% you · 30% traders · 10% flywheel · 10% holders · 20% Elpida')] : []), row('Network', draft.chain === 'local' ? 'Local simulation' : net()?.name ?? '—'), row('Wallet', draft.chain === 'local' ? `Demo ${ctx.config.accounts[Number(ctx.account)].name.toLowerCase()}` : short(ctx.wallet.address)), row('Trading pair', `${PAIR_INFO[draft.pair]?.title ?? ''} · ${pairSymbol()}`), v4Chosen() || (v2Chosen() && !solana()) ? row('Liquidity', 'Locked from launch in the same Uniswap v4 pool') : row('Graduates into', `A locked ${dexName()} pool`)),
-        block('Creator rewards', 2, row('Strategy', STRATEGIES[draft.rewardMode].name), ...(['holders', 'paired', 'buyback'].includes(draft.rewardMode) ? [row('Distribution threshold', draft.chain === 'local' ? `${draft.threshold} ${pairSymbol()}` : `$${number(draft.thresholdUsd, 2)} (in ${pairSymbol()} at the launch price)`), row('Minimum token holding', `${number(draft.minimumHolding, 0)} ${draft.symbol.toUpperCase()}`), ...(Number(draft.minimumHoldingUsd) > 0 ? [row('Minimum holding value', `$${number(draft.minimumHoldingUsd, 2)}`)] : [])] : [row('Recipients', recipients)]), draft.rewardMode === 'paired' ? row('Reward asset', rewardData?.assets.find(a => a.address === draft.rewardToken)?.symbol ?? '—') : null, draft.rewardMode === 'buyback' ? row('Vesting', `${draft.vestingDays} days`) : null),
+        block('Creator rewards', 2, row('Strategy', STRATEGIES[draft.rewardMode].name), ...(['holders', 'paired'].includes(draft.rewardMode) ? [row('Distribution threshold', draft.chain === 'local' ? `${draft.threshold} ${pairSymbol()}` : `$${number(draft.thresholdUsd, 2)} (in ${pairSymbol()} at the launch price)`), row('Minimum token holding', `${number(draft.minimumHolding, 0)} ${draft.symbol.toUpperCase()}`), ...(Number(draft.minimumHoldingUsd) > 0 ? [row('Minimum holding value', `$${number(draft.minimumHoldingUsd, 2)}`)] : [])] : [row('Recipients', recipients)]), draft.rewardMode === 'paired' ? row('Reward asset', rewardData?.assets.find(a => a.address === draft.rewardToken)?.symbol ?? '—') : null, draft.rewardMode === 'buyback' ? row('Vesting', `${draft.vestingDays} days`) : null),
         block('Creator purchase and costs', 3, row('Launch fee · $10', feeAmount()===null?'Quote unavailable':`${number(feeAmount(), 6)} ${feeSymbol()}${connected()?'':' (estimate)'}`), row('First purchase', buyText()), payNative() ? row('Paid with', `${nativeSymbol()}, converted to ${pairSymbol()} in a separate confirmation first`) : null, row('Buy / sell token tax', `${draft.taxBuy||0}% / ${draft.taxSell||0}% · additional to trading fees`), row('Estimated tokens', estimate() ? compact(estimate().tokens) : 'Shown after launch'), row('Conversion',priceNote()),row('Network gas', 'Estimated before signing; paid separately'))),
       h('section.summary-card', h('h4', 'Fixed after launch'), h('ul.fixed-list', h('li', 'Name, symbol and the 1,000,000,000 fixed supply'), h('li', `Trading pair (${pairSymbol()})`), h('li', 'Creator reward strategy, recipients and percentages'), ...(v2Chosen() ? [h('li', `Trading fee ${feePercent()}% and its five-way split`)] : []), h('li', v4Chosen() || (v2Chosen() && !solana()) ? 'Uniswap v4 liquidity locked from launch; the milestone keeps the same pool' : `Graduation into a ${dexName()} pool with permanently locked liquidity`))),
       ctx.mode!=='local'&&!solana() ? h('p.hint',draft.pair==='native'&&draft.feeCurrency!=='usdc' ? 'One launch confirmation pays the native fee, records supported metadata, creates your token and makes the first purchase. No token spending approval is needed.' : ctx.wallet.atomicLaunch ? 'Your wallet supports one atomic confirmation for payment approval, creation, supported metadata and the first purchase.' : 'Metadata uses the launch confirmation. This wallet may require a separate token payment approval; one-confirmation approval and launch requires an atomic-capable wallet.') : null,
@@ -569,7 +584,7 @@ export function renderLaunch(ctx) {
     if (draft.chain === 'local' && (draft.pair === 'token' || draft.pair === 'xstock')) body.quoteToken = body.quoteAsset;
     if (draft.chain === 'local') body.rewardPolicy = policy;
     else if (v2Strategies() && policy.mode === 'exclusive') { const rows = policy.recipients.map(r => ({ kind: r.kind, target: r.target, bps: recipientBps(r) })); if (rows.some(r => r.kind !== 'wallet')) { body.rewardIdentities = rows; delete body.reward; } else if (rows.length > 1) { body.rewardSplit = rows.map((r, i) => ({ wallet: r.target || (i === 0 ? ctx.wallet.address : ''), bps: r.bps })); delete body.reward; } else body.reward = rows[0].target || ctx.wallet.address; }
-    else if (v2Strategies() && ['holders', 'paired', 'buyback'].includes(policy.mode)) { body.rewardStrategy = { mode: policy.mode, threshold: String(policy.threshold), thresholdUsd: String(draft.thresholdUsd ?? '20'), minimumHolding: String(policy.minimumHolding), minimumHoldingUsd: String(policy.minimumHoldingUsd ?? '0'), vestingDays: policy.vestingDays, rewardAsset: policy.rewardToken ?? null }; delete body.reward; }
+    else if (v2Strategies() && ['holders', 'paired'].includes(policy.mode)) { body.rewardStrategy = { mode: policy.mode, threshold: String(policy.threshold), thresholdUsd: String(draft.thresholdUsd ?? '20'), minimumHolding: String(policy.minimumHolding), minimumHoldingUsd: String(policy.minimumHoldingUsd ?? '0'), vestingDays: policy.vestingDays, rewardAsset: policy.rewardToken ?? null }; delete body.reward; }
     else if (v2Splits() && policy.recipients.length > 1) { body.rewardSplit = policy.recipients.map((r, i) => ({ wallet: r.target || (i === 0 ? ctx.wallet.address : ''), bps: recipientBps(r) })); delete body.reward; }
     else body.reward = policy.recipients[0].target || ctx.wallet.address;
     phase = 'submitting'; statusState = { step: ctx.mode === 'local' ? 'submit' : STATUS_STEPS()[0][0], error: null, done: false }; draw();

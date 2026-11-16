@@ -246,6 +246,7 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
     return result;
   }
   let replayed=0,skipped=0;const failures=[];
+  rewards.replaying=true;
   if(journal.length){
     for(const [index,entry] of journal.entries()){
       try{
@@ -274,6 +275,7 @@ export async function createRuntime({seed = true, dex = false, metadataStore = n
   }
   // Demo launches on a fresh simulation are journaled like any other action, so replays keep every address.
   if(!journal.length&&seed)for (const [name,symbol,firstBuy,pair,account] of [['Orbit Club','ORBIT','0.1','native','0'],['Pixel Party','PIXEL','0.05','native','1'],['Lucky Sprout','LUCK','0.03','native','0']]){const at=((await provider.getBlock('latest')).timestamp+1)*1000,body={name,symbol,firstBuy,pair,account};await apply('launch',body);record('launch',body,at);}
+  rewards.replaying=false;
   config.simulation={durable:Boolean(journalPath),replayed,skipped,malformed:journalMalformed,failures};
   await indexer.sync();
   return {updatePrice,config,state,getQuote,getConversionQuote,indexer:combinedIndex,listings,provider,rewards,transact(action,body) { const result = queue.then(async () => { const started=((await provider.getBlock('latest')).timestamp+1)*1000; const result=action==='reward-x-finish'?await rewards.finishX(body):action==='reward-x-start'?await rewards.startX(body):action==='reward-verify'?await rewards.verify(body):action==='reward-challenge'?await rewards.challenge(body):action==='reward-process'?(await rewards.tick(),{message:'Reward treasuries processed.'}):await apply(action,body); record(action,body,started); try {await indexer.sync();} catch {result.message += " Indexing pending; refresh to retry.";} return result;}); queue = result.catch(() => {}); return result; },async close() {await queue; await taxRuntime?.close(); await indexer.close(); provider.destroy(); await connection.close();}};

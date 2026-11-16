@@ -129,7 +129,7 @@ export class SolanaIndexer {
     this.web3 = web3; this.connection = connection; this.network = network; this.deployment = deployment;
     this.client = createElpidaSolana(web3, new web3.PublicKey(deployment.programId), { cluster: network?.mainnet ? 'mainnet' : 'devnet' });
     // V2 test stock pairs (--v2-stocks) are named like the recorded pairs, so their tokens list as stock pairs.
-    this.pairs = new Map([...(deployment.pairs ?? []), ...(deployment.v2?.stocks ?? [])].map(p => [p.config, p]));
+    this.pairs = new Map([...(deployment.pairs ?? []), ...(deployment.v2?.pairs ?? []), ...(deployment.v2?.stocks ?? [])].map(p => [p.config, p]));
     this.backfill = backfill; this.spacingMs = spacingMs; this.holderCache = new Map(); this.lastError = null; this.lastSuccess = null; this.metadataStore = metadataStore; this.pumpPerTick = pumpPerTick; this.holderLookups = new Map();
     this.db = new DatabaseSync(path);
     this.db.exec(`PRAGMA journal_mode=WAL;

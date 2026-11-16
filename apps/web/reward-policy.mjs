@@ -1,9 +1,13 @@
-export const REWARD_MODES = ['creator','holders','paired','buyback','exclusive'];
-export function normalizeRewardPolicy(input = {}, chain = 'local') {
+// "Buy back and vest to holders" was removed on 16 November 2026 (every chain). New launches cannot choose it; a
+// simulation journal replay (`allowRetired`) still rebuilds the tokens that chose it before.
+export const REWARD_MODES = ['creator','holders','paired','exclusive'];
+export const RETIRED_REWARD_MODES = ['buyback'];
+export function normalizeRewardPolicy(input = {}, chain = 'local', { allowRetired = false } = {}) {
   if (typeof input === 'string') { try { input = JSON.parse(input); } catch { throw new Error('Invalid reward configuration.'); } }
   if (!input || typeof input !== 'object' || Array.isArray(input)) throw new Error('Invalid reward configuration.');
   const mode = input.mode ?? 'creator';
-  if (!REWARD_MODES.includes(mode)) throw new Error('Choose a creator reward strategy.');
+  if (RETIRED_REWARD_MODES.includes(mode) && !allowRetired) throw new Error('Buy back and vest is no longer offered. Choose another creator reward strategy.');
+  if (!REWARD_MODES.includes(mode) && !RETIRED_REWARD_MODES.includes(mode)) throw new Error('Choose a creator reward strategy.');
   const decimal = (value, fallback, positive = false) => {
     const s = String(value ?? fallback);
     if (!/^\d{1,18}(\.\d{1,6})?$/.test(s) || (positive && Number(s) <= 0)) throw new Error('Reward amounts must be positive numbers with at most six decimal places.');
@@ -14,8 +18,9 @@ export function normalizeRewardPolicy(input = {}, chain = 'local') {
   if (Number(minimumHoldingUsd) > 100000) throw new Error('The USD minimum cannot exceed $100,000.');
   const vestingDays = Number(input.vestingDays ?? 30);
   if (!Number.isInteger(vestingDays) || vestingDays < 1 || vestingDays > 3650) throw new Error('Vesting must be between 1 and 3,650 days.');
-  const rewardToken = String(input.rewardToken ?? '').toLowerCase();
-  if (mode === 'paired' && !/^0x[0-9a-f]{40}$/.test(rewardToken)) throw new Error('Choose an approved reward token on this chain.');
+  // EVM addresses are compared lowercased; Solana mints are base58 and case-sensitive.
+  const solanaChain = String(chain).startsWith('solana'), rewardToken = solanaChain ? String(input.rewardToken ?? '') : String(input.rewardToken ?? '').toLowerCase();
+  if (mode === 'paired' && !(solanaChain ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(rewardToken) : /^0x[0-9a-f]{40}$/.test(rewardToken))) throw new Error('Choose an approved reward token on this chain.');
   const recipients = mode === 'creator' || mode === 'exclusive' ? (input.recipients ?? [{kind:'wallet',target:'',percent:100}]) : [];
   if (!Array.isArray(recipients) || recipients.length > 12 || ((mode === 'creator' || mode === 'exclusive') && !recipients.length)) throw new Error('Add between one and twelve recipients.');
   const seen = new Set();

@@ -154,6 +154,15 @@ export const DISCRIMINATORS = {
   setPricing: [52, 200, 157, 192, 18, 134, 57, 123],
   setQuotePricing: [213, 232, 6, 111, 126, 174, 223, 196],
   setTestStockPrice: [135, 110, 207, 18, 167, 238, 44, 80],
+  createCreatorVault: [11, 247, 198, 52, 69, 10, 169, 118],
+  bindCreatorRow: [98, 195, 31, 179, 88, 234, 140, 239],
+  claimCreatorRow: [10, 120, 83, 199, 195, 38, 47, 190],
+  postCreatorRoot: [177, 137, 70, 69, 237, 90, 248, 136],
+  claimCreator: [231, 240, 197, 249, 244, 10, 21, 59],
+  creatorSwapRaydium: [73, 114, 108, 200, 167, 23, 99, 232],
+  creatorSwapTest: [72, 176, 215, 30, 0, 177, 68, 125],
+  CreatorVault: [200, 135, 38, 98, 35, 236, 238, 12],
+  CreatorRound: [166, 9, 246, 200, 37, 133, 152, 144],
   TestStockPrice: [50, 76, 224, 85, 168, 37, 210, 164],
   PricingConfig: [126, 131, 53, 131, 89, 154, 123, 85],
   PriceUpdateV2: [34, 241, 35, 99, 157, 126, 244, 205],
@@ -619,6 +628,15 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
   /** V2 stock pairs: the stock's own USD pricing (PDA ["quote-pricing", config]). */
   const quotePricingPda = config => PublicKey.findProgramAddressSync([enc('quote-pricing'), key(config).toBytes()], programId)[0];
   const testPricePda = mint => PublicKey.findProgramAddressSync([enc('test-price'), key(mint).toBytes()], programId)[0];
+  const creatorVaultPda = mint => PublicKey.findProgramAddressSync([enc('creator-vault'), key(mint).toBytes()], programId)[0];
+  const creatorRoundPda = (mint, round) => PublicKey.findProgramAddressSync([enc('creator-round'), key(mint).toBytes(), u32(round)], programId)[0];
+  /** A Raydium CPMM pool's accounts for any two mints (Raydium orders them by address: token 0 < token 1). */
+  const raydiumPoolAccounts = (pool, mintA, mintB) => {
+    const p = key(pool), x = key(mintA), y = key(mintB), a = x.toBytes(), b = y.toBytes(), diff = a.findIndex((byte, i) => byte !== b[i]);
+    const [mint0, mint1] = diff >= 0 && a[diff] < b[diff] ? [x, y] : [y, x];
+    return { program: rayProgram, ammConfig: new PublicKey(ray.ammConfig), authority: new PublicKey(ray.authority), pool: p, mint0, mint1,
+      vault0: rayPda(enc('pool_vault'), p.toBytes(), mint0.toBytes()), vault1: rayPda(enc('pool_vault'), p.toBytes(), mint1.toBytes()), observation: rayPda(enc('observation'), p.toBytes()) };
+  };
   const migrationPda = mint => PublicKey.findProgramAddressSync([enc('pump-migration'), key(mint).toBytes()], programId)[0];
   const partnerPda = creator => PublicKey.findProgramAddressSync([enc('partner'), key(creator).toBytes()], programId)[0];
   const ataWith = (owner, mint, program) => PublicKey.findProgramAddressSync([key(owner).toBytes(), key(program).toBytes(), key(mint).toBytes()], ataProgram)[0];
@@ -901,6 +919,59 @@ export function createElpidaSolana(web3, programIdInput, { cluster = 'devnet' } 
         concat(DISCRIMINATORS.setTestStockPrice, feed, e));
     },
     testPriceFor: mint => testPricePda(mint),
+    creatorVaultFor: mint => creatorVaultPda(mint),
+    creatorRoundFor: (mint, round) => creatorRoundPda(mint, round),
+    /**
+     * The creator, right after `launchV2` with `reward` = creatorVaultFor(mint): fixes what happens to the creator's 30%.
+     * `mode` 0 allocation (`rows`: [{ kind 0 wallet | 1 X | 2 website, label ('x:<handle>' / 'domain:<name>'), wallet,
+     * shareBps }]), 1 share with holders, 2 buy `payoutMint` (a reward asset) for holders. Thresholds in base units.
+     */
+    createCreatorVault({ creator, config, mint, mode, rows = [], payoutMint = null, threshold = 0n, minimumHolding = 0n, thresholdUsdE6 = 0n, minimumHoldingUsdE6 = 0n }) {
+      const rowBytes = rows.map(r => concat([r.kind], str(r.label ?? ''), key(r.wallet ?? PublicKey.default).toBytes(), u16(r.shareBps)));
+      return ix([meta(creator, true, true), meta(mint), meta(poolPda(mint)), meta(config.address ?? config), meta(payoutMint ?? config.quoteMint), meta(v2DistPda(0)), meta(creatorVaultPda(mint), true), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.createCreatorVault, [mode], u32(rows.length), ...rowBytes, u64(threshold), u64(minimumHolding), u64(thresholdUsdE6), u64(minimumHoldingUsdE6)));
+    },
+    /** Operator (the server keeper): binds an X or website row's payout wallet, once. */
+    bindCreatorRow({ operator, mint, row, wallet }) {
+      return ix([meta(operator, true), meta(creatorVaultPda(mint), true)], concat(DISCRIMINATORS.bindCreatorRow, [row], key(wallet).toBytes()));
+    },
+    /** Anyone: pays allocation row `row` what it is owed, to `wallet` (its associated token account). */
+    claimCreatorRow({ payer, mint, quoteMint, quoteProgram = tokenProgram, row, wallet }) {
+      const vault = creatorVaultPda(mint);
+      return ix([meta(payer, true, true), meta(vault, true), meta(quoteMint), meta(ata(vault, quoteMint, quoteProgram), true), meta(wallet), meta(ata(wallet, quoteMint, quoteProgram), true), meta(quoteProgram), meta(ataProgram), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.claimCreatorRow, [row]));
+    },
+    /** Operator: posts a creator-vault round's Merkle root in the vault's payout asset. */
+    postCreatorRoot({ operator, mint, payoutMint, payoutProgram = tokenProgram, round, root, total, recipients, manifestUri = '' }) {
+      const vault = creatorVaultPda(mint);
+      return ix([meta(operator, true, true), meta(vault, true), meta(payoutMint), meta(ata(vault, payoutMint, payoutProgram)), meta(creatorRoundPda(mint, round), true), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.postCreatorRoot, u32(round), Uint8Array.from(root), u64(total), u32(recipients), str(manifestUri)));
+    },
+    /** Anyone: pays one leaf of a creator-vault round to `account` (its associated token account). */
+    claimCreator({ payer, mint, payoutMint, payoutProgram = tokenProgram, round, index, account, amount, proof }) {
+      const vault = creatorVaultPda(mint), proofBytes = concat(u32(proof.length), ...proof.map(x => Uint8Array.from(x)));
+      return ix([meta(payer, true, true), meta(vault, true), meta(creatorRoundPda(mint, round), true), meta(payoutMint), meta(ata(vault, payoutMint, payoutProgram), true), meta(account), meta(ata(account, payoutMint, payoutProgram), true),
+        meta(payoutProgram), meta(ataProgram), meta(SystemProgram.programId)], concat(DISCRIMINATORS.claimCreator, u32(round), u32(index), u64(amount), proofBytes));
+    },
+    raydiumPoolAccounts,
+    /** Operator, reward vaults: swaps the pair asset into the reward asset through the Raydium CPMM pool `pool`. */
+    creatorSwapRaydium({ operator, mint, quoteMint, quoteProgram = tokenProgram, payoutMint, payoutProgram = tokenProgram, pool, amountIn, minOut }) {
+      const vault = creatorVaultPda(mint), r = raydiumPoolAccounts(pool, quoteMint, payoutMint);
+      return ix([meta(operator, true, true), meta(vault), meta(quoteMint), meta(payoutMint), meta(ata(vault, quoteMint, quoteProgram), true), meta(ata(vault, payoutMint, payoutProgram), true),
+        meta(r.pool, true), meta(r.authority), meta(r.ammConfig), meta(r.vault0, true), meta(r.vault1, true), meta(r.observation, true), meta(r.program), meta(quoteProgram), meta(payoutProgram), meta(ataProgram), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.creatorSwapRaydium, u64(amountIn), u64(minOut)));
+    },
+    /**
+     * Test networks, operator, reward vaults: wrapped SOL into a test stock or back, through the program's test conversion
+     * pool for `stockMint`. Returns the instructions (the pool's wrapped-SOL account is created first when SOL goes in).
+     */
+    creatorSwapTest({ operator, mint, quoteMint, quoteProgram = tokenProgram, payoutMint, payoutProgram = tokenProgram, stockMint, stockProgram, amountIn, minOut }) {
+      const vault = creatorVaultPda(mint), pool = this.testConversionPda(stockMint), poolWsol = ata(pool, wsol);
+      return [this.createAtaIdempotent(operator, pool, wsol), ix([meta(operator, true, true), meta(vault), meta(quoteMint), meta(payoutMint), meta(ata(vault, quoteMint, quoteProgram), true), meta(ata(vault, payoutMint, payoutProgram), true),
+        meta(pool, true), meta(ata(pool, stockMint, stockProgram), true), meta(poolWsol, true), meta(quoteProgram), meta(payoutProgram), meta(ataProgram), meta(SystemProgram.programId)],
+        concat(DISCRIMINATORS.creatorSwapTest, u64(amountIn), u64(minOut)))];
+    },
+    decodeCreatorVault: data => decodeCreatorVault(data, web3),
     /** Decodes a PricingConfig account, or null when the bytes are not one. */
     decodePricing(raw) {
       const bytes = raw ? new Uint8Array(raw) : null;
@@ -1261,6 +1332,38 @@ export function mintMultiplierE12(data, owner, now = Math.floor(Date.now() / 100
     offset += 4 + len;
   }
   return one;
+}
+
+/** Bytes of a creator vault account (8 + `CreatorVault::INIT_SPACE`). */
+export const CREATOR_VAULT_SIZE = 8 + 32 * 4 + 1 + 32 + 1 + 108 * 8 + 8 + 8 + 4 + 1;
+
+/** A creator vault (`create_creator_vault`), or null. Labels are UTF-8; mode 0 allocation, 1 holders, 2 reward token. */
+export function decodeCreatorVault(raw, { PublicKey } = {}) {
+  if (!PublicKey) throw new Error('decodeCreatorVault needs web3 ({ PublicKey }).');
+  const b = raw ? new Uint8Array(raw) : null;
+  if (!b || b.length < 8 + 32 * 4 + 1 + 32 + 1 + 108 * 8 + 21 || !DISCRIMINATORS.CreatorVault.every((x, i) => b[i] === x)) return null;
+  const v = new DataView(b.buffer, b.byteOffset, b.byteLength), pk = o => new PublicKey(b.subarray(o, o + 32));
+  let o = 8;
+  const mint = pk(o), quoteMint = pk(o + 32), payoutMint = pk(o + 64), operator = pk(o + 96); o += 128;
+  const mode = b[o]; o += 1;
+  const threshold = v.getBigUint64(o, true), minimumHolding = v.getBigUint64(o + 8, true), thresholdUsdE6 = v.getBigUint64(o + 16, true), minimumHoldingUsdE6 = v.getBigUint64(o + 24, true); o += 32;
+  const rowCount = b[o]; o += 1;
+  const rows = [];
+  for (let i = 0; i < 8; i++, o += 108) {
+    if (i >= rowCount) continue;
+    const kind = b[o], len = b[o + 1], label = new TextDecoder().decode(b.subarray(o + 2, o + 2 + len)), wallet = pk(o + 66);
+    rows.push({ index: i, kind, label, wallet: wallet.equals(PublicKey.default) ? null : wallet, shareBps: v.getUint16(o + 98, true), claimed: v.getBigUint64(o + 100, true) });
+  }
+  return { mint, quoteMint, payoutMint, operator, mode, threshold, minimumHolding, thresholdUsdE6, minimumHoldingUsdE6, rows, totalClaimed: v.getBigUint64(o, true), reserved: v.getBigUint64(o + 8, true), rounds: v.getUint32(o + 16, true), bump: b[o + 20] };
+}
+
+/**
+ * What an allocation row is owed now: its share of everything the vault has received (what it holds plus what rows
+ * were paid), less what the row was paid, as `claim_creator_row` computes it.
+ */
+export function creatorRowDue(vault, row, held) {
+  const received = BigInt(held) + vault.totalClaimed, due = received * BigInt(row.shareBps) / 10_000n - row.claimed;
+  return due > 0n ? due : 0n;
 }
 
 /** Test-only helpers: SPL and Token-2022 mints standing in for USDC, xStocks and other pair assets. */

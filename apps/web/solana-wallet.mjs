@@ -122,6 +122,7 @@ export class SolanaWallet {
     // ELPIDA V2 SOL pair (docs/V2_0_SOLANA.md), when the deploy set it up: launched with `launch_v2`, never a Model 10 pick.
     const v2 = this.deployment.v2?.config ? [{ kind: 'native', key: 'sol-v2', symbol: 'SOL', name: 'SOL (wrapped automatically)', config: this.deployment.v2.config, v2: true },
       // V2 test stock pairs (15 November 2026, --v2-stocks): priced from their bound quote pricing at each launch.
+      ...(this.deployment.v2.pairs ?? []).map(x => ({ kind: x.kind, key: `${x.key}-v2`, symbol: x.symbol, name: x.name, config: x.config, v2: true, test: x.test, faucet: x.faucet ?? listed.find(p => p.mint === x.mint)?.faucet ?? null })),
       ...(this.deployment.v2.stocks ?? []).map(x => ({ kind: 'xstock', key: `${x.key}-v2`, symbol: x.symbol, name: x.name, config: x.config, v2: true, test: x.test, faucet: listed.find(p => p.mint === x.mint)?.faucet ?? '25', quotePricing: x.quotePricing }))] : [];
     const listedAll = [...listed, ...v2];
     const infos = await this.connection.getMultipleAccountsInfo(listedAll.map(p => new web3.PublicKey(p.config)));
@@ -226,6 +227,32 @@ export class SolanaWallet {
       const fresh = nowSeconds() - px.publishTime <= cfg.quotePricing.maxAgeSecs;
       cfg.stockPrice = { ...px, usd: Number(px.price) * 10 ** px.exponent, fresh, source: px.test ? `${cfg.symbol} round test price (no value)` : `Pyth ${cfg.symbol} (on-chain)` };
     });
+  }
+  /**
+   * The creator vault a V2 launch asks for, or null for a single creator wallet: `rewardSplit` (wallets),
+   * `rewardIdentities` (wallets, X accounts, websites) or `rewardStrategy` (holders; a reward asset), as the launch form
+   * sends them. Thresholds are set in USD and fixed in the pair asset at today's price, as on EVM.
+   */
+  creatorVaultPlan(body, config) {
+    const split = Array.isArray(body.rewardSplit) && body.rewardSplit.length > 1, ids = Array.isArray(body.rewardIdentities) && body.rewardIdentities.length, strategy = body.rewardStrategy;
+    if (!split && !ids && !strategy) return null;
+    if (!this.deployment?.v2?.creatorVaults) throw new Error(`Creator splits, allocations and holder strategies need the upgraded Solana program on ${this.net.name}. Nothing was submitted.`);
+    const key = (value, what) => { try { return new web3.PublicKey(String(value || this.address).trim()); } catch { throw new Error(`Enter a valid Solana wallet for ${what}.`); } };
+    if (split || ids) {
+      const rows = (ids ? body.rewardIdentities.map(r => ({ kind: r.kind, target: r.target, bps: r.bps })) : body.rewardSplit.map(r => ({ kind: 'wallet', target: r.wallet, bps: r.bps })))
+        .map((r, i) => r.kind === 'wallet' ? { kind: 0, label: '', wallet: key(r.target, `allocation ${i + 1}`), shareBps: Number(r.bps) } : { kind: r.kind === 'x' ? 1 : 2, label: `${r.kind === 'x' ? 'x' : 'domain'}:${String(r.target).toLowerCase()}`, shareBps: Number(r.bps) });
+      if (rows.length > 8) throw new Error('A Solana allocation has at most 8 rows.');
+      return { mode: 0, rows };
+    }
+    const mode = strategy.mode === 'holders' ? 1 : strategy.mode === 'paired' ? 2 : null;
+    if (mode === null) throw new Error('Choose a holder strategy. Nothing was submitted.');
+    const usd = config.wsol ? this.price?.usd : config.kind === 'usdc' ? 1 : config.kind === 'xstock' ? config.stockPrice?.usd : config.kind === 'token' ? 50 / 500_000 : null;
+    if (!(usd > 0)) throw new Error(`No current ${config.symbol} price, so the distribution threshold cannot be fixed. Nothing was submitted.`);
+    const thresholdUsd = Number(strategy.thresholdUsd ?? 20), minimumHoldingUsd = Number(strategy.minimumHoldingUsd ?? 0);
+    if (!(thresholdUsd > 0) || thresholdUsd > 1_000_000 || !(minimumHoldingUsd >= 0) || minimumHoldingUsd > 100_000) throw new Error('Enter a threshold from $0.01 to $1,000,000.');
+    const threshold = BigInt(Math.ceil(thresholdUsd / usd * 10 ** config.quoteDecimals));
+    return { mode, payoutMint: mode === 2 ? key(strategy.rewardAsset, 'the reward asset') : config.quoteMint, threshold, minimumHolding: parseAmount(String(strategy.minimumHolding ?? '0'), 6),
+      thresholdUsdE6: BigInt(Math.round(thresholdUsd * 1e6)), minimumHoldingUsdE6: BigInt(Math.round(minimumHoldingUsd * 1e6)) };
   }
   /** Launchable trading assets by kind, the same structure as every other network (packages/core/pairs.mjs). */
   pairOptions() {
@@ -615,6 +642,19 @@ export class SolanaWallet {
       return !(await this.connection.simulateTransaction(tx)).value.err;
     } catch { return false; }
   }
+  /** Signs a text message with the connected wallet (ownership checks); base64 of the ed25519 signature. */
+  async signText(message) {
+    this.checkWallet();
+    if (!this.provider?.signMessage) throw new Error(`${this.walletName ?? 'This wallet'} cannot sign messages.`);
+    const out = await withWalletTimeout(this.provider.signMessage(new TextEncoder().encode(message), 'utf8'), this.walletName);
+    const sig = out?.signature ?? out;
+    return btoa(String.fromCharCode(...new Uint8Array(sig)));
+  }
+  /** Bytes a legacy transaction of `instructions` takes with `signers` signatures (Solana's cap is 1,232). */
+  txSize(instructions, signers = 1) {
+    const tx = new web3.Transaction({ feePayer: this.publicKey, blockhash: '11111111111111111111111111111111', lastValidBlockHeight: 0 }).add(...instructions);
+    return tx.serializeMessage().length + 1 + 64 * Math.max(signers, tx.compileMessage().header.numRequiredSignatures);
+  }
   async sendInstructions(instructions, extraSigners = [], message = 'Confirm the transaction in your wallet…', remoteSigners = []) {
     this.checkWallet();
     const { blockhash, lastValidBlockHeight } = await this.connection.getLatestBlockhash('confirmed');
@@ -698,6 +738,8 @@ export class SolanaWallet {
       if (this.price?.status !== 'fresh') throw new Error('The on-chain SOL/USD price is stale or uncertain right now. Wait a moment and refresh before launching.');
       if (v2Launch && config.kind === 'xstock' && !terms.stockPriceFeed) throw new Error(`The ${config.symbol} price is not available right now, so the launch cannot be priced. Nothing was submitted.`);
       if (inUsdc && !terms.usdcMint) throw new Error('Paying the fee in USDC is not available for this pair.');
+      // Creator vault (16 November 2026): a split, X or website allocations, or a holder strategy for the creator's 30%.
+      const vaultPlan = v2Launch ? this.creatorVaultPlan(body, config) : null;
       // A 1% cap above the quoted SOL fee: the launch fails instead of overcharging if SOL drops before it lands.
       const maxFee = inUsdc ? 0n : terms.fee * 101n / 100n + 1n;
       const fresh = { virtualQuote: terms.virtualQuote, virtualToken: config.virtualToken, curveSupply: config.curveSupply, realQuote: 0n, sold: 0n, liquidityBonus: 0n, status: 0 };
@@ -753,18 +795,43 @@ export class SolanaWallet {
       }
       // D9: a pre-ground mint address ending in "hope" when the server has one ready, else a random mint.
       const { mint, remote, vanityNote } = await this.mintFor();
-      const signature = await this.sendInstructions([
+      if (vaultPlan) reward = this.client.creatorVaultFor(mint.publicKey);
+      const vaultIx = vaultPlan ? this.client.createCreatorVault({ creator: this.publicKey, config: refs, mint: mint.publicKey, ...vaultPlan }) : null;
+      const launchIxs = [
         this.client.computeBudget(),
         ...await this.wrapFor(config, q.gross),
         v2Launch
           ? this.client.launchV2({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, feeBps: v2Fee, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, priceUpdate: terms.priceFeed, maxFee, usdc, stockPriceUpdate: terms.stockPriceFeed })
           : this.client.launch({ creator: this.publicKey, config: refs, mint: mint.publicKey, name, symbol, firstBuy, minTokensOut: q.tokens * 9950n / 10000n, reward, uri: published.uri, legacy: !withMetadata, partnerTiers, priceUpdate: terms.priceFeed, maxFee, usdc }),
         ...(config.wsol ? [this.client.unwrapSol(this.publicKey)] : []),
-      ], remote ? [] : [mint], `Confirm your token launch in your wallet ($10 fee: ${inUsdc ? `${formatAmount(terms.usdcFee, 6)} USDC` : `${formatAmount(terms.fee, 9)} SOL, at most ${formatAmount(maxFee, 9)} SOL`})…`, remote ? [remote] : []);
+      ];
+      // The creator vault goes in the launch transaction when it fits Solana's 1,232 bytes; otherwise right after it,
+      // in its own (only the creator can create it, and fees wait in its address until then).
+      const withVault = vaultIx ? (config.wsol ? [...launchIxs.slice(0, -1), vaultIx, launchIxs.at(-1)] : [...launchIxs, vaultIx]) : launchIxs;
+      const together = !!vaultIx && this.txSize(withVault, remote ? 1 : 2) <= 1232;
+      const ixs = together ? withVault : launchIxs;
+      const signature = await this.sendInstructions(ixs, remote ? [] : [mint], `Confirm your token launch in your wallet ($10 fee: ${inUsdc ? `${formatAmount(terms.usdcFee, 6)} USDC` : `${formatAmount(terms.fee, 9)} SOL, at most ${formatAmount(maxFee, 9)} SOL`})…`, remote ? [remote] : []);
+      if (vaultIx && !together) {
+        try { await this.sendInstructions([this.client.computeBudget(), vaultIx], [], 'Confirm your creator vault in your wallet (the split or strategy for your 30%)…'); }
+        catch (error) { throw new Error(`Your token is live, but its creator vault was not created (${String(error.message).slice(0, 160)}). Its creator fees wait safely in the vault's address; finish it from the token page.`); }
+      }
       if (payNative) try { localStorage.removeItem(ckey); } catch {}
       await writeMetadataCache(metadataKey(this.deployment.programId,mint.publicKey.toBase58()),published.metadata??metadata);
       return { hash: signature, token: mint.publicKey.toBase58(), metadataPublished: withMetadata, metadataStorage: published.storage,
         message: `Your token is live on ${this.net.name}.${vanityNote} ${!withMetadata ? 'Its details are saved in this browser (this network\'s program does not write token metadata yet).' : published.storage === 'public-ipfs' ? 'Its details are pinned to public IPFS and written into immutable token metadata.' : 'Its details are hosted by Elpida and written into immutable token metadata; public IPFS pinning is not configured.'}` };
+    }
+    // Creator vault allocation row (16 November 2026): pays the row's wallet what it is owed (anyone may press it).
+    if (action === 'creator-row-claim') {
+      const mint = new web3.PublicKey(String(body.token)), v = this.client.decodeCreatorVault((await this.connection.getAccountInfo(this.client.creatorVaultFor(mint)))?.data);
+      const row = v?.rows.find(r => r.index === Number(body.row));
+      if (!row) throw new Error('That allocation was not found.');
+      if (!row.wallet) throw new Error('This share is held until its owner verifies the X account or website.');
+      const quoteProgram = (await this.connection.getAccountInfo(v.quoteMint))?.owner ?? new web3.PublicKey(this.client.tokenProgram);
+      // Fees still in the pool are paid into the vault first, so the row gets everything it is owed so far.
+      const { pool } = await this.freshPool(body.token), config = this.configOf(pool), refs = config ? this.refsOf(config) : null;
+      const collect = refs && pool.v2 && v2Owed(pool.v2).some(x => x > 0n) ? [this.client.withdrawV2Fees({ payer: this.publicKey, config: refs, mint, reward: pool.reward })] : [];
+      const signature = await this.sendInstructions([this.client.computeBudget(), ...collect, this.client.claimCreatorRow({ payer: this.publicKey, mint, quoteMint: v.quoteMint, quoteProgram, row: row.index, wallet: row.wallet })], [], 'Confirm the payout in your wallet…');
+      return { hash: signature, message: `Paid to ${row.wallet.toBase58().slice(0, 4)}…${row.wallet.toBase58().slice(-4)}.` };
     }
     const { mint, pool } = await this.freshPool(body.token);
     config = this.configOf(pool);

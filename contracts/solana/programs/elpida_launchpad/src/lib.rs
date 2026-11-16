@@ -184,6 +184,15 @@ const V2_EXT_VERSION: u8 = 1;
 /// Reward distributors (S3): 0 trader airdrop (calendar months), 1 holder rewards (weekly). The vault PDAs
 /// ["v2-vault", kind] hold the funds; state lives at ["v2-dist", kind].
 pub const V2_DIST_AIRDROP: u8 = 0;
+/// Creator vault modes and allocation row kinds (`create_creator_vault`).
+pub const CREATOR_ALLOCATION: u8 = 0;
+pub const CREATOR_HOLDERS: u8 = 1;
+pub const CREATOR_REWARD: u8 = 2;
+pub const CREATOR_ROW_WALLET: u8 = 0;
+pub const CREATOR_ROW_X: u8 = 1;
+pub const CREATOR_ROW_WEBSITE: u8 = 2;
+pub const CREATOR_MAX_ROWS: usize = 8;
+pub const CREATOR_LABEL: usize = 64;
 pub const V2_DIST_HOLDER: u8 = 1;
 /// Unclaimed payouts return to the pool after this many further rounds (as on EVM).
 pub const V2_CLAIM_WINDOW_ROUNDS: u32 = 12;
@@ -805,6 +814,203 @@ pub mod elpida_launchpad {
             quote_transfer(&a.quote_token_program, &a.quote_mint, a.quote_vault.to_account_info(), to[i].clone(), a.pool.to_account_info(), amount, a.quote_mint.decimals, &[seeds])?;
             emit!(V2FeesPaid { pool: pool_key, recipient: i as u8, to: to[i].key(), amount });
         }
+        Ok(())
+    }
+
+    /// ELPIDA V2 creator vault (16 November 2026), the creator, once per token, right after `launch_v2` named the vault
+    /// (PDA ["creator-vault", mint]) as the token's reward account: what happens to the creator's 30%, fixed for good.
+    ///  - ALLOCATION: split between up to 8 rows by basis points. A wallet row is paid to its wallet; an X or website row
+    ///    is held until the operator (the server keeper, the V2 airdrop distributor's operator) binds the payout wallet
+    ///    its owner proved control of and signed for, once. Anyone may pay any row that has a wallet.
+    ///  - HOLDERS: paid to the token's holders in rounds the operator posts (Merkle roots), covered by the vault.
+    ///  - REWARD: the operator swaps the fees into `payout_mint` (a reward asset; minimum output), then rounds as HOLDERS.
+    /// The operator cannot send the vault's money anywhere else. `threshold` and `minimum_holding` are the creator's
+    /// round rules (pair-asset and token base units, and the same in USD), published for anyone to check a round.
+    #[allow(clippy::too_many_arguments)]
+    pub fn create_creator_vault(ctx: Context<CreateCreatorVault>, mode: u8, rows: Vec<CreatorRowInput>, threshold: u64, minimum_holding: u64, threshold_usd_e6: u64, minimum_holding_usd_e6: u64) -> Result<()> {
+        let vault_key = ctx.accounts.vault.key();
+        require_keys_eq!(ctx.accounts.pool.reward, vault_key, ElpidaError::CreatorVaultTerms);
+        let quote = ctx.accounts.curve_config.quote_mint;
+        let payout = ctx.accounts.payout_mint.key();
+        let v = &mut ctx.accounts.vault;
+        match mode {
+            CREATOR_ALLOCATION => {
+                require!(!rows.is_empty() && rows.len() <= CREATOR_MAX_ROWS && payout == quote, ElpidaError::CreatorVaultTerms);
+                let mut total = 0u32;
+                for (i, r) in rows.iter().enumerate() {
+                    let label = r.label.as_bytes();
+                    require!(r.share_bps > 0 && r.kind <= CREATOR_ROW_WEBSITE, ElpidaError::CreatorVaultTerms);
+                    if r.kind == CREATOR_ROW_WALLET { require!(r.wallet != Pubkey::default(), ElpidaError::CreatorVaultTerms); }
+                    else {
+                        require!(r.wallet == Pubkey::default() && !label.is_empty() && label.len() <= CREATOR_LABEL, ElpidaError::CreatorVaultTerms);
+                        for prior in rows.iter().take(i) { require!(!(prior.kind == r.kind && prior.label == r.label), ElpidaError::CreatorVaultTerms); }
+                    }
+                    total += r.share_bps as u32;
+                    let mut stored = [[0u8; 32]; 2];
+                    for (j, b) in label.iter().take(CREATOR_LABEL).enumerate() { stored[j / 32][j % 32] = *b; }
+                    v.rows[i] = CreatorRow { kind: r.kind, label_len: label.len().min(CREATOR_LABEL) as u8, label: stored, wallet: r.wallet, share_bps: r.share_bps, claimed: 0 };
+                }
+                require!(total == 10_000, ElpidaError::CreatorVaultTerms);
+                v.row_count = rows.len() as u8;
+            }
+            CREATOR_HOLDERS | CREATOR_REWARD => {
+                require!(rows.is_empty() && threshold > 0, ElpidaError::CreatorVaultTerms);
+                require!(if mode == CREATOR_HOLDERS { payout == quote } else { payout != quote }, ElpidaError::CreatorVaultTerms);
+            }
+            _ => return err!(ElpidaError::CreatorVaultTerms),
+        }
+        v.mint = ctx.accounts.mint.key(); v.quote_mint = quote; v.payout_mint = payout; v.operator = ctx.accounts.distributor.operator;
+        v.mode = mode; v.threshold = threshold; v.minimum_holding = minimum_holding; v.threshold_usd_e6 = threshold_usd_e6; v.minimum_holding_usd_e6 = minimum_holding_usd_e6;
+        v.bump = ctx.bumps.vault;
+        emit!(CreatorVaultCreated { mint: v.mint, vault: vault_key, mode, payout_mint: payout, operator: v.operator, threshold, minimum_holding, threshold_usd_e6, minimum_holding_usd_e6,
+            rows: rows.iter().map(|r| CreatorRowInput { kind: r.kind, label: r.label.clone(), wallet: r.wallet, share_bps: r.share_bps }).collect() });
+        Ok(())
+    }
+
+    /// Operator: binds the payout wallet of an X or website row, once, after its owner proved control and signed for it.
+    pub fn bind_creator_row(ctx: Context<BindCreatorRow>, row: u8, wallet: Pubkey) -> Result<()> {
+        let v = &mut ctx.accounts.vault;
+        require!(v.mode == CREATOR_ALLOCATION && row < v.row_count && wallet != Pubkey::default(), ElpidaError::CreatorVaultTerms);
+        let r = &mut v.rows[row as usize];
+        require!(r.kind != CREATOR_ROW_WALLET && r.wallet == Pubkey::default(), ElpidaError::CreatorVaultTerms);
+        r.wallet = wallet;
+        emit!(CreatorRowBound { mint: v.mint, row, wallet });
+        Ok(())
+    }
+
+    /// Anyone: pays allocation row `row` what it is owed of everything the vault has received, to its wallet.
+    pub fn claim_creator_row(ctx: Context<ClaimCreatorRow>, row: u8) -> Result<()> {
+        let held = ctx.accounts.vault_quote.amount;
+        let (mint, bump) = (ctx.accounts.vault.mint, ctx.accounts.vault.bump);
+        let v = &mut ctx.accounts.vault;
+        require!(v.mode == CREATOR_ALLOCATION && row < v.row_count, ElpidaError::CreatorVaultTerms);
+        let received = held as u128 + v.total_claimed as u128;
+        let r = v.rows[row as usize];
+        require!(r.wallet != Pubkey::default(), ElpidaError::CreatorRowUnbound);
+        require_keys_eq!(ctx.accounts.recipient.key(), r.wallet, ElpidaError::CreatorVaultTerms);
+        let due = (received * r.share_bps as u128 / 10_000).saturating_sub(r.claimed as u128) as u64;
+        require!(due > 0, ElpidaError::NothingToWithdraw);
+        v.rows[row as usize].claimed = r.claimed.checked_add(due).ok_or(ElpidaError::MathOverflow)?;
+        v.total_claimed = v.total_claimed.checked_add(due).ok_or(ElpidaError::MathOverflow)?;
+        let seeds: &[&[u8]] = &[b"creator-vault", mint.as_ref(), &[bump]];
+        let a = &ctx.accounts;
+        quote_transfer(&a.quote_token_program, &a.quote_mint, a.vault_quote.to_account_info(), a.recipient_quote.to_account_info(), a.vault.to_account_info(), due, a.quote_mint.decimals, &[seeds])?;
+        emit!(CreatorRowClaimed { mint, row, wallet: r.wallet, amount: due });
+        Ok(())
+    }
+
+    /// Operator, HOLDERS and REWARD vaults: commits round `round` (the next one) as a Merkle root of payouts in the
+    /// vault's payout asset, covered by what the vault holds beyond what earlier rounds still owe. Leaves are
+    /// keccak(keccak("elpida-creator" | program | mint | round | payout | index | account | amount)); pairs hash sorted.
+    #[allow(clippy::too_many_arguments)]
+    pub fn post_creator_root(ctx: Context<PostCreatorRoot>, round: u32, root: [u8; 32], total: u64, recipients: u32, manifest_uri: String) -> Result<()> {
+        let held = ctx.accounts.vault_payout.amount;
+        let v = &mut ctx.accounts.vault;
+        require!(v.mode != CREATOR_ALLOCATION && round == v.rounds, ElpidaError::CreatorVaultTerms);
+        require!(root != [0u8; 32] && total > 0 && recipients > 0 && recipients <= V2_MAX_RECIPIENTS && manifest_uri.len() <= MAX_URI, ElpidaError::V2Terms);
+        require!(held.saturating_sub(v.reserved) >= total, ElpidaError::NotFunded);
+        v.reserved = v.reserved.checked_add(total).ok_or(ElpidaError::MathOverflow)?;
+        v.rounds = v.rounds.checked_add(1).ok_or(ElpidaError::MathOverflow)?;
+        let r = &mut ctx.accounts.round;
+        r.mint = v.mint; r.round = round; r.root = root; r.total = total; r.claimed = 0; r.recipients = recipients;
+        r.posted_at = Clock::get()?.unix_timestamp; r.bump = ctx.bumps.round;
+        emit!(CreatorRootPosted { mint: v.mint, round, payout_mint: v.payout_mint, root, total, recipients, manifest_uri });
+        Ok(())
+    }
+
+    /// Anyone: pays a listed holder its amount from round `round`, with its Merkle proof, once.
+    pub fn claim_creator(ctx: Context<ClaimCreator>, round: u32, index: u32, amount: u64, proof: Vec<[u8; 32]>) -> Result<()> {
+        let (mint, payout, bump) = (ctx.accounts.vault.mint, ctx.accounts.vault.payout_mint, ctx.accounts.vault.bump);
+        let account = ctx.accounts.recipient.key();
+        let (root, recipients) = (ctx.accounts.round.root, ctx.accounts.round.recipients);
+        require!(index < recipients, ElpidaError::BadProof);
+        require!(verify_proof(&proof, root, creator_leaf(&mint, round, &payout, index, &account, amount)), ElpidaError::BadProof);
+        {
+            let info = ctx.accounts.round.to_account_info();
+            let mut data = info.try_borrow_mut_data()?;
+            let (byte, bit) = (8 + CreatorRound::INIT_SPACE + (index / 8) as usize, 1u8 << (index % 8));
+            require!(data.len() > byte, ElpidaError::BadProof);
+            require!(data[byte] & bit == 0, ElpidaError::AlreadyPaid);
+            data[byte] |= bit;
+        }
+        let r = &mut ctx.accounts.round;
+        r.claimed = r.claimed.checked_add(amount).ok_or(ElpidaError::MathOverflow)?;
+        require!(r.claimed <= r.total, ElpidaError::BadProof);
+        let v = &mut ctx.accounts.vault;
+        v.reserved = v.reserved.checked_sub(amount).ok_or(ElpidaError::MathOverflow)?;
+        let seeds: &[&[u8]] = &[b"creator-vault", mint.as_ref(), &[bump]];
+        let a = &ctx.accounts;
+        quote_transfer(&a.payout_token_program, &a.payout_mint, a.vault_payout.to_account_info(), a.recipient_payout.to_account_info(), a.vault.to_account_info(), amount, a.payout_mint.decimals, &[seeds])?;
+        emit!(CreatorClaimed { mint, round, index, account, amount });
+        Ok(())
+    }
+
+    /// Operator, REWARD vaults: swaps `amount_in` of the vault's pair asset into its reward asset through a Raydium CPMM
+    /// pool holding exactly those two mints, at least `min_out`. The output stays in the vault for rounds.
+    pub fn creator_swap_raydium(ctx: Context<CreatorSwapRaydium>, amount_in: u64, min_out: u64) -> Result<()> {
+        let a = &ctx.accounts;
+        require!(a.vault.mode == CREATOR_REWARD && amount_in > 0 && min_out > 0 && amount_in <= a.vault_quote.amount, ElpidaError::CreatorVaultTerms);
+        let (_, quote_is_0) = read_raydium(&a.ray_pool.to_account_info(), &a.ray_vault_0.to_account_info(), &a.ray_vault_1.to_account_info(), &a.quote_mint.key())?;
+        {
+            let data = a.ray_pool.try_borrow_data()?;
+            let other = if quote_is_0 { RAY_POOL_MINT_0 + 32 } else { RAY_POOL_MINT_0 };
+            require!(data[other..other + 32] == a.payout_mint.key().to_bytes(), ElpidaError::RaydiumAccount);
+        }
+        let (mint, bump) = (a.vault.mint, a.vault.bump);
+        let seeds: &[&[u8]] = &[b"creator-vault", mint.as_ref(), &[bump]];
+        let before = a.vault_payout.amount;
+        let mut data = Vec::with_capacity(24);
+        data.extend_from_slice(&RAY_SWAP_BASE_INPUT);
+        data.extend_from_slice(&amount_in.to_le_bytes());
+        data.extend_from_slice(&min_out.to_le_bytes());
+        let (input_vault, output_vault) = if quote_is_0 { (a.ray_vault_0.to_account_info(), a.ray_vault_1.to_account_info()) } else { (a.ray_vault_1.to_account_info(), a.ray_vault_0.to_account_info()) };
+        let infos = [
+            a.vault.to_account_info(), a.ray_authority.to_account_info(), a.amm_config.to_account_info(), a.ray_pool.to_account_info(),
+            a.vault_quote.to_account_info(), a.vault_payout.to_account_info(), input_vault, output_vault,
+            a.quote_token_program.to_account_info(), a.payout_token_program.to_account_info(), a.quote_mint.to_account_info(), a.payout_mint.to_account_info(), a.observation.to_account_info(),
+        ];
+        const WRITABLE: [bool; 13] = [false, false, false, true, true, true, true, true, false, false, false, false, true];
+        let accounts = infos.iter().enumerate().map(|(i, info)| AccountMeta { pubkey: *info.key, is_signer: i == 0, is_writable: WRITABLE[i] }).collect();
+        invoke_signed(&Instruction { program_id: raydium::PROGRAM, accounts, data }, &infos, &[seeds])?;
+        ctx.accounts.vault_payout.reload()?;
+        let got = ctx.accounts.vault_payout.amount.checked_sub(before).ok_or(ElpidaError::MathOverflow)?;
+        require!(got >= min_out, ElpidaError::Slippage);
+        emit!(CreatorSwapped { mint, amount_in, amount_out: got });
+        Ok(())
+    }
+
+    #[cfg(feature = "testnet")]
+    /// TEST NETWORKS ONLY, operator, REWARD vaults: swaps the vault's wrapped SOL into a test stock (or a test stock into
+    /// wrapped SOL) through the program's test conversion pool (x·y = k, 0.3% fee), at least `min_out`, since devnet has
+    /// no market for the test stocks. The output stays in the vault for rounds.
+    pub fn creator_swap_test(ctx: Context<CreatorSwapTest>, amount_in: u64, min_out: u64) -> Result<()> {
+        test_networks_only()?;
+        let a = &ctx.accounts;
+        require!(a.vault.mode == CREATOR_REWARD && amount_in > 0 && amount_in <= a.vault_quote.amount, ElpidaError::CreatorVaultTerms);
+        let (quote, payout, stock) = (a.quote_mint.key(), a.payout_mint.key(), a.pool.quote_mint);
+        let sol_in = quote == WSOL_MINT && payout == stock;
+        require!(sol_in || (quote == stock && payout == WSOL_MINT), ElpidaError::CreatorVaultTerms);
+        let (reserve_in, reserve_out) = if sol_in { (a.pool.sol_reserve, a.pool.quote_reserve) } else { (a.pool.quote_reserve, a.pool.sol_reserve) };
+        let out = test_conversion_out(reserve_in, reserve_out, amount_in)?;
+        require!(out >= min_out, ElpidaError::Slippage);
+        let (mint, bump) = (a.vault.mint, a.vault.bump);
+        let vault_seeds: &[&[u8]] = &[b"creator-vault", mint.as_ref(), &[bump]];
+        let pool_seeds: &[&[u8]] = &[b"test-conversion", stock.as_ref(), &[a.pool.bump]];
+        if sol_in {
+            // Wrapped SOL out of the vault's account into the pool's lamports: to the pool's own wrapped-SOL account,
+            // closed into the pool by its PDA.
+            quote_transfer(&a.quote_token_program, &a.quote_mint, a.vault_quote.to_account_info(), a.pool_wsol.to_account_info(), a.vault.to_account_info(), amount_in, a.quote_mint.decimals, &[vault_seeds])?;
+            token::close_account(CpiContext::new_with_signer(a.quote_token_program.to_account_info(), token::CloseAccount { account: a.pool_wsol.to_account_info(), destination: a.pool.to_account_info(), authority: a.pool.to_account_info() }, &[pool_seeds]))?;
+            quote_transfer(&a.payout_token_program, &a.payout_mint, a.pool_stock.to_account_info(), a.vault_payout.to_account_info(), a.pool.to_account_info(), out, a.payout_mint.decimals, &[pool_seeds])?;
+        } else {
+            quote_transfer(&a.quote_token_program, &a.quote_mint, a.vault_quote.to_account_info(), a.pool_stock.to_account_info(), a.vault.to_account_info(), amount_in, a.quote_mint.decimals, &[vault_seeds])?;
+            a.pool.to_account_info().sub_lamports(out)?;
+            a.vault_payout.to_account_info().add_lamports(out)?;
+            token::sync_native(CpiContext::new(a.payout_token_program.to_account_info(), token::SyncNative { account: a.vault_payout.to_account_info() }))?;
+        }
+        let pool = &mut ctx.accounts.pool;
+        if sol_in { pool.sol_reserve += amount_in; pool.quote_reserve -= out; } else { pool.quote_reserve += amount_in; pool.sol_reserve -= out; }
+        emit!(CreatorSwapped { mint, amount_in, amount_out: out });
         Ok(())
     }
 
@@ -2289,6 +2495,12 @@ pub fn v2_leaf(kind: u8, round: u32, asset: &Pubkey, index: u32, account: &Pubke
     hashv(&[&inner]).0
 }
 
+/// A creator-vault round leaf (`post_creator_root`).
+pub fn creator_leaf(mint: &Pubkey, round: u32, payout: &Pubkey, index: u32, account: &Pubkey, amount: u64) -> [u8; 32] {
+    let inner = hashv(&[b"elpida-creator", crate::ID.as_ref(), mint.as_ref(), &round.to_le_bytes(), payout.as_ref(), &index.to_le_bytes(), account.as_ref(), &amount.to_le_bytes()]).0;
+    hashv(&[&inner]).0
+}
+
 /// Sorted-pair Merkle proof check (the order of each pair is by byte value, as OpenZeppelin's MerkleProof).
 pub fn verify_proof(proof: &[[u8; 32]], root: [u8; 32], leaf: [u8; 32]) -> bool {
     let mut node = leaf;
@@ -2609,6 +2821,181 @@ pub struct WithdrawV2Fees<'info> {
 #[account]
 #[derive(InitSpace)]
 pub struct V2Distributor { pub kind: u8, pub operator: Pubkey, pub period: u32, pub genesis: i64, pub genesis_month: u32, pub bump: u8 }
+
+/// One allocation row as the creator sets it: kind (0 wallet, 1 X account, 2 website), its label ("x:<handle>" or
+/// "domain:<name>"; empty for a wallet), its wallet (default for an X or website row until bound) and share.
+#[derive(AnchorSerialize, AnchorDeserialize, Clone)]
+pub struct CreatorRowInput { pub kind: u8, pub label: String, pub wallet: Pubkey, pub share_bps: u16 }
+
+#[derive(AnchorSerialize, AnchorDeserialize, Clone, Copy, Default, InitSpace)]
+pub struct CreatorRow { pub kind: u8, pub label_len: u8, pub label: [[u8; 32]; 2], pub wallet: Pubkey, pub share_bps: u16, pub claimed: u64 }
+
+/// A V2 token's creator vault (PDA ["creator-vault", mint]); the token's reward account, so the creator's 30% lands in
+/// its token accounts. `payout_mint` is the pair asset, or the reward asset of a REWARD vault.
+#[account]
+#[derive(InitSpace)]
+pub struct CreatorVault {
+    pub mint: Pubkey, pub quote_mint: Pubkey, pub payout_mint: Pubkey, pub operator: Pubkey, pub mode: u8,
+    pub threshold: u64, pub minimum_holding: u64, pub threshold_usd_e6: u64, pub minimum_holding_usd_e6: u64,
+    pub row_count: u8, pub rows: [CreatorRow; CREATOR_MAX_ROWS],
+    pub total_claimed: u64, pub reserved: u64, pub rounds: u32, pub bump: u8,
+}
+
+/// One posted creator-vault round (PDA ["creator-round", mint, round]); a claim bitmap of `recipients` bits follows.
+#[account]
+#[derive(InitSpace)]
+pub struct CreatorRound { pub mint: Pubkey, pub round: u32, pub root: [u8; 32], pub total: u64, pub claimed: u64, pub recipients: u32, pub posted_at: i64, pub bump: u8 }
+
+#[derive(Accounts)]
+pub struct CreateCreatorVault<'info> {
+    #[account(mut)]
+    pub creator: Signer<'info>,
+    pub mint: Box<Account<'info, Mint>>,
+    #[account(seeds = [b"curve", mint.key().as_ref()], bump = pool.bump, has_one = mint, constraint = pool.creator == creator.key() @ ElpidaError::Unauthorized, constraint = pool.config == curve_config.key() @ ElpidaError::WrongConfig)]
+    pub pool: Box<Account<'info, CurvePool>>,
+    #[account(constraint = curve_config.model_version == V2_MODEL_VERSION @ ElpidaError::NotV2)]
+    pub curve_config: Box<Account<'info, CurveConfig>>,
+    pub payout_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(seeds = [b"v2-dist", &[V2_DIST_AIRDROP][..]], bump = distributor.bump)]
+    pub distributor: Box<Account<'info, V2Distributor>>,
+    #[account(init, payer = creator, space = 8 + CreatorVault::INIT_SPACE, seeds = [b"creator-vault", mint.key().as_ref()], bump)]
+    pub vault: Box<Account<'info, CreatorVault>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct BindCreatorRow<'info> {
+    pub operator: Signer<'info>,
+    #[account(mut, seeds = [b"creator-vault", vault.mint.as_ref()], bump = vault.bump, has_one = operator @ ElpidaError::Unauthorized)]
+    pub vault: Box<Account<'info, CreatorVault>>,
+}
+
+#[derive(Accounts)]
+pub struct ClaimCreatorRow<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, seeds = [b"creator-vault", vault.mint.as_ref()], bump = vault.bump, has_one = quote_mint)]
+    pub vault: Box<Account<'info, CreatorVault>>,
+    #[account(mint::token_program = quote_token_program)]
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = vault, associated_token::token_program = quote_token_program)]
+    pub vault_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    /// CHECK: must be the row's wallet (checked in the instruction).
+    pub recipient: UncheckedAccount<'info>,
+    #[account(init_if_needed, payer = payer, associated_token::mint = quote_mint, associated_token::authority = recipient, associated_token::token_program = quote_token_program)]
+    pub recipient_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(round_no: u32, root: [u8; 32], total: u64, recipients: u32)]
+pub struct PostCreatorRoot<'info> {
+    #[account(mut)]
+    pub operator: Signer<'info>,
+    #[account(mut, seeds = [b"creator-vault", vault.mint.as_ref()], bump = vault.bump, has_one = operator @ ElpidaError::Unauthorized, has_one = payout_mint)]
+    pub vault: Box<Account<'info, CreatorVault>>,
+    pub payout_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(associated_token::mint = payout_mint, associated_token::authority = vault, associated_token::token_program = payout_mint.to_account_info().owner)]
+    pub vault_payout: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(init, payer = operator, space = 8 + CreatorRound::INIT_SPACE + (recipients as usize).div_ceil(8), seeds = [b"creator-round", vault.mint.as_ref(), &round_no.to_le_bytes()], bump)]
+    pub round: Box<Account<'info, CreatorRound>>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+#[instruction(round_no: u32)]
+pub struct ClaimCreator<'info> {
+    #[account(mut)]
+    pub payer: Signer<'info>,
+    #[account(mut, seeds = [b"creator-vault", vault.mint.as_ref()], bump = vault.bump, has_one = payout_mint)]
+    pub vault: Box<Account<'info, CreatorVault>>,
+    #[account(mut, seeds = [b"creator-round", vault.mint.as_ref(), &round_no.to_le_bytes()], bump = round.bump)]
+    pub round: Box<Account<'info, CreatorRound>>,
+    #[account(mint::token_program = payout_token_program)]
+    pub payout_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(mut, associated_token::mint = payout_mint, associated_token::authority = vault, associated_token::token_program = payout_token_program)]
+    pub vault_payout: Box<InterfaceAccount<'info, QuoteAccount>>,
+    /// CHECK: the payee wallet named in the leaf.
+    pub recipient: UncheckedAccount<'info>,
+    #[account(init_if_needed, payer = payer, associated_token::mint = payout_mint, associated_token::authority = recipient, associated_token::token_program = payout_token_program)]
+    pub recipient_payout: Box<InterfaceAccount<'info, QuoteAccount>>,
+    pub payout_token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CreatorSwapRaydium<'info> {
+    #[account(mut)]
+    pub operator: Signer<'info>,
+    #[account(seeds = [b"creator-vault", vault.mint.as_ref()], bump = vault.bump, has_one = operator @ ElpidaError::Unauthorized, has_one = quote_mint, has_one = payout_mint)]
+    pub vault: Box<Account<'info, CreatorVault>>,
+    #[account(mint::token_program = quote_token_program)]
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(mint::token_program = payout_token_program)]
+    pub payout_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = vault, associated_token::token_program = quote_token_program)]
+    pub vault_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(init_if_needed, payer = operator, associated_token::mint = payout_mint, associated_token::authority = vault, associated_token::token_program = payout_token_program)]
+    pub vault_payout: Box<InterfaceAccount<'info, QuoteAccount>>,
+    /// CHECK: owner, mints and vaults checked when read.
+    #[account(mut)]
+    pub ray_pool: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = raydium::AUTHORITY @ ElpidaError::RaydiumAccount)]
+    pub ray_authority: UncheckedAccount<'info>,
+    /// CHECK: fixed address; Raydium checks it is the pool's config.
+    #[account(address = raydium::AMM_CONFIG @ ElpidaError::RaydiumAccount)]
+    pub amm_config: UncheckedAccount<'info>,
+    /// CHECK: matched against the Raydium pool's stored vault.
+    #[account(mut)]
+    pub ray_vault_0: UncheckedAccount<'info>,
+    /// CHECK: matched against the Raydium pool's stored vault.
+    #[account(mut)]
+    pub ray_vault_1: UncheckedAccount<'info>,
+    /// CHECK: Raydium checks it is the pool's observation account.
+    #[account(mut)]
+    pub observation: UncheckedAccount<'info>,
+    /// CHECK: fixed address.
+    #[account(address = raydium::PROGRAM @ ElpidaError::RaydiumAccount)]
+    pub raydium_program: UncheckedAccount<'info>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
+    pub payout_token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CreatorSwapTest<'info> {
+    #[account(mut)]
+    pub operator: Signer<'info>,
+    #[account(seeds = [b"creator-vault", vault.mint.as_ref()], bump = vault.bump, has_one = operator @ ElpidaError::Unauthorized, has_one = quote_mint, has_one = payout_mint)]
+    pub vault: Box<Account<'info, CreatorVault>>,
+    #[account(mint::token_program = quote_token_program)]
+    pub quote_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(mint::token_program = payout_token_program)]
+    pub payout_mint: Box<InterfaceAccount<'info, QuoteMint>>,
+    #[account(mut, associated_token::mint = quote_mint, associated_token::authority = vault, associated_token::token_program = quote_token_program)]
+    pub vault_quote: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(init_if_needed, payer = operator, associated_token::mint = payout_mint, associated_token::authority = vault, associated_token::token_program = payout_token_program)]
+    pub vault_payout: Box<InterfaceAccount<'info, QuoteAccount>>,
+    #[account(mut, seeds = [b"test-conversion", pool.quote_mint.as_ref()], bump = pool.bump)]
+    pub pool: Box<Account<'info, TestConversion>>,
+    /// CHECK: the pool's stock account, ATA(pool, stock) under the stock's token program; the token program checks it.
+    #[account(mut)]
+    pub pool_stock: UncheckedAccount<'info>,
+    /// CHECK: SOL in only: a wrapped-SOL account the pool owns (created by the client in the same transaction, closed
+    /// into the pool here); the token program checks it.
+    #[account(mut)]
+    pub pool_wsol: UncheckedAccount<'info>,
+    pub quote_token_program: Interface<'info, TokenInterface>,
+    pub payout_token_program: Interface<'info, TokenInterface>,
+    pub associated_token_program: Program<'info, AssociatedToken>,
+    pub system_program: Program<'info, System>,
+}
+
 
 /// Per distributor and asset: what posted rounds still owe (PDA ["v2-reserved", kind, asset]).
 #[account]
@@ -3527,6 +3914,18 @@ pub struct V2DistributorSet { pub kind: u8, pub operator: Pubkey, pub period: u3
 #[event]
 pub struct V2RootPosted { pub kind: u8, pub round: u32, pub asset: Pubkey, pub root: [u8; 32], pub total: u64, pub recipients: u32, pub manifest_uri: String }
 #[event]
+pub struct CreatorVaultCreated { pub mint: Pubkey, pub vault: Pubkey, pub mode: u8, pub payout_mint: Pubkey, pub operator: Pubkey, pub threshold: u64, pub minimum_holding: u64, pub threshold_usd_e6: u64, pub minimum_holding_usd_e6: u64, pub rows: Vec<CreatorRowInput> }
+#[event]
+pub struct CreatorRowBound { pub mint: Pubkey, pub row: u8, pub wallet: Pubkey }
+#[event]
+pub struct CreatorRowClaimed { pub mint: Pubkey, pub row: u8, pub wallet: Pubkey, pub amount: u64 }
+#[event]
+pub struct CreatorRootPosted { pub mint: Pubkey, pub round: u32, pub payout_mint: Pubkey, pub root: [u8; 32], pub total: u64, pub recipients: u32, pub manifest_uri: String }
+#[event]
+pub struct CreatorClaimed { pub mint: Pubkey, pub round: u32, pub index: u32, pub account: Pubkey, pub amount: u64 }
+#[event]
+pub struct CreatorSwapped { pub mint: Pubkey, pub amount_in: u64, pub amount_out: u64 }
+#[event]
 pub struct V2Claimed { pub kind: u8, pub round: u32, pub asset: Pubkey, pub index: u32, pub account: Pubkey, pub amount: u64 }
 #[event]
 pub struct V2Expired { pub kind: u8, pub round: u32, pub asset: Pubkey, pub returned_to_pool: u64 }
@@ -3593,4 +3992,6 @@ pub enum ElpidaError {
     #[msg("The flywheel never completes a curve")] FlywheelWouldComplete,
     #[msg("A stock pair needs its quote pricing and price account")] QuotePricingRequired,
     #[msg("The stock is paused by its issuer")] QuotePaused,
+    #[msg("Invalid creator vault terms")] CreatorVaultTerms,
+    #[msg("This allocation is held until its owner verifies")] CreatorRowUnbound,
 }

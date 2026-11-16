@@ -5,7 +5,7 @@ import assert from 'node:assert/strict';
 import * as web3 from '@solana/web3.js';
 import { createHash } from 'node:crypto';
 import { createElpidaSolana, parseTestStockPrice, stockVirtualQuote, usdToQuote, mintMultiplierE12, DISCRIMINATORS, TOKEN_SUPPLY, TOKEN_2022_PROGRAM } from '../packages/solana/client.mjs';
-import { V2_TEST_STOCK_PRICES, testStockFeedId, v2StockParams, ensureV2Stocks } from '../packages/solana/v2-setup.mjs';
+import { V2_TEST_STOCK_PRICES, V2_ASSET_CURVES, testStockFeedId, v2StockParams, ensureV2Stocks, ensureV2AssetPairs } from '../packages/solana/v2-setup.mjs';
 
 const disc = name => [...createHash('sha256').update(name).digest().subarray(0, 8)];
 
@@ -58,4 +58,11 @@ test('setup: fixed feed ids, ×5 curves at the 1.00% V2 minimum, test networks o
   const params = v2StockParams({ decimals: 9, launchFeeSol: '0.1' });
   assert.equal(params.baseFeeBps, 100); assert.equal(params.maxCreatorBuyBps, 300);
   await assert.rejects(ensureV2Stocks({ cluster: 'mainnet', stocks: [] }), /test networks only/);
+});
+
+test('V2 USDC and paired-token pairs: $50 to $250 in the pair asset, test networks only', async () => {
+  assert.deepEqual(V2_ASSET_CURVES.usdc, { startFdv: '50', endFdv: '250' });
+  // TEST-MEME is valued at $50 per 500,000 (packages/core/pairs.mjs).
+  assert.deepEqual(V2_ASSET_CURVES.token, { startFdv: '500000', endFdv: '2500000' });
+  await assert.rejects(ensureV2AssetPairs({ cluster: 'mainnet', assets: [] }), /test networks only/);
 });
