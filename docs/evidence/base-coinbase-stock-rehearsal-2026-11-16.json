@@ -3,6 +3,9 @@
   "network": "base",
   "chainId": 8453,
   "date": "2026-11-16",
+  "result": "PASS",
+  "block": 58372950,
+  "blockNote": "Fork block of run-b (the eight stocks, read from that run's deployments/base-mainnet-stock-rehearsal.json forkBlock). Run-a (AAPLc, AMZNc) forked the latest block the same evening; its number was overwritten by run-b and is not recorded.",
   "tool": "scripts/v2-mainnet-deploy.mjs rehearse --plan deployments/plans/base-mainnet.json --node http://127.0.0.1:8545 --stocks config/stocks/candidates/base-coinbase.json",
   "fork": "anvil 1.8.6 --fork-url <Base mainnet RPC (Alchemy)> --hardfork base:Cobalt",
   "runs": {
@@ -166,5 +169,15 @@
     "issuer transfer-policy changes or pauses (the fork used the policies in force at the fork block)",
     "feed descriptions (checked by scripts/stock-list.mjs before the Safe approves the list)",
     "reward conversion and distribution in a stock"
+  ],
+  "checks": [
+    "V2 deploy on the fork with a 2-of-2 test Safe: every preflight check passed against the real Uniswap v4 PoolManager, Chainlink ETH/USD feed and USDC",
+    "the Safe batch wired the hook, USD pricing, USDC at $25,000 virtual, the guardian and the daily launch cap",
+    "a native ETH launch started at $20,000 and the guardian pause stopped launches",
+    "each of the ten stocks: symbol and Chainlink feed read, treasury approvePricedQuote with maxAge 345600",
+    "each: a launch paired with the stock started within 0.1% of $20,000",
+    "each: after the 60 s anti-snipe window, a buy with the stock and a full sell returned 97.51% after both fees",
+    "each: buying past the x5 milestone graduated the launch, raising $30,912 to $30,941 into the locked pool",
+    "each: a sell and a buy then traded in the graduated pool"
   ]
 }
