@@ -298,6 +298,10 @@ export async function rehearse({ plan: given, fork = null, node = null, local = 
       plan.treasury ||= await deployMock('MockSafe', [[addrs[1], addrs[2]], 2]); plan.keeper ||= addrs[3]; plan.guardian ||= addrs[4];
       log('Fork rehearsal with a test Safe and wallets (the plan has none yet). The real deploy needs them filled in.');
     }
+    // The dev accounts are the well-known test keys. On a public chain such as Base they carry code others put there
+    // (EIP-7702 delegations), which anvil copies onto the fork: the keeper would then fail "is a plain wallet". Clear it
+    // on the fork only, so the stand-in roles are the plain wallets they stand in for.
+    for (const a of addrs) if ((await provider.getCode(a)) !== '0x') { await devRpc(provider, 'setCode', [a, '0x']); log(`Cleared code on test wallet ${a} (fork only).`); }
     const checks = await preflight({ provider, plan, deployer: addrs[0] });
     if (checks.failed.length) throw new Error(`Preflight failed: ${checks.failed.map(c => `${c.check} (${c.detail})`).join('; ')}`);
     const record = await deployPlan({ provider, signer: signers[0], plan, hash: planHash(JSON.stringify(plan)), approval: null, recordPath, art, log });

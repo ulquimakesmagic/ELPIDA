@@ -121,6 +121,10 @@ test('--node: the stock rehearsal runs on a dev node someone else started (as wi
   const server = await network.createServer('localCancun', '127.0.0.1', 0), { address, port } = await server.listen();
   t.after(() => server.close());
   const { plan } = readPlan(PLAN, { local: true });
+  // As on Base: the well-known test key used as the keeper carries someone's EIP-7702 delegation on the real chain.
+  const { JsonRpcProvider } = await import('ethers'), rpc = new JsonRpcProvider(`http://${address}:${port}`);
+  const keeper = (await rpc.send('eth_accounts', []))[3];
+  await rpc.send('hardhat_setCode', [keeper, '0xef0100' + '11'.repeat(20)]); rpc.destroy();
   const r = await rehearse({ plan, node: `http://${address}:${port}`, local: true, recordPath: join(dir, 'node.rehearsal.json'), stocks: [{ mock: true, price: 412.5 }] });
   assert.equal(r.checks.failed.length, 0, JSON.stringify(r.checks.failed));
   assert.ok(r.verified.every(c => c.ok));
