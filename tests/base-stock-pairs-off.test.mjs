@@ -30,3 +30,17 @@ test('the launch flow, the EVM wallet and the stock-list script all consult the 
   assert.match(wallet, /kind === 'xstock' && stockPairsOff\(this\.net\.chainId\)\) throw/);
   assert.match(readFileSync(new URL('../scripts/stock-list.mjs', import.meta.url), 'utf8'), /stockPairsOff\(net\.chainId\)/);
 });
+
+test('Coinbase stocks on Base: ticker matching and the rehearsal candidates', async () => {
+  const { underlying } = await import('../packages/core/stock-list.mjs');
+  assert.equal(underlying('NVDAc'), 'NVDA'); assert.equal(underlying('TSLAon'), 'TSLA'); assert.equal(underlying('BAC'), 'BAC'); assert.equal(underlying('SPCXc'), 'SPCX');
+  const list = JSON.parse(readFileSync(new URL('../config/stocks/candidates/base-coinbase.json', import.meta.url), 'utf8'));
+  const registry = JSON.parse(readFileSync(new URL('../config/tokenized-equity-registry.json', import.meta.url), 'utf8'));
+  const known = new Map(registry.assets.filter(a => a.network === 'base' && a.provider === 'coinbase').map(a => [a.symbol, a]));
+  assert.equal(list.length, 10);
+  for (const s of list) {
+    assert.match(s.symbol, /^[A-Z]{2,5}c$/);
+    assert.equal(s.address, known.get(s.symbol).address); assert.equal(s.feed, known.get(s.symbol).feed);
+    assert.equal(s.maxAge, 345600);
+  }
+});
