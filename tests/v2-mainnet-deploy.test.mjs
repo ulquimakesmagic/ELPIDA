@@ -125,6 +125,8 @@ test('--node: the stock rehearsal runs on a dev node someone else started (as wi
   const { JsonRpcProvider } = await import('ethers'), rpc = new JsonRpcProvider(`http://${address}:${port}`);
   const keeper = (await rpc.send('eth_accounts', []))[3];
   await rpc.send('hardhat_setCode', [keeper, '0xef0100' + '11'.repeat(20)]); rpc.destroy();
+  // A record left by an earlier rehearsal of another plan (another test Safe) must not stop this one.
+  writeFileSync(join(dir, 'node.rehearsal.json'), JSON.stringify({ planSha256: 'an earlier run', contracts: {}, txs: {} }));
   const r = await rehearse({ plan, node: `http://${address}:${port}`, local: true, recordPath: join(dir, 'node.rehearsal.json'), stocks: [{ mock: true, price: 412.5 }] });
   assert.equal(r.checks.failed.length, 0, JSON.stringify(r.checks.failed));
   assert.ok(r.verified.every(c => c.ok));

@@ -21,7 +21,7 @@
 // you started (Foundry anvil forking the chain), for tokens Hardhat cannot run: Base's Coinbase stocks are B20
 // precompiles, so on Base use `anvil --fork-url <rpc> --hardfork base:Cobalt` (Foundry v1.8.4+) and --node.
 import { createHash } from 'node:crypto';
-import { readFileSync, writeFileSync, existsSync, renameSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, renameSync, rmSync } from 'node:fs';
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
@@ -267,6 +267,9 @@ export async function devRpc(provider, method, params) {
  * real chain's addresses (tests).
  */
 export async function rehearse({ plan: given, fork = null, node = null, local = !fork && !node, log = () => {}, recordPath, stocks = [], findHolder = null }) {
+  // Every rehearsal deploys afresh on its own chain: a record left by an earlier run (another test Safe, another fork)
+  // is not resumed. Only the real deploy resumes a record.
+  if (recordPath) for (const f of [recordPath, safeBatchPath(recordPath)]) rmSync(f, { force: true });
   const { BrowserProvider } = await import('ethers');
   let connection = null, provider;
   if (node) {
