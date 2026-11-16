@@ -8,6 +8,7 @@ import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { Contract, JsonRpcProvider } from 'ethers';
 import { buildStockList } from '../packages/core/stock-list.mjs';
 import { testnets } from '../packages/core/networks.mjs';
+import { stockPairsOff } from '../packages/core/pairs.mjs';
 
 // Mainnet chains are not in networks.mjs yet (mainnet is not approved); their stock lists can still be prepared and checked.
 const MAINNETS = [{ key: 'ethereum', name: 'Ethereum', chainId: 1 }, { key: 'bnb', name: 'BNB Chain', chainId: 56 }, { key: 'base', name: 'Base', chainId: 8453 }];
@@ -15,6 +16,7 @@ const networks = [...testnets.filter(n => n.kind === 'evm'), ...MAINNETS];
 
 const [key, file] = process.argv.slice(2), at = process.argv.indexOf('--source'), source = at > 0 ? process.argv[at + 1] : file;
 const net = networks.find(n => n.key === key);
+if (net && stockPairsOff(net.chainId)) { console.error(stockPairsOff(net.chainId)); process.exit(2); }
 if (!net || !file) { console.error('Usage: STOCK_LIST_RPC_URL=<rpc> node scripts/stock-list.mjs <network-key> <candidates.json> [--source "…"]'); process.exit(2); }
 const rpc = process.env.STOCK_LIST_RPC_URL ?? net.rpcUrl;
 if (!rpc) { console.error(`No RPC for ${key}: set STOCK_LIST_RPC_URL.`); process.exit(2); }

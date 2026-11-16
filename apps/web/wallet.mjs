@@ -7,6 +7,7 @@ import { V4_MODEL } from '/v4-model.mjs';
 import { V2_MODEL } from '/v2-economics.mjs';
 import { deployV2, deployV2UsdcDistributors, setupTestPayoutStable, approveV2StockList, launchV2, approveV2Stock, claimCreatorSplit, claimIdentityRow, claimV2CreatorFees } from './v2-launchpad.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
+import { stockPairsOff } from '/pairs.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress } from '/vendor/ethers.js';
 import { routerAbi, swapCalldata } from '/dex-router.mjs';
 
@@ -247,7 +248,7 @@ export class TestnetWallet {
     return {
       native: { assets: [{ id: 'native', symbol: native, name: this.net.nativeCurrency.name, decimals: 18, ...fee, curve: this.previewCurve() }] },
       usdc: approved('usdc').length ? { assets: approved('usdc') } : { assets: [], unavailable: !this.dex ? 'USDC trading pairs need a DEX graduation adapter on this network.' : 'USDC trading setup is incomplete on this deployment. The owner can finish it here once; it then becomes available to everyone.' },
-      xstock: approved('xstock').length ? { assets: approved('xstock') } : { assets: [], unavailable: missing('xstock') },
+      xstock: stockPairsOff(this.net.chainId) ? { assets: [], unavailable: stockPairsOff(this.net.chainId) } : approved('xstock').length ? { assets: approved('xstock') } : { assets: [], unavailable: missing('xstock') },
       token: approved('token').length ? { assets: approved('token') } : { assets: [], unavailable: missing('token') },
     };
   }
@@ -289,7 +290,7 @@ export class TestnetWallet {
     await this.checkNetwork(); const factory = (await this.verifyFactory()).connect(this.signer);
     const response = await fetch(`/api/public/tokenized-equity?network=${encodeURIComponent(this.net.key)}&provider=ondo`, { signal: AbortSignal.timeout(15000) });
     const view = response.ok ? await response.json() : null, record = view?.assets?.find(a => a.address === String(asset ?? '').toLowerCase()) ?? null;
-    const gate = stockApprovalGate(record, { mainnet: !!this.net.mainnet }); if (gate) throw new Error(gate);
+    const gate = stockApprovalGate(record, { mainnet: !!this.net.mainnet, chainId: this.net.chainId }); if (gate) throw new Error(gate);
     if (!this.dex) throw new Error('This launchpad has no DEX graduation configured.');
     if ((await factory.approvedQuotes(record.address)).adapter !== ZeroAddress) return { message: `${record.symbol} is already an approved trading pair.` };
     const feed = new Contract(record.feed, ['function decimals() view returns(uint8)', 'function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)'], this.provider);
@@ -1090,6 +1091,7 @@ export class TestnetWallet {
       const details = normalizeMetadata(body);
       const kind = body.pair ?? 'native';
       if (!['native','usdc','xstock','token'].includes(kind)) throw new Error('Choose a trading pair.');
+      if (kind === 'xstock' && stockPairsOff(this.net.chainId)) throw new Error(`${stockPairsOff(this.net.chainId)} Nothing was submitted.`);
       const nativePair = kind === 'native', paired = !nativePair;
       const asset = paired ? (this.approvedQuotes ?? []).find(a => a.kind === kind && a.address.toLowerCase() === String(body.quoteAsset ?? '').toLowerCase()) : null;
       if (paired && !asset) throw new Error(this.pairOptions()[kind].unavailable ?? 'Choose an approved asset for this pair.');

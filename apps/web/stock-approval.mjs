@@ -4,9 +4,11 @@
 // and records the production price feed it is valued with. The starting valuation is fixed at approval: the
 // launchpad's starting FDV in USD, converted to stock units at the feed price.
 import { usdQuoteTemplate } from '/curve-model.mjs';
+import { stockPairsOff } from '/pairs.mjs';
 
 /** Why `record` (from /api/public/tokenized-equity) must not be approved, or null when every gate passes. */
-export function stockApprovalGate(record, { mainnet = false } = {}) {
+export function stockApprovalGate(record, { mainnet = false, chainId = null } = {}) {
+  if (stockPairsOff(chainId)) return stockPairsOff(chainId);
   if (!mainnet) return 'Real tokenized stocks exist only on mainnet. On testnets, add the labelled stand-ins with Add test pair.';
   if (!record) return 'This stock is not in the verified registry for this network. Tickers and look-alike tokens are never accepted.';
   for (const key of ['launchQuote', 'graduatedPool']) {

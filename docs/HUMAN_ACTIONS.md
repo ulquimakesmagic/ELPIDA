@@ -11,6 +11,15 @@
 > `contracts, unit and full suite` and `solana program` checks on `main`; (2) create a Safe on Base for the treasury
 > and pick a guardian wallet for the launch stop; (3) a fresh, separate Base keeper key.
 
+## Base mainnet: no tokenized-stock pairs at launch, 16 November 2026
+
+Neither Ondo (docs.ondo.finance/addresses: Ethereum, BNB Chain, HyperEVM, Robinhood Chain, Solana) nor xStocks issues
+stocks on Base, so new Base mainnet launches pair with ETH or USDC only (`STOCK_PAIRS_OFF` in packages/core/pairs.mjs).
+The launch flow hides the stock pair and stock reward assets on chain 8453, the wallet refuses a stock-paired launch,
+the operator panel refuses stock approvals, and `scripts/stock-list.mjs base` exits. Base Sepolia keeps its test
+stocks. Nothing for you to do. To turn Base stocks on later (for example Coinbase's own B20 stocks, already in
+config/tokenized-equity-registry.json), remove the 8453 entry once the provider is verified.
+
 ## Solana devnet: creator vaults (splits, X and website allocations, holder strategies), 16 November 2026
 
 A program upgrade. A V2 launch can now send the creator's 30% to a creator vault fixed at launch: split between up to 8
