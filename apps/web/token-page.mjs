@@ -369,7 +369,8 @@ export function tradePanel(ctx, token, { dex, solana }) {
   const tabs = h('div.segmented', { role: 'tablist', 'aria-label': 'Trade side' }, ['buy', 'sell'].map(s => h('button', { type: 'button', role: 'tab', 'data-side': s, 'aria-selected': String(s === side), on: { click: () => setSide(s) } }, s === 'buy' ? 'Buy' : 'Sell')));
   const quoteBalance = () => {
     if(token.pair === 'native') return `${number(ctx.state.nativeBalance ?? 0, 6)} ${q}`;
-    const held=Object.entries(ctx.state.pairBalances??{}).find(([address])=>address.toLowerCase()===token.quoteAddress?.toLowerCase())?.[1];
+    // EVM wallets key pair balances by the asset's address; the Solana wallet by the token's pair config.
+    const held=Object.entries(ctx.state.pairBalances??{}).find(([address])=>address.toLowerCase()===token.quoteAddress?.toLowerCase()||address===token.config)?.[1];
     if(held!=null)return `${number(held,4)} ${q}`;
     return ctx.state.balanceSymbol===q?`${number(ctx.state.balance,4)} ${q}`:null;
   };
@@ -387,7 +388,7 @@ export function tradePanel(ctx, token, { dex, solana }) {
     balance.textContent = side === 'buy' ? (qb ? `Available: ${qb}` : '') : `Available: ${number(token.balance, 4)} ${token.symbol}`;
     // 25/50/75/Max of the spendable balance. Buys keep a small native reserve for network fees.
     const decimals = side === 'buy' ? (routed() || token.pair === 'native' ? (solana ? 9 : 18) : (token.quoteDecimals ?? 18)) : (token.decimals ?? 18);
-    const available = side === 'buy' ? (routed() || token.pair === 'native' ? ctx.state.nativeBalance : Object.entries(ctx.state.pairBalances ?? {}).find(([k]) => k.toLowerCase() === String(token.quoteAddress).toLowerCase())?.[1] ?? null) : token.balance;
+    const available = side === 'buy' ? (routed() || token.pair === 'native' ? ctx.state.nativeBalance : Object.entries(ctx.state.pairBalances ?? {}).find(([k]) => k.toLowerCase() === String(token.quoteAddress).toLowerCase() || k === token.config)?.[1] ?? null) : token.balance;
     const gasReserve = side === 'buy' && (routed() || token.pair === 'native') ? (solana ? 0.02 : 0.0005) : 0;
     const toUnits = text => { const [w, f = ''] = String(text ?? '0').split('.'); return BigInt(w || '0') * 10n ** BigInt(decimals) + BigInt((f.slice(0, decimals) || '0').padEnd(decimals, '0')); };
     const fromUnits = n => `${n / 10n ** BigInt(decimals)}.${(n % 10n ** BigInt(decimals)).toString().padStart(decimals, '0')}`.replace(/\.?0+$/, '') || '0';
