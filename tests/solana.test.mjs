@@ -1975,8 +1975,9 @@ test('Solana creator vault: allocations (wallet now, X and website once bound), 
   const launchWith = async (vault, { reward } = {}) => {
     const mint = Keypair.generate(), m = mint.publicKey;
     await send(f.connection, user, [f.client.computeBudget(), ...f.client.wrapSol(user.publicKey, SOL / 100n),
-      f.client.launchV2({ uri: TEST_URI, creator: user.publicKey, config, mint: m, name: 'Vault', symbol: 'vault', feeBps: 200, firstBuy: SOL / 100n, reward: reward ?? f.client.creatorVaultFor(m), priceUpdate: f.oracles.fresh, maxFee: SOL }),
-      ...(vault ? [f.client.createCreatorVault({ creator: user.publicKey, config, mint: m, ...vault })] : [])], [mint], 1);
+      f.client.launchV2({ uri: TEST_URI, creator: user.publicKey, config, mint: m, name: 'Vault', symbol: 'vault', feeBps: 200, firstBuy: SOL / 100n, reward: reward ?? f.client.creatorVaultFor(m), priceUpdate: f.oracles.fresh, maxFee: SOL })], [mint], 1);
+    // A vault with several labelled rows does not fit in the launch transaction; it follows in its own (as the app does).
+    if (vault) await send(f.connection, user, [f.client.createCreatorVault({ creator: user.publicKey, config, mint: m, ...vault })], [], 1);
     return m;
   };
   const trade = async mint => {
