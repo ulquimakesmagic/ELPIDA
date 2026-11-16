@@ -269,7 +269,8 @@ export class SolanaWallet {
         faucet: cfg.test && cfg.faucet ? { label: `Get ${Number(cfg.faucet).toLocaleString()} ${cfg.symbol}`, action: 'faucet', body: { asset: id } } : cfg.wsol && this.net.gasFaucet ? { label: 'Get devnet SOL', href: this.net.gasFaucet } : null };
     };
     const group = kind => {
-      if (!SOLANA_LAUNCH_KINDS.includes(kind)) return { assets: [], unavailable: PAIR_LIMITS.solana[kind] };
+      // V2 offers every pair the deploy set up (--v2-pairs: USDC and the test paired token); Model 10 stays SOL or stocks.
+      if (!SOLANA_LAUNCH_KINDS.includes(kind) && !(v2 && all.some(cfg => cfg.kind === kind))) return { assets: [], unavailable: PAIR_LIMITS.solana[kind] };
       // Stock pairs: only issuer-controlled mints the program completes into its locked pool, and only while the
       // issuer has not paused the stock or switched on a transfer hook (either would make every trade fail).
       const usable = cfg => kind !== 'xstock' || (cfg.lockedPool && !cfg.controls?.paused && !cfg.controls?.hookProgram);
