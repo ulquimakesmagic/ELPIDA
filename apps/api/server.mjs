@@ -5,7 +5,7 @@ import { feeAnalytics } from './fee-analytics.mjs';
 import { AdminAuth, parseAdminAddresses, sessionCookie, clearCookie } from './admin-auth.mjs';
 import { readTreasuries, operatorAddresses, cachedLoader } from './admin-overview.mjs';
 import { SiteAnalytics, cleanEvent, telemetryLimiter, restrictedJurisdictions } from './site-analytics.mjs';
-import { createElpidaSolana, creatorRowDue } from '../../packages/solana/client.mjs';
+import { createElpidaSolana, creatorRowDue, v2Owed } from '../../packages/solana/client.mjs';
 import { PriceKeeper } from './price-keeper.mjs';
 import {configuredGraduationKeeper} from './graduation-keeper.mjs';
 import {configuredBuybackKeeper} from './buyback-keeper.mjs';
@@ -583,16 +583,20 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         // or a holder strategy's threshold, gathered amount and rounds). Read from chain, cached 10 s.
         {const m=url.pathname.match(/^\/api\/public\/solana-creator-vault\/([1-9A-HJ-NP-Za-km-z]{32,44})$/);if(m){
           const conn=solanaConnection();if(!conn||!solanaNet.deployment?.programId)return send(404,{error:'No public Solana deployment.'});
-          const hit=creatorVaultCache.get(m[1]);if(hit&&Date.now()-hit.at<10_000)return send(200,hit.data);
-          const client=createElpidaSolana(solanaWeb3,solanaNet.deployment.programId),mint=new solanaWeb3.PublicKey(m[1]),address=client.creatorVaultFor(mint),v=client.decodeCreatorVault((await conn.getAccountInfo(address))?.data);
-          if(!v){const data={vault:null};creatorVaultCache.set(m[1],{at:Date.now(),data});return send(200,data);}
+          const hit=creatorVaultCache.get(m[1]);if(hit&&Date.now()-hit.at<5_000)return send(200,hit.data);
+          const client=createElpidaSolana(solanaWeb3,solanaNet.deployment.programId),mint=new solanaWeb3.PublicKey(m[1]),address=client.creatorVaultFor(mint);
+          const [vaultInfo,poolInfo]=await conn.getMultipleAccountsInfo([address,client.poolPda(mint)]),v=client.decodeCreatorVault(vaultInfo?.data),pool=poolInfo?client.decodePool(poolInfo.data):null;
+          // The creator's 30% still in the pool (paid into the vault or wallet at the next collection), so amounts follow every trade.
+          const pending=pool?.v2?(v2Owed(pool.v2)[0]>0n?v2Owed(pool.v2)[0]:0n):0n,quoteDecimals=pool?(client.decodeConfig((await conn.getAccountInfo(pool.config))?.data)?.quoteDecimals??9):9;
+          if(!v){const data={vault:null,quoteDecimals,...(pool?.v2?{creatorWallet:pool.reward.toBase58(),pending:pending.toString(),paid:pool.v2.paid[0].toString()}:{})};creatorVaultCache.set(m[1],{at:Date.now(),data});return send(200,data);}
           const balanceOf=async owner_mint=>{const info=await conn.getAccountInfo(owner_mint);return client.tokenAmount((await conn.getAccountInfo(client.ata(address,owner_mint,info?.owner??new solanaWeb3.PublicKey(client.tokenProgram))))?.data);};
           const [heldQuote,heldPayout]=await Promise.all([balanceOf(v.quoteMint),v.payoutMint.equals(v.quoteMint)?null:balanceOf(v.payoutMint)]);
           const rounds=[];for(let r=Math.max(0,v.rounds-5);r<v.rounds;r++){const info=await conn.getAccountInfo(client.creatorRoundFor(mint,r));if(info){const d=info.data,dv=new DataView(d.buffer,d.byteOffset,d.byteLength);rounds.push({round:r,total:dv.getBigUint64(76,true).toString(),claimed:dv.getBigUint64(84,true).toString(),recipients:dv.getUint32(92,true)});}}
-          const data={vault:address.toBase58(),mode:['allocation','holders','paired'][v.mode]??String(v.mode),quoteMint:v.quoteMint.toBase58(),payoutMint:v.payoutMint.toBase58(),operator:v.operator.toBase58(),
+          const fromPool=pool?.reward?.equals(address)?pending:0n;
+          const data={vault:address.toBase58(),quoteDecimals,pending:fromPool.toString(),mode:['allocation','holders','paired'][v.mode]??String(v.mode),quoteMint:v.quoteMint.toBase58(),payoutMint:v.payoutMint.toBase58(),operator:v.operator.toBase58(),
             threshold:v.threshold.toString(),minimumHolding:v.minimumHolding.toString(),thresholdUsd:Number(v.thresholdUsdE6)/1e6,minimumHoldingUsd:Number(v.minimumHoldingUsdE6)/1e6,
             held:heldQuote.toString(),heldPayout:heldPayout?.toString()??null,reserved:v.reserved.toString(),roundCount:v.rounds,rounds:rounds.reverse(),
-            rows:v.rows.map(r=>{const[kind,...rest]=r.label.split(':');return {index:r.index,kind:r.kind===0?'wallet':kind==='x'?'x':'domain',target:r.kind===0?null:rest.join(':'),wallet:r.wallet?.toBase58()??null,bps:r.shareBps,claimed:r.claimed.toString(),due:creatorRowDue(v,r,heldQuote).toString()};})};
+            rows:v.rows.map(r=>{const[kind,...rest]=r.label.split(':');return {index:r.index,kind:r.kind===0?'wallet':kind==='x'?'x':'domain',target:r.kind===0?null:rest.join(':'),wallet:r.wallet?.toBase58()??null,bps:r.shareBps,claimed:r.claimed.toString(),due:creatorRowDue(v,r,heldQuote+fromPool).toString()};})};
           creatorVaultCache.set(m[1],{at:Date.now(),data});if(creatorVaultCache.size>500)creatorVaultCache.delete(creatorVaultCache.keys().next().value);return send(200,data);}}
         const solanaMatch=url.pathname.match(/^\/api\/public\/tokens(?:\/([1-9A-HJ-NP-Za-km-z]{32,44})(?:\/(trades|candles|holders))?)?$/);
         if(solanaMatch&&url.searchParams.get('network')?.startsWith('solana-')){

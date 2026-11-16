@@ -19,7 +19,7 @@ import {odometer} from './odometer.mjs';
 import {filterByWho,topTraders,safetyChecks,quickAmounts,walletHolders} from './token-insights.mjs';
 import {flywheelChip} from './burn-labels.mjs';
 import { creatorSplitCard, creatorStrategyCard, identityAllocationCard, claimFeesTag, creatorWalletCard } from './creator-split.mjs';
-import { solanaCreatorVaultCard } from './solana-creator-vault-view.mjs';
+import { solanaCreatorVaultCard, solanaClaimTag } from './solana-creator-vault-view.mjs';
 export { exceedsRemaining };
 
 const metadataRequests = new Map();
@@ -85,7 +85,8 @@ export function renderToken(ctx, address) {
   const creatorFeesTotal=h('strong','Loading…');
   // V2 EVM tokens show the creator's 30% in the Allocations card (one wallet, a split, or X/website rows), read live from
   // the hook, so the separate lifetime "Creator fees" panel is not shown for them (Malik, 14 Nov).
-  const v2Allocations=token?.deploymentModel==='v2-hook'&&!String(token.network??'').startsWith('solana');
+  // Solana V2 tokens (16 Nov): the same, from the creator vault or the creator wallet (solana-creator-vault-view.mjs).
+  const v2Allocations=(token?.deploymentModel==='v2-hook'&&!String(token.network??'').startsWith('solana'))||!!token?.solanaV2;
   const creatorFeesStat=h('section.tk-card.tk-fees',{'aria-label':'Creator fees',title:'Lifetime creator fees, including claimed amounts. LP fees include collected and currently collectible fees. Assets are shown separately.'},h('h2.tk-h','Creator fees'),creatorFeesTotal,h('p.hint','Lifetime total, including amounts already claimed.'),h('a.btn.btn-secondary.btn-sm',{href:'#/rewards'},'Claim fees',icon('arrow-right','icon-sm')));
   const tile=(label,value,title)=>h('div.tk-tile',{title:title??null},h('span',label),h('strong',value));
   const details = h('section.tk-card.tk-details', { 'aria-label': 'Token details' }, h('h2.tk-h', 'Token details'), h('div.tk-tiles',
@@ -128,7 +129,7 @@ export function renderToken(ctx, address) {
           token.creator ? h('a.tk-tag.tk-creator', { href: addressUrl(token.creator) ?? '#', target: '_blank', rel: 'noopener noreferrer', title: `Creator: ${token.creator}` }, 'by ', h('span.mono', short(token.creator)), h('span.badge-dev', 'Dev')) : null,
           h('span.tk-tag.tk-addr', { title: token.address }, short(token.address), copyButton(token.address, '')),
           h('span.tk-tag', { title: 'Copy a link that shows a preview card on X, Telegram and Discord' }, 'Share', copyButton(`${location.origin}/token/${encodeURIComponent(token.network ?? ctx.wallet.net.key)}/${token.address}`, '')),
-          claimFeesTag(ctx, token),
+          claimFeesTag(ctx, token), solanaClaimTag(ctx, token),
           isV2Token(token) ? h('span.tk-tag.tk-tag-test', { title: `ELPIDA V2: ${((token.feeBps ?? 125) / 100).toFixed(2)}% fee for good, shared 30% creator / 30% trader airdrop / 10% flywheel / 10% holders / 20% treasury; liquidity locked from launch in one Uniswap v4 pool. Not audited; test networks only.` }, icon('flask-conical', 'icon-xs'), `V2 test · ${((token.feeBps ?? 125) / 100).toFixed(2)}% fee`) : isV4Token(token) ? h('span.tk-tag.tk-tag-test', { title: 'Model 11: the curve runs inside one Uniswap v4 pool, liquidity locked from launch. Not audited; test networks only.' }, icon('flask-conical', 'icon-xs'), token.graduated ? 'Model 11 test · past the milestone' : 'Model 11 test · Uniswap v4') : token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null,
           (stock => stock ? h('span.tk-tag.tk-tag-stock', { 'data-ok': String(stock.usable), title: stock.reason ?? 'Stock price is fresh; the curve can graduate.' }, icon('chart-candlestick', 'icon-xs'), `${q} · ${STOCK_LABELS[stock.status] ?? stock.status}`) : null)(testStockStatus(token.stock)),
           kothTag(ctx, token),
@@ -260,7 +261,7 @@ function marketActivity(ctx,token,q,{addressUrl,isCreator,me,info,onCounts,onHol
       if(selected==='trades'){onTrades?.(fetched);
         const all=filterTrades(filterByWho(fetched,who,{creator:token.creator,me}),side),rows=all.slice(0,shown);
         total.textContent=`${all.length} of ${fetched.length}${fetched.length>=100?'+':''} recent trades`;
-        const table=h('table.market-table.tk-table',h('thead',h('tr',...['Time','Type',token.symbol,'Amount','Trader','Price'].map((l,i)=>h('th',{scope:'col',class:i===0||i===1||i===4?'':'num'},l)))),h('tbody',rows.map(row=>h('tr',{class:`tk-row tk-row-${row.side==='buy'?'buy':'sell'}`},
+        const table=h('table.market-table.tk-table',h('thead',h('tr',...['Time','Type','$'+token.symbol,'Amount','Trader','Price'].map((l,i)=>h('th',{scope:'col',class:i===0||i===1||i===4?'':'num'},l)))),h('tbody',rows.map(row=>h('tr',{class:`tk-row tk-row-${row.side==='buy'?'buy':'sell'}`},
             h('td.tk-time',txLink(row)?h('a',{href:txLink(row),target:'_blank',rel:'noopener noreferrer',title:new Date(row.timestamp*1000).toLocaleString()},ago(row.timestamp)+' ago'):ago(row.timestamp)+' ago'),
             h('td',h(`span.tk-badge.tk-${row.side==='buy'?'buy':'sell'}`,row.side==='buy'?'Buy':'Sell')),
             h('td.num',compact(row.tokenAmount)),h('td.num',amountCell(row)),h('td',trader(row.account)),h('td.num',priceCell(row))))));
@@ -381,12 +382,12 @@ export function tradePanel(ctx, token, { dex, solana }) {
     quoteReady = false; updateSubmit(); useRemaining.hidden = true; remainingHint.hidden = side !== 'buy' || routed();
     tabs.querySelectorAll('button').forEach(b => { b.setAttribute('aria-selected', String(b.dataset.side === side)); b.tabIndex = b.dataset.side === side ? 0 : -1; });
     form?.querySelector('label[for=trade-amount]')?.replaceChildren('You pay');
-    unit.replaceChildren(side==='buy'?picker():chip(token.symbol,true));receiveUnit.replaceChildren(side==='buy'?chip(token.symbol,true):picker());routeLabel.textContent=side==='buy'?`${currency()} → ${token.symbol}`:`${token.symbol} → ${currency()}`;
-    submit.textContent = `${side === 'buy' ? 'Buy' : 'Sell'} ${token.symbol}`;
+    unit.replaceChildren(side==='buy'?picker():chip('$'+token.symbol,true));receiveUnit.replaceChildren(side==='buy'?chip('$'+token.symbol,true):picker());routeLabel.textContent=side==='buy'?`${currency()} → $${token.symbol}`:`$${token.symbol} → ${currency()}`;
+    submit.textContent = `${side === 'buy' ? 'Buy' : 'Sell'} $${token.symbol}`;
     submit.className = `btn btn-block btn-lg ${side === 'buy' ? 'btn-buy' : 'btn-sell'}`;
     amount.value = ''; out.textContent = '0.00'; fee.textContent = '—'; minOut.textContent = '—'; feeNote.textContent = ''; error.textContent = '';
     const qb=routed()?`${number(ctx.state.nativeBalance??0,6)} ${native}`:quoteBalance();
-    balance.textContent = side === 'buy' ? (qb ? `Available: ${qb}` : '') : `Available: ${number(token.balance, 4)} ${token.symbol}`;
+    balance.textContent = side === 'buy' ? (qb ? `Available: ${qb}` : '') : `Available: ${number(token.balance, 4)} $${token.symbol}`;
     // 25/50/75/Max of the spendable balance. Buys keep a small native reserve for network fees.
     const decimals = side === 'buy' ? (routed() || token.pair === 'native' ? (solana ? 9 : 18) : (token.quoteDecimals ?? 18)) : (token.decimals ?? 18);
     const available = side === 'buy' ? (routed() || token.pair === 'native' ? ctx.state.nativeBalance : Object.entries(ctx.state.pairBalances ?? {}).find(([k]) => k.toLowerCase() === String(token.quoteAddress).toLowerCase() || k === token.config)?.[1] ?? null) : token.balance;
@@ -437,7 +438,7 @@ export function tradePanel(ctx, token, { dex, solana }) {
         nativeQuote=routed()?result:null; quoteReady = true; updateSubmit();
         out.textContent = compactTradeAmount(routed()?result.output:result.out);out.title=String(routed()?result.output:result.out);
         fee.textContent=routed()?'Included in route':`${compactTradeAmount(result.fee)} ${result.feeSymbol??q}`;
-        minOut.textContent = `${compactTradeAmount(Number(routed()?result.output:result.out) * (1 - (routed()?1:Number(slippage.value)) / 100))} ${side === 'buy' ? token.symbol : currency()}`;
+        minOut.textContent = `${compactTradeAmount(Number(routed()?result.output:result.out) * (1 - (routed()?1:Number(slippage.value)) / 100))} ${side === 'buy' ? '$' + token.symbol : currency()}`;
         feeNote.textContent = routed() ? (solana ? `One transaction: SOL converts through ${result.via ?? 'the conversion pool'}, then trades. Each hop keeps a 1% margin; any unused ${q} stays in your wallet.` : (result.execution==='v4'?`${native} converts through the conversion pool, then trades on the Uniswap v4 pool. Each hop keeps a 1% margin. One confirmation if your wallet batches calls, otherwise separate steps; any extra ${q} stays in your wallet.`:'Native routes protect each hop with 1% slippage. Any unused pair asset stays in your wallet. Requires funded conversion liquidity and a verified native router or atomic-capable wallet.')) : result.antiSnipeActive ? `Launch protection is active: the fee is ${number(result.feeBps / 100, 2)}% right now and falls to this token's ${number((token.feeBps ?? 125) / 100, 2)}% by the end of the first minute. The amount above ${number((token.feeBps ?? 125) / 100, 2)}% is added to the token's locked liquidity.` : result.completesCurve ? `This purchase completes the curve. Only ${number(result.spend, 4)} ${q} will be charged.` : '';
       } catch (e) {
         if (rev !== revision) return; out.textContent = '—'; fee.textContent = '—'; minOut.textContent = '—'; error.textContent = errorText(e);
