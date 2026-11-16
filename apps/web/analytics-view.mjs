@@ -3,7 +3,7 @@ import {rewardsSection} from './v2-rewards-view.mjs';
 import {analyticsHeadline} from './analytics-headline.mjs';
 import {feesSection} from './fee-analytics-view.mjs';
 
-export function renderAnalytics({api}){
+export function renderAnalytics({api,mainnetSite=false}){
   let period='7d',network='all',metric='volumeUsd',revision=0,data=null,flywheel=null;
   const root=h('div.analytics-page'), body=h('div.analytics-body'), status=h('p.small.muted',{'role':'status'});
   const periods=h('div.analytics-filters',{'aria-label':'Analytics period'},['24h','7d','30d','all'].map(p=>h('button.btn.btn-secondary.btn-sm',{type:'button','aria-pressed':String(p===period),on:{click:()=>{period=p;for(const b of periods.children)b.setAttribute('aria-pressed',b.dataset.period===p);load();}},'data-period':p},p==='all'?'All time':p)));
@@ -38,7 +38,7 @@ export function renderAnalytics({api}){
       h('section.panel',h('h2','Top tokens'),h('p.small.muted','Ranked by reference USD volume, then trade count.'),table(['Token','Chain','Volume','Trades'],data.topTokens.filter(r=>r.trades).map(r=>h('tr',h('td',tokenCell(r)),h('td',r.chain),h('td',r.priced?usd(r.volumeUsd):'USD unavailable'),h('td',number(r.trades)))))) ,
       h('section.panel',h('h2','Reserves & unclaimed fees'),h('p.small.muted','Current indexed balances across all time. Fees below are outstanding claims, not cumulative revenue. Uncollected DEX position fees are excluded.'),table(['Chain / asset','Trading reserve','Creator fees','Protocol fees'],data.assets.map(a=>h('tr',h('td',`${a.chain} · ${a.symbol}`),...['reserve','creatorFees','protocolFees'].map(k=>h('td',`${number(a[k],8)} ${a.symbol}`)))))) ,
       flywheelSection(),
-      h('section.analytics-notes',h('h3','About these figures'),h('p.small.muted',data.basis),h('p.small.muted',`${t.unpricedTrades} trades have no verified USD reference. Testnet tokens have no monetary value. Local simulations are excluded. Chains without configured indexers are shown above and excluded from totals.`)));
+      h('section.analytics-notes',h('h3','About these figures'),h('p.small.muted',data.basis),h('p.small.muted',`${t.unpricedTrades} trades have no verified USD reference.${mainnetSite ? '' : ' Testnet tokens have no monetary value.'} Local simulations are excluded. Chains without configured indexers are shown above and excluded from totals.`)));
   }
   /** Revenue flywheel (docs/REVENUE_FLYWHEEL.md): the policy, and what the keeper actually bought and burned. */
   function flywheelSection(){

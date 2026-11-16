@@ -164,7 +164,7 @@ export function renderToken(ctx, address) {
       h('p.small.muted',image?'A public logo URL is available. Wallets decide whether to use it.':'No public logo is available yet. Publish the token image before requesting wallet display.'),
       image?h('a.link',{href:image,target:'_blank',rel:'noopener noreferrer'},'Open token image'):null,
       h('p',h('a.link',{href:'/api/wallet-tokenlist.json?network='+encodeURIComponent(ctx.wallet.net.key),target:'_blank',rel:'noopener noreferrer'},'Open this network’s token list')),
-      h('p.small.muted','Phantom may use its own data providers. Publishing here does not guarantee a logo or a verified badge. Testnet indexing can differ from mainnet.'),
+      h('p.small.muted',`Phantom may use its own data providers. Publishing here does not guarantee a logo or a verified badge.${ctx.config?.siteMode === 'mainnet' ? '' : ' Testnet indexing can differ from mainnet.'}`),
       add,!ctx.wallet.address?h('p.hint','Connect an EVM wallet to request adding this token.'):null,status));
   }
   const tech = h('details.tech', h('summary', 'Technical details', icon('chevron-down', 'icon-sm')), h('dl.kv',

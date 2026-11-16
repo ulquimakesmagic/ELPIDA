@@ -43,7 +43,10 @@ async function api(path, body, renewed = false) {
   return result;
 }
 const onWalletProgress = message => (progressHook ? progressHook(message) : toast(message));
-const networks = () => [...config.testnets, config.solana];
+// The networks this site serves: the testnets, or on the mainnet site (siteMode 'mainnet') the ready mainnets. Solana is
+// listed unless the server switched it off (the mainnet site, until Solana itself is on mainnet).
+const networks = () => [...config.testnets, ...(config.solana && !config.solana.disabled ? [config.solana] : [])];
+const mainnetSite = () => config?.siteMode === 'mainnet';
 const networkByKey = key => networks().find(net => net.key === key);
 const currentChain = () => (mode === 'local' ? 'local' : wallet.net.key);
 const txLink = hash => (hash && mode === 'testnet' ? { href: wallet.txUrl(hash), label: 'View transaction' } : undefined);
@@ -313,7 +316,7 @@ function rerender(reason) {
   const r = currentRoute;
   if(r.name==='analytics'){
     view.setAttribute('aria-busy','false');
-    if(!analyticsView||!view.contains(analyticsView.root)){const m=page('analytics');if(!m){view.replaceChildren(loadingView());return;}analyticsView=m.renderAnalytics({api});view.replaceChildren(analyticsView.root);}
+    if(!analyticsView||!view.contains(analyticsView.root)){const m=page('analytics');if(!m){view.replaceChildren(loadingView());return;}analyticsView=m.renderAnalytics({api,mainnetSite:mainnetSite()});view.replaceChildren(analyticsView.root);}
     return;
   }
   analyticsView?.dispose();analyticsView=null;
@@ -462,7 +465,7 @@ async function openTools() {
   const local = mode === 'local';
   if(!local&&wallet.address&&wallet.deployment){try{await wallet.checkFeeAccounting?.();await wallet.checkLaunchFeatures?.();}catch(e){fail(e);}}
   const envSection = h('section.tools-section', h('h4', 'Environment'),
-    h('p.small.muted', 'Local simulation uses simulated balances on a private test chain. Public testnets use your own wallet and free test funds.'),
+    h('p.small.muted', mainnetSite() ? 'Mainnet networks use your own wallet and real funds. The local simulation uses simulated balances on a private test chain.' : 'Local simulation uses simulated balances on a private test chain. Public testnets use your own wallet and free test funds.'),
     h('div.choice-grid', [{ key: 'local', name: 'Local simulation', note: 'Demo accounts, instant test funds', env: 'sim' }, ...networks().map(net => ({ key: net.key, name: net.name, note: net.kind === 'solana' ? 'Phantom, Solflare or Backpack' : 'Browser wallet such as MetaMask', env: 'testnet', mainnet: !!net.mainnet }))].map(item =>
       h('button.choice', { type: 'button', 'data-busy-disable': '', 'aria-pressed': String(currentChain() === item.key), on: { click: async () => { error.textContent = ''; try { if (item.key === 'local') await useLocal(); else await connect(item.key); $('#tools-dialog').close(); toast(`Switched to ${item.key === 'local' ? 'the local simulation' : item.name}.`, { kind: 'success' }); } catch (e) { fail(e); } } } },
         h('span.choice-title', item.name, currentChain() === item.key ? h('span.chip.chip-positive', 'Current') : null), h('p', item.note), h(`span.chip.chip-${item.env}`, item.env === 'sim' ? 'Simulated funds' : item.mainnet ? 'Mainnet beta · real funds' : 'Public testnet')))));
@@ -499,7 +502,11 @@ async function init() {
   const stripLoop=()=>{setTimeout(()=>{if(document.visibilityState==='visible')refreshLastSale();stripLoop();},stripDelay);};
   stripLoop();
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')liveTrades?.resume();else liveTrades?.pause();});
-  if (config.solana?.mainnet) {
+  if (mainnetSite()) {
+    const names = config.testnets.map(n => n.name).join(', ') || 'Mainnet';
+    $('#footer-note').textContent = `${names} mainnet: real funds. The contracts are not independently audited; new launches have a daily cap and a launch stop.`;
+    $('#how-network-note').textContent = `Elpida runs on ${names} mainnet with real funds. The contracts have not been independently audited. Creator rewards are paid from day one; the trader airdrop, holder rewards and flywheel shares build up in their contracts and are not paid out yet.`;
+  } else if (config.solana?.mainnet) {
     $('#footer-note').textContent = 'Solana mainnet beta: real funds, new contracts. Other networks are test networks with no monetary value.';
     $('#how-network-note').textContent = 'Solana runs as a mainnet beta with real funds and new, unaudited contracts; launching is invite-only while the beta gate is on. The other networks are test networks.';
   }
@@ -514,7 +521,7 @@ async function init() {
   wallet = evmWallet;
   let saved = null; try { saved = localStorage.getItem('elpida:network'); } catch {}
   // A visitor who left on Solana gets the Solana library before the first read; everyone else never downloads it.
-  if (saved === config.solana.key) { try { await ensureSolanaWeb3(); wallet = solWallet; } catch { wallet = evmWallet; } } else if (saved && saved !== 'local') { try { evmWallet.select(saved); } catch {} }
+  if (saved === config.solana.key && !config.solana.disabled) { try { await ensureSolanaWeb3(); wallet = solWallet; } catch { wallet = evmWallet; } } else if (saved && saved !== 'local') { try { evmWallet.select(saved); } catch {} }
   // Public markets can be browsed without granting wallet access.
   if(saved!=='local'){mode='testnet';}
   if (location.pathname === '/analytics') history.replaceState({}, '', '/#/analytics');
