@@ -4,14 +4,15 @@ import { testnets } from './networks.mjs';
 const address=/^0x[a-fA-F0-9]{40}$/;
 // A test chain without Chainlink uses its registered ElpidaRelayFeed (networks.mjs `relay`), labelled as relayed.
 const relayed=Object.fromEntries(testnets.filter(n=>n.relay?.feed).map(n=>[n.key,{feed:n.relay.feed,maxAge:n.relay.maxAge,source:`Chainlink ETH / USD relayed from ${n.relay.source.network} (testnet relay)`}]));
-export function usdOracles(env=process.env){
+/** `networks`: extra networks with a `usd` entry from their deployment (mainnets, packages/core/mainnets.mjs). */
+export function usdOracles(env=process.env,networks=[]){
   const defaults={'base-sepolia':{feed:'0x4aDC67696bA383F43DD60A9e78F2C97Fbbfc7cb1',maxAge:1500,usdc:'0x036CbD53842c5426634e7929541eC2318f3dCF7e'},'bnb-testnet':{feed:'0x2514895c72f50D8bd4B4F9b1110F0D6bD2c97526',maxAge:3900},'ethereum-sepolia':{feed:'0x694AA1769357215DE4FAC081bf1f309aDC325306',maxAge:3900,usdc:'0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238'}};
   return Object.fromEntries(['base-sepolia','ethereum-sepolia','bnb-testnet','robinhood-testnet'].map(key=>{
     const prefix='ELPIDA_'+key.replaceAll('-','_').toUpperCase(),d=defaults[key]??relayed[key]??{};
     const feed=env[prefix+'_USD_FEED']??d.feed,usdc=env[prefix+'_USDC']??d.usdc;
     const maxAge=Number(env[prefix+'_USD_MAX_AGE']??d.maxAge??3600);
     return [key,{feed:address.test(feed??'')?feed:null,usdc:address.test(usdc??'')?usdc:null,maxAge:Number.isInteger(maxAge)&&maxAge>0&&maxAge<=86400?maxAge:3600,available:address.test(feed??''),source:d.source??'Chainlink-compatible on-chain feed'}];
-  }));
+  }).concat((networks??[]).filter(n=>n?.mainnet&&n.usd).map(n=>[n.key,{feed:address.test(n.usd.feed??'')?n.usd.feed:null,usdc:address.test(n.usd.usdc??'')?n.usd.usdc:null,maxAge:Number.isInteger(n.usd.maxAge)&&n.usd.maxAge>0&&n.usd.maxAge<=86400?n.usd.maxAge:3600,available:address.test(n.usd.feed??''),source:'Chainlink ETH / USD'}])));
 }
 
 // Solana: the program verifies a Pyth PriceUpdateV2 account on-chain (owner, full verification, feed id,

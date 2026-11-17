@@ -47,7 +47,7 @@ export class PublicIndexer {
       // Model 11 (Uniswap v4 hook) test launchpad: its own index beside the curve launchpads, once pinned in networks.mjs.
       if(net.v4?.shared?.factory&&net.v4.poolManager)this.legacy.get(net.key).push(openV4Entry({net,provider,dataDir}));
       // ELPIDA V2.0 test launchpad (same pool design and router as Model 11), once pinned in networks.mjs (`v2.shared`).
-      if(net.v2?.shared?.factory&&net.v4?.poolManager&&!net.mainnet)this.legacy.get(net.key).push(openV2Entry({net,provider,dataDir}));
+      if(net.v2?.shared?.factory&&net.v4?.poolManager)this.legacy.get(net.key).push(openV2Entry({net,provider,dataDir}));
     }
   }
   /** The current deployment first, then any legacy deployments on the same network. */
