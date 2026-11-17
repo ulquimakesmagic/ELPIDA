@@ -58,6 +58,7 @@ import { solanaDevnet, solanaLocalnet, solanaMainnet } from '../../packages/core
 // The EVM networks this server runs: the public testnets, or on the mainnet site (ELPIDA_MODE=mainnet) the mainnets
 // whose V2 deployment record is ready (apps/api/evm-networks.mjs).
 import { evm, evmNetworks } from './evm-networks.mjs';
+import { siteHtml, seoText } from './site-copy.mjs';
 import { isDexModel } from '../../packages/core/curve-model.mjs';
 import { V2RewardsService } from './v2-rewards-service.mjs';
 import { configuredV2Keeper } from './v2-keeper.mjs';
@@ -646,7 +647,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if (vendorFiles.has(url.pathname)) { const out = staticAssets.serve(url.pathname, url.searchParams.get('v')); return sendCompressed(req, res, { 'Content-Type': 'text/javascript; charset=utf-8', 'Cache-Control': out.immutable ? IMMUTABLE : 'no-cache' }, out.body); }
         const seoOrigin = canonicalOrigin(), seoPage = PAGES.find(p => p.path === url.pathname);
         const seoBody = url.pathname === '/robots.txt' ? [renderRobots(seoOrigin), 'text/plain'] : url.pathname === '/sitemap.xml' ? [renderSitemap(seoOrigin), 'application/xml'] : url.pathname === '/llms.txt' ? [renderLlms(seoOrigin), 'text/plain'] : seoPage ? [renderPage(seoPage, seoOrigin), 'text/html'] : null;
-        if (seoBody) { res.setHeader('Cache-Control', 'public, max-age=3600'); res.writeHead(200, { 'Content-Type': `${seoBody[1]}; charset=utf-8` }); return res.end(seoBody[0]); }
+        if (seoBody) { res.setHeader('Cache-Control', 'public, max-age=3600'); res.writeHead(200, { 'Content-Type': `${seoBody[1]}; charset=utf-8` }); return res.end(seoText(seoBody[0], { mode: evm.mode, names: evmNetworks.map(n => n.name) })); }
         const tokenRoute = url.pathname.match(TOKEN_PATH);
         if (tokenRoute) {
           const [, key, addr] = tokenRoute, nets = new Map([['local', 'Local simulation'], ...evmNetworks.map(n => [n.key, n.name]), ...[solanaDevnet, solanaLocalnet, solanaMainnet].map(n => [n.key, n.name])]);
@@ -673,7 +674,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           // App code changes with every deploy: unversioned URLs are revalidated, versioned ones (?v=<build>, which
           // index.html and every import use) are immutable because a deploy changes the build id.
           if (resource[1] === 'text/html') {
-            const page = staticAssets.html(await readFile(resolve(webRoot, resource[0]), 'utf8'));
+            const page = siteHtml(staticAssets.html(await readFile(resolve(webRoot, resource[0]), 'utf8')), { mode: evm.mode, names: evmNetworks.map(n => n.name) });
             return sendCompressed(req, res, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-cache' }, url.pathname === '/' ? homePage(page) : page);
           }
           const out = staticAssets.serve(url.pathname, url.searchParams.get('v'));

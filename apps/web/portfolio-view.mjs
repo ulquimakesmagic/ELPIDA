@@ -167,7 +167,7 @@ export function portfolioView(ctx, { connect, rerender }) {
   }));
 
   const netName = key => ctx.networkByKey?.(key)?.name ?? key;
-  const where = mode === 'local' ? ctx.envLabel() : !signedIn ? 'Not connected' : crossChain ? `${short(author)} · every EVM testnet` : `${short(author)} · ${ctx.envLabel()}`;
+  const where = mode === 'local' ? ctx.envLabel() : !signedIn ? 'Not connected' : crossChain ? `${short(author)} · every EVM ${ctx.config?.siteMode === 'mainnet' ? 'network' : 'testnet'}` : `${short(author)} · ${ctx.envLabel()}`;
   const tabHref = (key, net) => `#/portfolio?tab=${key}${net && net !== 'all' ? `&net=${encodeURIComponent(net)}` : ''}`;
   const chips = nets.length > 1 ? h('div.pf-nets', { role: 'group', 'aria-label': 'Filter by network' },
     h('a.pf-net', { href: tabHref(tab, 'all'), 'aria-current': chosenNet === 'all' ? 'true' : null }, 'All networks', h('span.tk-count', String(nets.reduce((n, x) => n + x.count, 0)))),
@@ -175,7 +175,7 @@ export function portfolioView(ctx, { connect, rerender }) {
   const balancesStatus = crossChain && balancesHit ? balancesHit.value.networks ?? [] : [];
   const behind = balancesStatus.filter(n => !n.fresh).map(n => netName(n.network));
   const scope = mode !== 'testnet' ? null : crossChain
-    ? (balancesHit ? `Indexed balances on ${balancesStatus.length} EVM testnets${behind.length ? `; ${behind.join(', ')} ${behind.length === 1 ? 'is' : 'are'} catching up` : ''}. ${ctx.wallet.net.name} reads your wallet directly. Solana holdings show when a Solana wallet is connected.` : `Loading balances on every EVM testnet. Showing ${ctx.wallet.net.name} meanwhile.`)
+    ? (balancesHit ? `Indexed balances on ${balancesStatus.length} EVM ${ctx.config?.siteMode === 'mainnet' ? 'network' : 'testnet'}${balancesStatus.length === 1 ? '' : 's'}${behind.length ? `; ${behind.join(', ')} ${behind.length === 1 ? 'is' : 'are'} catching up` : ''}. ${ctx.wallet.net.name} reads your wallet directly. Solana holdings show when a Solana wallet is connected.` : `Loading balances on every EVM ${ctx.config?.siteMode === 'mainnet' ? 'network' : 'testnet'}. Showing ${ctx.wallet.net.name} meanwhile.`)
     : `Showing ${ctx.wallet.net.name}. Switch the network to see tokens on other chains.`;
   return h('div.pf.pf-v2',
     h('header.pf-top',

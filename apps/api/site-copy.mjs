@@ -1,0 +1,47 @@
+// The page wording that says which networks Elpida runs on (17 November 2026). index.html is written for the testnet
+// site; the mainnet site (ELPIDA_MODE=mainnet) serves the same file with these sentences replaced before any script
+// runs, so search engines, link previews and visitors without JavaScript never read "testnet" on the mainnet site.
+// app.mjs sets the same notes again once the page loads.
+
+/** index.html with the network wording for `mode`. `names`: the mainnet chain names, for example ['Base']. */
+export function siteHtml(html, { mode, names = [] } = {}) {
+  if (mode !== 'mainnet') return html;
+  const where = names.length ? names.join(', ') : 'mainnet';
+  const swaps = [
+    ['Elpida runs on a local simulation and public testnets.', `Elpida is live on ${where} mainnet.`],
+    ['Live on public testnets.', `Live on ${where} mainnet.`],
+    ['Currently running on public testnets.', `Live on ${where} mainnet with real funds; the contracts are not independently audited.`],
+    ['Elpida currently runs on a local simulation and public testnets only. No mainnet launch is available.', `Elpida runs on ${where} mainnet with real funds. The contracts have not been independently audited.`],
+    ['Prototype on test networks. Test tokens have no monetary value.', `${where} mainnet: real funds. The contracts are not independently audited.`],
+    // Mainnet launches are V2 only: liquidity sits in a Uniswap v4 pool from launch and graduates in that same pool.
+    ['When the curve sells out, its trading reserve and the remaining tokens open a DEX pool at the final curve price: Uniswap v3 on Base Sepolia and the local DEX simulation. Other EVM testnets use a locked test pool. Existing Solana tokens use PumpSwap. That liquidity is locked permanently.',
+      'Every token trades in its own Uniswap v4 pool from the first block. At five times its starting market cap it graduates in that same pool: what the sale raised becomes permanent liquidity that nobody can withdraw.'],
+  ];
+  return swaps.reduce((page, [from, to]) => page.split(from).join(to), html);
+}
+
+/**
+ * The /learn guides, the FAQ (page and JSON-LD) and llms.txt with the network wording for `mode`. Exact sentence swaps,
+ * kept free of quotes and apostrophes so the HTML-escaped and JSON copies match alike.
+ */
+export function seoText(text, { mode, names = [] } = {}) {
+  if (mode !== 'mainnet') return text;
+  const where = names.length ? names.join(', ') : 'mainnet';
+  const swaps = [
+    ['Elpida currently runs on public testnets: Base Sepolia, Ethereum Sepolia, BNB Chain Testnet, Robinhood Chain Testnet and Solana Devnet. Mainnet is not open to the public.', `Elpida runs on ${where} mainnet. More chains follow as each gets its own deployment and checks.`],
+    ['No. Elpida is in testnet. Its contracts have not had an independent audit. Do not treat any testnet token as having value, and do not send funds you cannot afford to lose to any contract that has not been audited.', `Yes, on ${where} mainnet. Its contracts have not had an independent audit, so do not send funds you cannot afford to lose. New launches have a daily cap and a launch stop.`],
+    [' On testnets the amounts use test funds.', ''],
+    [' On testnets the sizes are scaled down with the same shape.', ''],
+    ['Only as test assets on testnets.', 'Not yet: tokenized stocks are switched off for the first mainnet release.'],
+    ['Elpida currently runs on public testnets.', `Elpida runs on ${where} mainnet.`],
+    ['Elpida currently runs on testnets.', `Elpida runs on ${where} mainnet.`],
+    ['Launch a token on testnet', 'Launch a token'],
+    ['Elpida runs on a local simulation and public testnets, its contracts are not audited, and nothing here is financial advice.', `Elpida runs on ${where} mainnet with real funds, its contracts are not independently audited, and nothing here is financial advice.`],
+    ['Choose where the token lives (Base Sepolia, Ethereum Sepolia, BNB Chain Testnet, Robinhood Chain Testnet and Solana Devnet)', `Choose where the token lives (${where})`],
+    ['Elpida runs on Base Sepolia, Ethereum Sepolia, BNB Chain Testnet, Robinhood Chain Testnet and Solana Devnet.', `Elpida runs on ${where} mainnet.`],
+    ['Elpida is in testnet and its contracts have not had an independent audit.', 'Elpida runs with real funds and its contracts have not had an independent audit.'],
+    ['Currently running on public testnets.', `Live on ${where} mainnet.`],
+    ['It is in testnet; its contracts are not audited', 'It runs with real funds; its contracts are not independently audited'],
+  ];
+  return swaps.reduce((out, [from, to]) => out.split(from).join(to), text);
+}
