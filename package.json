@@ -45,9 +45,7 @@
     "test:v2": "node --test tests/v2-economics.test.mjs tests/v2-airdrop.test.mjs tests/v2-hook.test.mjs tests/v2-vaults.test.mjs tests/v2-rewards-indexer.test.mjs tests/v2-indexer.test.mjs tests/v2-browser.test.mjs tests/v2-keeper.test.mjs tests/v2-creator-rewards.test.mjs tests/v2-payout-stables.test.mjs tests/v2-rewards-view.test.mjs tests/v2-stock-feeds.test.mjs tests/v2-usdc-rewards.test.mjs tests/v2-audit-fixes.test.mjs"
   },
   "overrides": {
-    "solc": {
-      "tmp": "0.2.7"
-    },
+    "tmp": "0.2.7",
     "jayson": {
       "uuid": "11.1.1",
       "stream-json": "3.7.0"
@@ -68,7 +66,7 @@
     "ethers": "6.17.0",
     "hardhat": "3.19.0",
     "lightweight-charts": "5.2.1",
-    "sharp": "0.34.5",
+    "sharp": "0.35.5",
     "solc": "0.8.24",
     "solc-0.8.26": "npm:solc@0.8.26"
   }
