@@ -1,18 +1,39 @@
-import { randomBytes } from 'node:crypto';
+import { randomBytes, createPublicKey, verify as verifyEd25519 } from 'node:crypto';
 import { verifyMessage } from 'ethers';
+import { PublicKey } from '@solana/web3.js';
 
 // Operator sign-in for the read-only admin panel. The operator signs a one-time message with an allowed wallet: the
 // treasury of a configured factory, or an address in ELPIDA_ADMIN_ADDRESSES (the owners of a Safe treasury, which
-// cannot sign messages itself). No passwords are stored. Sessions live in memory, so a redeploy signs everyone out.
+// cannot sign messages itself, or a Solana wallet, which signs with ed25519). No passwords are stored. Sessions live in memory, so a redeploy signs everyone out.
 
 const CHALLENGE_TTL = 5 * 60 * 1000;
 const SESSION_TTL = 8 * 60 * 60 * 1000;
 const MAX_CHALLENGES = 200;
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+const SOLANA = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 
-/** Parse ELPIDA_ADMIN_ADDRESSES (comma or space separated) into lower-case addresses; anything else is ignored. */
+/** A valid Solana wallet (base58 of a 32-byte key), as written: Solana addresses are case-sensitive. */
+function solanaAddress(value) {
+  if (!SOLANA.test(String(value ?? ''))) return null;
+  try { return new PublicKey(value).toBase58() === value ? value : null; } catch { return null; }
+}
+
+/**
+ * Parse ELPIDA_ADMIN_ADDRESSES (comma or space separated): EVM addresses in lower case and Solana wallets as written
+ * (Malik, 18 Nov: a Solana admin). Anything else is ignored.
+ */
 export function parseAdminAddresses(value) {
-  return [...new Set(String(value ?? '').split(/[\s,]+/).filter(a => ADDRESS.test(a)).map(a => a.toLowerCase()))];
+  return [...new Set(String(value ?? '').split(/[\s,]+/).map(a => ADDRESS.test(a) ? a.toLowerCase() : solanaAddress(a)).filter(Boolean))];
+}
+
+/** Whether `signature` (base64, 64 bytes) is `wallet`'s ed25519 signature of the UTF-8 `message`. */
+function solanaSigned(message, signature, wallet) {
+  try {
+    const sig = Buffer.from(String(signature ?? ''), 'base64');
+    if (sig.length !== 64) return false;
+    const key = createPublicKey({ key: Buffer.concat([Buffer.from('302a300506032b6570032100', 'hex'), Buffer.from(new PublicKey(wallet).toBytes())]), format: 'der', type: 'spki' });
+    return verifyEd25519(null, Buffer.from(message, 'utf8'), key, sig);
+  } catch { return false; }
 }
 
 export class AdminAuth {
@@ -40,10 +61,16 @@ export class AdminAuth {
     const c = this.challenges.get(String(nonce ?? ''));
     this.challenges.delete(String(nonce ?? ''));
     if (!c || c.expires < this.now()) throw Object.assign(new Error('This sign-in request expired. Try again.'), { status: 400 });
-    if (!ADDRESS.test(String(address ?? ''))) throw Object.assign(new Error('Invalid wallet address.'), { status: 400 });
     let signer;
-    try { signer = verifyMessage(c.message, String(signature ?? '')).toLowerCase(); } catch { throw Object.assign(new Error('The signature could not be read.'), { status: 400 }); }
-    if (signer !== String(address).toLowerCase()) throw Object.assign(new Error('The signature does not match this wallet.'), { status: 401 });
+    const solana = solanaAddress(address);
+    if (solana) {
+      if (!solanaSigned(c.message, signature, solana)) throw Object.assign(new Error('The signature does not match this wallet.'), { status: 401 });
+      signer = solana;
+    } else {
+      if (!ADDRESS.test(String(address ?? ''))) throw Object.assign(new Error('Invalid wallet address.'), { status: 400 });
+      try { signer = verifyMessage(c.message, String(signature ?? '')).toLowerCase(); } catch { throw Object.assign(new Error('The signature could not be read.'), { status: 400 }); }
+      if (signer !== String(address).toLowerCase()) throw Object.assign(new Error('The signature does not match this wallet.'), { status: 401 });
+    }
     let ok = false;
     try { ok = await isAllowed(signer); } catch { ok = false; }
     if (!ok) throw Object.assign(new Error('This wallet is not an Elpida operator. Use a factory treasury or an address in ELPIDA_ADMIN_ADDRESSES.'), { status: 403 });

@@ -569,7 +569,8 @@ volume, indexers, the price relay, graduation and backups. It cannot send transa
   read from the contract, so on testnets your treasury wallet works with no setup.
 - **Optional:** to let in other wallets, add the Railway variable `ELPIDA_ADMIN_ADDRESSES` (comma-separated
   addresses). This is needed on mainnet: the treasury there is a Safe, which cannot sign a message, so list the
-  owners' own wallets. Addresses are public; this variable holds no secret.
+  owners' own wallets. Addresses are public; this variable holds no secret. Solana wallets can be listed too (as
+  written, case matters); they sign in with "Sign in with a Solana wallet" (Phantom, Solflare or Backpack).
 - Sessions last eight hours and end on every redeploy.
 - The page lives at `#/monkey`, not `#/admin`, so it is not the first thing a scanner finds. That only hides the
   door: the lock is the wallet signature, checked by the server on every request. `#/admin` shows "Page not found".
