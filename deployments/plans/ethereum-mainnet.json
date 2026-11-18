@@ -5,10 +5,10 @@
   "nativeSymbol": "ETH",
   "startMcapUsd": 20000,
   "minFeeBps": 100,
-  "dailyLaunchCap": 500,
-  "treasury": null,
-  "keeper": null,
-  "guardian": null,
+  "dailyLaunchCap": 1000,
+  "treasury": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01",
+  "keeper": "0x10299c3Cff25C3e775e91463c5D9c8670483d39F",
+  "guardian": "0xfC08505EfEf934c3fF19d82D189f60f28a0255eB",
   "minSafeThreshold": 2,
   "poolManager": "0x000000000004444c5dc75cB358380D2e3dE08A90",
   "usdFeed": "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419",
@@ -17,6 +17,6 @@
   "usdcDecimals": 6,
   "confirmations": 2,
   "minDeployerBalance": "0.015",
-  "notes": "Fill treasury (a NEW Safe on Ethereum with the clean signers), keeper and guardian. PoolManager: Uniswap's v4 deployment on Ethereum (developers.uniswap.org v4 deployments). usdFeed: Chainlink ETH / USD (1 h heartbeat, so feedMaxAge 3 h); `check` confirms its description and freshness and that USDC has 6 decimals. Gas: the deploy is about 12.5M gas, so deploy on a low-gas day; minDeployerBalance 0.015 ETH covers up to about 1 gwei. explorerApi: Blockscout, only to find an existing stock holder to impersonate on a fork (`rehearse --fork <rpc> --stocks config/stocks/candidates/ethereum-ondo.json`).",
+  "notes": "treasury: the Elpida Treasury Safe (same address, owners and 2-of-3 threshold as on Base; add this network to it in the Safe app before `check`); keeper and guardian: the same wallets as Base (18 Nov 2026). dailyLaunchCap 1000 and minFeeBps 100 follow Malik's Base decision. PoolManager: Uniswap's v4 deployment on Ethereum (developers.uniswap.org v4 deployments). usdFeed: Chainlink ETH / USD (1 h heartbeat, so feedMaxAge 3 h); `check` confirms its description and freshness and that USDC has 6 decimals. Gas: the deploy is about 12.5M gas, so deploy on a low-gas day; minDeployerBalance 0.015 ETH covers up to about 1 gwei. explorerApi: Blockscout, only to find an existing stock holder to impersonate on a fork (`rehearse --fork <rpc> --stocks config/stocks/candidates/ethereum-ondo.json`).",
   "explorerApi": "https://eth.blockscout.com"
 }

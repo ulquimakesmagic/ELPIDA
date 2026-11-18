@@ -24,6 +24,7 @@ prices, analytics and token pages work from the record alone. No Model 10 or Mod
 |---|---|
 | `ELPIDA_MODE=mainnet` | Serve mainnets only |
 | `ELPIDA_RPC_8453` | Private Base RPC (Alchemy). The server's indexer, prices and keeper use it; browsers use `https://mainnet.base.org` |
+| `ELPIDA_RPC_56`, `ELPIDA_RPC_4663`, `ELPIDA_RPC_1` | The same for BNB Chain, Robinhood Chain and Ethereum, once each has a ready record (Alchemy covers all three: `bnb-mainnet`, `robinhood-mainnet`, `eth-mainnet`). Browsers use the public RPC in `packages/core/mainnets.mjs` |
 | `ELPIDA_V2_KEEPER_KEY` | The keeper wallet named in the plan: collects fees and pays creator rewards. Fund it with about 0.002 ETH on Base |
 | `ELPIDA_PUBLIC_URL`, `PINATA_JWT`, a volume, `ELPIDA_BACKUP_*` | As for any mainnet (`PRODUCTION_GUARD.md`) |
 

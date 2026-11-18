@@ -51,10 +51,12 @@ test('the server runs the testnets unless ELPIDA_MODE=mainnet, and then only rea
   assert.deepEqual(none.networks, []); assert.match(none.skipped[0].reason, /no mainnet deployment record/);
   writeFileSync(join(root, 'deployments', 'base-mainnet.json'), JSON.stringify(record));
   const ready = loadEvmNetworks({ env: { ELPIDA_MODE: 'mainnet' }, root });
-  assert.deepEqual(ready.networks.map(n => n.key), ['base-mainnet']); assert.deepEqual(ready.skipped, []);
+  assert.deepEqual(ready.networks.map(n => n.key), ['base-mainnet']);
+  assert.deepEqual(ready.skipped.map(s => s.key), ['bnb-mainnet', 'robinhood-mainnet', 'ethereum-mainnet'], 'the other mainnets wait for their own records');
+  assert.ok(ready.skipped.every(s => /no mainnet deployment record yet/.test(s.reason)));
   assert.ok(ready.networks.every(n => n.mainnet), 'no testnet on the mainnet site');
   writeFileSync(join(root, 'deployments', 'base-mainnet.json'), '{ not json');
-  assert.match(loadEvmNetworks({ env: { ELPIDA_MODE: 'mainnet' }, root }).skipped[0].reason, /could not be read/);
+  assert.match(loadEvmNetworks({ env: { ELPIDA_MODE: 'mainnet' }, root }).skipped.find(s => s.key === 'base-mainnet').reason, /could not be read/);
 });
 
 const evm = () => ({ mode: 'mainnet', networks: [mainnetNetwork(base, record, plan).net], skipped: [] });
@@ -123,4 +125,21 @@ test('mainnet prices come from the plan\'s Chainlink feed through the private RP
   await keeper.readOracle(net);
   assert.equal(urls[0], 'https://private.example/rpc');
   assert.equal(keeper.chainValues['base-mainnet'].usd, 1811);
+});
+
+test('BNB Chain, Robinhood Chain and Ethereum: each plan names its chain, its own dollar and price feed', () => {
+  const read = k => JSON.parse(readFileSync(new URL(`../deployments/plans/${k}.json`, import.meta.url), 'utf8'));
+  const want = { 'bnb-mainnet': [56, 'BNB', 'USDC', 18], 'robinhood-mainnet': [4663, 'ETH', 'USDG', 6], 'ethereum-mainnet': [1, 'ETH', 'USDC', 6] };
+  for (const [key, [chainId, native, dollar, decimals]] of Object.entries(want)) {
+    const template = EVM_MAINNETS.find(n => n.key === key), p = { ...read(key), keeper: keeper.address };
+    assert.equal(template.chainId, chainId); assert.equal(template.nativeCurrency.symbol, native); assert.equal(p.chainId, chainId);
+    const { net } = mainnetNetwork(template, { ...record, network: key, chainId }, p);
+    assert.equal(net.key, key);
+    assert.deepEqual(net.payoutStable, { address: p.usdc, symbol: dollar, decimals, test: false }, `${key} pays in ${dollar} with ${decimals} decimals`);
+    assert.equal(usdOracles({}, [net])[key].source, `Chainlink ${native} / USD`);
+    assert.equal(serverRpcUrl(net, { [`ELPIDA_RPC_${chainId}`]: 'https://p.example' }), 'https://p.example');
+    for (const role of ['treasury', 'keeper', 'guardian']) assert.match(String(p[role]), /^0x[0-9a-fA-F]{40}$/, `${key} ${role}`);
+  }
+  assert.equal(read('robinhood-mainnet').poolManager, '0x8366a39CC670B4001A1121B8F6A443A643e40951', 'Uniswap v4 on Robinhood Chain');
+  assert.equal(read('robinhood-mainnet').usdc, '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168', 'USDG on Robinhood Chain');
 });
