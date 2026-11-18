@@ -36,3 +36,14 @@ test('underlying-feed candidates (BNB 13, Ethereum 2): valid, no duplicates, mat
     }
   }
 });
+
+test('Robinhood Chain Ondo tokens (18 Nov): 15 valid addresses, no duplicates, and no price feed, so the stock list builder cannot use them', () => {
+  const list = read('config/stocks/candidates/robinhood-ondo-unpriced.json'), seen = new Set();
+  assert.equal(list.length, 15);
+  for (const s of list) {
+    assert.match(s.symbol, /^[A-Z]{2,6}on$/); getAddress(s.address.toLowerCase());
+    assert.equal(s.feed, undefined, `${s.symbol} has no price source on Robinhood Chain yet`);
+    assert.equal(s.underlyingFeed, undefined);
+    for (const k of [s.symbol, s.address.toLowerCase()]) { assert.ok(!seen.has(k), `duplicate ${k}`); seen.add(k); }
+  }
+});

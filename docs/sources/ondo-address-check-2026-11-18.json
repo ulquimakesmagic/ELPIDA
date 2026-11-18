@@ -1,0 +1,42 @@
+{
+  "date": "2026-11-18",
+  "source": "Ondo's GM token list linked from docs.ondo.finance/addresses (EXTERNAL Ondo GM Tokens CSV, 484 tokens), read in the browser",
+  "ethereum": {
+    "checked": [
+      "TSLAon",
+      "SPYon",
+      "QQQon",
+      "IAUon",
+      "STRCon",
+      "SGOVon",
+      "BILon",
+      "USFRon",
+      "GOOGLon",
+      "NVDAon"
+    ],
+    "result": "all 10 candidate addresses match Ondo's list"
+  },
+  "bnb": {
+    "checked": [
+      "COINon",
+      "NVDAon",
+      "TSLAon",
+      "PFEon",
+      "GMEon",
+      "JPMon",
+      "GOOGLon",
+      "AMZNon",
+      "AAPLon",
+      "MSFTon",
+      "METAon",
+      "NFLXon",
+      "MRNAon"
+    ],
+    "result": "all 13 candidate addresses match Ondo's list"
+  },
+  "robinhood": {
+    "tokens": 15,
+    "onchain": "Read on rpc.mainnet.chain.robinhood.com: every address is a GMToken proxy (implementation 0xf74a964355485aE20457601b554754311c14233F) with the listed symbol, 18 decimals and compliance contract 0x57df1e146c08f88e2f1df1b4df03f0dd45181327. Supplies are small (largest GMEon about 1,830; BMNRon, FXIon and CPERon 0).",
+    "pricing": "No Chainlink feed for any Ondo token on Robinhood Chain (118 EACAggregatorProxy contracts listed on Blockscout, read by description(): Robinhood's own stock tokens, crypto and a few others; none named for Ondo). No Ondo SyntheticSharesOracle found on Robinhood Chain, so ElpidaOndoStockFeed cannot be used there. The 'Robinhood AAPL / USD' style feeds price Robinhood's own tokens, not Ondo's."
+  }
+}

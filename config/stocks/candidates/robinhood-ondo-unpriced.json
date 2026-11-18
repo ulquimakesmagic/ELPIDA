@@ -1,0 +1,107 @@
+[
+  {
+    "symbol": "AAPLon",
+    "ticker": "AAPL",
+    "address": "0x9bf86418caf2b7a939603d6c24219a77bf7f9b33",
+    "type": "Stock",
+    "supplyRead": 73.73
+  },
+  {
+    "symbol": "BMNRon",
+    "ticker": "BMNR",
+    "address": "0x900f8970d2fae8060d06bb29234f629c837c3383",
+    "type": "Stock",
+    "supplyRead": 0.0
+  },
+  {
+    "symbol": "CRCLon",
+    "ticker": "CRCL",
+    "address": "0x369c4748e98c153e9b7adebc3e71e9e2a5f60dc0",
+    "type": "Stock",
+    "supplyRead": 307.0
+  },
+  {
+    "symbol": "FXIon",
+    "ticker": "FXI",
+    "address": "0x75113389169b154ddac67ca7efa542680d75f072",
+    "type": "ETF",
+    "supplyRead": 0.0
+  },
+  {
+    "symbol": "GMEon",
+    "ticker": "GME",
+    "address": "0xb094d0d3221d7f7a9f14b0f78c34cd38d7acf6f2",
+    "type": "Stock",
+    "supplyRead": 1830.38
+  },
+  {
+    "symbol": "GOOGLon",
+    "ticker": "GOOGL",
+    "address": "0xe10cc5f0cd0c90322ebeb33e7757b2c9090146dc",
+    "type": "Stock",
+    "supplyRead": 78.83
+  },
+  {
+    "symbol": "HOODon",
+    "ticker": "HOOD",
+    "address": "0x43cac729218c62210d71d66b7f0ec93990d8d8cc",
+    "type": "Stock",
+    "supplyRead": 114.22
+  },
+  {
+    "symbol": "METAon",
+    "ticker": "META",
+    "address": "0x7b5026cfcb4de0cf3d9a39fe2a541514b71437a2",
+    "type": "Stock",
+    "supplyRead": 38.38
+  },
+  {
+    "symbol": "MSTRon",
+    "ticker": "MSTR",
+    "address": "0x09dedc334fc47ab543e5d70c7fd9d2b1aea175bd",
+    "type": "Stock",
+    "supplyRead": 178.31
+  },
+  {
+    "symbol": "NVDAon",
+    "ticker": "NVDA",
+    "address": "0xf1b95ae4e7700b962714702ea53784dc8492a856",
+    "type": "Stock",
+    "supplyRead": 119.85
+  },
+  {
+    "symbol": "QQQon",
+    "ticker": "QQQ",
+    "address": "0x300fe8a40701ce81460503fb886f9ed81a3b5e14",
+    "type": "ETF",
+    "supplyRead": 36.03
+  },
+  {
+    "symbol": "SPYon",
+    "ticker": "SPY",
+    "address": "0x533c5571ae586985e1fddfaa24304284d970c62a",
+    "type": "ETF",
+    "supplyRead": 30.5
+  },
+  {
+    "symbol": "TSLAon",
+    "ticker": "TSLA",
+    "address": "0xb197f36c25ba9b66960688882a4dc595c6b04309",
+    "type": "Stock",
+    "supplyRead": 67.53
+  },
+  {
+    "symbol": "CPERon",
+    "ticker": "CPER",
+    "address": "0xa8f72952653864f7457e0c307fdb415e03c2ece1",
+    "type": "ETF",
+    "supplyRead": 0.0
+  },
+  {
+    "symbol": "SPCXon",
+    "ticker": "SPCX",
+    "address": "0x9b8294f24453379aa87c807ab82bf1d5722153fc",
+    "type": "Stock",
+    "supplyRead": 172.3
+  }
+]
