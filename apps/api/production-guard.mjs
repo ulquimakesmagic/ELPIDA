@@ -70,9 +70,11 @@ export function productionGuard({ env = {}, solana = null, evm = null } = {}) {
 
   // Test-only features that must be off.
   if (env.CIRCLE_API_KEY || env.ELPIDA_CIRCLE_ADMIN_TOKEN) error('circle_test_funding', 'Circle test-wallet funding is configured. Remove CIRCLE_API_KEY and ELPIDA_CIRCLE_ADMIN_TOKEN from the mainnet service.');
-  if (env.ELPIDA_TOKENIZED_EQUITY === '1') error('tokenized_equity_on', 'Tokenized stocks are switched on (ELPIDA_TOKENIZED_EQUITY=1). They stay off for the mainnet beta.');
+  // Stock pairs (Malik, 18 November 2026: allowed on mainnet). A stock is still only offered once its registry
+  // capability flag is on, it is in the verified stock list and the chain's Safe has approved it.
   const flags = Object.keys(env).filter(k => /^ELPIDA_TOKENIZED_EQUITY_[A-Z_]+$/.test(k) && env[k] === '1');
-  if (flags.length) error('tokenized_equity_flags', `Tokenized-stock capability flags are set (${flags.join(', ')}). Remove them for the mainnet beta.`);
+  if (env.ELPIDA_TOKENIZED_EQUITY === '1') warn('tokenized_equity_on', `Stock pairs are switched on${flags.length ? ` (${flags.join(', ')})` : ' but no capability flag is set, so none is offered'}. Only stocks the Safe approved from the verified list are offered.`);
+  else if (flags.length) warn('tokenized_equity_flags_unused', `Stock capability flags are set (${flags.join(', ')}) but ELPIDA_TOKENIZED_EQUITY is not 1, so no stock pair is offered.`);
 
   // Allowed, but worth seeing in the deploy log.
   warn('simulation_present', 'The local simulation (fake funds, labelled as a simulation) is still served alongside mainnet.');

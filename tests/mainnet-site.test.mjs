@@ -79,7 +79,6 @@ test('the production guard passes a ready mainnet site and names what is missing
     ['distributions_on', { ELPIDA_V2_DISTRIBUTIONS: 'on' }],
     ['testnet_worker_keys', { ELPIDA_FLYWHEEL_EVM_KEY: '0x' + '1'.repeat(64) }],
     ['circle_test_funding', { CIRCLE_API_KEY: 'TEST_API_KEY:x' }],
-    ['tokenized_equity_on', { ELPIDA_TOKENIZED_EQUITY: '1' }],
     ['pinning_missing', { PINATA_JWT: undefined }],
   ];
   for (const [code, change, net] of cases) {

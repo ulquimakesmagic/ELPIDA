@@ -61,10 +61,17 @@ test('the program must be a recorded mainnet build', () => {
 test('test-only features are refused on mainnet', () => {
   assert.deepEqual(codes(productionGuard({ env: { ...goodEnv(), CIRCLE_API_KEY: 'TEST_API_KEY:abc' }, solana: mainnet() })), ['circle_test_funding']);
   assert.deepEqual(codes(productionGuard({ env: { ...goodEnv(), ELPIDA_CIRCLE_ADMIN_TOKEN: 'x'.repeat(40) }, solana: mainnet() })), ['circle_test_funding']);
-  assert.deepEqual(codes(productionGuard({ env: { ...goodEnv(), ELPIDA_TOKENIZED_EQUITY: '1' }, solana: mainnet() })), ['tokenized_equity_on']);
-  const flagged = productionGuard({ env: { ...goodEnv(), ELPIDA_TOKENIZED_EQUITY_COINBASE_SECONDARY_TRADING: '1' }, solana: mainnet() });
-  assert.deepEqual(codes(flagged), ['tokenized_equity_flags']);
-  assert.match(flagged.errors[0].message, /ELPIDA_TOKENIZED_EQUITY_COINBASE_SECONDARY_TRADING/);
+});
+
+test('stock pairs are allowed on mainnet (18 Nov) and only noted in the deploy log', () => {
+  const on = productionGuard({ env: { ...goodEnv(), ELPIDA_TOKENIZED_EQUITY: '1', ELPIDA_TOKENIZED_EQUITY_COINBASE_LAUNCH_QUOTE: '1' }, solana: mainnet() });
+  assert.deepEqual(codes(on), []);
+  const note = on.warnings.find(w => w.code === 'tokenized_equity_on');
+  assert.match(note.message, /ELPIDA_TOKENIZED_EQUITY_COINBASE_LAUNCH_QUOTE/); assert.match(note.message, /Safe approved/);
+  assert.match(productionGuard({ env: { ...goodEnv(), ELPIDA_TOKENIZED_EQUITY: '1' }, solana: mainnet() }).warnings.find(w => w.code === 'tokenized_equity_on').message, /none is offered/);
+  const unused = productionGuard({ env: { ...goodEnv(), ELPIDA_TOKENIZED_EQUITY_COINBASE_SECONDARY_TRADING: '1' }, solana: mainnet() });
+  assert.deepEqual(codes(unused), []);
+  assert.ok(unused.warnings.some(w => w.code === 'tokenized_equity_flags_unused'));
 });
 
 test('reports name settings but never print their values', () => {

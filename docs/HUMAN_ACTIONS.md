@@ -35,8 +35,8 @@ adapter needed, `approvePricedQuote` takes them directly).
 3. You, after the Base mainnet deploy: `STOCK_LIST_RPC_URL=<rpc> node scripts/stock-list.mjs base config/stocks/candidates/base-coinbase.json`
    (it checks each feed's description), then approve the list from the Base Safe.
 4. You, when stock pairs should go live: set `ELPIDA_TOKENIZED_EQUITY=1`, `ELPIDA_TOKENIZED_EQUITY_COINBASE_LAUNCH_QUOTE=1`
-   and `ELPIDA_TOKENIZED_EQUITY_COINBASE_GRADUATED_POOL=1` on the service. The production guard refuses these for the
-   mainnet beta, so this waits until you lift that rule.
+   and `ELPIDA_TOKENIZED_EQUITY_COINBASE_GRADUATED_POOL=1` on the mainnet service. The production guard allows them
+   since 18 November (it notes them in the deploy log).
 
 ## Solana devnet: creator vaults (splits, X and website allocations, holder strategies), 16 November 2026
 
