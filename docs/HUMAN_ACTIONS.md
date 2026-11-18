@@ -155,7 +155,7 @@ multiplier), 4-day staleness for weekends. FLHYon is left out: Chainlink lists t
    $env:STOCK_LIST_RPC_URL="<ETH RPC>"
    node scripts/stock-list.mjs ethereum config/stocks/candidates/ethereum-ondo.json --source "app.ondo.finance asset pages and Chainlink's feed directory, 13 November 2026"
    ```
-   Push `config/stocks/ethereum.json` on a branch.
+   Push `config/stocks/ethereum-mainnet.json` on a branch.
 3. After the Ethereum deploy: operator panel → Pairs → V2 card → approve the stock list. With a Safe treasury it
    downloads Transaction Builder files (25 stocks each) for the Safe to sign.
 
@@ -217,7 +217,7 @@ After the Solana USDC payouts PR is merged:
    proxy (docs.chain.link → Tokenized equity feeds → Ondo) into a `candidates.json` like
    `[{"symbol":"TSLAon","name":"Tesla","address":"0x…","feed":"0x…"}]`. Send it to me if you prefer; I format it.
 2. Run `STOCK_LIST_RPC_URL=<your RPC> node scripts/stock-list.mjs ethereum candidates.json` (likewise `bnb`). It checks
-   every stock on chain and writes `config/stocks/<chain>.json`; rejects are listed with the reason. Commit it in a PR.
+   every stock on chain and writes `config/stocks/<chain>-mainnet.json`; rejects are listed with the reason. Commit it in a PR.
 3. After the mainnet V2 launchpad exists: operator panel → Launchpads → V2 card → **Approve N more stocks**. With a Safe
    treasury this downloads one file per 25 stocks; drag each into Safe{Wallet} → Transaction Builder and sign.
 Details: `docs/V2_0_STOCKS.md`.
