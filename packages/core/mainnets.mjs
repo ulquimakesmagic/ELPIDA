@@ -1,4 +1,4 @@
-// EVM mainnets (17 November 2026). A mainnet appears on the mainnet site (ELPIDA_MODE=mainnet) only once its V2
+// EVM mainnets (17 November 2026; BNB Chain, Robinhood Chain and Ethereum added 18 November). A mainnet appears on the mainnet site (ELPIDA_MODE=mainnet) only once its V2
 // deployment record says "ready": deployed by scripts/v2-mainnet-deploy.mjs, wired by the treasury Safe's batch and
 // checked by `verify`. Until then it is not listed, so the mainnet site never shows a chain it cannot use.
 // Chains move from the testnet site to the mainnet site one at a time, as each gets its record (Malik, 17 Nov).
@@ -14,6 +14,26 @@ export const EVM_MAINNETS = Object.freeze([
     nativeCurrency: Object.freeze({ name: 'Ether', symbol: 'ETH', decimals: 18 }), gasFaucet: null,
     // How old the Chainlink ETH/USD answer may be for the site's prices (Base heartbeat 20 minutes, as on Base Sepolia).
     usdMaxAge: 1500,
+  }),
+  Object.freeze({
+    key: 'bnb-mainnet', planKey: 'bnb-mainnet', name: 'BNB Chain', short: 'BNB', kind: 'evm', mainnet: true,
+    chainId: 56, rpcUrl: 'https://bsc-dataseed.bnbchain.org', explorer: 'https://bscscan.com',
+    nativeCurrency: Object.freeze({ name: 'BNB', symbol: 'BNB', decimals: 18 }), gasFaucet: null,
+    usdMaxAge: 3600,
+  }),
+  Object.freeze({
+    key: 'robinhood-mainnet', planKey: 'robinhood-mainnet', name: 'Robinhood Chain', short: 'ROBINHOOD', kind: 'evm', mainnet: true,
+    chainId: 4663, rpcUrl: 'https://rpc.mainnet.chain.robinhood.com', explorer: 'https://robinhoodchain.blockscout.com',
+    nativeCurrency: Object.freeze({ name: 'Ether', symbol: 'ETH', decimals: 18 }), gasFaucet: null,
+    // Chainlink's Robinhood Chain ETH / USD heartbeat is not published with the address; allow a day, as the plan does.
+    usdMaxAge: 86400,
+  }),
+  Object.freeze({
+    key: 'ethereum-mainnet', planKey: 'ethereum-mainnet', name: 'Ethereum', short: 'ETH', kind: 'evm', mainnet: true,
+    chainId: 1, rpcUrl: 'https://ethereum-rpc.publicnode.com', explorer: 'https://etherscan.io',
+    nativeCurrency: Object.freeze({ name: 'Ether', symbol: 'ETH', decimals: 18 }), gasFaucet: null,
+    // Chainlink ETH / USD on Ethereum updates at least hourly.
+    usdMaxAge: 3900,
   }),
 ]);
 
@@ -42,6 +62,9 @@ export function mainnetNetwork(template, record, plan) {
       v2: { shared: { factory: c.factory, hook: c.hook, router: c.router, airdrop: c.airdrop, holder: c.holder, flywheel: c.flywheel,
         keeper: plan.keeper, treasury: plan.treasury, block: record.block, minFeeBps: Number(plan.minFeeBps ?? 100), distributions: false } },
       usd: { feed: plan.usdFeed, usdc: plan.usdc, maxAge: usdMaxAge ?? 3600 },
+      // The plan's dollar: USDC (18 decimals on BNB Chain), or USDG on Robinhood Chain. Pinned so payouts and amounts use
+      // the plan's own symbol and decimals instead of assuming a 6-decimal USDC.
+      payoutStable: { address: plan.usdc, symbol: plan.usdcSymbol ?? 'USDC', decimals: Number(plan.usdcDecimals ?? 6), test: false },
       deployment: { planSha256: record.planSha256 ?? null, approval: record.approval ?? null, gitCommit: record.gitCommit ?? null },
     },
     reason: null,

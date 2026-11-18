@@ -9,6 +9,23 @@ start, an approval no older than 14 days, a contract treasury, and `verifyDeploy
 against a gate plan built from what was deployed (kept in the record as `gate`). `scripts/deploy-v2.mjs` (#234) checks a
 plan whose vaults already exist; this script deploys the vaults itself, so its approval pins the plan file instead.
 
+## The four EVM mainnets (18 November 2026)
+
+Every chain runs the same steps below with its own plan, its own `check`, its own approval and its own Safe batch.
+All four use the Elpida Treasury Safe address (add each network to it in the Safe app first), the same keeper and
+guardian, minFeeBps 100 and dailyLaunchCap 1000.
+
+| Plan | Chain | Gas | Plan dollar | ETH-or-native / USD feed | Alchemy RPC network |
+|---|---|---|---|---|---|
+| `base-mainnet` | 8453 | ETH | USDC (6) | Chainlink ETH / USD | `base-mainnet` |
+| `bnb-mainnet` | 56 | BNB | USDC (Binance-Peg, 18) | Chainlink BNB / USD | `bnb-mainnet` |
+| `robinhood-mainnet` | 4663 | ETH | **USDG** (Paxos, 6) | Chainlink ETH / USD (standard proxy) | `robinhood-mainnet` |
+| `ethereum-mainnet` | 1 | ETH | USDC (6) | Chainlink ETH / USD | `eth-mainnet` |
+
+Order: Base, BNB Chain, Robinhood Chain (cheap L2s), then Ethereum on a low-gas day. Solana mainnet follows separately.
+Explorer source verification (step 7) uses Etherscan's API, which covers Base, BNB Chain and Ethereum; Robinhood Chain's
+explorer is Blockscout and is verified there by hand for now.
+
 ## 0. Dress rehearsal on Base Sepolia (recommended first)
 
 `deployments/plans/base-sepolia-rehearsal.json` runs the exact procedure below (steps 1–6) on Base Sepolia with test ETH:

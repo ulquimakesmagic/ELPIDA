@@ -5,10 +5,10 @@
   "nativeSymbol": "BNB",
   "startMcapUsd": 20000,
   "minFeeBps": 100,
-  "dailyLaunchCap": 500,
-  "treasury": null,
-  "keeper": null,
-  "guardian": null,
+  "dailyLaunchCap": 1000,
+  "treasury": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01",
+  "keeper": "0x10299c3Cff25C3e775e91463c5D9c8670483d39F",
+  "guardian": "0xfC08505EfEf934c3fF19d82D189f60f28a0255eB",
   "minSafeThreshold": 2,
   "poolManager": "0x28e2Ea090877bF75740558f6BFB36A5ffeE9e9dF",
   "usdFeed": "0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE",
@@ -17,5 +17,5 @@
   "usdcDecimals": 18,
   "confirmations": 2,
   "minDeployerBalance": "0.01",
-  "notes": "Fill treasury (a NEW Safe on BNB Chain with the clean signers), keeper and guardian. PoolManager: Uniswap's v4 deployment on BNB Smart Chain (developers.uniswap.org v4 deployments). usdFeed: Chainlink BNB / USD; `check` confirms its description is BNB / USD and fresh. USDC on BNB Chain (Binance-Peg) has 18 decimals: the USDC pair's virtual quote is 25,000e18 and the $10 USDC fee is 10e18 (ElpidaUsdPricing, 13 November)."
+  "notes": "treasury: the Elpida Treasury Safe (same address, owners and 2-of-3 threshold as on Base; add this network to it in the Safe app before `check`); keeper and guardian: the same wallets as Base (18 Nov 2026). dailyLaunchCap 1000 and minFeeBps 100 follow Malik's Base decision. PoolManager: Uniswap's v4 deployment on BNB Smart Chain (developers.uniswap.org v4 deployments). usdFeed: Chainlink BNB / USD; `check` confirms its description is BNB / USD and fresh. USDC on BNB Chain (Binance-Peg) has 18 decimals: the USDC pair's virtual quote is 25,000e18 and the $10 USDC fee is 10e18 (ElpidaUsdPricing, 13 November)."
 }
