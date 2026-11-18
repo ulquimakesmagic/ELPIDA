@@ -135,6 +135,26 @@ Not yet: the site's Solana stock launch (posting a fresh Pyth price first) and t
 ever sets a transfer-hook program on its mints, stock transfers through the program stop until it passes that hook's
 accounts.
 
+## Ondo stocks per EVM chain: status, 18 November 2026
+
+Malik, 18 Nov: Ondo stocks on the other EVM chains go ahead without a partnership (Ondo support answered on 18 Nov
+that Partnerships will reach out "if there's a fit"; nothing in it blocks the integration). Chainlink's Ondo page says
+that once the tokens are on chain anyone can hold them. Evidence: `docs/sources/ondo-address-check-2026-11-18.json`.
+
+| Chain | Ondo stocks | Price source | Status |
+|---|---|---|---|
+| Base | none (Ondo is not on Base) | — | Coinbase stocks instead (above) |
+| Ethereum | 10 candidates, addresses match Ondo's list | 8 direct Chainlink feeds, 2 adapters | ready for the steps below after the Ethereum deploy |
+| BNB Chain | 13 candidates, addresses match Ondo's list | 13 adapters (Chainlink share price x Ondo sValue) | ready for the adapter steps below after the BNB deploy |
+| Robinhood Chain | 15 tokens (`config/stocks/candidates/robinhood-ondo-unpriced.json`) | none yet | no stock pairs; tiny supplies and no Ondo feed or sValue oracle on that chain |
+
+Robinhood Chain gets Ondo pairs once Chainlink lists an Ondo feed there or Ondo deploys its SyntheticSharesOracle
+there (then the BNB adapter path works unchanged). Every Ondo token has a `compliance` contract, so the fork rehearsal
+(launch, buy, sell, graduate through our router) is what proves a pool can hold it; run it before approving a list.
+
+Mainnet stock pairs also stay behind the production guard (`tokenized_equity_on`) until you lift the beta rule, on
+every chain including Base.
+
 ## Ondo stocks on Ethereum mainnet, 13 November 2026
 
 Malik, 13 November: Ondo stocks go live without waiting for Ondo's reply, with neutral wording (no "powered by"), and
