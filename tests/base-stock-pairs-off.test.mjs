@@ -72,7 +72,7 @@ test('a Base fork rehearsal runs before the Safe exists, but the real deploy sti
   const { readPlan } = await import('../scripts/v2-mainnet-deploy.mjs');
   const plan = new URL('../deployments/plans/base-mainnet.json', import.meta.url);
   assert.equal(readPlan(plan, { forkRehearsal: true }).plan.explorerApi, 'https://base.blockscout.com');
-  assert.throws(() => readPlan(plan), /no treasury/);
+  assert.equal(readPlan(plan).plan.treasury, '0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01', 'the real deploy has every role since 18 Nov 2026');
   const src = readFileSync(new URL('../scripts/v2-mainnet-deploy.mjs', import.meta.url), 'utf8');
   assert.match(src, /forkRehearsal \? \['treasury', 'keeper', 'guardian'\]/);
 });

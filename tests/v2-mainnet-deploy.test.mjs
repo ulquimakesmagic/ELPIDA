@@ -10,9 +10,13 @@ import { readPlan, planHash, approvalFor, rehearse, preflight, rehearsalNetwork,
 
 const PLAN = new URL('../deployments/plans/base-mainnet.json', import.meta.url);
 
-test('the Base plan is incomplete until Malik fills the wallets, and nothing deploys without an approval for that exact plan', t => {
-  assert.throws(() => readPlan(PLAN), /no treasury/);
-  const { plan } = readPlan(PLAN, { local: true });
+test('the Base plan names three distinct roles (a plan missing one is refused), and nothing deploys without an approval for that exact plan', t => {
+  const { plan } = readPlan(PLAN);
+  assert.equal(new Set([plan.treasury, plan.keeper, plan.guardian].map(a => a.toLowerCase())).size, 3, 'treasury, keeper and guardian are three different wallets');
+  const dir0 = mkdtempSync(join(tmpdir(), 'elpida-plan-')); t.after(() => rmSync(dir0, { recursive: true, force: true }));
+  const missing = join(dir0, 'base-mainnet.json');
+  writeFileSync(missing, JSON.stringify({ ...JSON.parse(readFileSync(PLAN, 'utf8')), treasury: null }));
+  assert.throws(() => readPlan(missing), /no treasury/);
   assert.equal(plan.chainId, 8453); assert.equal(plan.startMcapUsd, 20_000);
   const dir = mkdtempSync(join(tmpdir(), 'elpida-approval-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
   const hash = planHash('{"key":"base-mainnet"}');
