@@ -76,3 +76,11 @@ test('a Base fork rehearsal runs before the Safe exists, but the real deploy sti
   const src = readFileSync(new URL('../scripts/v2-mainnet-deploy.mjs', import.meta.url), 'utf8');
   assert.match(src, /forkRehearsal \? \['treasury', 'keeper', 'guardian'\]/);
 });
+
+test('stock lists are saved under the mainnet site\'s network key, the file the site asks for', () => {
+  const src = readFileSync(new URL('../scripts/stock-list.mjs', import.meta.url), 'utf8');
+  assert.match(src, /EVM_MAINNETS/);
+  for (const [short, key] of [['base', 'base-mainnet'], ['bnb', 'bnb-mainnet'], ['ethereum', 'ethereum-mainnet'], ['robinhood', 'robinhood-mainnet']]) assert.ok(src.includes(`${short}: '${key}'`), short);
+  assert.match(src, /config\/stocks\/\$\{key\}\.json/);
+  assert.match(readFileSync(new URL('../apps/web/v2-launchpad.mjs', import.meta.url), 'utf8'), /stock-list\?network=\$\{encodeURIComponent\(w\.net\.key\)\}/);
+});

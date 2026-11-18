@@ -30,10 +30,11 @@ Exit code 0 means the server would start; 1 lists what is missing.
 | `distributions_on` | `ELPIDA_V2_DISTRIBUTIONS=on` | The first mainnet release pays creator rewards only; remove it |
 | `testnet_worker_keys` | A test-network worker key is set (Model 10 graduation, flywheel, buyback, testnet relay) | Keep those on the testnet site |
 | `solana_devnet_on_mainnet_site` | The mainnet site would serve Solana devnet | Leave `ELPIDA_SOLANA_CLUSTER` unset (Solana stays off there) or set it to `mainnet` once Solana is on mainnet |
-| `tokenized_equity_on` / `tokenized_equity_flags` | `ELPIDA_TOKENIZED_EQUITY=1` or any capability flag is `1` | Tokenized stocks stay off for the mainnet beta |
 
 Not refused, but noted in the log: `simulation_present`. The local simulation (fake funds, labelled as a simulation)
-is still served next to mainnet.
+is still served next to mainnet. `tokenized_equity_on` / `tokenized_equity_flags_unused`: stock pairs are allowed on
+mainnet (Malik, 18 November 2026); a stock is offered only when `ELPIDA_TOKENIZED_EQUITY=1`, its capability flag is
+`1`, it is in the verified stock list and the chain's Safe has approved it.
 
 What it does not cover: the multisig and treasury setup (C3; the deploy script checks the Safe) and the restore drill
 (C5). Tests: `tests/production-guard.test.mjs`, `tests/mainnet-site.test.mjs`.

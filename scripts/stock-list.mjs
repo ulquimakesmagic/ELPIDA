@@ -9,12 +9,15 @@ import { Contract, JsonRpcProvider } from 'ethers';
 import { buildStockList } from '../packages/core/stock-list.mjs';
 import { testnets } from '../packages/core/networks.mjs';
 import { stockPairsOff } from '../packages/core/pairs.mjs';
+import { EVM_MAINNETS } from '../packages/core/mainnets.mjs';
 
-// Mainnet chains are not in networks.mjs yet (mainnet is not approved); their stock lists can still be prepared and checked.
-const MAINNETS = [{ key: 'ethereum', name: 'Ethereum', chainId: 1 }, { key: 'bnb', name: 'BNB Chain', chainId: 56 }, { key: 'base', name: 'Base', chainId: 8453 }];
-const networks = [...testnets.filter(n => n.kind === 'evm'), ...MAINNETS];
+// Mainnet lists are saved under the mainnet site's network key (config/stocks/base-mainnet.json), the file the site
+// asks for; the short names base, bnb, ethereum and robinhood still work.
+const ALIASES = { base: 'base-mainnet', bnb: 'bnb-mainnet', ethereum: 'ethereum-mainnet', robinhood: 'robinhood-mainnet' };
+const networks = [...testnets.filter(n => n.kind === 'evm'), ...EVM_MAINNETS.map(n => ({ key: n.key, name: n.name, chainId: n.chainId, rpcUrl: n.rpcUrl }))];
 
-const [key, file] = process.argv.slice(2), at = process.argv.indexOf('--source'), source = at > 0 ? process.argv[at + 1] : file;
+const [given, file] = process.argv.slice(2), at = process.argv.indexOf('--source'), source = at > 0 ? process.argv[at + 1] : file;
+const key = ALIASES[given] ?? given;
 const net = networks.find(n => n.key === key);
 if (net && stockPairsOff(net.chainId)) { console.error(stockPairsOff(net.chainId)); process.exit(2); }
 if (!net || !file) { console.error('Usage: STOCK_LIST_RPC_URL=<rpc> node scripts/stock-list.mjs <network-key> <candidates.json> [--source "…"]'); process.exit(2); }
