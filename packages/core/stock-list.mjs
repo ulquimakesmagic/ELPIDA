@@ -20,6 +20,16 @@ const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 export const underlying = symbol => String(symbol).replace(/(on|c)$/, '').toUpperCase();
 
 /**
+ * Whether a feed's description names the stock: "TSLAon / USD", "NVDA / USD", or, for Coinbase's stocks on Base
+ * (symbol ending in "c"), Chainlink's own name for their total-return feeds, "Coinbase NVDA" (read on chain 18 Nov 2026).
+ */
+export function feedNamesStock(symbol, description) {
+  const t = underlying(symbol).replace('.', '\\.');
+  if (new RegExp(`(^|[^A-Z])${t}(ON|C)?\\s*/\\s*USD`, 'i').test(description)) return true;
+  return /c$/.test(String(symbol)) && new RegExp(`^\\s*Coinbase\\s+${t}\\s*$`).test(String(description));
+}
+
+/**
  * Checks one candidate { symbol, name?, address, feed, maxAge? } on chain. `Contract` and `provider` are ethers'.
  * Returns { ok: true, stock } with what was read, or { ok: false, symbol, reason }.
  */
@@ -38,7 +48,7 @@ export async function verifyStock({ Contract, provider, now }, c) {
     if (onSymbol !== symbol) return fail(`the token's symbol is ${onSymbol}, not ${symbol}`);
     if (Number(decimals) < 6 || Number(decimals) > 18) return fail(`unsupported decimals ${decimals}`);
     if (Number(feedDecimals) > 18) return fail(`unsupported feed decimals ${feedDecimals}`);
-    if (!new RegExp(`(^|[^A-Z])${underlying(symbol).replace('.', '\\.')}(ON|C)?\\s*/\\s*USD`, 'i').test(description)) return fail(`the feed is "${description}", not ${underlying(symbol)} / USD`);
+    if (!feedNamesStock(symbol, description)) return fail(`the feed is "${description}", not ${underlying(symbol)} / USD`);
     const [id, answer, , updatedAt, answered] = round;
     if (!(answer > 0n) || !(id > 0n) || answered < id || Number(updatedAt) <= 0 || Number(updatedAt) > now + 60) return fail('the feed has no valid answer');
     return { ok: true, stock: { symbol, name: c.name ?? null, address: c.address, decimals: Number(decimals), feed: c.feed, feedDecimals: Number(feedDecimals), feedDescription: description, maxAge,

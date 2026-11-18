@@ -117,3 +117,9 @@ test('the operator approves the verified list from the panel: directly on a test
   assert.match((await approveV2StockList(wallet(f.owner))).message, /All 2 listed stocks are already approved/);
   assert.ok(await f.factory.quoteVirtual(other.target) > 0n);
 });
+
+test('Coinbase stocks on Base: Chainlink names their feeds "Coinbase NVDA", and only that exact name is accepted', async () => {
+  const { feedNamesStock } = await import('../packages/core/stock-list.mjs');
+  for (const [symbol, description] of [['NVDAc', 'Coinbase NVDA'], ['TSLAc', 'Coinbase TSLA'], ['NVDAc', 'NVDAc / USD'], ['NVDAc', 'NVDA / USD'], ['TSLAon', 'TSLAon / USD']]) assert.ok(feedNamesStock(symbol, description), `${symbol} ${description}`);
+  for (const [symbol, description] of [['NVDAc', 'Coinbase TSLA'], ['NVDAc', 'Coinbase NVDA2'], ['NVDAc', 'coinbase nvda x'], ['TSLAon', 'Coinbase TSLA'], ['NVDA', 'Coinbase NVDA'], ['NVDAc', 'ETH / USD']]) assert.ok(!feedNamesStock(symbol, description), `${symbol} ${description}`);
+});
