@@ -1,6 +1,7 @@
 import { h, icon, short, number, compact, errorText } from './ui.mjs';
 import { chainIcon } from './chain-ui.mjs';
 import { withWalletTimeout } from './wallet.mjs';
+import { injectedSolanaWallets } from './wallet-discovery.mjs';
 import { renderVisitors } from './admin-visitors.mjs';
 import { renderLaunchpads } from './admin-launchpads.mjs';
 import { renderTestFunds } from './admin-funds.mjs';
@@ -44,6 +45,27 @@ export function renderAdmin(ctx, { connect }) {
         status.textContent = ''; load();
       } catch (e) { status.textContent = ''; error.textContent = errorText(e); button.disabled = false; }
     } } }, icon('wallet', 'icon-sm'), 'Sign in with this wallet');
+    // A Solana admin (ELPIDA_ADMIN_ADDRESSES) signs the same message with Phantom, Solflare or Backpack; this works on
+    // every site, including mainnet before Solana is live there.
+    const solButton = h('button.btn.btn-secondary', { type: 'button', on: { click: async () => {
+      error.textContent = ''; solButton.disabled = true; status.textContent = 'Waiting for your Solana wallet…';
+      try {
+        const found = injectedSolanaWallets(typeof window === 'undefined' ? {} : window)[0];
+        if (!found) throw new Error('Install Phantom, Solflare or Backpack to sign in with a Solana wallet.');
+        const p = found.provider;
+        const connected = p.isConnected && p.publicKey ? null : await withWalletTimeout(p.connect(), found.name);
+        const solAddress = String(connected?.publicKey ?? p.publicKey ?? '');
+        if (!solAddress) throw new Error(`${found.name} did not share an address.`);
+        if (typeof p.signMessage !== 'function') throw new Error(`${found.name} cannot sign messages.`);
+        const challenge = await getJson('admin/challenge');
+        const out = await withWalletTimeout(p.signMessage(new TextEncoder().encode(challenge.message), 'utf8'), found.name);
+        const bytes = new Uint8Array(out?.signature ?? out);
+        const signature = btoa(String.fromCharCode(...bytes));
+        status.textContent = 'Checking…';
+        await getJson('admin/session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': ctx.config.csrf }, body: JSON.stringify({ nonce: challenge.nonce, address: solAddress, signature }) });
+        status.textContent = ''; load();
+      } catch (e) { status.textContent = ''; error.textContent = errorText(e); solButton.disabled = false; }
+    } } }, icon('wallet', 'icon-sm'), 'Sign in with a Solana wallet');
     return h('section.op-signin.tk-card',
       h('span.pf-mark', icon('shield-check')),
       h('h1', 'Operator sign-in'),
@@ -51,7 +73,7 @@ export function renderAdmin(ctx, { connect }) {
       !evm ? h('p.small.muted', 'Switch to an EVM network (Base, Ethereum, BNB or Robinhood) to sign in.')
         : address ? h('p.small', 'Wallet: ', h('span.mono', short(address)))
         : h('button.btn.btn-secondary', { type: 'button', on: { click: connect } }, 'Connect wallet'),
-      evm ? button : null, status, error);
+      evm ? button : null, solButton, status, error);
   }
 
   function dashboard(d, refresh) {

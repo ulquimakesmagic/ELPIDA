@@ -120,3 +120,23 @@ test('the operator page lives at #/monkey; #/admin is not a page', async () => {
   assert.doesNotMatch(app, /'\/admin':/);
   assert.doesNotMatch(view, /href: '#\/admin/);
 });
+
+test('a Solana admin signs in with an ed25519 signature; the address is kept as written and must match', async () => {
+  const { generateKeyPairSync, sign } = await import('node:crypto');
+  const { PublicKey } = await import('@solana/web3.js');
+  const keypair = () => { const { publicKey, privateKey } = generateKeyPairSync('ed25519'); return { privateKey, address: new PublicKey(publicKey.export({ format: 'der', type: 'spki' }).subarray(12)).toBase58() }; };
+  const admin = keypair(), other = keypair();
+  assert.deepEqual(parseAdminAddresses(`${operator.address} ${admin.address} notbase58! ${admin.address}`), [operator.address.toLowerCase(), admin.address]);
+  const allowed = parseAdminAddresses(admin.address), isAllowed = a => allowed.includes(a);
+  const sig = (kp, message) => sign(null, Buffer.from(message, 'utf8'), kp.privateKey).toString('base64');
+  const auth = new AdminAuth({ host: 'elpida.test' });
+  let c = auth.challenge();
+  const session = await auth.signIn({ nonce: c.nonce, address: admin.address, signature: sig(admin, c.message) }, isAllowed);
+  assert.equal(session.address, admin.address);
+  c = auth.challenge();
+  await assert.rejects(auth.signIn({ nonce: c.nonce, address: admin.address, signature: sig(other, c.message) }, isAllowed), e => e.status === 401);
+  c = auth.challenge();
+  await assert.rejects(auth.signIn({ nonce: c.nonce, address: other.address, signature: sig(other, c.message) }, isAllowed), e => e.status === 403);
+  c = auth.challenge();
+  await assert.rejects(auth.signIn({ nonce: c.nonce, address: admin.address, signature: sig(admin, 'another message') }, isAllowed), e => e.status === 401);
+});
