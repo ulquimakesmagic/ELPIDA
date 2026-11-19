@@ -844,3 +844,17 @@ Add a Railway variable `ELPIDA_VANITY_KEY` with 32 random bytes as 64 hex charac
 ## Not needed for Phase 1
 
 No API keys, Railway variables or Solana actions are needed for Phase 1. Solana items arrive with Phase 2.
+
+## Testnet trim, 19 November 2026
+
+Railway bills the testnet for about 3.3 GB of memory, but the server itself uses about 0.7 GB. The rest (about 2.1 GB)
+is Linux file cache from the volume, which is 3.2 GB and mostly databases of retired Model 10 factories that hold 0–3
+old test tokens each. Railway's file system does not let the service hand that cache back, so the fix is to stop
+keeping those databases.
+
+1. Set `ELPIDA_INDEX_LEGACY=false` on the **testnet** service only. The server then skips every `legacy` factory in
+   `packages/core/networks.mjs`; the current curve, Model 11 and V2 launchpads stay. The old test tokens leave the
+   testnet listings. Remove the setting to bring them back (they re-index from the chain).
+2. After it redeploys, delete the skipped databases on the testnet volume (permanent; they can be rebuilt from the
+   chain by removing the setting). Ask Claude for the exact file list.
+3. Indexer logs now print a line per factory only when its token count changes, after an error, or every ten minutes.
