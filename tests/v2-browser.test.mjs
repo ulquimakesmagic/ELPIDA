@@ -275,3 +275,11 @@ test('a test stock listed twice (overlapping pair loads) shows once in the V2 an
   const w = { net, provider, approvedQuotes: [stock, { ...stock, address: stock.address.toUpperCase().replace('0X', '0x') }] };
   assert.equal((await v2StockPairs(w)).length, 1);
 });
+
+test('mainnet: the ready V2 record is the launchpad the launch form and operator panel use (19 Nov)', async () => {
+  const { v2Deployment } = await import('../apps/web/v4-launchpad.mjs');
+  const net = { key: 'base-mainnet', chainId: 8453, mainnet: true, v4: { poolManager: '0x498581fF718922c3f8e6A244956aF099B2652b2b' }, v2: { shared: { factory: '0x29f0D2A8F2DD5B2dF872222f10bE35D6B27aFD71', hook: '0xf53DddE8e792D8645f256ddE71Bb91e16dc7a8cC', router: '0x63Cb3BCbDB6F00302EaD64Bd8D17A614FfBBD4B9', minFeeBps: 100, block: 59162718 } } };
+  const d = v2Deployment(net);
+  assert.equal(d.factory, net.v2.shared.factory); assert.equal(d.pinned, true); assert.equal(d.poolManager, net.v4.poolManager); assert.equal(d.minFeeBps, 100);
+  assert.equal(v2Deployment({ ...net, v2: undefined }), null, 'no record, no launchpad');
+});

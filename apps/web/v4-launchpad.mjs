@@ -47,6 +47,8 @@ export function v4Deployment(net) {
 const v2Key = chainId => `elpida:v2:deployment:${chainId}`;
 /** The network's V2 launchpad: the team deployment pinned in networks.mjs (`v2.shared`), else one this browser deployed. */
 export function v2Deployment(net) {
+  // Mainnet: the V2 launchpad from its ready deployment record (served in the network config), on Uniswap's PoolManager.
+  if (net?.mainnet) return net.v2?.shared?.factory && net.v4?.poolManager ? { ...net.v2.shared, poolManager: net.v4.poolManager, pinned: true } : null;
   const manager = v4PoolManager(net);
   if (!manager) return null;
   if (net.v2?.shared?.factory) return { ...net.v2.shared, poolManager: manager, pinned: true };

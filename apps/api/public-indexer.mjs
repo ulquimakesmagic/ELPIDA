@@ -36,8 +36,11 @@ export class PublicIndexer {
     this.providerFactory=providerFactory;this.rpcs=new Map();this.onTrades=onTrades??null;
     // A mainnet chain has only its ELPIDA V2 launchpad (no curve `shared`): the V2 index is then the network's main entry.
     for(const net of networks.filter(n=>n.shared?.factory||n.v2?.shared?.factory&&n.v4?.poolManager)){
-      // An operator override is used alone; otherwise the network's RPC, then its server-side fallbacks.
-      const override=process.env['ELPIDA_RPC_'+net.chainId],list=override?[override]:[net.rpcUrl,...(net.rpcFallbacks??[])];
+      // ELPIDA_INDEX_RPC_<chainId> (comma-separated) is for the indexer alone: its log scans need wide block ranges,
+      // which free plans such as Alchemy's (10 blocks per eth_getLogs) refuse, while the keeper and prices keep
+      // ELPIDA_RPC_<chainId>. Otherwise an operator override is used alone, else the network's RPC and its fallbacks.
+      const indexRpcs=String(process.env['ELPIDA_INDEX_RPC_'+net.chainId]??'').split(',').map(u=>u.trim()).filter(u=>/^https:\/\//.test(u));
+      const override=process.env['ELPIDA_RPC_'+net.chainId],list=indexRpcs.length?indexRpcs:override?[override]:[net.rpcUrl,...(net.rpcFallbacks??[])];
       this.rpcs.set(net.key,{list,index:0,failures:0});
       const provider=providerFactory(list[0]);
       if(!net.shared?.factory){this.entries.set(net.key,openV2Entry({net,provider,dataDir}));this.legacy.set(net.key,[]);continue;}
@@ -86,7 +89,7 @@ export class PublicIndexer {
         if(!e.validated){const d=deploymentOf(e),chain=Number((await e.provider.getNetwork()).chainId),v=Number(await new Contract(d.factory,['function MODEL_VERSION() view returns(uint256)'],e.provider).MODEL_VERSION());if(chain!==e.net.chainId||v!==MODEL_VERSIONS[d.model])throw new Error('Deployment identity mismatch');e.validated=true;}
         await e.index.sync();e.error=null;e.errorCode=null;e.lastSuccess=new Date().toISOString();
         this.publishFresh(e);
-        if(!e.legacy&&!e.v4){const r=this.rpcs?.get(e.net.key);if(r)r.failures=0;}
+        if(this.entries.get(e.net.key)===e){const r=this.rpcs?.get(e.net.key);if(r)r.failures=0;}
         for(const t of e.index.tokens())if(t.metadataURI){
           // Only factory events synchronized by the validated chain index authorize retention.
           try{this.metadataStore.retainPublished(t.metadataURI);if(!e.metadata.has(t.address))e.metadata.set(t.address,normalizeMetadata(await this.metadataStore.resolve(t.metadataURI)));}catch{/* IPFS outage does not discard chain history. */}
@@ -97,8 +100,8 @@ export class PublicIndexer {
          if(sig!==e.loggedSig||now-(e.loggedAt??0)>=600000){e.loggedSig=sig;e.loggedAt=now;e.loggedError=false;this.log(JSON.stringify({event:'public_indexer_synced',network:e.net.key,...(e.legacy?{factory:deploymentOf(e).factory}:{}),...st,error:null}));}}
       }catch(error){
         e.error='Indexing unavailable; retrying.';e.errorCode=errorCode(error);e.loggedError=true;e.loggedSig=null;
-        this.log(JSON.stringify({event:'public_indexer_error',network:e.net.key,...(e.legacy?{factory:deploymentOf(e).factory}:{}),code:e.errorCode,rpc:rpcHost(this.rpcs?.get(e.net.key)),message:e.error}));
-        if(!e.legacy&&!e.v4)this.failover(e.net.key);
+        this.log(JSON.stringify({event:'public_indexer_error',network:e.net.key,...(e.legacy?{factory:deploymentOf(e).factory}:{}),code:e.errorCode,rpc:rpcHost(this.rpcs?.get(e.net.key)),message:e.error,reason:errorReason(error)}));
+        if(this.entries.get(e.net.key)===e)this.failover(e.net.key);
       }finally{e.busy=false;this.inFlight--;}
     });}catch{/* each deployment reports its own error above */}
   }
@@ -160,6 +163,8 @@ export class PublicIndexer {
 
 const deploymentOf=e=>e.deployment??e.net.shared;
 /** A short, safe error code for logs and the public status (letters, digits and _ only; never a message or URL). */
+/** A short reason for the log: the RPC's own message, with URLs (which can carry an API key) and long hex removed. */
+export const errorReason=error=>String(error?.info?.responseBody??error?.error?.message??error?.shortMessage??error?.message??'').replace(/https?:\/\/\S+/g,'<url>').replace(/0x[0-9a-fA-F]{40,}/g,'<hex>').replace(/[A-Za-z0-9_-]{24,}/g,'<redacted>').replace(/\s+/g,' ').slice(0,200);
 const errorCode=error=>String(error?.code??error?.name??'INDEX_ERROR').replace(/[^a-zA-Z0-9_]/g,'').slice(0,64)||'INDEX_ERROR';
 /** The RPC host in use, without path or query, so keys in operator-supplied URLs never leak. */
 const rpcHost=r=>{try{return new URL(r.list[r.index]).host;}catch{return null;}};
