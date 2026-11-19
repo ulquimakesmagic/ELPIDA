@@ -34,11 +34,13 @@ export class PublicIndexer {
   constructor({networks,contracts,dataDir,metadataStore,onTrades,providerFactory=rpc=>new JsonRpcProvider(rpc,undefined,{cacheTimeout:-1,batchMaxCount:1}),log=console.log}){
     this.entries=new Map();this.legacy=new Map();this.metadataStore=metadataStore;this.log=log;this.stopping=false;
     this.providerFactory=providerFactory;this.rpcs=new Map();this.onTrades=onTrades??null;
-    for(const net of networks.filter(n=>n.shared?.factory)){
+    // A mainnet chain has only its ELPIDA V2 launchpad (no curve `shared`): the V2 index is then the network's main entry.
+    for(const net of networks.filter(n=>n.shared?.factory||n.v2?.shared?.factory&&n.v4?.poolManager)){
       // An operator override is used alone; otherwise the network's RPC, then its server-side fallbacks.
       const override=process.env['ELPIDA_RPC_'+net.chainId],list=override?[override]:[net.rpcUrl,...(net.rpcFallbacks??[])];
       this.rpcs.set(net.key,{list,index:0,failures:0});
       const provider=providerFactory(list[0]);
+      if(!net.shared?.factory){this.entries.set(net.key,openV2Entry({net,provider,dataDir}));this.legacy.set(net.key,[]);continue;}
       this.entries.set(net.key,openEntry({net,deployment:net.shared,provider,contracts,dataDir}));
       // Earlier team factories on the same network stay indexed, so their tokens remain listed and tradable.
       // ELPIDA_INDEX_LEGACY=false (Malik, 19 Nov: trim the testnet) skips these retired factories: their databases are
@@ -131,7 +133,7 @@ export class PublicIndexer {
   static FAILOVER_AFTER=3;
   start(){this.job=this.tick();this.timer=setInterval(()=>{this.job=this.tick();},TICK_MS);this.timer.unref();return this;}
   /** The V2 trading index of a network, for the V2 keeper (null until V2 is pinned and validated there). */
-  v2Index(key){const e=(this.legacy.get(key)??[]).find(x=>x.v2&&x.validated);return e?.index??null;}
+  v2Index(key){const e=this.all(key).find(x=>x.v2&&x.validated);return e?.index??null;}
   status(key){const e=this.entries.get(key);return e?{...e.index.status(),error:e.error,errorCode:e.errorCode??null,rpc:rpcHost(this.rpcs?.get(key)),lastSuccess:e.lastSuccess,enabled:true,
     // Earlier launchpads on the same network have their own index; a stuck one must be visible too.
     legacy:(this.legacy?.get(key)??[]).map(l=>{const s=l.index.status();return {factory:deploymentOf(l).factory,model:deploymentOf(l).model??null,indexedBlock:s.indexedBlock,lag:s.lag,error:l.error??null,errorCode:l.errorCode??null,lastSuccess:l.lastSuccess??null};})}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}

@@ -112,6 +112,16 @@ export function renderLaunchpads(ctx, { connect }) {
   }
 
   /** ELPIDA V2 test launchpad: the factory, the hook, the router and the three reward contracts the hook pays. */
+  // Mainnet: the launchpad comes from the approved deploy (deployments/<plan>.json), never from this page. Only the
+  // verified stock list is approved here; with the Safe as treasury that downloads Transaction Builder files.
+  function mainnetV2Card(net) {
+    const v2 = v2Deployment(net);
+    if (!v2) return card('ELPIDA V2', h('p.small.muted', `${net.name} has no ready V2 deployment record.`));
+    return card(`ELPIDA V2 · ${net.name}`,
+      h('p.small.muted', 'Deployed from the approved plan: factory ', h('a.mono', { href: `${net.explorer}/address/${v2.factory}`, target: '_blank', rel: 'noopener noreferrer' }, short(v2.factory)), ', router ', h('span.mono', short(v2.router)), ', treasury ', h('span.mono', short(v2.treasury ?? '')), '.'),
+      v2VerifiedStocks());
+  }
+
   function v2Card(net) {
     if (!v2Available(net) || net.mainnet) return null;
     if (!v4PoolManager(net)) return card('ELPIDA V2 test launchpad', h('p.small.muted', 'Deploy the test PoolManager first; V2 is deployed on top of it.'));
@@ -139,6 +149,7 @@ export function renderLaunchpads(ctx, { connect }) {
     if (ctx.mode !== 'testnet' || !net) { root.replaceChildren(card('Launchpads', h('p.small.muted', 'Launchpads are per network. Switch to Base, Ethereum, BNB Chain or Robinhood Chain in Network and funds, then come back here.'))); return; }
     if (!w.address) { root.replaceChildren(card('Launchpads', h('p.small.muted', `Connect the operator wallet on ${net.name} to set up its launchpads.`), h('button.btn.btn-secondary', { type: 'button', on: { click: connect } }, 'Connect wallet'))); return; }
     const head = h('header.op-head', h('div', h('h1', h('span.op-net', chainIcon(net.key), `Launchpads · ${net.name}`)), h('p.small.muted', 'Deployments send from the connected wallet. Each one is pinned in networks.mjs before visitors use it.')));
+    if (net.mainnet) { root.replaceChildren(h('header.op-head', h('div', h('h1', h('span.op-net', chainIcon(net.key), `Launchpads · ${net.name}`)), h('p.small.muted', 'Mainnet launchpads are deployed with scripts/v2-mainnet-deploy.mjs from an approved plan, not from this page.'))), status, error, h('div.op-grid', mainnetV2Card(net))); return; }
     root.replaceChildren(head, status, error, h('div.op-grid', ...[testDexCard(w, net), curveCard(w, net), poolManagerCard(net), v2Card(net)].filter(Boolean)));
   }
   queueMicrotask(draw);
