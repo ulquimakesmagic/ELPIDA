@@ -306,6 +306,22 @@ function kothTag(ctx, token) {
   const pct = Math.round(curveProgress(token) * 100);
   return h('span.tk-tag.tk-tag-koth', { 'data-king': crowned ? 'true' : undefined, title: crowned ? 'King of the Hill: the token closest to graduating right now' : `King of the Hill contender: ${pct}% of the curve sold` }, icon('crown', 'icon-xs'), crowned ? `King of the Hill · ${pct}%` : `KOTH · ${pct}%`);
 }
+/** Ondo pause or sValue change coming for this token's stock quote (from /api/public/stock-status). Fills in when the
+ * server has Ondo's API key; otherwise stays empty. Onchain trading continues during these pauses. */
+export function ondoStockNotice(summary, symbol, now = Date.now()) {
+  const e = (summary?.events ?? []).find(x => x.symbol === symbol);
+  if (!e) return null;
+  const when = t => t ? new Date(t).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' }) : null;
+  const span = e.start && e.end ? `${when(e.start)} to ${when(e.end)}` : e.start ? `from ${when(e.start)}` : 'until further notice';
+  const live = e.status === 'active' || (e.start && Date.parse(e.start) <= now);
+  return `${symbol}: Ondo ${live ? 'has' : 'will have'} ${e.kind === 'paused' ? 'paused' : 'limited'} minting and redemption for ${e.reason}, ${span}.${e.sValueChanges ? ' Its share multiplier changes, so the stock price used here will step.' : ''} Trading here continues.`;
+}
+function ondoNotice(token, q) {
+  if (token.pair !== 'xstock' || !/^[A-Za-z0-9.]{1,16}on$/.test(q)) return null;
+  const note = h('p.callout.callout-warn.small.tk-ondo-note', { role: 'status', hidden: true });
+  fetch(`/api/public/stock-status?symbol=${encodeURIComponent(q)}`).then(r => r.ok ? r.json() : null).then(s => { const text = ondoStockNotice(s, q); if (text) { note.textContent = text; note.hidden = false; } }).catch(() => {});
+  return note;
+}
 export function tradePanel(ctx, token, { dex, solana }) {
   const q = token.quoteSymbol ?? ctx.state?.nativeSymbol ?? 'ETH';
 
@@ -483,7 +499,7 @@ export function tradePanel(ctx, token, { dex, solana }) {
   setSide('buy');
   tickFeeWindow();
   const section = h('section.panel.trade-panel.tk-trade', { 'aria-labelledby': 'trade-title' }, h('div.swap-heading',h('h2#trade-title','Swap'),h('button.icon-btn',{type:'button','aria-label':'Toggle slippage settings',on:{click:()=>{const d=form.querySelector('.trade-settings');d.open=!d.open;}}},icon('sliders-horizontal','icon-sm'))),
-    form,!connected?h('p.hint','Connect your wallet using the button above.'):null,
+    form,!connected?h('p.hint','Connect your wallet using the button above.'):null,ondoNotice(token, q),
     h('p.small.muted.tk-trade-note', token.solanaV2 ? `ELPIDA V2 test on Solana (not audited). Every trade pays this token's ${((token.v2FeeBps ?? token.feeBps ?? 125) / 100).toFixed(2)}% fee, on the curve and ${token.lockedPool ? 'in Elpida\u2019s locked pool' : 'after graduation'} (higher in the first minute, which locks extra liquidity). Each fee is shared: 30% creator, 30% traders' monthly airdrop, 10% flywheel buy-and-burn, 10% holder rewards, 20% treasury.` : isV2Token(token) ? `ELPIDA V2 test (Uniswap v4, not audited). Every trade pays this token's ${((token.feeBps ?? 125) / 100).toFixed(2)}% fee, before and after graduation (higher in the first minute, which locks extra liquidity). Each fee is shared: 30% creator, 30% traders' monthly airdrop, 10% flywheel buy-and-burn, 10% holder rewards, 20% treasury. Liquidity is locked from launch.` : isV4Token(token) ? (token.graduated ? 'Model 11 test (Uniswap v4, not audited). Past the milestone: a 1% fee in the pair asset on every trade, split as before. The liquidity has been locked since launch.' : 'Model 11 test (Uniswap v4, not audited). The curve runs inside its v4 pool and the liquidity is locked from launch: there is no graduation step. 1.25% fee (higher in the first minute, which locks extra liquidity), split 50/50.') : token.tax ? `Buy tax ${token.tax.buyBps/100}% / sell tax ${token.tax.sellBps/100}%, fixed at launch. Tax revenue: 30% Elpida / 70% creator allocations. ${token.graduated?'The V2 pool fee is additional; the curve fee has stopped. LP fees compound in locked liquidity. Creator tax claims are paid in this token.':'The 1.25% curve fee remains additional, split 50/50. First-minute protection adds locked liquidity.'}` : token.graduated ? `Trading on ${dex === 'test' ? 'the locked test pool' : dex}. Liquidity is locked permanently. The curve fee has stopped; the DEX pool fee applies.${token.venue === 'PumpSwap' ? ' Pool trading fees pay the creator share and any buyback when they are harvested.' : ''}` : 'Trades on the bonding curve. Each trade pays 1.25%, plus a higher launch-protection fee during the first minute.'));
   // Lets the phone buy bar open the panel on the right side.
   section.selectCurrency = value => {if(!['native','pair'].includes(value)||submitting)return;settlement=value;setSide(side);};

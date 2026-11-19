@@ -866,3 +866,10 @@ Ondo asked us to geofence prohibited regions such as the US. Visitors from the U
 Cuba, Iran, North Korea, Syria, Russia, Belarus and Tor exits (Cloudflare `CF-IPCountry`) cannot open a stock pair
 or buy into a stock-paired token. Selling stays open. Optional Railway variable to replace the list:
 `ELPIDA_STOCK_BLOCKED_COUNTRIES=US,PR,GU,VI,AS,MP,UM,CA,CU,IR,KP,SY,RU,BY,T1`. Check it against Ondo's eligibility page.
+
+## Ondo API key (19 November 2026)
+
+`ONDO_API_KEY` is set on the mainnet service (read-only key from Ondo; never commit or paste it). With it the server
+reads https://api.gm.ondo.finance/v1/status/assets every 15 minutes, and token pages paired with an Ondo stock show any
+upcoming or active pause and whether the sValue changes. Ondo: these pauses stop minting and redemption through Ondo
+only; onchain transfers continue. Leave it off the testnet service.
