@@ -38,3 +38,12 @@ it passes.
 
 The testnet site does not need a paid service: `docs/ORACLE_HOSTING.md` runs it on Oracle Cloud's Always Free VM, so
 Railway can host the mainnet site alone.
+
+## Indexer RPC (19 November 2026)
+
+Alchemy's free plan answers `eth_getLogs` for at most 10 blocks, and the V2 indexer reads logs 100 to 1,000 blocks at a
+time, so on Alchemy free it fails with `SERVER_ERROR` on every tick. Set `ELPIDA_INDEX_RPC_<chainId>` (one or more
+HTTPS URLs, comma-separated; the indexer fails over between them) to an endpoint without that limit, for example
+`ELPIDA_INDEX_RPC_8453=https://base-rpc.publicnode.com,https://mainnet.base.org`. It is used by the public indexer
+only; the keeper, prices and the production guard keep `ELPIDA_RPC_<chainId>`. Indexer errors now log a short `reason`
+with URLs and keys removed.

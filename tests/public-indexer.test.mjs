@@ -136,3 +136,20 @@ test('a mainnet chain with only a V2 launchpad (no curve `shared`) is indexed, w
     assert.equal(s.status('base-mainnet').enabled,true);
   }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+test('ELPIDA_INDEX_RPC_<chainId> feeds the indexer alone, and error reasons never carry a URL or key',async()=>{
+  const { errorReason }=await import('../apps/api/public-indexer.mjs');
+  const dir=mkdtempSync(join(tmpdir(),'elpida-idxrpc-')),seen=[];
+  const net={key:'base-mainnet',chainId:8453,mainnet:true,rpcUrl:'https://mainnet.base.org',v4:{poolManager:'0x'+'ff'.repeat(20)},v2:{shared:{factory:'0x'+'cc'.repeat(20),hook:'0x'+'dd'.repeat(20),router:'0x'+'ee'.repeat(20),block:1}},nativeCurrency:{symbol:'ETH'},explorer:'https://basescan.org'};
+  const options={dataDir:dir,networks:[net],contracts:{},providerFactory:url=>{seen.push(url);return {destroy(){}};},metadataStore:{},log(){}};
+  const saved={a:process.env.ELPIDA_INDEX_RPC_8453,b:process.env.ELPIDA_RPC_8453};
+  try{
+    process.env.ELPIDA_RPC_8453='https://base-mainnet.g.alchemy.com/v2/KEY';process.env.ELPIDA_INDEX_RPC_8453='https://base-rpc.publicnode.com, https://mainnet.base.org';
+    const s=new PublicIndexer(options);
+    assert.deepEqual(seen,['https://base-rpc.publicnode.com']);assert.deepEqual(s.rpcs.get('base-mainnet').list,['https://base-rpc.publicnode.com','https://mainnet.base.org']);
+    delete process.env.ELPIDA_INDEX_RPC_8453;seen.length=0;new PublicIndexer(options);
+    assert.deepEqual(seen,['https://base-mainnet.g.alchemy.com/v2/KEY'],'without it the private RPC is used as before');
+  }finally{for(const [k,v] of [['ELPIDA_INDEX_RPC_8453',saved.a],['ELPIDA_RPC_8453',saved.b]])if(v===undefined)delete process.env[k];else process.env[k]=v;rmSync(dir,{recursive:true,force:true});}
+  const r=errorReason({info:{responseBody:'{"error":{"message":"Under the Free tier plan, you can make eth_getLogs requests with up to a 10 block range."}} at https://base-mainnet.g.alchemy.com/v2/abcdEFGHijklMNOPqrstUVWXyz012345'}});
+  assert.match(r,/10 block range/);assert.ok(!/alchemy|abcdEFGH/.test(r),r);
+});
