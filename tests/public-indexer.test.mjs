@@ -105,3 +105,19 @@ test('a public RPC that keeps failing on the server is replaced by the next one;
     status = service.status('test'); assert.equal(status.error, null); assert.equal(status.errorCode, null);
   } finally { await service.close(); rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('ELPIDA_INDEX_LEGACY=false skips retired factories (19 Nov testnet trim) and keeps the current one; unset keeps them',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'elpida-trim-'));
+  const current='0x'+'aa'.repeat(20),old='0x'+'bb'.repeat(20);
+  const net={key:'test',chainId:84532,shared:{factory:current,block:10,model:'curve-dex-v10'},legacy:[{factory:old,block:1,model:'curve-dex-v9'}],nativeCurrency:{symbol:'ETH'},explorer:'https://example.com'};
+  const options={dataDir:dir,networks:[net],contracts:Object.fromEntries(['dexFactory','dexCurve','factory','curve','pool','token'].map(n=>[n,{abi:[]}])),providerFactory:()=>({destroy(){}}),metadataStore:{},log(){}};
+  const before=process.env.ELPIDA_INDEX_LEGACY;
+  try{
+    process.env.ELPIDA_INDEX_LEGACY='false';
+    let s=new PublicIndexer(options);
+    assert.deepEqual(s.all('test').map(e=>e.deployment.factory),[current]);s.stop?.();
+    delete process.env.ELPIDA_INDEX_LEGACY;
+    s=new PublicIndexer(options);
+    assert.deepEqual(s.all('test').map(e=>e.deployment.factory),[current,old]);s.stop?.();
+  }finally{if(before===undefined)delete process.env.ELPIDA_INDEX_LEGACY;else process.env.ELPIDA_INDEX_LEGACY=before;rmSync(dir,{recursive:true,force:true});}
+});

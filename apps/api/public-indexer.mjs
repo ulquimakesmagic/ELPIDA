@@ -41,7 +41,10 @@ export class PublicIndexer {
       const provider=providerFactory(list[0]);
       this.entries.set(net.key,openEntry({net,deployment:net.shared,provider,contracts,dataDir}));
       // Earlier team factories on the same network stay indexed, so their tokens remain listed and tradable.
-      const older=(net.legacy??[]).filter(d=>d?.factory&&d.factory.toLowerCase()!==net.shared.factory.toLowerCase());
+      // ELPIDA_INDEX_LEGACY=false (Malik, 19 Nov: trim the testnet) skips these retired factories: their databases are
+      // most of the volume and, read on every listing, most of the memory Railway bills. The current curve, Model 11
+      // and V2 launchpads below are unaffected. Their tokens come back when the setting is removed.
+      const older=process.env.ELPIDA_INDEX_LEGACY==='false'?[]:(net.legacy??[]).filter(d=>d?.factory&&d.factory.toLowerCase()!==net.shared.factory.toLowerCase());
       this.legacy.set(net.key,older.map(deployment=>openEntry({net,deployment,provider,contracts,dataDir,legacy:true})));
       if(net.taxDeployment?.factory)this.legacy.get(net.key).push(openEntry({net,deployment:{...net.taxDeployment,model:'curve-tax-v10'},provider,contracts,dataDir}));
       // Model 11 (Uniswap v4 hook) test launchpad: its own index beside the curve launchpads, once pinned in networks.mjs.
@@ -86,9 +89,12 @@ export class PublicIndexer {
           // Only factory events synchronized by the validated chain index authorize retention.
           try{this.metadataStore.retainPublished(t.metadataURI);if(!e.metadata.has(t.address))e.metadata.set(t.address,normalizeMetadata(await this.metadataStore.resolve(t.metadataURI)));}catch{/* IPFS outage does not discard chain history. */}
         }
-        this.log(JSON.stringify({event:'public_indexer_synced',network:e.net.key,...(e.legacy?{factory:deploymentOf(e).factory}:{}),...e.index.status(),error:null}));
+        // One line when something changed (tokens, recovery from an error) or every ten minutes, not every tick: 21
+        // indexers at 3 s were thousands of identical lines an hour.
+        {const st=e.index.status(),now=Date.now(),sig=`${st.tokens}|${e.loggedError?1:0}`;
+         if(sig!==e.loggedSig||now-(e.loggedAt??0)>=600000){e.loggedSig=sig;e.loggedAt=now;e.loggedError=false;this.log(JSON.stringify({event:'public_indexer_synced',network:e.net.key,...(e.legacy?{factory:deploymentOf(e).factory}:{}),...st,error:null}));}}
       }catch(error){
-        e.error='Indexing unavailable; retrying.';e.errorCode=errorCode(error);
+        e.error='Indexing unavailable; retrying.';e.errorCode=errorCode(error);e.loggedError=true;e.loggedSig=null;
         this.log(JSON.stringify({event:'public_indexer_error',network:e.net.key,...(e.legacy?{factory:deploymentOf(e).factory}:{}),code:e.errorCode,rpc:rpcHost(this.rpcs?.get(e.net.key)),message:e.error}));
         if(!e.legacy&&!e.v4)this.failover(e.net.key);
       }finally{e.busy=false;this.inFlight--;}
