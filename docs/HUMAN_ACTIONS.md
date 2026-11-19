@@ -859,3 +859,10 @@ keeping those databases.
 2. After it redeploys, delete the skipped databases on the testnet volume (permanent; they can be rebuilt from the
    chain by removing the setting). Ask Claude for the exact file list.
 3. Indexer logs now print a line per factory only when its token count changes, after an error, or every ten minutes.
+
+## Stock pairs: region block (19 November 2026)
+
+Ondo asked us to geofence prohibited regions such as the US. Visitors from the US and its territories, Canada,
+Cuba, Iran, North Korea, Syria, Russia, Belarus and Tor exits (Cloudflare `CF-IPCountry`) cannot open a stock pair
+or buy into a stock-paired token. Selling stays open. Optional Railway variable to replace the list:
+`ELPIDA_STOCK_BLOCKED_COUNTRIES=US,PR,GU,VI,AS,MP,UM,CA,CU,IR,KP,SY,RU,BY,T1`. Check it against Ondo's eligibility page.

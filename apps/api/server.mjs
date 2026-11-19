@@ -45,7 +45,8 @@ import { TOKEN_PATH, renderTokenPage, renderTokenNotFound, renderTokenUnavailabl
 import { memoryReport } from './memory-report.mjs';
 import { Thumbnails, thumbWidth } from './thumbnails.mjs';
 import { PriceHistory, priceEntries } from './price-history.mjs';
-import { usdReferenceFor } from '../../packages/core/pairs.mjs';
+import { usdReferenceFor, stockRegionStatus, blockedCountriesFrom, STOCK_BLOCKED_COUNTRIES } from '../../packages/core/pairs.mjs';
+const stockBlockedCountries=blockedCountriesFrom(process.env.ELPIDA_STOCK_BLOCKED_COUNTRIES)??STOCK_BLOCKED_COUNTRIES;
 import { trendingCards, withPreloads, withFirstScreen, storedMetadataImage } from './home-preload.mjs';
 import { getHeapStatistics } from 'node:v8';
 import { productionGuard, formatGuardReport, durableStorage } from './production-guard.mjs';
@@ -635,7 +636,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         // Bytecode for the labelled test DEX and relay feed, fetched only when the launchpad owner deploys them.
         if (url.pathname === '/api/test-dex-artifacts') return send(200, testDexArtifacts());
         if (url.pathname === '/api/v4-artifacts') return send(200, v4Artifacts());
-        if (url.pathname === '/api/config') return send(200, { ...runtime.config, serverTime: Date.now()/1000, vanity: vanity.status(), circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), relay: feedRelay.publicConfig(), v2Keeper: v2Keeper.address?{address:v2Keeper.address,active:Boolean(v2Keeper.enabled)}:null,v2Identities:{x:v2Identities.xEnabled}, consent: consentConfig, csrf });
+        if (url.pathname === '/api/config') return send(200, { ...runtime.config, serverTime: Date.now()/1000, vanity: vanity.status(), circle: circle.status(), prices:priceSnapshot(), hostedSimulation:Boolean(publicUrl), metadataPublishing:metadataStore.status(), solana: solanaConfig(), relay: feedRelay.publicConfig(), v2Keeper: v2Keeper.address?{address:v2Keeper.address,active:Boolean(v2Keeper.enabled)}:null,v2Identities:{x:v2Identities.xEnabled}, consent: consentConfig, stockRegion: stockRegionStatus(req.headers['cf-ipcountry'], stockBlockedCountries), csrf });
         if(url.pathname==='/api/metadata/resolve')return send(200,await metadataStore.resolve(url.searchParams.get('uri')));
         if(url.pathname.startsWith('/api/content/')){const cid=url.pathname.slice('/api/content/'.length),record=metadataStore.get(cid);if(!record)return send(404,{error:'Content not found.'});const width=thumbWidth(url.searchParams.get('w'));const thumb=width?await thumbnails.get(cid,record,width):null;if(thumb){res.writeHead(200,{'Content-Type':'image/webp','Cache-Control':'public, max-age=31536000, immutable','Content-Length':thumb.length});return res.end(thumb);}res.writeHead(200,{'Content-Type':record.type,'Cache-Control':'public, max-age=31536000, immutable'});return res.end(Buffer.from(record.data,'base64'));}
         if (url.pathname === '/api/indexer/status') { if(syncLimit())return send(429,{error:'Indexer is busy. Retry shortly.'}); await runtime.indexer.sync(); return send(200,runtime.indexer.status()); }

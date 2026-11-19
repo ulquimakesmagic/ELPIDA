@@ -1,7 +1,7 @@
 import {restoreTradeDraft} from './trade-draft.mjs';
 import { nowSeconds, syncClock } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
-import { usdReferenceFor } from '/pairs.mjs';
+import { usdReferenceFor, setStockRegion } from '/pairs.mjs';
 import { exploreHash, overlayToken, tokenKey, pairTokenReferences } from './discovery.mjs';
 import { createExplore, exploreSkeleton } from './explore-view.mjs';
 import { assetIcon, chainIcon, chainSelector } from './chain-ui.mjs';
@@ -491,6 +491,7 @@ async function openTools() {
 async function init() {
   const configSent = Date.now();
   config = await api('config');
+  setStockRegion(config.stockRegion);
   syncClock(config.serverTime, configSent);
   // Background refresh. Also on returning to the tab: timers do not run while it is hidden, and a dollar reference
   // older than 3 minutes is shown as stale (values fall back to the pair's own unit) until prices are re-read.
