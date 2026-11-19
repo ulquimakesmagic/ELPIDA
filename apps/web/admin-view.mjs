@@ -193,10 +193,10 @@ export function renderAdmin(ctx, { connect }) {
         h('a', { href: '#/monkey', 'aria-current': tab === 'ops' ? 'page' : undefined }, 'Operations'),
         h('a', { href: '#/monkey?tab=launchpads', 'aria-current': tab === 'launchpads' ? 'page' : undefined }, 'Launchpads'),
         h('a', { href: '#/monkey?tab=pairs', 'aria-current': tab === 'pairs' ? 'page' : undefined }, 'Pairs'),
-        h('a', { href: '#/monkey?tab=funds', 'aria-current': tab === 'funds' ? 'page' : undefined }, 'Test funds'),
+        ctx.wallet?.net?.mainnet ? null : h('a', { href: '#/monkey?tab=funds', 'aria-current': tab === 'funds' ? 'page' : undefined }, 'Test funds'),
         h('a', { href: '#/monkey?tab=visitors', 'aria-current': tab === 'visitors' ? 'page' : undefined }, 'Visitors'));
       if (tab === 'visitors') { root.replaceChildren(tabs, renderVisitors(ctx, { getJson })); return; }
-      if (tab === 'funds') { const funds = renderTestFunds(ctx, { connect }); root.replaceChildren(tabs, funds.root); ctx.refresh?.().catch(() => {}).finally(funds.update); return; }
+      if (tab === 'funds') { if (ctx.wallet?.net?.mainnet) { root.replaceChildren(tabs, h('p.small.muted', 'Test funds are for test networks only.')); return; } const funds = renderTestFunds(ctx, { connect }); root.replaceChildren(tabs, funds.root); ctx.refresh?.().catch(() => {}).finally(funds.update); return; }
       if (tab === 'launchpads') { const pads = renderLaunchpads(ctx, { connect }); root.replaceChildren(tabs, pads.root); ctx.refresh?.().catch(() => {}).finally(pads.update); return; }
       if (tab === 'pairs') { const pairs = renderPairs(ctx, { connect }); root.replaceChildren(tabs, pairs.root); ctx.refresh?.().catch(() => {}).finally(pairs.update); return; }
       const data = await getJson('admin/overview');

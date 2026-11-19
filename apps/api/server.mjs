@@ -367,7 +367,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // Operator panel (read-only): wallet sign-in against the factory treasuries plus ELPIDA_ADMIN_ADDRESSES.
   const adminAuth=new AdminAuth({host:(()=>{try{return publicUrl?new URL(publicUrl).host:'localhost';}catch{return 'elpida';}})()});
   const adminAddresses=parseAdminAddresses(process.env.ELPIDA_ADMIN_ADDRESSES);
-  const treasuryNetworks=()=>evmNetworks.filter(n=>publicIndex.entries.get(n.key)).map(n=>({key:n.key,name:n.name,explorer:n.explorer,nativeSymbol:n.nativeCurrency?.symbol,factory:n.shared?.factory,provider:publicIndex.entries.get(n.key).index.provider}));
+  const treasuryNetworks=()=>evmNetworks.filter(n=>publicIndex.entries.get(n.key)).map(n=>({key:n.key,name:n.name,explorer:n.explorer,nativeSymbol:n.nativeCurrency?.symbol,factory:n.shared?.factory??n.v2?.shared?.factory,provider:publicIndex.entries.get(n.key).provider}));
   const treasuries=cachedLoader(()=>readTreasuries(treasuryNetworks()),60000);
   const siteHost=(()=>{try{return publicUrl?new URL(publicUrl).host:'localhost';}catch{return 'elpida';}})();
   // Opt-in visitor analytics for the Visitors tab (docs/SITE_ANALYTICS.md). No IP or user agent is stored.
@@ -426,7 +426,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rpcProxy = solana.mainnet ? createRpcProxy(solanaRpcList(process.env).urls) : null;
   const operationsStartedAt=Date.now();
   const backupRunner=configuredBackup({env:port===0?{}:process.env,dataDir,statePath:port===0?null:dataFile('ops-backup-state.json'),workDir:process.env.ELPIDA_BACKUP_WORK_DIR??resolve(tmpdir(),'elpida-backups-'+dataPrefix.replace(/[^a-z0-9-]/gi,'')),log:console.log});
-  const operationsInput=()=>({relay:feedRelay.status(),graduation:graduationKeeper.status(),startedAt:operationsStartedAt,durable:durableStorage(),storage:metadataStore.status().storage,networks:Object.fromEntries([...publicIndex.entries.keys()].map(key=>[key,publicIndex.status(key)])),prices:priceSnapshot(),backup:backupRunner.status()});
+  // The graduation keeper serves Base Sepolia's Model 10 launchpad only; the mainnet site has no such network.
+  const operationsInput=()=>({relay:feedRelay.status(),graduation:evmNetworks.some(n=>n.key==='base-sepolia')?graduationKeeper.status():undefined,startedAt:operationsStartedAt,durable:durableStorage(),storage:metadataStore.status().storage,networks:Object.fromEntries([...publicIndex.entries.keys()].map(key=>[key,publicIndex.status(key)])),prices:priceSnapshot(),backup:backupRunner.status()});
   const monitor=new OperationsMonitor({read:operationsInput});
   const operationsTimer=port===0?null:setInterval(()=>monitor.tick(),60000);operationsTimer?.unref();
   const memoryNow=()=>memoryReport({heapLimit:getHeapStatistics().heap_size_limit,extra:{uptimeMinutes:Math.round(process.uptime()/60),streams:tradeFeed.status().clients,vanityWorkers:vanity.status().grinding}});

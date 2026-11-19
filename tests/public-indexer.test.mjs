@@ -121,3 +121,18 @@ test('ELPIDA_INDEX_LEGACY=false skips retired factories (19 Nov testnet trim) an
     assert.deepEqual(s.all('test').map(e=>e.deployment.factory),[current,old]);s.stop?.();
   }finally{if(before===undefined)delete process.env.ELPIDA_INDEX_LEGACY;else process.env.ELPIDA_INDEX_LEGACY=before;rmSync(dir,{recursive:true,force:true});}
 });
+
+test('a mainnet chain with only a V2 launchpad (no curve `shared`) is indexed, with V2 as its main entry',()=>{
+  const dir=mkdtempSync(join(tmpdir(),'elpida-v2main-'));
+  const factory='0x'+'cc'.repeat(20),hook='0x'+'dd'.repeat(20),router='0x'+'ee'.repeat(20),pm='0x'+'ff'.repeat(20);
+  const net={key:'base-mainnet',chainId:8453,mainnet:true,v4:{poolManager:pm},v2:{shared:{factory,hook,router,block:59162718}},nativeCurrency:{symbol:'ETH'},explorer:'https://basescan.org'};
+  const options={dataDir:dir,networks:[net],contracts:Object.fromEntries(['dexFactory','dexCurve','factory','curve','pool','token'].map(n=>[n,{abi:[]}])),providerFactory:()=>({destroy(){}}),metadataStore:{},log(){}};
+  try{
+    const s=new PublicIndexer(options);
+    const all=s.all('base-mainnet');
+    assert.equal(all.length,1);assert.equal(all[0].v2,true);assert.equal(all[0].deployment.factory,factory);
+    assert.equal(s.v2Index('base-mainnet'),null,'not validated yet');all[0].validated=true;
+    assert.equal(s.v2Index('base-mainnet'),all[0].index);
+    assert.equal(s.status('base-mainnet').enabled,true);
+  }finally{rmSync(dir,{recursive:true,force:true});}
+});
