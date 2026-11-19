@@ -3,13 +3,13 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import './helpers/browser-modules.mjs';
-const { stockPairsOff, STOCK_PAIRS_OFF } = await import('../packages/core/pairs.mjs');
+const { stockPairsBlocked, STOCK_PAIRS_OFF } = await import('../packages/core/pairs.mjs');
 const { stockApprovalGate } = await import('../apps/web/stock-approval.mjs');
 
 const ready = { symbol: 'NVDAc', address: '0x' + '1'.repeat(40), feed: '0x' + '2'.repeat(40), capabilities: { launchQuote: { enabled: true }, graduatedPool: { enabled: true } } };
 
 test('no chain has stock pairs switched off since Base passed its fork rehearsal (16 November 2026)', () => {
-  for (const id of [8453, '8453', 1, 56, 84532, 11155111, 97, null, undefined]) assert.equal(stockPairsOff(id), null);
+  for (const id of [8453, '8453', 1, 56, 84532, 11155111, 97, null, undefined]) assert.equal(stockPairsBlocked(id), null);
   assert.deepEqual(Object.keys(STOCK_PAIRS_OFF), []);
   assert.ok(Object.isFrozen(STOCK_PAIRS_OFF));
 });
@@ -43,14 +43,14 @@ test('the Base Coinbase stocks have fork evidence for launch quote and graduated
   assert.equal(on.capabilityState(on.assets().find(a => a.symbol === 'NVDAc' && a.network === 'base'), 'secondaryTrading').enabled, false);
 });
 
-test('the launch flow, the EVM wallet and the stock-list script all consult the gate', () => {
+test('the launch flow, the EVM wallet and the stock-list script all consult the gate (chain rule, then the visitor region)', () => {
   const flow = readFileSync(new URL('../apps/web/launch-flow.mjs', import.meta.url), 'utf8');
-  assert.match(flow, /V2_PAIRS\.filter\(k => k !== 'xstock' \|\| !stockPairsOff/);
-  assert.match(flow, /draft\.pair === 'xstock' && !solana\(\) && stockPairsOff/);
-  assert.match(flow, /approvedQuotes \?\? \[\]\)\.filter\(a => a\.kind !== 'xstock' \|\| !stockPairsOff/);
+  assert.match(flow, /V2_PAIRS\.filter\(k => k !== 'xstock' \|\| !stockPairsBlocked/);
+  assert.match(flow, /draft\.pair === 'xstock' && !solana\(\) && stockPairsBlocked/);
+  assert.match(flow, /approvedQuotes \?\? \[\]\)\.filter\(a => a\.kind !== 'xstock' \|\| !stockPairsBlocked/);
   const wallet = readFileSync(new URL('../apps/web/wallet.mjs', import.meta.url), 'utf8');
-  assert.match(wallet, /xstock: stockPairsOff\(this\.net\.chainId\) \?/);
-  assert.match(wallet, /kind === 'xstock' && stockPairsOff\(this\.net\.chainId\)\) throw/);
+  assert.match(wallet, /xstock: stockPairsBlocked\(this\.net\.chainId\) \?/);
+  assert.match(wallet, /kind === 'xstock' && stockPairsBlocked\(this\.net\.chainId\)\) throw/);
   assert.match(readFileSync(new URL('../scripts/stock-list.mjs', import.meta.url), 'utf8'), /stockPairsOff\(net\.chainId\)/);
 });
 

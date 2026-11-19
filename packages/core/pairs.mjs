@@ -89,6 +89,33 @@ export const STOCK_PAIRS_OFF = Object.freeze({});
 export function stockPairsOff(chainId) { return STOCK_PAIRS_OFF[Number(chainId)] ?? null; }
 
 /**
+ * Regions where tokenized-stock pairs are not offered (issuer eligibility rules; Ondo, 19 November 2026: "geofencing
+ * prohibited regions such as the US"). Two-letter codes from Cloudflare's CF-IPCountry header. The US and its
+ * territories, Canada, comprehensively sanctioned countries, and Tor exits (T1, location unknown). The issuer's
+ * published rules prevail; ELPIDA_STOCK_BLOCKED_COUNTRIES (comma list) replaces this list on the server.
+ */
+export const STOCK_BLOCKED_COUNTRIES = Object.freeze(['US', 'PR', 'GU', 'VI', 'AS', 'MP', 'UM', 'CA', 'CU', 'IR', 'KP', 'SY', 'RU', 'BY', 'T1']);
+export const STOCK_REGION_REASON = 'Tokenized stock pairs are not available in your region (Terms, “Tokenized stock pairs”).';
+/** Server side: whether a visitor from `country` may use stock pairs. `blocked` overrides the default list. */
+export function stockRegionStatus(country, blocked = STOCK_BLOCKED_COUNTRIES) {
+  const code = /^[A-Za-z][A-Za-z0-9]$/.test(String(country ?? '').trim()) ? String(country).trim().toUpperCase() : null;
+  const off = code != null && blocked.includes(code);
+  return { allowed: !off, reason: off ? STOCK_REGION_REASON : null };
+}
+/** Parses ELPIDA_STOCK_BLOCKED_COUNTRIES; null (use the default) when unset or empty. */
+export function blockedCountriesFrom(value) {
+  const list = String(value ?? '').split(',').map(c => c.trim().toUpperCase()).filter(c => /^[A-Z][A-Z0-9]$/.test(c));
+  return list.length ? list : null;
+}
+let regionReason = null;
+/** Browser side: set once from /api/config (stockRegion). Anything other than an explicit allow keeps the last value. */
+export function setStockRegion(status) { if (status && typeof status.allowed === 'boolean') regionReason = status.allowed ? null : (status.reason || STOCK_REGION_REASON); }
+/** Why this visitor may not open or buy into a stock pair, or null. */
+export function stockRegionOff() { return regionReason; }
+/** Why a new stock pair is off for this visitor on this chain: the chain rule first, then the region. */
+export function stockPairsBlocked(chainId) { return stockPairsOff(chainId) ?? regionReason; }
+
+/**
  * Designated tokenized-stock provider per network (mainnet and test keys). One provider each; there is no
  * fallback to another. Live capabilities are tracked in config/tokenized-equity-registry.json and are off
  * until verified. Display names only; nothing here implies a partnership.

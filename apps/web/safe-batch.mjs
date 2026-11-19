@@ -30,11 +30,30 @@ export function treasuryError({ mainnet = false, treasury, connected, safe }) {
 }
 
 /** A Safe Transaction Builder batch file (JSON) for the treasury-only setup steps. */
-export function safeBatch({ chainId, safe, name, description, transactions, now = Date.now() }) {
+export function safeBatch({ chainId, safe, name, description, transactions, now = Date.now(), keccak = null }) {
   if (!transactions.length) throw new Error('Nothing for the treasury to sign.');
-  return {
+  const batch = {
     version: '1.0', chainId: String(chainId), createdAt: now,
     meta: { name, description, txBuilderVersion: '1.16.5', createdFromSafeAddress: safe, createdFromOwnerAddress: '' },
     transactions: transactions.map(t => ({ to: t.to, value: String(t.value ?? 0n), data: t.data, contractMethod: null, contractInputsValues: null })),
   };
+  return keccak ? withSafeChecksum(batch, keccak) : batch;
+}
+
+// Safe Transaction Builder checksum (safe-react-apps tx-builder lib/checksum.ts). Without meta.checksum the builder
+// warns that the file has "changed properties". Keys sorted, undefined as null, meta.name left out of the hash.
+const replacer = (_, v) => (v === undefined ? null : v);
+export function serializeForChecksum(json) {
+  if (Array.isArray(json)) return `[${json.map(serializeForChecksum).join(',')}]`;
+  if (json !== null && typeof json === 'object') {
+    const keys = Object.keys(json).sort();
+    return `{${JSON.stringify(keys, replacer)}${keys.map(k => `${serializeForChecksum(json[k])},`).join('')}}`;
+  }
+  return JSON.stringify(json, replacer);
+}
+/** `keccak(text)`: keccak-256 of the UTF-8 text as 0x hex (ethers `id`). Returns a copy with meta.checksum set. */
+export function withSafeChecksum(batch, keccak) {
+  const { checksum: _old, ...meta } = batch.meta ?? {};
+  const checksum = keccak(serializeForChecksum({ ...batch, meta: { ...meta, name: null } }));
+  return { ...batch, meta: { ...meta, checksum } };
 }

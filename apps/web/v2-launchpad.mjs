@@ -2,7 +2,7 @@
 // creators launch with their own fee. Trading uses the Model 11 path (v4-launchpad.mjs: same pool design and router).
 // NOT AUDITED: test networks with Uniswap v4 (or the labelled test PoolManager) only. Every function takes the connected
 // TestnetWallet `w`.
-import { Contract, ContractFactory, AbiCoder, Interface, concat, getAddress, parseUnits, formatUnits, isAddress, ZeroAddress } from '/vendor/ethers.js';
+import { Contract, ContractFactory, AbiCoder, Interface, concat, getAddress, parseUnits, formatUnits, isAddress, ZeroAddress, id as keccakText } from '/vendor/ethers.js';
 import { swapCalldata } from '/dex-router.mjs';
 import { quoteNativePairConversion } from './usdc-conversion.mjs';
 import { V2, V2_MODEL, V2_FEE_SPLIT, V2_PROPOSED_MIN_FEE_BPS, V2_TESTNET_START_FDV_USD_E6, maxFirstBuyGross, firstBuyCapTokens, virtualToken, splitFee, feeOn } from '/v2-economics.mjs';
@@ -334,7 +334,7 @@ export async function approveV2StockList(w) {
     for (const group of state.groups) for (const c of group) { await step(w, w.signer.sendTransaction({ to: c.to, data: c.data }), `Approve ${c.symbol} (${++n} of ${state.groups.flat().length}), priced at each launch by its feed…`); }
     return { message: `${n} stocks approved on ${w.net.name}.` };
   }
-  const batches = state.groups.map((group, i) => safeBatch({ chainId: w.net.chainId, safe: state.treasury, name: `Elpida V2 stock approvals ${i + 1} of ${state.groups.length}`,
+  const batches = state.groups.map((group, i) => safeBatch({ keccak: keccakText, chainId: w.net.chainId, safe: state.treasury, name: `Elpida V2 stock approvals ${i + 1} of ${state.groups.length}`,
     description: `Approve ${group.map(c => c.symbol).join(', ')} as V2 pairs, each priced at launch by its verified feed (config/stocks/${w.net.key}.json, checked ${state.checkedAt}).`, transactions: group }));
   return { safeBatches: batches, message: `${batches.length} Safe ${batches.length === 1 ? 'batch' : 'batches'} for ${state.groups.flat().length} stocks downloaded. Drag each into Safe{Wallet} → Transaction Builder, check it, then sign and execute.` };
 }

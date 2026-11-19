@@ -25,7 +25,8 @@ import { readFileSync, writeFileSync, existsSync, renameSync, rmSync } from 'nod
 import { join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execSync } from 'node:child_process';
-import { AbiCoder, Contract, ContractFactory, Interface, JsonRpcProvider, Wallet, ZeroAddress, concat, getAddress, getBytes, isAddress, keccak256, toBeHex, zeroPadValue, formatEther, parseEther } from 'ethers';
+import { AbiCoder, Contract, ContractFactory, Interface, JsonRpcProvider, Wallet, ZeroAddress, concat, getAddress, getBytes, isAddress, keccak256, toBeHex, zeroPadValue, formatEther, parseEther, id } from 'ethers';
+import { withSafeChecksum } from '../apps/web/safe-batch.mjs';
 import { compileV4, uniswapV4Artifact } from './compile-v4.mjs';
 import { V4_HOOK_FLAGS, V4_FLAG_MASK } from '../packages/core/v4-model.mjs';
 // One set of rules (#234): the start cap, the approval's age limit and the plan-versus-chain comparison come from the gate.
@@ -215,8 +216,8 @@ export function safeBatch(plan, record) {
   const i = new Interface(FACTORY_WRITE), f = record.contracts.factory;
   const usdcVirtual = usdcVirtualQuote(plan);
   const calls = [['setHook', [record.contracts.hook]], ['configureUsdPricing', [plan.usdFeed, plan.feedMaxAge, plan.usdc]], ['approveQuote', [plan.usdc, usdcVirtual]], ['setGuardian', [plan.guardian]], ['setDailyLaunchCap', [plan.dailyLaunchCap]]];
-  return { version: '1.0', chainId: String(plan.chainId), createdAt: Date.now(), meta: { name: `ELPIDA V2 ${plan.name} wiring`, description: `Plan ${record.planSha256.slice(0, 16)}: connect the hook, set USD pricing, approve USDC ($25,000 virtual quote), name the guardian, cap launches at ${plan.dailyLaunchCap} a day.`, txBuilderVersion: '1.16.5', createdFromSafeAddress: plan.treasury },
-    transactions: calls.map(([name, args]) => ({ to: f, value: '0', data: i.encodeFunctionData(name, args), contractMethod: null, contractInputsValues: null, description: `${name}(${args.join(', ')})` })) };
+  return withSafeChecksum({ version: '1.0', chainId: String(plan.chainId), createdAt: Date.now(), meta: { name: `ELPIDA V2 ${plan.name} wiring`, description: `Plan ${record.planSha256.slice(0, 16)}: connect the hook, set USD pricing, approve USDC ($25,000 virtual quote), name the guardian, cap launches at ${plan.dailyLaunchCap} a day.`, txBuilderVersion: '1.16.5', createdFromSafeAddress: plan.treasury },
+    transactions: calls.map(([name, args]) => ({ to: f, value: '0', data: i.encodeFunctionData(name, args), contractMethod: null, contractInputsValues: null, description: `${name}(${args.join(', ')})` })) }, id);
 }
 
 /** After the Safe batch: checks the wiring on chain and marks the record ready. */

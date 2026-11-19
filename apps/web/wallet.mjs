@@ -7,8 +7,8 @@ import { V4_MODEL } from '/v4-model.mjs';
 import { V2_MODEL } from '/v2-economics.mjs';
 import { deployV2, deployV2UsdcDistributors, setupTestPayoutStable, approveV2StockList, launchV2, approveV2Stock, claimCreatorSplit, claimIdentityRow, claimV2CreatorFees } from './v2-launchpad.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
-import { stockPairsOff } from '/pairs.mjs';
-import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress } from '/vendor/ethers.js';
+import { stockPairsBlocked } from '/pairs.mjs';
+import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress, id as keccakText } from '/vendor/ethers.js';
 import { routerAbi, swapCalldata } from '/dex-router.mjs';
 
 import { normalizeMetadata, withSavedMetadata } from './metadata.mjs';
@@ -248,7 +248,7 @@ export class TestnetWallet {
     return {
       native: { assets: [{ id: 'native', symbol: native, name: this.net.nativeCurrency.name, decimals: 18, ...fee, curve: this.previewCurve() }] },
       usdc: approved('usdc').length ? { assets: approved('usdc') } : { assets: [], unavailable: !this.dex ? 'USDC trading pairs need a DEX graduation adapter on this network.' : 'USDC trading setup is incomplete on this deployment. The owner can finish it here once; it then becomes available to everyone.' },
-      xstock: stockPairsOff(this.net.chainId) ? { assets: [], unavailable: stockPairsOff(this.net.chainId) } : approved('xstock').length ? { assets: approved('xstock') } : { assets: [], unavailable: missing('xstock') },
+      xstock: stockPairsBlocked(this.net.chainId) ? { assets: [], unavailable: stockPairsBlocked(this.net.chainId) } : approved('xstock').length ? { assets: approved('xstock') } : { assets: [], unavailable: missing('xstock') },
       token: approved('token').length ? { assets: approved('token') } : { assets: [], unavailable: missing('token') },
     };
   }
@@ -279,7 +279,7 @@ export class TestnetWallet {
       steps.push({ to: factory.target, data: factory.interface.encodeFunctionData('approveQuote', [usdc, usdQuoteTemplate(await factory.startFdvUsd(), 6), adapter]) });
     }
     if (!steps.length) return null;
-    return safeBatch({ chainId: this.net.chainId, safe: await factory.treasury(), name: `Elpida ${this.net.name} launchpad setup`, description: `Treasury-only setup for launchpad ${factory.target}: ${steps.length} step(s), activating USD pricing and approving USDC trading.`, transactions: steps });
+    return safeBatch({ keccak: keccakText, chainId: this.net.chainId, safe: await factory.treasury(), name: `Elpida ${this.net.name} launchpad setup`, description: `Treasury-only setup for launchpad ${factory.target}: ${steps.length} step(s), activating USD pricing and approving USDC trading.`, transactions: steps });
   }
   /**
    * Operator panel only: approve a real tokenized stock as a trading pair on a mainnet launchpad, after every registry
@@ -306,7 +306,7 @@ export class TestnetWallet {
     const treasury = await factory.treasury(), call = { to: factory.target, data: factory.interface.encodeFunctionData('approveQuote', [record.address, virtualQuote, adapter]) };
     const price = formatUnits(priceUsd8, 8);
     if (treasury.toLowerCase() !== this.address.toLowerCase())
-      return { safeBatch: safeBatch({ chainId: this.net.chainId, safe: treasury, name: `Approve ${record.symbol} on ${this.net.name}`, description: `approveQuote(${record.symbol}) on launchpad ${factory.target}: starting valuation fixed at ${price} USD per ${record.symbol}, adapter ${adapter}.`, transactions: [call] }),
+      return { safeBatch: safeBatch({ keccak: keccakText, chainId: this.net.chainId, safe: treasury, name: `Approve ${record.symbol} on ${this.net.name}`, description: `approveQuote(${record.symbol}) on launchpad ${factory.target}: starting valuation fixed at ${price} USD per ${record.symbol}, adapter ${adapter}.`, transactions: [call] }),
         message: `The ${record.symbol} approval file is downloading. Import it in the Safe Transaction Builder for the treasury signers. Price used: $${price}.` };
     const result = await this.wait(factory.approveQuote(record.address, virtualQuote, adapter), `Approve ${record.symbol} as a trading pair at $${price}…`);
     this.pairsScanned = undefined; this.approvedQuotes = undefined; await this.loadPairs(factory);
@@ -1091,7 +1091,7 @@ export class TestnetWallet {
       const details = normalizeMetadata(body);
       const kind = body.pair ?? 'native';
       if (!['native','usdc','xstock','token'].includes(kind)) throw new Error('Choose a trading pair.');
-      if (kind === 'xstock' && stockPairsOff(this.net.chainId)) throw new Error(`${stockPairsOff(this.net.chainId)} Nothing was submitted.`);
+      if (kind === 'xstock' && stockPairsBlocked(this.net.chainId)) throw new Error(`${stockPairsBlocked(this.net.chainId)} Nothing was submitted.`);
       const nativePair = kind === 'native', paired = !nativePair;
       const asset = paired ? (this.approvedQuotes ?? []).find(a => a.kind === kind && a.address.toLowerCase() === String(body.quoteAsset ?? '').toLowerCase()) : null;
       if (paired && !asset) throw new Error(this.pairOptions()[kind].unavailable ?? 'Choose an approved asset for this pair.');

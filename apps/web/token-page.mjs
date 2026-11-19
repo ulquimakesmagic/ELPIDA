@@ -10,6 +10,7 @@ import { withWalletTimeout, walletErrorText } from './wallet.mjs';
 import { compactTradeAmount, exceedsRemaining } from './amounts.mjs';
 import {terminalChart} from './terminal-chart.mjs';
 import { testStockStatus } from './test-stock.mjs';
+import { stockRegionOff } from '/pairs.mjs';
 const STOCK_LABELS = { fresh: 'Price fresh', 'market-closed': 'Market closed', stale: 'Price stale', 'corporate-action': 'Corporate action', paused: 'Issuer paused', outage: 'No price' };
 import {holderTerminal} from './holder-terminal.mjs';
 import {tokenWalletImage,watchEvmToken} from './wallet-token.mjs';
@@ -454,6 +455,8 @@ export function tradePanel(ctx, token, { dex, solana }) {
     if (!(Number(amount.value) > 0)) { error.textContent = 'Enter an amount greater than zero.'; amount.focus(); return; }
     if (!quoteReady || submitting) { quote(); return; }
     if (ctx.mode === 'testnet' && !ctx.wallet.address) { error.textContent = 'Connect your wallet first.'; return; }
+    // Issuer eligibility: a visitor in a blocked region may sell but not buy into a stock-paired token.
+    if (side === 'buy' && token.pair === 'xstock' && stockRegionOff()) { error.textContent = `${stockRegionOff()} Selling stays open.`; return; }
     submitting = true; updateSubmit();
     try { if(routed()){if(!nativeQuote)throw new Error('Get a fresh native quote.');await ctx.run('trade-native-pair',nativeQuote);}else await ctx.run(side, { token: token.address, amount: amount.value, slippage: slippage.value }); }
     catch (e) { error.textContent = errorText(e); }
