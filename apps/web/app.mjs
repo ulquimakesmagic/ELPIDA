@@ -505,8 +505,9 @@ async function init() {
   document.addEventListener('visibilitychange',()=>{if(document.visibilityState==='visible')liveTrades?.resume();else liveTrades?.pause();});
   if (mainnetSite()) {
     const names = config.testnets.map(n => n.name).join(', ') || 'Mainnet';
-    $('#footer-note').textContent = `${names} mainnet: real funds. The contracts are not independently audited; new launches have a daily cap and a launch stop.`;
-    $('#how-network-note').textContent = `Elpida runs on ${names} mainnet with real funds. The contracts have not been independently audited. ${config.v2Keeper?.distributions ? 'Creator rewards, the trader airdrop, holder rewards and the flywheel are paid out by the Elpida keeper.' : 'Creator rewards are paid from day one; the trader airdrop, holder rewards and flywheel shares build up in their contracts and are not paid out yet.'}`;
+    // The mainnet notice lives on How it works, not in the footer (Malik, 20 Nov).
+    $('#footer-note').textContent = ''; $('#footer-note').hidden = true;
+    $('#how-network-note').textContent = `Elpida runs on ${names} mainnet with real funds. The contracts have not been independently audited; new launches have a daily cap and a launch stop. ${config.v2Keeper?.distributions ? 'Creator rewards, the trader airdrop, holder rewards and the flywheel are paid out by the Elpida keeper.' : 'Creator rewards are paid from day one; the trader airdrop, holder rewards and flywheel shares build up in their contracts and are not paid out yet.'}`;
   } else if (config.solana?.mainnet) {
     $('#footer-note').textContent = 'Solana mainnet beta: real funds, new contracts. Other networks are test networks with no monetary value.';
     $('#how-network-note').textContent = 'Solana runs as a mainnet beta with real funds and new, unaudited contracts; launching is invite-only while the beta gate is on. The other networks are test networks.';

@@ -11,6 +11,7 @@ import {configuredGraduationKeeper} from './graduation-keeper.mjs';
 import {configuredBuybackKeeper} from './buyback-keeper.mjs';
 import {configuredFlywheelKeeper} from './flywheel-keeper.mjs';
 import {createStockCatalog} from './stock-catalog.mjs';
+import {createCoinbaseStocks} from './coinbase-stocks.mjs';
 import {createOndoStatus} from './ondo-status.mjs';
 import {createDexscreener} from './dexscreener.mjs';
 import {testnetDexes} from '../../packages/core/uniswap.mjs';
@@ -261,7 +262,7 @@ export function createRpcProxy(targets, { perSecond = 15, burst = 60 } = {}) {
   };
 }
 
-export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1', circleFunding = null, stockCatalog: injectedStockCatalog, ondoStatus: injectedOndoStatus, dexscreener: injectedDexscreener = null } = {}) {
+export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1', circleFunding = null, stockCatalog: injectedStockCatalog, coinbaseStocks: injectedCoinbaseStocks, ondoStatus: injectedOndoStatus, dexscreener: injectedDexscreener = null } = {}) {
   const dataPrefix=port===3000||process.env.RAILWAY_ENVIRONMENT_NAME?'':`preview-${port}-`;
   const dataDir=resolve(process.env.ELPIDA_DATA_DIR??process.env.RAILWAY_VOLUME_MOUNT_PATH??fileURLToPath(new URL('../../local-data/',import.meta.url)));
   const dataFile=name=>resolve(dataDir,dataPrefix+name);
@@ -325,6 +326,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // Ondo stock catalog and issuer icons for the launch picker (display only; apps/api/stock-catalog.mjs). Tests inject
   // their own; a test server (port 0) never fetches.
   const stockCatalog=injectedStockCatalog??createStockCatalog({dataDir:port===0?null:resolve(dataDir,dataPrefix+'stock-catalog'),autoRefresh:port!==0,log:e=>console.log(JSON.stringify(e))}).start();
+  // Coinbase Tokenized Stocks (Base): names and icons (apps/api/coinbase-stocks.mjs). Tests inject a fake.
+  const coinbaseStocks=injectedCoinbaseStocks??createCoinbaseStocks({autoRefresh:port!==0,log:e=>console.log(JSON.stringify(e))}).start();
   // Ondo GM pauses and sValue changes for token pages (display only; apps/api/ondo-status.mjs). Off until ONDO_API_KEY is set.
   // DexScreener pair lookups for mainnet token page charts (apps/api/dexscreener.mjs).
   const dexscreener=injectedDexscreener??createDexscreener();
@@ -577,6 +580,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/public/stock-list'){const key=String(url.searchParams.get('network')??'');if(!/^[a-z0-9-]{2,40}$/.test(key))return send(400,{error:'Choose a network.'});let list=null;try{list=JSON.parse(readFileSync(fileURLToPath(new URL(`../../config/stocks/${key}.json`,import.meta.url)),'utf8'));}catch{list=null;}res.setHeader('Cache-Control','public, max-age=300');return list?send(200,list):send(404,{error:'No verified stock list for this network yet.'});}
         if(url.pathname==='/api/public/dex-chart'){const network=String(url.searchParams.get('network')??''),token=String(url.searchParams.get('token')??'');if(!/^[a-z0-9-]{2,40}$/.test(network)||!/^0x[0-9a-fA-F]{40}$/.test(token))return send(400,{error:'Choose a network and token.'});const r=await dexscreener.lookup(network,token);res.setHeader('Cache-Control','public, max-age=120');return send(200,r);}
         if(url.pathname==='/api/public/stock-status'){const sym=url.searchParams.get('symbol');if(sym!=null&&!/^[A-Za-z0-9.]{1,16}on$/.test(sym))return send(400,{error:'Unknown stock symbol.'});res.setHeader('Cache-Control','public, max-age=300');return send(200,ondoStatus.summary(sym));}
+        if(url.pathname==='/api/public/coinbase-stocks'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,coinbaseStocks.summary());}
+        {const m=url.pathname.match(/^\/api\/public\/coinbase-stock-icon\/([A-Z.]{1,8}c)\.png$/);if(m){const img=await coinbaseStocks.icon(m[1]);if(!img)return send(404,{error:'No icon for this stock.'});res.writeHead(200,{'Content-Type':img.type,'Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});return res.end(img.bytes);}}
         if(url.pathname==='/api/public/stock-catalog'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,stockCatalog.summary());}
         const stockIcon=url.pathname.match(/^\/api\/public\/stock-icon\/([A-Z0-9.]{1,12}on)\.png$/);
         if(stockIcon){const bytes=await stockCatalog.icon(stockIcon[1]);if(!bytes)return send(404,{error:'No icon for this stock.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});return res.end(bytes);}
@@ -788,7 +793,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
   bootPhase('listening');
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();ondoStatus.stop?.();await v2Keeper.close();solanaRewards?.stop();await solanaV2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);clearInterval(memoryTimer);clearTimeout(priceHistoryStart);clearInterval(priceHistoryTimer);clearTimeout(homeCardsStart);clearInterval(homeCardsTimer);try{priceHistory.close();}catch{};try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();coinbaseStocks.stop?.();ondoStatus.stop?.();await v2Keeper.close();solanaRewards?.stop();await solanaV2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);clearInterval(memoryTimer);clearTimeout(priceHistoryStart);clearInterval(priceHistoryTimer);clearTimeout(homeCardsStart);clearInterval(homeCardsTimer);try{priceHistory.close();}catch{};try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {

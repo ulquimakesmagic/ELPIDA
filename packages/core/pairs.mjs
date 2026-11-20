@@ -55,10 +55,10 @@ export function testPairReference(token,now=Math.floor(Date.now()/1000)){
 const TEST_PAIR_START_FDV_USD=50;
 
 export const PAIR_INFO = {
-  native: { title: 'Native coin', glyph: 'coins', note: symbol => `Buyers pay in ${symbol}, the network’s own coin.` },
-  usdc: { title: 'USDC', glyph: 'coins', note: () => 'Buyers pay in USDC. The curve and graduated pool stay paired with USDC; network gas is separate.' },
-  xstock: { title: 'Tokenized stock', glyph: 'chart-candlestick', note: () => 'Buyers pay in a tokenized stock from the network’s designated provider. On test networks this is a simulated stock with no value; live provider assets stay off until verified.' },
-  token: { title: 'Paired token', glyph: 'layers', note: () => 'Buyers pay in another approved token, such as a graduated Elpida token.' },
+  native: { title: 'Native coin', glyph: 'coins', note: symbol => `Buyers pay in ${symbol}.` },
+  usdc: { title: 'USDC', glyph: 'coins', note: () => 'Buyers pay in USDC.' },
+  xstock: { title: 'Tokenized stock', glyph: 'chart-candlestick', note: () => 'Buyers pay in a tokenized stock. Choose it below.' },
+  token: { title: 'Paired token', glyph: 'layers', note: () => 'Buyers pay in another approved token.' },
 };
 
 /**

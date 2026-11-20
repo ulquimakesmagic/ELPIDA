@@ -49,14 +49,17 @@ export function stockIdentity(symbol, { provider = null, name = null, catalog = 
   let ticker = raw, issuer = null, test = provider === 'ondo-test';
   const ondo = raw.match(/^(t?)([A-Z.]{1,6})on$/);
   const xstock = raw.match(/^([A-Z.]{1,6})x$/);
+  // Coinbase Tokenized Stocks on Base (AAPLc): issuer icons from /api/public/coinbase-stock-icon (apps/api/coinbase-stocks.mjs).
+  const coinbase = provider === 'coinbase' || /\(Coinbase\)/.test(String(name ?? '')) ? raw.match(/^([A-Z.]{1,8})c$/) : null;
   if (ondo) { ticker = ondo[2]; test = test || ondo[1] === 't'; issuer = 'Ondo'; }
+  else if (coinbase) { ticker = coinbase[1]; issuer = 'Coinbase'; }
   else if (xstock) { ticker = xstock[1]; issuer = 'xStocks'; }
   const known = STOCK_UNDERLYINGS[ticker], listed = issuer === 'Ondo' ? catalog?.get?.(`${ticker}on`) : null;
   return {
     symbol: raw, ticker, issuer: test ? `${issuer ?? 'Stock'} (test)` : issuer, test,
     company: listed?.name ?? known?.company ?? (name || null), type: listed?.type ?? known?.type ?? 'Stock',
     tone: known?.tone ?? stockTone(ticker),
-    logo: issuer === 'Ondo' ? stockIconUrl(raw) : STOCK_LOGOS.has(ticker) ? `/assets/stocks/${ticker}.png` : null,
+    logo: issuer === 'Ondo' ? stockIconUrl(raw) : issuer === 'Coinbase' ? `/api/public/coinbase-stock-icon/${ticker}c.png` : STOCK_LOGOS.has(ticker) ? `/assets/stocks/${ticker}.png` : null,
   };
 }
 

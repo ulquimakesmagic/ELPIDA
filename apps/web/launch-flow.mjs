@@ -168,7 +168,7 @@ export function renderLaunch(ctx) {
     return [];
   };
   const sameAsset = (a, b) => (solana() ? String(a ?? '') === String(b ?? '') : String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase());
-  const publicRewardAssets = () => solana() ? solanaRewardAssets() : [{ address: '0x0000000000000000000000000000000000000000', symbol: nativeSymbol() }, ...(ctx.wallet?.approvedQuotes ?? []).filter(a => a.kind !== 'xstock' || !stockPairsBlocked(net()?.chainId)).map(a => ({ address: a.address, symbol: `${a.symbol} · ${a.address.slice(0, 6)}…${a.address.slice(-4)}` }))]
+  const publicRewardAssets = () => solana() ? solanaRewardAssets() : [{ address: '0x0000000000000000000000000000000000000000', symbol: nativeSymbol(), name: net()?.nativeCurrency?.name ?? nativeSymbol(), kind: 'native' }, ...(ctx.wallet?.approvedQuotes ?? []).filter(a => a.kind !== 'xstock' || !stockPairsBlocked(net()?.chainId)).map(a => ({ address: a.address, symbol: a.symbol, name: a.name, kind: a.kind, stock: a.stock }))]
     .filter(a => a.address.toLowerCase() !== String(draft.pair === 'native' ? '0x0000000000000000000000000000000000000000' : selectedAsset()?.address ?? '').toLowerCase());
   const v2Missing = () => !!draft.chain && draft.chain !== 'local' && !v2Offered();
   const modelsOffered = () => v4Offered() || v2Offered();
@@ -236,7 +236,7 @@ export function renderLaunch(ctx) {
     if (v2Chosen()) {
       // V2: virtual token 1.25 B and virtual quote = start × 5/4 (Model 10's is start × 10/9 at the same test start), the
       // creator's own fee, no token tax; the hook refuses a first buy above 3% of supply.
-      const net = buy * (1 - Number(draft.feeBps ?? V2.defaultFeeBps) / 10000), vq = curve.vq * 1.125, tokens = 1.25e9 * net / (vq + net), cap = 3e7;
+      const net = buy * (1 - Number(draft.feeBps ?? V2.defaultFeeBps) / 10000), vq = curve.v2vq ?? curve.vq * 1.125, tokens = 1.25e9 * net / (vq + net), cap = 3e7;
       return { tokens: Math.min(tokens, cap), exceeds: tokens > cap, completes: false, share: Math.min(tokens, cap) / 1e9 * 100 };
     }
     const net = buy * (1 - ((curve.feeBps ?? 125)+tax*100) / 10000), tokens = curve.vt * net / (curve.vq + net);
@@ -362,7 +362,7 @@ export function renderLaunch(ctx) {
       const ownerSetup=kind==='usdc'&&!!reason&&draft.chain!=='local'&&!solana()&&connected()&&ctx.state?.pricing?.owner&&ctx.wallet.dex&&ctx.wallet.feeUsdc;
       const finish=ownerSetup?h('a.btn.btn-secondary.btn-sm',{href:'#/monkey?tab=pairs'},'Approve in the operator panel'):null;
       return h('div.choice', { 'data-unavailable': reason ? 'true' : undefined }, h('label',h('input', { type: 'radio', name: 'pair', value: kind, checked: draft.pair === kind, disabled: !!reason, on: { change: () => { draft.pair = kind; draft.quoteAsset = group.assets[0].id; draft.firstBuy = defaultBuy(kind, group.assets[0]); save(); draw(); } } }),
-        h('span.choice-title', pairIcon(kind, group), info.title, symbols ? h('span.chip', { title: symbols }, symbols) : null), h('p', ownerSetup?'This launchpad has not approved USDC yet. Pair approvals are made by the treasury in the operator panel (Pairs).':reason ?? info.note(kind === 'native' ? group.assets[0].symbol : ''))),finish);
+        h('span.choice-title', pairIcon(kind, group), info.title, symbols && kind !== 'xstock' ? h('span.chip', { title: symbols }, symbols) : null), h('p', ownerSetup?'This launchpad has not approved USDC yet. Pair approvals are made by the treasury in the operator panel (Pairs).':reason ?? info.note(kind === 'native' ? group.assets[0].symbol : ''))),finish);
     }));
     const asset = selectedAsset(), group = pairs?.[draft.pair];
     const balanceOf = a => ctx.state?.pairBalances?.[a.id] ?? (draft.pair === 'native' ? ctx.state?.nativeBalance : null);
@@ -427,7 +427,9 @@ export function renderLaunch(ctx) {
           : field({ label: 'Distribution threshold', control: h('div.input-affix', input('thresholdUsd', { type: 'number', min: '0.01', max: '1000000', step: 'any', onInput: e => { draft.thresholdUsd = e.target.value; save(); drawThresholdHint(); } }), h('span.affix', 'USD')), hint: thresholdHint }),
         field({ label: 'Minimum token holding', control: h('div.input-affix', input('minimumHolding', { type: 'number', min: '0', step: 'any' }), h('span.affix', (draft.symbol || 'tokens').toUpperCase())), hint: 'Wallets holding less are skipped. Pools, the curve and treasuries never qualify.' })),
         field({ label: 'Minimum holding value', control: h('div.input-affix', input('minimumHoldingUsd', { type: 'number', min: '0', max: '100000', step: 'any', placeholder: '20' }), h('span.affix', 'USD')), hint: 'Holders must also hold at least this much in USD, converted to tokens at each distribution using a fresh price. The larger of the two minimums applies. If no fresh USD price exists for the pair, distributions wait instead of guessing.' }));
-      if (draft.rewardMode === 'paired') settings.append(field({ label: 'Reward asset', control: h('select.select', { on: { change: e => { draft.rewardToken = solana() ? e.target.value : e.target.value.toLowerCase(); save(); drawPreview(); } } }, (local ? rewardData?.assets ?? [] : publicRewardAssets()).map(a => h('option', { value: a.address, selected: sameAsset(a.address, draft.rewardToken) }, a.symbol))), hint: 'The asset holders receive. It can differ from the trading pair; if it is the same, fees are paid directly without a swap.' }));
+      // EVM public networks: the same icon dropdown as the stock pair (stock-picker.mjs), coins and stocks together.
+      if (draft.rewardMode === 'paired' && !local && !solana() && publicRewardAssets().length) settings.append(field({ label: 'Reward asset', control: stockPicker({ assets: publicRewardAssets().map(a => ({ ...a, id: a.address.toLowerCase() })), selectedId: String(draft.rewardToken ?? '').toLowerCase(), label: 'Reward asset', noun: 'asset', emptyText: 'No asset matches.', onSelect: a => { draft.rewardToken = a.address.toLowerCase(); save(); draw(); } }), hint: 'The asset holders receive. It can differ from the trading pair; if it is the same, fees are paid directly without a swap.' }));
+      else if (draft.rewardMode === 'paired') settings.append(field({ label: 'Reward asset', control: h('select.select', { on: { change: e => { draft.rewardToken = solana() ? e.target.value : e.target.value.toLowerCase(); save(); drawPreview(); } } }, (local ? rewardData?.assets ?? [] : publicRewardAssets()).map(a => h('option', { value: a.address, selected: sameAsset(a.address, draft.rewardToken) }, a.symbol))), hint: 'The asset holders receive. It can differ from the trading pair; if it is the same, fees are paid directly without a swap.' }));
       settings.append(callout('', 'info', 'Holder payouts are weighted by each wallet’s eligible token balance at the recorded snapshot, not by total supply.'));
     } else settings.append(allocationEditor());
     const canTax = local ? !!ctx.config.taxLaunch?.available : !!ctx.wallet?.net?.taxDeployment;
@@ -518,7 +520,7 @@ export function renderLaunch(ctx) {
         connected()&&draft.chain!=='local'?[h('dt','Available for native payment and gas'),h('dd',`${number(ctx.state?.nativeBalance??0,8)} ${nativeSymbol()}`)]:null),
         connected()&&draft.chain!=='local'&&Number(ctx.state?.nativeBalance)===0?callout('warn','info',`This wallet has no ${nativeSymbol()} on ${net()?.name}. Add native currency for approval and launch gas, even when both payments use USDC.`):null,
         e?.completes ? callout('warn', 'triangle-alert', 'This amount reaches the curve limit. An amount above the remaining curve is rejected. Reduce your first purchase to leave supply for the community.') : null,
-        !e ? h('p.hint', 'This network does not publish the curve for this pair before launch, so the exact amount appears on the token page.') : null].filter(Boolean));
+        !e && buyAmount() > 0 ? h('p.hint', 'This pair\'s price is not available right now, so the exact amount appears on the token page.') : null].filter(Boolean));
       drawPreview();
     };
     conversionDrawn = drawEstimate;
