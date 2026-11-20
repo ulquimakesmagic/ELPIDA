@@ -41,3 +41,10 @@ test('the wallet offers V2 pairs on mainnet and the launch page loads them; laun
   assert.match(v2, /launchStock\(w, body\.quoteAsset\)/);
   assert.match(flow, /'Mainnet beta: the contracts are new and not audited yet\.'/);
 });
+
+test('the launch flow offers no token-to-token pair on any network; a saved token draft falls back to native', () => {
+  const flow = readFileSync(new URL('../apps/web/launch-flow.mjs', import.meta.url), 'utf8');
+  assert.match(flow, /const PAIR_KINDS = ALL_PAIR_KINDS\.filter\(k => k !== 'token'\);/);
+  assert.match(flow, /if \(!PAIR_KINDS\.includes\(draft\.pair\)\) \{ draft\.pair = 'native';/);
+  assert.doesNotMatch(flow, /another approved token/);
+});

@@ -9,13 +9,16 @@ import { normalizeRewardPolicy, recipientBps } from './reward-policy.mjs';
 import { launchProfile } from './launch-capabilities.mjs';
 import { STRATEGIES } from './rewards-view.mjs';
 import { usdcFunding } from './usdc-funding.mjs';
-import { PAIR_KINDS, PAIR_INFO, EQUITY_PROVIDERS, issuerNotice, stockPairsBlocked } from '/pairs.mjs';
+import { PAIR_KINDS as ALL_PAIR_KINDS, PAIR_INFO, EQUITY_PROVIDERS, issuerNotice, stockPairsBlocked } from '/pairs.mjs';
 import { stockPicker, loadStockCatalog, stockCatalog } from './stock-picker.mjs';
 import { curveShape, DEX_MODEL, BETA_MODEL, BASE_FEE_BPS, LOCAL_START_FDV_USD } from '/curve-model.mjs';
 import { v2Deployment } from './v4-launchpad.mjs';
 import { splitPreview } from './v2-launchpad.mjs';
 import { V2, V2_MODEL } from '/v2-economics.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
+// Token-to-token launches were removed from the launch flow (20 November 2026): a new token pairs with the native
+// coin, USDC or a tokenized stock. Existing token-paired tokens keep trading.
+const PAIR_KINDS = ALL_PAIR_KINDS.filter(k => k !== 'token');
 
 const DRAFT_KEY = 'elpida:launch-draft';
 const STEPS = [
@@ -383,7 +386,7 @@ export function renderLaunch(ctx) {
         h('p', (solana() ? 'A bonding curve that graduates at ×5 into a Raydium pool whose liquidity is locked for good; the pool\'s fees are shared the same way. You choose' : 'Liquidity locked from the first trade in one Uniswap v4 pool. You choose')+' the trading fee (up to 4%), fixed for good. Every fee is shared: 30% to you, 30% to traders as a monthly airdrop, 10% buys and burns top tokens, 10% to holders, 20% to Elpida. First buy capped at 3% of supply. '+(solana() ? 'SOL pair. ' : net()?.mainnet ? 'Native, USDC or approved stock pairs. ' : 'Native, USDC or test-stock pairs (stocks once the operator approves them for V2). ')+(net()?.mainnet ? 'Mainnet beta: the contracts are new and not audited yet.' : 'Not audited; test networks only.')), h('span.chip', net()?.mainnet ? 'Beta' : 'Test'))) : null,
       v2Missing() ? callout('warn', 'info', `ELPIDA V2 is not on ${net()?.name ?? 'this network'} yet, so new tokens cannot launch here. Choose another network.`) : null,
       v2Chosen() ? feeSelector() : null,
-      h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'Choose native currency, USDC, an oStock (Ondo tokenized stock) or another approved token. Buyers pay in this asset, and the graduated pool keeps the same pair. Pay the $10 launch fee separately in native currency or USDC. Network gas is always paid in the native coin.'), h('p.small.muted', 'Tokenized stocks are issued by third parties such as Ondo Global Markets. Elpida is independent and not affiliated with or endorsed by Ondo or any issuer. Stock pairs are not available to US persons (Terms, “Tokenized stock pairs”).'), pairGrid, assetBox),
+      h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'Choose native currency, USDC or a tokenized stock. Buyers pay in this asset, and the graduated pool keeps the same pair. Pay the $10 launch fee separately in native currency or USDC. Network gas is always paid in the native coin.'), h('p.small.muted', 'Tokenized stocks are issued by third parties such as Ondo Global Markets. Elpida is independent and not affiliated with or endorsed by Ondo or any issuer. Stock pairs are not available to US persons (Terms, “Tokenized stock pairs”).'), pairGrid, assetBox),
       draft.chain!=='local'&&(solana()?!solanaPriced():!ctx.config.oracles?.[draft.chain]?.available)?callout('warn','info',solana()?'USD pricing is not active on this Solana cluster yet. It turns on when the team upgrades the program and runs the deploy (solana-upgrade.cmd). Existing tokens can still be browsed and traded.':'Verified launch pricing is pending configuration on this network. Use simulation to test creation.') : null,
       error,
     ], validate: () => {
