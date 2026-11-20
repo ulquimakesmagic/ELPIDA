@@ -19,10 +19,9 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createInterface } from 'node:readline/promises';
 import { Contract, ContractFactory, JsonRpcProvider, Wallet, getAddress } from 'ethers';
 import { compileV4 } from './compile-v4.mjs';
-import { askHidden, deployerKey } from './v2-mainnet-deploy.mjs';
+import { askHidden, askTyped, deployerKey } from './v2-mainnet-deploy.mjs';
 import { ONDO_NETWORKS, adaptedCandidates as chainlinkCandidates } from './ondo-stock-feeds.mjs';
 import { HERMES, PYTH_ID as ID, pythHex as hex, hermesJson, latestUpdate } from '../apps/api/pyth-hermes.mjs';
 export { HERMES, latestUpdate };
@@ -143,12 +142,11 @@ async function main() {
     for (const c of checked) console.log(c.ok ? `ok   ${c.symbol}: $${c.priceUsd.toFixed(2)} (${c.underlyingUsd.toFixed(4)} × ${c.multiplier.toFixed(6)}), ${Math.round(c.ageSec / 3600)} h old${c.storedAgeSec == null ? ', not stored in Pyth Core yet' : `, stored ${Math.round(c.storedAgeSec / 3600)} h ago`}${c.paused ? ', PAUSED by Ondo now' : ''}` : `FAIL ${c.symbol}: ${c.reason}`);
     console.log(`${good.length} of ${entries.length} pass.`); provider.destroy(); return;
   }
-  const rl = createInterface({ input: process.stdin, output: process.stdout });
   const recordPath = join(root, 'deployments', `${key}-ondo-pyth-feeds.json`);
   const record = existsSync(recordPath) ? JSON.parse(readFileSync(recordPath, 'utf8')) : { network: key, chainId: net.chainId, pyth, sharesOracle: net.sharesOracle, maxConfBps: MAX_CONF_BPS, feeds: {} };
   if (cmd === 'push') {
     const ids = [...new Set((Object.keys(record.feeds).length ? Object.values(record.feeds) : good).map(e => e.pythId))];
-    const answer = await rl.question(`Store the latest Pyth prices for ${ids.length} stocks in Pyth Core on ${net.name} (${Math.ceil(ids.length / 50)} transactions, a small fee each)? Type PUSH to continue: `); rl.close();
+    const answer = await askTyped(`Store the latest Pyth prices for ${ids.length} stocks in Pyth Core on ${net.name} (${Math.ceil(ids.length / 50)} transactions, a small fee each)? Type PUSH to continue: `);
     if (answer.trim() !== 'PUSH') { console.log('Nothing was sent.'); process.exit(1); }
     const signer = new Wallet(deployerKey(process.env.ELPIDA_MAINNET_DEPLOYER_KEY ?? await askHidden('Wallet private key for the fees (hidden, then Enter): ')), provider);
     await pushPythPrices({ signer, pyth, ids, log: m => console.log(m) }); provider.destroy(); return;
@@ -156,12 +154,11 @@ async function main() {
   const todo = good.filter(e => !record.feeds[e.symbol]?.adapter);
   if (!todo.length) console.log('Every passing stock already has its feed.');
   else {
-    const answer = await rl.question(`Deploy ${todo.length} Pyth price feed contracts to ${net.name} with real gas? Type DEPLOY to continue: `); rl.close();
+    const answer = await askTyped(`Deploy ${todo.length} Pyth price feed contracts to ${net.name} with real gas? Type DEPLOY to continue: `);
     if (answer.trim() !== 'DEPLOY') { console.log('Nothing was deployed.'); process.exit(1); }
     const signer = new Wallet(deployerKey(process.env.ELPIDA_MAINNET_DEPLOYER_KEY ?? await askHidden('Deployer private key (hidden, then Enter): ')), provider);
     await deployPythFeeds({ signer, pyth, sharesOracle: net.sharesOracle, entries: todo, record, save: r => writeFileSync(recordPath, JSON.stringify(r, null, 2) + '\n'), log: m => console.log(m) });
   }
-  rl.close();
   const chainlinkPath = join(root, 'deployments', `${key}-ondo-feeds.json`);
   const chainlink = existsSync(chainlinkPath) ? JSON.parse(readFileSync(chainlinkPath, 'utf8')) : null;
   const out = join(root, 'config', 'stocks', 'candidates', `${key}-ondo-feeds-all.json`);
