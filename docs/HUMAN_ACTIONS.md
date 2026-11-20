@@ -873,3 +873,11 @@ or buy into a stock-paired token. Selling stays open. Optional Railway variable 
 reads https://api.gm.ondo.finance/v1/status/assets every 15 minutes, and token pages paired with an Ondo stock show any
 upcoming or active pause and whether the sValue changes. Ondo: these pauses stop minting and redemption through Ondo
 only; onchain transfers continue. Leave it off the testnet service.
+
+## Mainnet: holder strategies, X/website allocations and distributions on (20 November 2026)
+
+Malik reversed Option B. The launch page offers every creator reward strategy on mainnet (they need the V2 keeper,
+`ELPIDA_V2_KEEPER_KEY`, which the mainnet service already has). To pay the trader airdrop, holder rewards and flywheel
+as well, set on the **mainnet** service: `ELPIDA_V2_DISTRIBUTIONS=on`. Keep the keeper funded (about 0.005 ETH on Base)
+and its daily gas budget small (`ELPIDA_V2_KEEPER_DAILY_GAS`, default 0.25). The production guard logs a warning, not an
+error. "Buy a reward token" swaps through Uniswap v3 on Base (pinned in packages/core/mainnets.mjs).

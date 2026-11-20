@@ -14,6 +14,9 @@ export const EVM_MAINNETS = Object.freeze([
     nativeCurrency: Object.freeze({ name: 'Ether', symbol: 'ETH', decimals: 18 }), gasFaucet: null,
     // How old the Chainlink ETH/USD answer may be for the site's prices (Base heartbeat 20 minutes, as on Base Sepolia).
     usdMaxAge: 1500,
+    // Uniswap v3 on Base (developers.uniswap.org, Base deployments): the market a "Buy a reward token" holder strategy
+    // swaps the creator share through. SwapRouter02 (no deadline field), as ElpidaV2CreatorRewards expects.
+    rewardDex: Object.freeze({ factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', router: '0x2626664c2603336E57B271c5C0b26F421741e481', weth: '0x4200000000000000000000000000000000000006', routerVersion: 2 }),
   }),
   Object.freeze({
     key: 'bnb-mainnet', planKey: 'bnb-mainnet', name: 'BNB Chain', short: 'BNB', kind: 'evm', mainnet: true,

@@ -76,7 +76,6 @@ test('the production guard passes a ready mainnet site and names what is missing
     ['keeper_missing', { ELPIDA_V2_KEEPER_KEY: undefined }],
     ['keeper_invalid', { ELPIDA_V2_KEEPER_KEY: 'words words words' }],
     ['keeper_mismatch', { ELPIDA_V2_KEEPER_KEY: Wallet.createRandom().privateKey }],
-    ['distributions_on', { ELPIDA_V2_DISTRIBUTIONS: 'on' }],
     ['testnet_worker_keys', { ELPIDA_FLYWHEEL_EVM_KEY: '0x' + '1'.repeat(64) }],
     ['circle_test_funding', { CIRCLE_API_KEY: 'TEST_API_KEY:x' }],
     ['pinning_missing', { PINATA_JWT: undefined }],
@@ -87,15 +86,19 @@ test('the production guard passes a ready mainnet site and names what is missing
     assert.deepEqual(codes(r), [code], code);
     assert.ok(!JSON.stringify(r).includes('alchemy.com/v2/k') && !JSON.stringify(r).includes(keeper.privateKey.slice(2)), 'no setting value is ever reported');
   }
+  const on = productionGuard({ env: { ...goodEnv(), ELPIDA_V2_DISTRIBUTIONS: 'on' }, solana: disabledSolana, evm: evm() });
+  assert.deepEqual(codes(on), [], 'distributions on mainnet: allowed since 20 Nov'); assert.ok(on.warnings.some(w => w.code === 'distributions_on'));
   assert.deepEqual(codes(productionGuard({ env: goodEnv(), solana: { key: 'solana-devnet', mainnet: false, deployment: { programId: 'x' } }, evm: evm() })), ['solana_devnet_on_mainnet_site']);
   assert.match(productionGuard({ env: {}, evm: { mode: 'mainnet', networks: [], skipped: [{ reason: 'Base: the deployment record is "awaiting_safe", not "ready".' }] } }).errors.find(e => e.code === 'evm_mainnet_none').message, /awaiting_safe/);
 });
 
-test('on mainnet the keeper collects fees and pays creator rewards only, on the private RPC, as the plan\'s keeper', () => {
+test('on mainnet the keeper collects fees and pays creator rewards, and distributes only when switched on, on the private RPC, as the plan\'s keeper', () => {
   const logs = [], net = mainnetNetwork(base, record, plan).net;
   const make = env => configuredV2Keeper({ env, networks: [net], indexFor: () => null, prices: () => ({}), path: ':memory:', publicUrl: 'https://elpida.fun', log: e => logs.push(e) });
-  const k = make({ ELPIDA_V2_KEEPER_KEY: keeper.privateKey, ELPIDA_V2_DISTRIBUTIONS: 'on', ELPIDA_RPC_8453: 'https://private.example/rpc' });
-  assert.equal(k.enabled, true); assert.equal(k.network, 'mainnet'); assert.equal(k.distributions, false, 'never distributes on mainnet');
+  const k = make({ ELPIDA_V2_KEEPER_KEY: keeper.privateKey, ELPIDA_RPC_8453: 'https://private.example/rpc' });
+  assert.equal(k.enabled, true); assert.equal(k.network, 'mainnet'); assert.equal(k.distributions, false, 'mainnet distributes only with ELPIDA_V2_DISTRIBUTIONS=on');
+  const on = make({ ELPIDA_V2_KEEPER_KEY: keeper.privateKey, ELPIDA_V2_DISTRIBUTIONS: 'on', ELPIDA_RPC_8453: 'https://private.example/rpc' });
+  assert.equal(on.distributions, true); assert.deepEqual(on.jobs(), ['fees', 'airdrop', 'holder', 'creator', 'flywheel']);
   assert.deepEqual(k.jobs(), ['fees', 'creator']);
   assert.equal(k.workers[0].provider._getConnection().url, 'https://private.example/rpc');
   assert.equal(k.workers[0].usdc, plan.usdc, 'USDC from the deployment plan');

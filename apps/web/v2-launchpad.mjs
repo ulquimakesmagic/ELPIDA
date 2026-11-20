@@ -504,6 +504,8 @@ async function creatorStrategyVault(w, d, { mode, threshold, thresholdUsd, minim
   const m = STRATEGY_MODES[mode];
   if (mode === 'buyback') throw new Error('Buy back and vest is no longer offered. Choose another creator reward strategy.');
   if (m === undefined) throw new Error('Choose a holder strategy. Nothing was submitted.');
+  // The reward swap's market: the network's test DEX, or on mainnet its pinned Uniswap v3 (mainnets.mjs rewardDex).
+  const dex = w.dex ?? w.net.rewardDex ?? null;
   const keeper = w.config.v2Keeper;
   if (!keeper?.address || !keeper.active) throw new Error('Holder strategies need the Elpida V2 keeper, which is not running on this server. Nothing was submitted.');
   // The threshold is set in USD (Malik, 11 November: "$20 by default, editable"); the contract keeps it in the pair asset
@@ -522,10 +524,10 @@ async function creatorStrategyVault(w, d, { mode, threshold, thresholdUsd, minim
   if (m === 2 && (vesting < 86400n || vesting > 3650n * 86400n)) throw new Error('Vesting must be between 1 and 3,650 days. Nothing was submitted.');
   let reward = ZeroAddress, poolFee = 0;
   if (m === 1) {
-    if (!w.dex?.router || !w.dex?.factory || !w.dex?.weth) throw new Error(`There is no Uniswap v3 market on ${w.net.name} for the reward swap. Choose another strategy. Nothing was submitted.`);
+    if (!dex?.router || !dex?.factory || !dex?.weth) throw new Error(`There is no Uniswap v3 market on ${w.net.name} for the reward swap. Choose another strategy. Nothing was submitted.`);
     reward = getAddress(rewardAsset ?? ZeroAddress);
     if (reward.toLowerCase() === feeAsset.toLowerCase()) throw new Error('The reward asset is the trading pair itself: choose "Share fees with holders" instead. Nothing was submitted.');
-    const a = feeAsset === ZeroAddress ? w.dex.weth : feeAsset, b = reward === ZeroAddress ? w.dex.weth : reward, factory = new Contract(w.dex.factory, V3_FACTORY, w.provider);
+    const a = feeAsset === ZeroAddress ? dex.weth : feeAsset, b = reward === ZeroAddress ? dex.weth : reward, factory = new Contract(dex.factory, V3_FACTORY, w.provider);
     let best = 0n;
     for (const fee of [100, 500, 3000, 10000]) {
       const pool = await factory.getPool(a, b, fee); if (/^0x0{40}$/i.test(pool)) continue;
@@ -537,7 +539,7 @@ async function creatorStrategyVault(w, d, { mode, threshold, thresholdUsd, minim
   const response = await fetch('/api/v4-artifacts');
   const art = response.ok ? (await response.json()).v2?.creatorRewards : null;
   if (!art?.bytecode) throw new Error('The holder strategy contract is unavailable on this server. Nothing was submitted.');
-  const deployed = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(keeper.address, d.hook, d.router, w.dex?.router ?? ZeroAddress, w.dex?.weth ?? ZeroAddress, poolFee, m, reward, thresholdRaw, minimumRaw, vesting, thresholdUsdE6, minimumHoldingUsdE6);
+  const deployed = await new ContractFactory(art.abi, art.bytecode, w.signer).deploy(keeper.address, d.hook, d.router, dex?.router ?? ZeroAddress, dex?.weth ?? ZeroAddress, poolFee, m, reward, thresholdRaw, minimumRaw, vesting, thresholdUsdE6, minimumHoldingUsdE6);
   const r = await w.wait(Promise.resolve(deployed.deploymentTransaction()), 'Deploy your holder strategy vault. Its strategy and settings are fixed for good; the Elpida keeper runs it…');
   await walletCaughtUp(w, r?.tx?.nonce);
   const address = await deployed.getAddress();

@@ -689,8 +689,9 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
   // and the distributions switch (default on for test networks; the first mainnet release keeps them off).
   const conf = Number(env.ELPIDA_KEEPER_CONFIRMATIONS), confirmations = Number.isInteger(conf) && conf >= 1 && conf <= 64 ? conf : undefined;
   const dailyGas = /^\d+(\.\d{1,18})?$/.test(String(env.ELPIDA_V2_KEEPER_DAILY_GAS ?? '')) ? parseEther(env.ELPIDA_V2_KEEPER_DAILY_GAS) : undefined;
-  // The first mainnet release never distributes, whatever ELPIDA_V2_DISTRIBUTIONS says (the production guard refuses 'on').
-  const distributions = mainnet ? false : env.ELPIDA_V2_DISTRIBUTIONS === 'off' ? false : env.ELPIDA_V2_DISTRIBUTIONS === 'on' ? true : undefined;
+  // Mainnet distributes only with ELPIDA_V2_DISTRIBUTIONS=on (20 November 2026: Malik turned the airdrop, holder rewards and
+  // flywheel on for mainnet, reversing the creator-rewards-only Option B). Test networks distribute unless it is 'off'.
+  const distributions = mainnet ? env.ELPIDA_V2_DISTRIBUTIONS === 'on' : env.ELPIDA_V2_DISTRIBUTIONS === 'off' ? false : env.ELPIDA_V2_DISTRIBUTIONS === 'on' ? true : undefined;
   const keeper = new V2Keeper({ workers, path, publicUrl, log, gasTarget, gasShareBps, confirmations, dailyGas, network: mainnet ? 'mainnet' : 'testnet', ...(distributions === undefined ? {} : { distributions }) });
   keeper.enabled = true; keeper.address = getAddress(address);
   return keeper;
