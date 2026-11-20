@@ -12,3 +12,8 @@ test('desktop first-view rules size the chart from the viewport and compact the 
   assert.match(block, /\.tk-layout \.tk-trade \.pay-box, \.tk-layout \.tk-trade \.receive \{ min-height: 0;/);
   assert.match(block, /\.tk-layout \.tk-trade \.swap-route \{ display: none; \}/);
 });
+
+test('EVM V2 token pages show no fee note under the swap panel', () => {
+  const page = readFileSync(new URL('../apps/web/token-page.mjs', import.meta.url), 'utf8');
+  assert.match(page, /isV2Token\(token\) && !token\.solanaV2 \? null : h\('p\.small\.muted\.tk-trade-note'/);
+});
