@@ -20,14 +20,15 @@ test('the mainnet site serves index.html without testnet wording; the testnet si
   assert.match(siteHtml(html, { mode: 'mainnet', names: ['Base', 'BNB Chain'] }), /Live on Base, BNB Chain mainnet\./);
 });
 
-test('the site hides a switched-off Solana, labels mainnet networks and keeps holder strategies off on mainnet', () => {
+test('the site hides a switched-off Solana, labels mainnet networks and offers holder strategies on mainnet (since 20 Nov)', () => {
   const app = read('apps/web/app.mjs'), flow = read('apps/web/launch-flow.mjs');
   assert.match(app, /const networks = \(\) => \[\.\.\.config\.testnets, \.\.\.\(config\.solana && !config\.solana\.disabled \? \[config\.solana\] : \[\]\)\];/);
   assert.match(app, /saved === config\.solana\.key && !config\.solana\.disabled/);
   assert.match(app, /if \(mainnetSite\(\)\) \{\s*const names/);
   assert.match(app, /item\.mainnet \? 'Mainnet beta · real funds'/);
-  assert.match(flow, /const v2Strategies = \(\) => v2Splits\(\) && !net\(\)\?\.mainnet &&/);
-  assert.match(flow, /net\(\)\?\.mainnet \? 'Holder strategies and X or website allocations are not on mainnet yet/);
+  assert.match(flow, /const v2Strategies = \(\) => v2Splits\(\) && \(solana\(\)/);
+  assert.match(flow, /net\(\)\?\.mainnet \? 'Mainnet beta; not audited\.'/);
+  assert.match(app, /config\.v2Keeper\?\.distributions \?/);
   assert.match(read('apps/web/analytics-view.mjs'), /mainnetSite \? '' : ' Testnet tokens have no monetary value\.'/);
 });
 
@@ -58,4 +59,13 @@ test('a mainnet V2 launch needs only the V2 launchpad; the server serves mainnet
   const { usdOracles } = await import('../packages/core/usd-oracles.mjs');
   const o = usdOracles({}, [{ key: 'base-mainnet', mainnet: true, usd: { feed: '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70', usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', maxAge: 1500 } }]);
   assert.equal(o['base-mainnet'].available, true);
+});
+
+test('holder strategies on mainnet: Base pins Uniswap v3 for reward swaps; the vault deploy uses it when no test DEX exists', async () => {
+  const { EVM_MAINNETS } = await import('../packages/core/mainnets.mjs');
+  const base = EVM_MAINNETS.find(n => n.key === 'base-mainnet');
+  assert.deepEqual({ ...base.rewardDex }, { factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', router: '0x2626664c2603336E57B271c5C0b26F421741e481', weth: '0x4200000000000000000000000000000000000006', routerVersion: 2 });
+  const v2 = read('apps/web/v2-launchpad.mjs');
+  assert.match(v2, /const dex = w\.dex \?\? w\.net\.rewardDex \?\? null;/);
+  assert.match(v2, /deploy\(keeper\.address, d\.hook, d\.router, dex\?\.router \?\? ZeroAddress, dex\?\.weth \?\? ZeroAddress/);
 });
