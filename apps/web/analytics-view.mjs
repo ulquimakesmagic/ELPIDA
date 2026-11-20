@@ -9,7 +9,7 @@ export function renderAnalytics({api,mainnetSite=false}){
   const periods=h('div.analytics-filters',{'aria-label':'Analytics period'},['24h','7d','30d','all'].map(p=>h('button.btn.btn-secondary.btn-sm',{type:'button','aria-pressed':String(p===period),on:{click:()=>{period=p;for(const b of periods.children)b.setAttribute('aria-pressed',b.dataset.period===p);load();}},'data-period':p},p==='all'?'All time':p)));
   const chain=h('select',{ 'aria-label':'Analytics chain',on:{change:()=>{network=chain.value;load();}}},h('option',{value:'all'},'All chains'));
   const refresh=h('button.round-button.analytics-refresh',{type:'button','aria-label':'Refresh analytics',title:'Refresh',on:{click:load}},icon('refresh-cw','icon-sm'));
-  const headline=analyticsHeadline(),fees=feesSection({api}),rewards=rewardsSection({api,onData:summary=>headline.update({rewards:summary})});
+  const headline=analyticsHeadline({mainnetSite}),fees=feesSection({api}),rewards=rewardsSection({api,onData:summary=>headline.update({rewards:summary})});
   root.append(h('div.page-head',h('div',h('p.an-eyebrow',icon('chart-column','icon-sm'),'Analytics · public protocol data'),h('h1','Analytics'),h('p.muted','Launches, markets and fees across Elpida networks. No wallet required.')),h('div.analytics-controls',periods,chain,refresh)),status,headline.root,fees.root,rewards.root,body);
   const usd=v=>'$'+compact(v), metricCard=(title,value,note,glyph,hl)=>h('div.tile.analytics-metric',{'data-hl':hl?'true':null},h('p.an-tile-label',icon(glyph,'icon-sm'),title),h('strong',value),h('p.small.muted',note));
   function chart(){

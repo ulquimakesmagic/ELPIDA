@@ -49,8 +49,13 @@ export function renderToken(ctx, address) {
   const state = ctx.state;
   const token = state.tokens.find(t => t.address.toLowerCase() === address.toLowerCase());
   if (!token) {
+    // A token opened right after its launch can be ahead of the index for a few seconds (first Base mainnet launch,
+    // 20 Nov): look again a few times before giving up.
+    const tries = (renderToken.tries ??= new Map()), n = (tries.get(address) ?? 0) + 1;
+    tries.set(address, n);
+    if (n <= 6 && !state.disconnected && ctx.mode !== 'local') setTimeout(() => { if (location.hash.toLowerCase().includes(address.toLowerCase())) ctx.refresh?.(); }, 5000);
     return h('div', h('a.back-link', { href: '#/' }, icon('arrow-left', 'icon-sm'), 'Launches'),
-      h('div.empty', h('h3', 'Token not found on this network'), h('p', state.disconnected ? 'Connect your wallet to load this network.' : `This token is not listed on ${ctx.envLabel()}. It may belong to another network or to a local session that has restarted.`),
+      h('div.empty', h('h3', n <= 6 && !state.disconnected ? 'Looking for this token…' : 'Token not found on this network'), h('p', state.disconnected ? 'Connect your wallet to load this network.' : n <= 6 ? `If it was just launched, it appears here within a minute. Checking ${ctx.envLabel()} again…` : `This token is not listed on ${ctx.envLabel()}. It may belong to another network or to a local session that has restarted.`),
         h('a.btn.btn-primary', { href: '#/' }, 'Back to launches')));
   }
   const p = pricing(token), pct = progressOf(token), life = lifecycle(token), q = token.quoteSymbol ?? ctx.state?.nativeSymbol ?? 'ETH', dex = dexName(ctx, token);

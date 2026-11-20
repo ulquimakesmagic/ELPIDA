@@ -37,7 +37,7 @@ export function headlineFigures(rewards, analytics) {
 }
 
 /** The headline block; `update(rewards, analytics)` redraws it, hiding it while there is nothing to show. */
-export function analyticsHeadline() {
+export function analyticsHeadline({ mainnetSite = false } = {}) {
   const root = h('section.an-headline', { hidden: true, 'aria-label': 'Where the fees go' });
   let rewards = null, analytics = null;
   const scrollTo = id => document.getElementById(id)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -45,13 +45,14 @@ export function analyticsHeadline() {
     const f = headlineFigures(rewards, analytics);
     if (!f.large.length && !f.small.length) { root.hidden = true; root.replaceChildren(); return; }
     root.hidden = false;
-    root.replaceChildren(
+    root.replaceChildren(...[
       f.large.length ? h('div.an-headline-large', ...f.large.map(x => h('div.an-headline-tile', { 'data-key': x.key },
         h('p.an-tile-label', icon(x.glyph, 'icon-sm'), x.title), h('strong', x.value), h('p.small.muted', x.note),
         x.detail && x.detail !== x.value ? h('p.small.muted.an-headline-detail', x.detail) : null,
         x.link ? h('button.an-headline-link', { type: 'button', on: { click: () => scrollTo(x.link.target) } }, `${x.link.label} →`) : null))) : null,
       f.small.length ? h('div.an-headline-small', ...f.small.map(x => h('div.an-headline-stat', { 'data-key': x.key }, h('span', x.title), h('strong', x.value)))) : null,
-      h('p.small.muted.an-headline-note', 'Test networks: test coins have no monetary value. Dollar figures use today\'s prices where a fresh price exists; other amounts are shown in their own units.'));
+      // replaceChildren turns a null argument into the text "null" (seen on elpida.fun, 20 Nov), so empty parts are dropped.
+      h('p.small.muted.an-headline-note', `${mainnetSite ? '' : 'Test networks: test coins have no monetary value. '}Dollar figures use today's prices where a fresh price exists; other amounts are shown in their own units.`)].filter(Boolean));
   }
   return { root, update(next) { if ('rewards' in next) rewards = next.rewards; if ('analytics' in next) analytics = next.analytics; draw(); } };
 }
