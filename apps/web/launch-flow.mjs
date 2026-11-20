@@ -9,13 +9,16 @@ import { normalizeRewardPolicy, recipientBps } from './reward-policy.mjs';
 import { launchProfile } from './launch-capabilities.mjs';
 import { STRATEGIES } from './rewards-view.mjs';
 import { usdcFunding } from './usdc-funding.mjs';
-import { PAIR_KINDS, PAIR_INFO, EQUITY_PROVIDERS, issuerNotice, stockPairsBlocked } from '/pairs.mjs';
+import { PAIR_KINDS as ALL_PAIR_KINDS, PAIR_INFO, EQUITY_PROVIDERS, issuerNotice, stockPairsBlocked } from '/pairs.mjs';
 import { stockPicker, loadStockCatalog, stockCatalog } from './stock-picker.mjs';
 import { curveShape, DEX_MODEL, BETA_MODEL, BASE_FEE_BPS, LOCAL_START_FDV_USD } from '/curve-model.mjs';
 import { v2Deployment } from './v4-launchpad.mjs';
 import { splitPreview } from './v2-launchpad.mjs';
 import { V2, V2_MODEL } from '/v2-economics.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
+// Token-to-token launches were removed from the launch flow (20 November 2026): a new token pairs with the native
+// coin, USDC or a tokenized stock. Existing token-paired tokens keep trading.
+const PAIR_KINDS = ALL_PAIR_KINDS.filter(k => k !== 'token');
 
 const DRAFT_KEY = 'elpida:launch-draft';
 const STEPS = [
@@ -351,9 +354,10 @@ export function renderLaunch(ctx) {
     }
     const pairs = pairOptions();
     if (!stockCatalog() && pairs?.xstock?.assets?.length) loadStockCatalog().then(c => { if (c) draw(); });
+    if (net()?.mainnet && connected() && !solana() && ctx.wallet.v2PairsFor !== net()?.chainId) ctx.wallet.loadV2Pairs?.().then(() => draw());
     const pairGrid = h('div.choice-grid', { class: 'pair-grid', role: 'radiogroup', 'aria-label': 'Trading pair' }, PAIR_KINDS.map(kind => {
       const info = PAIR_INFO[kind], group = pairs?.[kind];
-      const reason = !draft.chain ? 'Choose a network first.' : kind === 'xstock' && !solana() && stockPairsBlocked(net()?.chainId) ? stockPairsBlocked(net()?.chainId) : v2Chosen() && !v2Pairs().includes(kind) ? (solana() ? solanaV2Only() : 'V2 test launches pair with the native coin, USDC or a test stock approved for V2.') : v4Chosen() && !V4_PAIRS.includes(kind) ? 'Model 11 test launches pair with the native coin, USDC or a test stock. Choose Model 10 above for this pair.' : !pairs ? 'Connect your wallet to see the assets on this network.' : group?.unavailable ?? (group?.assets.length ? null : 'Not available on this network.');
+      const reason = !draft.chain ? 'Choose a network first.' : kind === 'xstock' && !solana() && stockPairsBlocked(net()?.chainId) ? stockPairsBlocked(net()?.chainId) : v2Chosen() && !v2Pairs().includes(kind) ? (solana() ? solanaV2Only() : (net()?.mainnet ? 'ELPIDA V2 pairs with the native coin, USDC or an approved stock.' : 'V2 test launches pair with the native coin, USDC or a test stock approved for V2.')) : v4Chosen() && !V4_PAIRS.includes(kind) ? 'Model 11 test launches pair with the native coin, USDC or a test stock. Choose Model 10 above for this pair.' : !pairs ? 'Connect your wallet to see the assets on this network.' : group?.unavailable ?? (group?.assets.length ? null : 'Not available on this network.');
       const symbols = group?.assets.map(a => a.symbol).join(', ');
       const ownerSetup=kind==='usdc'&&!!reason&&draft.chain!=='local'&&!solana()&&connected()&&ctx.state?.pricing?.owner&&ctx.wallet.dex&&ctx.wallet.feeUsdc;
       const finish=ownerSetup?h('a.btn.btn-secondary.btn-sm',{href:'#/monkey?tab=pairs'},'Approve in the operator panel'):null;
@@ -379,10 +383,10 @@ export function renderLaunch(ctx) {
     return { body: [
       networkPicker(), connection,
       v2Offered() ? h('div.stack', h('h3', 'Launch model'), h('div.choice', h('span.choice-title', icon('sparkles'), `ELPIDA V2${net()?.mainnet ? '' : ' test'} · your fee`),
-        h('p', (solana() ? 'A bonding curve that graduates at ×5 into a Raydium pool whose liquidity is locked for good; the pool\'s fees are shared the same way. You choose' : 'Liquidity locked from the first trade in one Uniswap v4 pool. You choose')+' the trading fee (up to 4%), fixed for good. Every fee is shared: 30% to you, 30% to traders as a monthly airdrop, 10% buys and burns top tokens, 10% to holders, 20% to Elpida. First buy capped at 3% of supply. '+(solana() ? 'SOL pair. ' : 'Native, USDC or test-stock pairs (stocks once the operator approves them for V2). ')+'Not audited; test networks only.'), h('span.chip', 'Test'))) : null,
+        h('p', (solana() ? 'A bonding curve that graduates at ×5 into a Raydium pool whose liquidity is locked for good; the pool\'s fees are shared the same way. You choose' : 'Liquidity locked from the first trade in one Uniswap v4 pool. You choose')+' the trading fee (up to 4%), fixed for good. Every fee is shared: 30% to you, 30% to traders as a monthly airdrop, 10% buys and burns top tokens, 10% to holders, 20% to Elpida. First buy capped at 3% of supply. '+(solana() ? 'SOL pair. ' : net()?.mainnet ? 'Native, USDC or approved stock pairs. ' : 'Native, USDC or test-stock pairs (stocks once the operator approves them for V2). ')+(net()?.mainnet ? 'Mainnet beta: the contracts are new and not audited yet.' : 'Not audited; test networks only.')), h('span.chip', net()?.mainnet ? 'Beta' : 'Test'))) : null,
       v2Missing() ? callout('warn', 'info', `ELPIDA V2 is not on ${net()?.name ?? 'this network'} yet, so new tokens cannot launch here. Choose another network.`) : null,
       v2Chosen() ? feeSelector() : null,
-      h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'Choose native currency, USDC, an oStock (Ondo tokenized stock) or another approved token. Buyers pay in this asset, and the graduated pool keeps the same pair. Pay the $10 launch fee separately in native currency or USDC. Network gas is always paid in the native coin.'), h('p.small.muted', 'Tokenized stocks are issued by third parties such as Ondo Global Markets. Elpida is independent and not affiliated with or endorsed by Ondo or any issuer. Stock pairs are not available to US persons (Terms, “Tokenized stock pairs”).'), pairGrid, assetBox),
+      h('div.stack', h('h3', 'Trading pair'), h('p.small.muted', 'Choose native currency, USDC or a tokenized stock. Buyers pay in this asset, and the graduated pool keeps the same pair. Pay the $10 launch fee separately in native currency or USDC. Network gas is always paid in the native coin.'), h('p.small.muted', 'Tokenized stocks are issued by third parties such as Ondo Global Markets. Elpida is independent and not affiliated with or endorsed by Ondo or any issuer. Stock pairs are not available to US persons (Terms, “Tokenized stock pairs”).'), pairGrid, assetBox),
       draft.chain!=='local'&&(solana()?!solanaPriced():!ctx.config.oracles?.[draft.chain]?.available)?callout('warn','info',solana()?'USD pricing is not active on this Solana cluster yet. It turns on when the team upgrades the program and runs the deploy (solana-upgrade.cmd). Existing tokens can still be browsed and traded.':'Verified launch pricing is pending configuration on this network. Use simulation to test creation.') : null,
       error,
     ], validate: () => {
@@ -406,7 +410,7 @@ export function renderLaunch(ctx) {
     const error = h('p.error-text', { role: 'alert' });
     const local = draft.chain === 'local';
     const grid = h('div.choice-grid', { role: 'radiogroup', 'aria-label': 'Reward strategy' }, Object.entries(STRATEGIES).map(([key, s]) => h('label.choice', h('input', { type: 'radio', name: 'strategy', value: key, checked: draft.rewardMode === key, disabled: !strategyAllowed(key), on: { change: () => { draft.rewardMode = key; if (key === 'creator') draft.recipients = draft.recipients.map(r => ({ ...r, kind: 'wallet' })); save(); draw(); } } }),
-      h('span.choice-title', icon(s.glyph), s.name), h('p', STRATEGY_TEXT[key]), !strategyAllowed(key) ? h('span.chip', 'Local simulation only') : null)));
+      h('span.choice-title', icon(s.glyph), s.name), h('p', STRATEGY_TEXT[key]), !strategyAllowed(key) ? h('span.chip', net()?.mainnet ? 'Coming to mainnet' : 'Local simulation only') : null)));
     const settings = h('div.stack.reveal');
     const automated = ['holders', 'paired'].includes(draft.rewardMode);
     if (draft.rewardMode === 'paired' && !local && !publicRewardAssets().some(a => sameAsset(a.address, draft.rewardToken))) draft.rewardToken = solana() ? publicRewardAssets()[0]?.address : publicRewardAssets()[0]?.address.toLowerCase();
