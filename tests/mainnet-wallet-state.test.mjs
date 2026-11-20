@@ -11,3 +11,10 @@ test('wallet state on a V2-only network lists the public index tokens with this 
   assert.match(s, /return await v4TokenState\(this, item\)/);
   assert.match(s, /v4RouterFor, v2Deployment \} from '\.\/v4-launchpad\.mjs';/);
 });
+
+test('mainnet quotes and trades find V2 tokens: wallet state fills this.launches from the index', () => {
+  const s = readFileSync(new URL('../apps/web/wallet.mjs', import.meta.url), 'utf8');
+  assert.match(s, /this\.launches\.clear\(\); for \(const item of entries\) this\.launches\.set\(item\.address\.toLowerCase\(\), \{ \.\.\.item \}\);/);
+  const page = readFileSync(new URL('../apps/web/token-page.mjs', import.meta.url), 'utf8');
+  assert.match(page, /`V2 \$\{ctx\.wallet\?\.net\?\.mainnet \? 'beta' : 'test'\}/);
+});
