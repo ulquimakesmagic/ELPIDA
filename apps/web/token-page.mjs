@@ -99,7 +99,7 @@ export function renderToken(ctx, address) {
   // also count the token side, so they show about the market cap as liquidity for a new token.
   const liquidityNote=isV2Token(token)?`The ${q} actually in the locked pool, paid in by buyers. A new token's pool starts with its tokens and no ${q}; some scanners count the token side too and show about the market cap as liquidity.`:'Actual quote assets in the curve or pool; virtual reserves are excluded.';
   const details = h('section.tk-card.tk-details', { 'aria-label': 'Token details' }, h('h2.tk-h', 'Token details'), h('div.tk-tiles',
-    tile(isV2Token(token) ? `${q} in pool` : 'Liquidity',fmtValue(Number(token.reserve??0),token),liquidityNote),
+    tile('Liquidity',fmtValue(Number(token.reserve??0),token),liquidityNote),
     tile('Supply', compact(token.supply || 1e9)),
     tile('Trading pair', q),
     tile('Venue', token.graduated ? (dex === 'test' ? 'Locked test pool' : dex) : 'Bonding curve')));
@@ -112,7 +112,7 @@ export function renderToken(ctx, address) {
   const strip = h('section.tk-strip', { 'aria-label': 'Market numbers' },
     tile2('Price', h('div.tk-strip-price', odometer(fmtPrice(token), 'tk-price-value'), changePill)),
     tile2('Market cap', h('strong.tk-accent', fmtMarketCap(token)), '.tk-strip-cap', 'Price × total supply (1B)'),
-    tile2(isV2Token(token) ? `${q} in pool` : 'Liquidity', h('strong', fmtValue(Number(token.reserve ?? 0), token)), '', liquidityNote),
+    tile2('Liquidity', h('strong', fmtValue(Number(token.reserve ?? 0), token)), '', liquidityNote),
     tile2('24h volume', volumeValue),
     tile2('Holders', holdersValue),
     tile2('24h trades', txValue, '', 'Indexed trades in the last 24 hours'));
