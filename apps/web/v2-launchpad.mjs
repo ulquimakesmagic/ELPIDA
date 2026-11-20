@@ -420,6 +420,7 @@ export async function launchV2(w, body) {
     if (!(await v2PairApproved(factory, asset))) throw new Error(`${launchStock(w, asset)?.symbol ?? 'This stock'} is not a V2 pair yet: the operator approves it in the operator panel (Launchpads, V2 card). Pair with the native coin or USDC instead.`);
     await w.stockPreflight?.({ pair: 'xstock', quoteAddress: asset }, 'launch');
   }
+  if (pair === 'xstock') await refreshPythPrice(w, factory, asset);
   const quote = asset === ZeroAddress ? null : new Contract(asset, ERC20, w.signer), decimals = quote ? Number(await quote.decimals()) : 18;
   const vQ = await v2VirtualQuote(factory, asset);
   if (vQ === 0n) throw new Error('This pair is not approved on this V2 launchpad. Launch with the native coin.');
@@ -761,6 +762,28 @@ async function creatorSplit(w, { wallets, shares }) {
   if (!await hasCode(w.provider, address, { wait: true })) throw new Error('The creator split contract is not visible on the network yet. Try again; nothing else was submitted.');
   write(key, { address });
   return address;
+}
+
+const PYTH_FEED_ABI = ['function pyth() view returns(address)', 'function priceId() view returns(bytes32)'];
+const PYTH_CORE_ABI = ['function getPriceUnsafe(bytes32) view returns((int64 price,uint64 conf,int32 expo,uint256 publishTime))', 'function getUpdateFee(bytes[]) view returns(uint256)', 'function updatePriceFeeds(bytes[]) payable'];
+/**
+ * Pyth-priced stock pairs (ElpidaPythOndoStockFeed, 20 November 2026): Pyth stores a price only when someone pushes a
+ * signed update, so before such a launch the wallet stores Pyth's latest price (fetched through /api/public/pyth-update;
+ * Pyth Core checks its signatures). Chainlink-priced pairs and prices already current are left alone. Returns whether
+ * an update was sent.
+ */
+export async function refreshPythPrice(w, factory, asset, { fetchImpl = fetch } = {}) {
+  let feed = null; try { feed = (await factory.quoteFeeds(asset)).feed; } catch { return false; }
+  if (!feed || feed === ZeroAddress) return false;
+  let pyth, id; try { const f = new Contract(feed, PYTH_FEED_ABI, w.provider); [pyth, id] = await Promise.all([f.pyth(), f.priceId()]); } catch { return false; }
+  const r = await fetchImpl(`/api/public/pyth-update?id=${id}`), u = await r.json().catch(() => ({}));
+  if (!r.ok || !Array.isArray(u.data) || !u.data.length) throw new Error(`${u.error ?? 'Pyth prices are unavailable right now.'} Nothing was submitted.`);
+  const core = new Contract(pyth, PYTH_CORE_ABI, w.signer);
+  let stored = 0; try { stored = Number((await core.getPriceUnsafe(id)).publishTime); } catch { stored = 0; }
+  if (u.publishTime && stored >= Number(u.publishTime)) return false;
+  const fee = await core.getUpdateFee(u.data);
+  await step(w, core.updatePriceFeeds(u.data, { value: fee }), 'Store the stock\'s latest Pyth price on chain before the launch (a tiny Pyth fee)…');
+  return true;
 }
 
 async function step(w, pending, message) { const r = await w.wait(pending, message); await walletCaughtUp(w, r?.tx?.nonce); return r; }
