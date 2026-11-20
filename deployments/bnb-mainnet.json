@@ -190,9 +190,54 @@
     }
   ],
   "safeBatch": "bnb-mainnet-safe-batch.json",
-  "status": "awaiting_safe",
+  "status": "ready",
   "pending": {
     "safe": "Execute the Safe batch (setHook, configureUsdPricing, approveQuote USDC, setGuardian, setDailyLaunchCap), then run verify.",
     "keeper": "flywheel.setRouter(router) from the keeper, before the flywheel is switched on (it stays off in the first release)."
+  },
+  "verify": {
+    "at": "2026-11-20T20:32:15.525Z",
+    "checks": [
+      {
+        "check": "factory hook",
+        "ok": true,
+        "detail": "0xe843acBa3505cE2842b09F32aa5c9147615DE8Cc"
+      },
+      {
+        "check": "USD feed",
+        "ok": true,
+        "detail": "0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE"
+      },
+      {
+        "check": "USDC approved at $25,000 virtual",
+        "ok": true,
+        "detail": "25000000000000000000000"
+      },
+      {
+        "check": "guardian",
+        "ok": true,
+        "detail": "0xfC08505EfEf934c3fF19d82D189f60f28a0255eB"
+      },
+      {
+        "check": "daily launch cap",
+        "ok": true,
+        "detail": "1000"
+      },
+      {
+        "check": "launches paused",
+        "ok": true,
+        "detail": "false"
+      },
+      {
+        "check": "native start price readable",
+        "ok": true,
+        "detail": "46.838469799182308984 native = $25,000 virtual"
+      },
+      {
+        "check": "flywheel router (keeper, before the flywheel is switched on)",
+        "ok": true,
+        "detail": "not set yet (flywheel off in the first release)"
+      }
+    ]
   }
 }
