@@ -45,3 +45,17 @@ test('the /learn guides, the FAQ and llms.txt carry no testnet wording on the ma
   assert.equal((out.match(/Yes, on Base mainnet\. Its contracts have not had an independent audit/g) ?? []).length >= 2, true);
   assert.match(out, /Not yet: tokenized stocks are switched off for the first mainnet release\./);
 });
+
+// 20 November 2026: the first Base mainnet launch was blocked ("Base is not set up for launches yet") because the
+// launch page checked for a curve launchpad, which mainnet never has, and the server served no Base USD oracle.
+test('a mainnet V2 launch needs only the V2 launchpad; the server serves mainnet USD oracles', async () => {
+  const flow = readFileSync(new URL('../apps/web/launch-flow.mjs', import.meta.url), 'utf8');
+  assert.match(flow, /draft\.chain !== 'local' && v2Chosen\(\) \? connected\(\)/);
+  assert.match(flow, /!ctx\.wallet\.deployment && !\(n\.kind !== 'solana' && v2Offered\(\)\)/);
+  assert.match(flow, /ctx\.wallet\.price\?\?ctx\.config\.prices\?\.\[draft\.chain\]/);
+  assert.match(flow, /ELPIDA V2\$\{net\(\)\?\.mainnet \? '' : ' test'\}/);
+  assert.match(readFileSync(new URL('../apps/api/curve-runtime.mjs', import.meta.url), 'utf8'), /oracles:usdOracles\(process\.env,evmNetworks\)/);
+  const { usdOracles } = await import('../packages/core/usd-oracles.mjs');
+  const o = usdOracles({}, [{ key: 'base-mainnet', mainnet: true, usd: { feed: '0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70', usdc: '0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913', maxAge: 1500 } }]);
+  assert.equal(o['base-mainnet'].available, true);
+});

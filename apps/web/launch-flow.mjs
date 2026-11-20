@@ -63,7 +63,9 @@ export function renderLaunch(ctx) {
   const freshPrice = p => p?.status === 'fresh' && Number(p.usd) > 0 && nowSeconds()-p.updatedAt <= (p.maxAge ?? 180);
   // Solana: the program verifies the bound Pyth SOL/USD account itself; launches need it active and fresh.
   const solanaPriced = () => !!ctx.wallet?.deployment?.usdPricing;
-  const ready = () => solana() ? connected() && !!ctx.wallet.deployment && solanaPriced() && freshPrice(ctx.wallet.price) : (draft.chain==='local'||!!ctx.config.oracles?.[draft.chain]?.available) && connected() && (draft.chain === 'local' || (!!ctx.wallet.deployment&&freshPrice(ctx.wallet.price)));
+  // An EVM V2 launch needs only its V2 launchpad (v4-launchpad.mjs v2Deployment): launchV2 reads the fee from the factory
+  // and checks the balance itself. Mainnet has no curve launchpad, so the curve checks below would always block it.
+  const ready = () => solana() ? connected() && !!ctx.wallet.deployment && solanaPriced() && freshPrice(ctx.wallet.price) : draft.chain !== 'local' && v2Chosen() ? connected() : (draft.chain==='local'||!!ctx.config.oracles?.[draft.chain]?.available) && connected() && (draft.chain === 'local' || (!!ctx.wallet.deployment&&freshPrice(ctx.wallet.price)));
   const nativeSymbol = () => draft.chain === 'local' ? 'ETH' : net()?.nativeCurrency.symbol ?? 'ETH';
   /** Same structure on every chain: { native, xstock, token } → { assets, unavailable }. Null until known. */
   const pairOptions = () => {
@@ -95,7 +97,7 @@ export function renderLaunch(ctx) {
   // Native payment uses the execution-time oracle; USDC payment is independent of the pool asset.
   const feeAmount = () => draft.feeCurrency==='usdc'?10:selectedAsset()?.feeAmount!=null?Number(selectedAsset().feeAmount):freshPrice(launchPrice())?10/launchPrice().usd:null;
   const feeSymbol = () => draft.feeCurrency==='usdc'?'USDC':selectedAsset()?.feeSymbol ?? nativeSymbol();
-  const launchPrice = () => draft.chain==='local'?ctx.config.local.price:connected()?ctx.wallet.price:ctx.config.prices?.[draft.chain];
+  const launchPrice = () => draft.chain==='local'?ctx.config.local.price:connected()?ctx.wallet.price??ctx.config.prices?.[draft.chain]:ctx.config.prices?.[draft.chain];
   const priceNote = () => {const p=launchPrice();return freshPrice(p)?`1 ${nativeSymbol()} ≈ USD ${number(p.usd,2)} · ${p.source} · Updated ${new Date(p.updatedAt*1000).toLocaleTimeString()}`:'Price feed unavailable or stale. Refresh before launching.';};
   const usdcAvailable = () => draft.chain==='local'||(connected()&&!!ctx.wallet.feeUsdc&&!/^0x0{40}$/.test(ctx.wallet.feeUsdc));
   const assetDecimals = () => selectedAsset()?.decimals ?? 18;
@@ -171,7 +173,7 @@ export function renderLaunch(ctx) {
   // network's conversion DEX.
   const swapDex = () => v2Chosen() ? ctx.config.publicDexes?.[draft.chain]?.name ?? 'the conversion pool' : dexName();
   const feePercent = () => (Number(draft.feeBps ?? V2.defaultFeeBps) / 100).toFixed(2);
-  const modelName = () => v2Chosen() ? `ELPIDA V2 test · ${feePercent()}% fee` : v4Chosen() ? 'Model 11 test · Uniswap v4' : 'Bonding curve (local simulation)';
+  const modelName = () => v2Chosen() ? `ELPIDA V2${net()?.mainnet ? '' : ' test'} · ${feePercent()}% fee` : v4Chosen() ? 'Model 11 test · Uniswap v4' : 'Bonding curve (local simulation)';
   const dexName = () => v2Chosen() && solana() ? 'Raydium' : v4Chosen() || v2Chosen() ? 'Uniswap v4' : !draft.chain ? 'DEX' : solana() ? 'Raydium' : draft.chain === 'local' ? (ctx.config.dex ? 'Uniswap v3' : 'test') : draft.chain === 'base-sepolia' ? 'Uniswap v3' : ctx.config.publicDexes?.[draft.chain]?.name ?? 'test';
 
   async function loadRewards() {
@@ -327,7 +329,7 @@ export function renderLaunch(ctx) {
         if (ctx.wallet.beta?.enabled && !ctx.wallet.beta.allowed) connection.append(callout('warn', 'lock', 'Launching is invite-only during the mainnet beta, and this wallet is not on the list yet. You can still browse and trade; ask the Elpida team to add this wallet to launch.'));
         else if (n.mainnet) connection.append(callout('warn', 'triangle-alert', 'Mainnet beta: this launch uses real funds and new, unaudited contracts.'));
         // Launchpad setup is operator work (operator panel, Launchpads); a visitor only learns the network is not ready.
-        if (!ctx.wallet.deployment) connection.append(callout('warn', 'triangle-alert', `${n.name} is not set up for launches yet. Choose another network, or try again later.`));
+        if (!ctx.wallet.deployment && !(n.kind !== 'solana' && v2Offered())) connection.append(callout('warn', 'triangle-alert', `${n.name} is not set up for launches yet. Choose another network, or try again later.`));
       }
     }
     // Network cards with each chain's icon. Choosing one switches the app's chain, exactly like the header menu.
@@ -376,7 +378,7 @@ export function renderLaunch(ctx) {
       asset.wsol ? callout('', 'info', 'You pay and receive plain SOL. Elpida wraps it for each trade and unwraps what is left in the same transaction.') : null) : null;
     return { body: [
       networkPicker(), connection,
-      v2Offered() ? h('div.stack', h('h3', 'Launch model'), h('div.choice', h('span.choice-title', icon('sparkles'), 'ELPIDA V2 test · your fee'),
+      v2Offered() ? h('div.stack', h('h3', 'Launch model'), h('div.choice', h('span.choice-title', icon('sparkles'), `ELPIDA V2${net()?.mainnet ? '' : ' test'} · your fee`),
         h('p', (solana() ? 'A bonding curve that graduates at ×5 into a Raydium pool whose liquidity is locked for good; the pool\'s fees are shared the same way. You choose' : 'Liquidity locked from the first trade in one Uniswap v4 pool. You choose')+' the trading fee (up to 4%), fixed for good. Every fee is shared: 30% to you, 30% to traders as a monthly airdrop, 10% buys and burns top tokens, 10% to holders, 20% to Elpida. First buy capped at 3% of supply. '+(solana() ? 'SOL pair. ' : 'Native, USDC or test-stock pairs (stocks once the operator approves them for V2). ')+'Not audited; test networks only.'), h('span.chip', 'Test'))) : null,
       v2Missing() ? callout('warn', 'info', `ELPIDA V2 is not on ${net()?.name ?? 'this network'} yet, so new tokens cannot launch here. Choose another network.`) : null,
       v2Chosen() ? feeSelector() : null,
