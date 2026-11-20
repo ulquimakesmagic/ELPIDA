@@ -941,6 +941,8 @@ export class TestnetWallet {
       // Mainnet has only the ELPIDA V2 launchpad (no curve launchpad): its tokens come from the public index, with this
       // wallet's balance read for each. Before this (20 Nov) a connected wallet saw no tokens: "Token not found".
       const entries = await this.publicTokens();
+      // Quotes and trades look tokens up in this.launches (filled from the curve factory elsewhere): fill it from the index.
+      this.launches.clear(); for (const item of entries) this.launches.set(item.address.toLowerCase(), { ...item });
       const tokens = await Promise.all(entries.map(async item => { if (!isV4Token(item)) return item; try { return await v4TokenState(this, item); } catch { return item; } }));
       return { ...base, tokens };
     }
