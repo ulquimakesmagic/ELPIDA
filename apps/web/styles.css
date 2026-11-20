@@ -808,3 +808,17 @@ dialog{max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contai
 .fee-split ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
 .fee-split li { display: grid; grid-template-columns: 1fr auto 80px; gap: 10px; align-items: baseline; font-size: 13px; }
 .fee-split li strong { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* Swap page (20 Nov 2026): one card, the same boxes as the token page's swap panel. */
+.swap-page { max-width: 520px; margin: 0 auto; display: grid; gap: 16px; }
+.swap-card { display: grid; gap: 10px; padding: 16px; }
+.swap-card .pay-box, .swap-card .receive { display: grid; gap: 8px; border: .67px solid var(--line-soft); border-radius: var(--r-tile, 14px); background: var(--panel-2); padding: 12px 14px; }
+.swap-card .swap-card-top { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+.swap-card .swap-amount { font-size: 24px; border: 0; background: none; padding: 0; width: 100%; }
+.swap-card .swap-receive-row strong { font-size: 24px; font-variant-numeric: tabular-nums; }
+.swap-card .swap-direction { display: flex; justify-content: center; margin: -6px 0; }
+.swap-card .trade-meta { display: flex; justify-content: space-between; align-items: center; gap: 12px; font-size: 13px; color: var(--ink-2); }
+.swap-card .segmented { display: inline-flex; gap: 4px; }
+.swap-card .segmented button { border: .67px solid var(--line-soft); background: none; color: var(--ink-2); border-radius: var(--r-pill, 999px); padding: 4px 10px; font-size: 12px; cursor: pointer; }
+.swap-card .segmented button[aria-pressed="true"] { border-color: var(--accent-line); color: var(--accent-text); background: var(--accent-tint); }
+.swap-card .btn-buy { background: linear-gradient(180deg, var(--accent-hi), var(--accent)); color: var(--accent-ink); border-color: transparent; }

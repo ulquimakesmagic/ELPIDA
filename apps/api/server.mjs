@@ -14,6 +14,7 @@ import {createStockCatalog} from './stock-catalog.mjs';
 import {createCoinbaseStocks} from './coinbase-stocks.mjs';
 import {createOndoStatus} from './ondo-status.mjs';
 import {createDexscreener} from './dexscreener.mjs';
+import {createSwap,swapTokens,KYBER_CHAINS} from './swap.mjs';
 import {testnetDexes} from '../../packages/core/uniswap.mjs';
 import { FeedRelay } from './feed-relay.mjs';
 import { testDexArtifacts } from './test-dex-artifacts.mjs';
@@ -113,6 +114,7 @@ resources.set('/usdc-funding.mjs', ['usdc-funding.mjs','text/javascript']);
 resources.set('/payment-errors.mjs', ['payment-errors.mjs','text/javascript']);
 resources.set('/analytics', ['index.html', 'text/html']);
 resources.set('/analytics-view.mjs', ['analytics-view.mjs', 'text/javascript']);
+resources.set('/swap-view.mjs', ['swap-view.mjs', 'text/javascript']);
 resources.set('/v2-rewards-view.mjs', ['v2-rewards-view.mjs', 'text/javascript']);
 resources.set('/analytics-headline.mjs', ['analytics-headline.mjs', 'text/javascript']);
 resources.set('/fee-analytics-view.mjs', ['fee-analytics-view.mjs', 'text/javascript']);
@@ -262,7 +264,7 @@ export function createRpcProxy(targets, { perSecond = 15, burst = 60 } = {}) {
   };
 }
 
-export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1', circleFunding = null, stockCatalog: injectedStockCatalog, coinbaseStocks: injectedCoinbaseStocks, ondoStatus: injectedOndoStatus, dexscreener: injectedDexscreener = null } = {}) {
+export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1', circleFunding = null, stockCatalog: injectedStockCatalog, coinbaseStocks: injectedCoinbaseStocks, ondoStatus: injectedOndoStatus, dexscreener: injectedDexscreener = null, swap: injectedSwap = null } = {}) {
   const dataPrefix=port===3000||process.env.RAILWAY_ENVIRONMENT_NAME?'':`preview-${port}-`;
   const dataDir=resolve(process.env.ELPIDA_DATA_DIR??process.env.RAILWAY_VOLUME_MOUNT_PATH??fileURLToPath(new URL('../../local-data/',import.meta.url)));
   const dataFile=name=>resolve(dataDir,dataPrefix+name);
@@ -331,6 +333,10 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // Ondo GM pauses and sValue changes for token pages (display only; apps/api/ondo-status.mjs). Off until ONDO_API_KEY is set.
   // DexScreener pair lookups for mainnet token page charts (apps/api/dexscreener.mjs).
   const dexscreener=injectedDexscreener??createDexscreener();
+  // Swap page (apps/api/swap.mjs): native coin, USDC and the network's verified stocks, routed by KyberSwap.
+  const stockListFor=key=>{try{return JSON.parse(readFileSync(fileURLToPath(new URL(`../../config/stocks/${key}.json`,import.meta.url)),'utf8'));}catch{return null;}};
+  const swapTokensFor=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);return n?swapTokens(n,stockListFor(key)):[];};
+  const swap=injectedSwap??createSwap({tokensFor:swapTokensFor});
   const ondoStatus=injectedOndoStatus??createOndoStatus({apiKey:port===0?'':process.env.ONDO_API_KEY,log:e=>console.log(JSON.stringify(e))}).start();
   // ELPIDA V2.0 rewards (vault sizes, rounds, countdowns, flywheel burns): only networks with a pinned V2 deployment.
   const v2Rewards=new V2RewardsService({networks:port===0?[]:evmNetworks,dataDir:port===0?null:resolve(dataDir,dataPrefix+'v2-rewards')}).start();
@@ -578,6 +584,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/public/v2-rewards/payouts'){try{return send(200,v2Rewards.payouts(url.searchParams.get('wallet')));}catch(error){return send(400,{error:error.message});}}
         // The verified stock list for a chain (config/stocks/<network>.json, built by scripts/stock-list.mjs): what the operator approves.
         if(url.pathname==='/api/public/stock-list'){const key=String(url.searchParams.get('network')??'');if(!/^[a-z0-9-]{2,40}$/.test(key))return send(400,{error:'Choose a network.'});let list=null;try{list=JSON.parse(readFileSync(fileURLToPath(new URL(`../../config/stocks/${key}.json`,import.meta.url)),'utf8'));}catch{list=null;}res.setHeader('Cache-Control','public, max-age=300');return list?send(200,list):send(404,{error:'No verified stock list for this network yet.'});}
+        if(url.pathname==='/api/public/swap/tokens'){const key=String(url.searchParams.get('network')??'');res.setHeader('Cache-Control','public, max-age=300');return send(200,{network:key,available:!!KYBER_CHAINS[key]&&swapTokensFor(key).length>0,tokens:swapTokensFor(key)});}
+        if(url.pathname==='/api/public/swap/quote'){res.setHeader('Cache-Control','no-store');try{return send(200,await swap.quote({network:String(url.searchParams.get('network')??''),tokenIn:String(url.searchParams.get('tokenIn')??''),tokenOut:String(url.searchParams.get('tokenOut')??''),amountIn:String(url.searchParams.get('amountIn')??'')}));}catch(error){return send(error.status??502,{error:error.message});}}
         if(url.pathname==='/api/public/dex-chart'){const network=String(url.searchParams.get('network')??''),token=String(url.searchParams.get('token')??'');if(!/^[a-z0-9-]{2,40}$/.test(network)||!/^0x[0-9a-fA-F]{40}$/.test(token))return send(400,{error:'Choose a network and token.'});const r=await dexscreener.lookup(network,token);res.setHeader('Cache-Control','public, max-age=120');return send(200,r);}
         if(url.pathname==='/api/public/stock-status'){const sym=url.searchParams.get('symbol');if(sym!=null&&!/^[A-Za-z0-9.]{1,16}on$/.test(sym))return send(400,{error:'Unknown stock symbol.'});res.setHeader('Cache-Control','public, max-age=300');return send(200,ondoStatus.summary(sym));}
         if(url.pathname==='/api/public/coinbase-stocks'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,coinbaseStocks.summary());}
@@ -742,6 +750,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         else return send(404,{error:'Unknown network.'});
         return send(202,{queued:true});
       }
+      if(action==='swap/build'){try{return send(200,await swap.build({network:String(body.network??''),routeSummary:body.routeSummary,sender:String(body.sender??''),slippageBps:body.slippageBps}));}catch(error){return send(error.status??502,{error:error.message});}}
       if(action==='telemetry'){
         if(telemetryLimit(clientAddress(req)))return send(429,{error:'Too many events.'});
         try{const event=cleanEvent(body,{networks:new Set([...evmNetworks.map(n=>n.key),solanaNet.key,'local']),ownHost:siteHost});return send(202,siteAnalytics.record(event,{country:req.headers['cf-ipcountry'],userAgent:req.headers['user-agent']}));}

@@ -232,7 +232,7 @@ function parseRoute() {
     if (/^0x[0-9a-fA-F]{40}$/.test(p.get('claim') ?? '')) return { name: 'rewards', claim: p.get('claim'), address: p.get('claim'), network: p.get('network'), xResult };
     if (xResult) return { name: 'rewards', xResult };
   }
-  return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/docs': 'docs', '/monkey': 'admin', '/terms': 'terms' }[hash] ?? 'notfound' };
+  return { name: { '/': 'explore', '': 'explore', '/portfolio': 'portfolio', '/rewards': 'rewards', '/launch': 'launch', '/analytics': 'analytics', '/swap': 'swap', '/docs': 'docs', '/monkey': 'admin', '/terms': 'terms' }[hash] ?? 'notfound' };
 }
 const ROUTE_TITLES = { explore: 'Explore tokens across chains | Elpida', portfolio: 'Portfolio | Elpida', rewards: 'Creator rewards | Elpida', launch: 'Create a token | Elpida', token: 'Token | Elpida', analytics: 'Analytics — Launches, volume & fees | Elpida', admin: 'Operations | Elpida', docs: 'Docs | Elpida', terms: 'Terms of Use | Elpida', notfound: 'Page not found | Elpida' };
 
@@ -278,7 +278,7 @@ function route() {
 const PAGES = {
   analytics: () => import('./analytics-view.mjs'), launch: () => import('./launch-flow.mjs'), docs: () => import('./docs-view.mjs'),
   token: () => import('./token-page.mjs'), rewards: () => import('./rewards-view.mjs'), split: () => import('./creator-split.mjs'),
-  portfolio: () => import('./portfolio-view.mjs'), admin: () => import('./admin-view.mjs'),
+  portfolio: () => import('./portfolio-view.mjs'), admin: () => import('./admin-view.mjs'), swap: () => import('./swap-view.mjs'),
 };
 const pageModules = {}, pageLoads = {};
 function loadPage(name) {
@@ -324,6 +324,8 @@ function rerender(reason) {
   if(r.name==='notfound'){view.setAttribute('aria-busy','false');view.replaceChildren(notFoundView());return;}
   // The operator panel loads its own data; a background refresh must not reset it mid-read.
   if(r.name==='admin'){view.setAttribute('aria-busy','false');if(reason==='route'||!view.querySelector('.op')||view.querySelector('.op-signin')){const m=page('admin');view.replaceChildren(m?m.renderAdmin(ctx,{connect:connectCurrent}):loadingView());}return;}
+  // Swap keeps its own state (amount, quote); a background refresh must not reset it. A network change redraws it.
+  if (r.name === 'swap') { const key = mode + ':' + currentChain() + ':' + (wallet?.address ?? ''); if (reason === 'route' || !view.querySelector('.swap-page') || view.dataset.swapKey !== key) { const m = page('swap'); view.dataset.swapKey = key; view.replaceChildren(m ? m.renderSwap(ctx).root : loadingView()); } return; }
   if (r.name === 'launch') {
     // The launch flow owns its own state; a data refresh only updates balances and connection status.
     if (!launchView || reason === 'route' && !view.contains(launchView.root)) { const m = page('launch'); if (!m) { launchView = null; view.replaceChildren(loadingView()); return; } launchView = m.renderLaunch(ctx); view.replaceChildren(launchView.root); }

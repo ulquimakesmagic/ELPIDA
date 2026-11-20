@@ -881,3 +881,12 @@ Malik reversed Option B. The launch page offers every creator reward strategy on
 as well, set on the **mainnet** service: `ELPIDA_V2_DISTRIBUTIONS=on`. Keep the keeper funded (about 0.005 ETH on Base)
 and its daily gas budget small (`ELPIDA_V2_KEEPER_DAILY_GAS`, default 0.25). The production guard logs a warning, not an
 error. "Buy a reward token" swaps through Uniswap v3 on Base (pinned in packages/core/mainnets.mjs).
+
+## Swap page (20 November 2026)
+
+Sidebar → Swap: native coin, USDC and the network's verified stocks (Coinbase on Base; Ondo elsewhere, once
+`config/stocks/<network>.json` exists), both ways. Routes and calldata come from the KyberSwap aggregator via the
+server (`/api/public/swap/quote`, `swap/build`; client id `elpida`, no key). The visitor's wallet approves the exact input
+and sends to Kyber's MetaAggregationRouterV2 `0x6131B5fae19EA4f9D964eAc0408E4408b66337b5` only. Stocks follow the
+region block. Base, BNB Chain and Ethereum; Robinhood Chain once its Kyber slug is confirmed. If Kyber rate-limits us,
+ask KyberSwap for an API key.
