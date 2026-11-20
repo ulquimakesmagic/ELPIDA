@@ -12,6 +12,7 @@ import {configuredBuybackKeeper} from './buyback-keeper.mjs';
 import {configuredFlywheelKeeper} from './flywheel-keeper.mjs';
 import {createStockCatalog} from './stock-catalog.mjs';
 import {createOndoStatus} from './ondo-status.mjs';
+import {createDexscreener} from './dexscreener.mjs';
 import {testnetDexes} from '../../packages/core/uniswap.mjs';
 import { FeedRelay } from './feed-relay.mjs';
 import { testDexArtifacts } from './test-dex-artifacts.mjs';
@@ -260,7 +261,7 @@ export function createRpcProxy(targets, { perSecond = 15, burst = 60 } = {}) {
   };
 }
 
-export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1', circleFunding = null, stockCatalog: injectedStockCatalog, ondoStatus: injectedOndoStatus = null } = {}) {
+export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1', circleFunding = null, stockCatalog: injectedStockCatalog, ondoStatus: injectedOndoStatus, dexscreener: injectedDexscreener = null } = {}) {
   const dataPrefix=port===3000||process.env.RAILWAY_ENVIRONMENT_NAME?'':`preview-${port}-`;
   const dataDir=resolve(process.env.ELPIDA_DATA_DIR??process.env.RAILWAY_VOLUME_MOUNT_PATH??fileURLToPath(new URL('../../local-data/',import.meta.url)));
   const dataFile=name=>resolve(dataDir,dataPrefix+name);
@@ -325,6 +326,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // their own; a test server (port 0) never fetches.
   const stockCatalog=injectedStockCatalog??createStockCatalog({dataDir:port===0?null:resolve(dataDir,dataPrefix+'stock-catalog'),autoRefresh:port!==0,log:e=>console.log(JSON.stringify(e))}).start();
   // Ondo GM pauses and sValue changes for token pages (display only; apps/api/ondo-status.mjs). Off until ONDO_API_KEY is set.
+  // DexScreener pair lookups for mainnet token page charts (apps/api/dexscreener.mjs).
+  const dexscreener=injectedDexscreener??createDexscreener();
   const ondoStatus=injectedOndoStatus??createOndoStatus({apiKey:port===0?'':process.env.ONDO_API_KEY,log:e=>console.log(JSON.stringify(e))}).start();
   // ELPIDA V2.0 rewards (vault sizes, rounds, countdowns, flywheel burns): only networks with a pinned V2 deployment.
   const v2Rewards=new V2RewardsService({networks:port===0?[]:evmNetworks,dataDir:port===0?null:resolve(dataDir,dataPrefix+'v2-rewards')}).start();
@@ -447,7 +450,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     if (/^\/(api\/|health|ready)/.test(String(req.url))) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' ${connectSources}; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
+    res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' ${connectSources}; frame-src https://dexscreener.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
     // Crawlers and link checkers probe public pages with HEAD. Node drops the body of a HEAD response itself, so a public
     // non-API path is handled exactly like GET; the API keeps its strict method rules.
     if (req.method === 'HEAD' && !/^\/(api\/|health)/.test(String(req.url))) req.method = 'GET';
@@ -572,6 +575,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/public/v2-rewards/payouts'){try{return send(200,v2Rewards.payouts(url.searchParams.get('wallet')));}catch(error){return send(400,{error:error.message});}}
         // The verified stock list for a chain (config/stocks/<network>.json, built by scripts/stock-list.mjs): what the operator approves.
         if(url.pathname==='/api/public/stock-list'){const key=String(url.searchParams.get('network')??'');if(!/^[a-z0-9-]{2,40}$/.test(key))return send(400,{error:'Choose a network.'});let list=null;try{list=JSON.parse(readFileSync(fileURLToPath(new URL(`../../config/stocks/${key}.json`,import.meta.url)),'utf8'));}catch{list=null;}res.setHeader('Cache-Control','public, max-age=300');return list?send(200,list):send(404,{error:'No verified stock list for this network yet.'});}
+        if(url.pathname==='/api/public/dex-chart'){const network=String(url.searchParams.get('network')??''),token=String(url.searchParams.get('token')??'');if(!/^[a-z0-9-]{2,40}$/.test(network)||!/^0x[0-9a-fA-F]{40}$/.test(token))return send(400,{error:'Choose a network and token.'});const r=await dexscreener.lookup(network,token);res.setHeader('Cache-Control','public, max-age=120');return send(200,r);}
         if(url.pathname==='/api/public/stock-status'){const sym=url.searchParams.get('symbol');if(sym!=null&&!/^[A-Za-z0-9.]{1,16}on$/.test(sym))return send(400,{error:'Unknown stock symbol.'});res.setHeader('Cache-Control','public, max-age=300');return send(200,ondoStatus.summary(sym));}
         if(url.pathname==='/api/public/stock-catalog'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,stockCatalog.summary());}
         const stockIcon=url.pathname.match(/^\/api\/public\/stock-icon\/([A-Z0-9.]{1,12}on)\.png$/);
