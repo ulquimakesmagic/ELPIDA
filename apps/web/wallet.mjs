@@ -2,7 +2,7 @@ import {prepareTestLiquidity,testLiquidityCalls,testLiquidityChain,TEST_MANAGER_
 import {verifyNativeRouter,findCurveNonce} from './native-trade-router.mjs';
 import { nowSeconds } from './clock.mjs';
 import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './tax-wallet.mjs';
-import { isV4Token, v4Available, v4Deployment, deployTestPoolManager, v4Quote, v4Trade, v4WithdrawFees, v4TokenState, v4RouterFor } from './v4-launchpad.mjs';
+import { isV4Token, v4Available, v4Deployment, deployTestPoolManager, v4Quote, v4Trade, v4WithdrawFees, v4TokenState, v4RouterFor, v2Deployment } from './v4-launchpad.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
 import { V2_MODEL } from '/v2-economics.mjs';
 import { deployV2, deployV2UsdcDistributors, setupTestPayoutStable, approveV2StockList, launchV2, approveV2Stock, loadV2Pairs, claimCreatorSplit, claimIdentityRow, claimV2CreatorFees } from './v2-launchpad.mjs';
@@ -935,7 +935,15 @@ export class TestnetWallet {
     await this.checkNetwork();
     const native = this.net.nativeCurrency.symbol;
     const balance = formatUnits(await this.provider.getBalance(this.address), 18);
-    if (!this.deployment) return { wallet: this.address, balance, balanceSymbol: native, nativeBalance: balance, nativeSymbol: native, tokens: [], activity: [], treasuryBalance: '0', undeployed: true };
+    if (!this.deployment) {
+      const base = { wallet: this.address, balance, balanceSymbol: native, nativeBalance: balance, nativeSymbol: native, activity: [], treasuryBalance: '0', undeployed: true };
+      if (!v2Deployment(this.net)) return { ...base, tokens: [] };
+      // Mainnet has only the ELPIDA V2 launchpad (no curve launchpad): its tokens come from the public index, with this
+      // wallet's balance read for each. Before this (20 Nov) a connected wallet saw no tokens: "Token not found".
+      const entries = await this.publicTokens();
+      const tokens = await Promise.all(entries.map(async item => { if (!isV4Token(item)) return item; try { return await v4TokenState(this, item); } catch { return item; } }));
+      return { ...base, tokens };
+    }
     const factory = await this.verifyFactory();
     if(this.dex){try{this.needsMetadataUpgrade=await factory.METADATA_VERSION()!==1n;}catch{this.needsMetadataUpgrade=true;}}
     const latest = await this.provider.getBlockNumber();
