@@ -70,6 +70,19 @@ export function buildBytecode(contractName, eol) {
 }
 
 /**
+ * A creation transaction's input, read raw: BNB Chain RPCs (Alchemy, 20 Nov 2026) return `"to": ""` instead of null for
+ * contract creations, which ethers' getTransaction refuses ("invalid value for value.to").
+ */
+export async function creationTx(provider, hash) {
+  if (typeof provider.send === 'function') {
+    const raw = await provider.send('eth_getTransactionByHash', [hash]);
+    if (!raw) return null;
+    return { data: String(raw.input ?? raw.data ?? '0x') };
+  }
+  return provider.getTransaction(hash);
+}
+
+/**
  * One job per deployed contract: its address, its creation code from the chain, whether that code starts with this
  * checkout's build, and the constructor arguments that follow it. The hook went through the CREATE2 deployer, so its
  * creation code is the `deploy(bytes,bytes32)` call's first argument.
@@ -81,7 +94,7 @@ export async function explorerJobs({ provider, record, art = artifacts(), build 
     const address = record.contracts?.[key], hash = record.txs?.[key]?.hash;
     if (!address) continue;
     if (!hash) { jobs.push({ key, address, contractName, ok: false, detail: 'no creation transaction in the record' }); continue; }
-    const tx = await provider.getTransaction(hash);
+    const tx = await creationTx(provider, hash);
     if (!tx) { jobs.push({ key, address, contractName, ok: false, detail: `creation transaction ${hash} not found on this RPC` }); continue; }
     let initCode = tx.data.toLowerCase();
     if (key === 'hook') { try { initCode = CREATE2.decodeFunctionData('deploy', tx.data)[0].toLowerCase(); } catch { /* not a CREATE2 deployment: use the data as is */ } }
