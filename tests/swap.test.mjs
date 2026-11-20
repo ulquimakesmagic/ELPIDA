@@ -47,3 +47,33 @@ test('page: units parsing, router pinned, nav and route wired', async () => {
   assert.match(page, /if \(!same\(tx\.to, KYBER_ROUTER\)\) throw/);
   assert.match(page, /token\.approve\(KYBER_ROUTER, units\)/, 'approves exactly the input');
 });
+
+test('fee: 0.5% default to the treasury Safe, native/USDC side, enforced at build', async () => {
+  const { swapFeeFor, feeSide } = await import('../apps/api/swap.mjs');
+  const treasury = '0x' + '7'.repeat(40), net = { ...base, v2: { shared: { treasury } } };
+  assert.deepEqual(swapFeeFor(net, {}), { bps: 50, receiver: treasury });
+  assert.equal(swapFeeFor(net, { ELPIDA_SWAP_FEE_BPS: '0' }), null);
+  assert.equal(swapFeeFor(net, { ELPIDA_SWAP_FEE_BPS: '500' }).bps, 100, 'capped at 1%');
+  assert.equal(swapFeeFor(base, {}), null, 'no treasury, no fee');
+  const tokens = swapTokens(base, list);
+  assert.equal(feeSide(tokens, NATIVE), 'currency_in'); assert.equal(feeSide(tokens, tokens[1].address), 'currency_in'); assert.equal(feeSide(tokens, AAPL), 'currency_out');
+  const calls = [];
+  const fetchImpl = async (url, init) => { calls.push({ url, init });
+    if (url.includes('/routes')) { const q = new URL(url).searchParams; return new Response(JSON.stringify({ data: { routerAddress: KYBER_ROUTER, routeSummary: { tokenIn: q.get('tokenIn'), tokenOut: q.get('tokenOut'), amountIn: '1000', amountOut: '5', extraFee: { feeAmount: q.get('feeAmount'), chargeFeeBy: q.get('chargeFeeBy'), isInBps: q.get('isInBps') === 'true', feeReceiver: q.get('feeReceiver') } } } })); }
+    return new Response(JSON.stringify({ data: { routerAddress: KYBER_ROUTER, data: '0xab', transactionValue: '0', amountOut: '5', amountIn: '1000' } })); };
+  const swap = createSwap({ fetchImpl, tokensFor: () => tokens, feeFor: () => swapFeeFor(net, {}) });
+  const q = await swap.quote({ network: 'base-mainnet', tokenIn: AAPL, tokenOut: NATIVE, amountIn: '1000' });
+  assert.match(calls[0].url, /feeAmount=50&isInBps=true&chargeFeeBy=currency_out&feeReceiver=0x7{40}/); assert.deepEqual(q.fee, { bps: 50, side: 'out' });
+  const sender = '0x' + '1'.repeat(40);
+  await swap.build({ network: 'base-mainnet', routeSummary: q.routeSummary, sender, slippageBps: 100 });
+  await assert.rejects(swap.build({ network: 'base-mainnet', routeSummary: { ...q.routeSummary, extraFee: { feeAmount: '0', chargeFeeBy: '', isInBps: false, feeReceiver: '' } }, sender, slippageBps: 100 }), /out of date/);
+  await assert.rejects(swap.build({ network: 'base-mainnet', routeSummary: { ...q.routeSummary, extraFee: { ...q.routeSummary.extraFee, feeReceiver: sender } }, sender, slippageBps: 100 }), /out of date/);
+});
+
+test('page: 25/50/Max portions keep a gas reserve on the native coin', async () => {
+  const { portionOf } = await import('../apps/web/swap-view.mjs');
+  assert.equal(portionOf(1000n, 25), 250n); assert.equal(portionOf(1000n, 100), 1000n);
+  assert.equal(portionOf(1000n, 100, { native: true, reserve: 200n }), 800n);
+  assert.equal(portionOf(1000n, 50, { native: true, reserve: 200n }), 500n);
+  assert.equal(portionOf(100n, 100, { native: true, reserve: 200n }), 0n);
+});

@@ -49,3 +49,16 @@ test('Coinbase stocks get their icon in the pickers; pair cards are brief', () =
   assert.match(flow, /control: stockPicker\(\{ assets: publicRewardAssets\(\)/);
   assert.match(flow, /vq = curve\.v2vq \?\? curve\.vq \* 1\.125/);
 });
+
+test('icons: type read from the bytes (Coinbase CDN may say octet-stream); Ondo fallback wired', async () => {
+  const { sniffImage, createCoinbaseStocks } = await import('../apps/api/coinbase-stocks.mjs');
+  const png = Buffer.concat([Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]), Buffer.alloc(120)]);
+  assert.equal(sniffImage(png), 'image/png'); assert.equal(sniffImage(Buffer.from('<svg xmlns="http://www.w3.org/2000/svg"></svg>')), null);
+  const fetchImpl = async url => url.includes('tokenized-stocks')
+    ? new Response(JSON.stringify({ tokens: [{ symbol: 'AAPLc', contract_address: '0x' + '1'.repeat(40), name: 'Apple Inc.', icon_url: 'https://metadata.coinbase.com/equity_icons/a.png' }] }))
+    : new Response(png, { headers: { 'content-type': 'binary/octet-stream' } });
+  const cb = createCoinbaseStocks({ fetchImpl, autoRefresh: false }); await cb.refresh();
+  const img = await cb.icon('AAPLc'); assert.equal(img.type, 'image/png'); assert.equal(img.bytes.length, png.length);
+  const server = readFileSync(new URL('../apps/api/server.mjs', import.meta.url), 'utf8');
+  assert.ok(server.includes('stockCatalog.icon(`${m[1].slice(0,-1)}on`)'), 'falls back to the Ondo icon for the same company');
+});

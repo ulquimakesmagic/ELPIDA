@@ -821,4 +821,6 @@ dialog{max-height:calc(100dvh - 32px);overflow-y:auto;overscroll-behavior:contai
 .swap-card .segmented { display: inline-flex; gap: 4px; }
 .swap-card .segmented button { border: .67px solid var(--line-soft); background: none; color: var(--ink-2); border-radius: var(--r-pill, 999px); padding: 4px 10px; font-size: 12px; cursor: pointer; }
 .swap-card .segmented button[aria-pressed="true"] { border-color: var(--accent-line); color: var(--accent-text); background: var(--accent-tint); }
+.swap-card .swap-portions { display: flex; gap: 6px; }
+.swap-card .swap-portions .btn { flex: 1; }
 .swap-card .btn-buy { background: linear-gradient(180deg, var(--accent-hi), var(--accent)); color: var(--accent-ink); border-color: transparent; }

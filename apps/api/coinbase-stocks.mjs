@@ -1,11 +1,21 @@
 // Coinbase Tokenized Stocks on Base: names and icons for the launch picker, the reward picker and Swap (display only).
 // The list comes from Coinbase's public API (https://api.coinbase.com/v1/tokenized-stocks, docs.base.org, no key),
 // cached; each token's `icon_url` is fetched by the server, checked to be a small PNG, JPEG or WebP and served from
-// this origin (/api/public/coinbase-stock-icon/<SYMBOL>.png), so pages never call Coinbase directly.
+// this origin (/api/public/coinbase-stock-icon/<SYMBOL>.png), so pages never call Coinbase directly. When Coinbase has no usable icon, the
+// server falls back to Ondo's icon for the same company (apps/api/server.mjs).
 export const COINBASE_STOCKS_URL = 'https://api.coinbase.com/v1/tokenized-stocks';
-const REFRESH_MS = 6 * 3_600_000, ICON_RETRY_MS = 3_600_000, MAX_LIST_BYTES = 4 * 1024 * 1024, MAX_ICON_BYTES = 256 * 1024;
+const REFRESH_MS = 6 * 3_600_000, ICON_RETRY_MS = 3_600_000, MAX_LIST_BYTES = 4 * 1024 * 1024, MAX_ICON_BYTES = 1024 * 1024;
 const SYMBOL = /^[A-Z.]{1,8}c$/, ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const MAGIC = [[0x89, 0x50, 0x4e, 0x47], [0xff, 0xd8, 0xff], [0x52, 0x49, 0x46, 0x46]];
+
+/** image/png, image/jpeg or image/webp from the file's first bytes, else null. */
+export function sniffImage(bytes) {
+  if (!bytes || bytes.length < 12) return null;
+  if (MAGIC[0].every((b, i) => bytes[i] === b)) return 'image/png';
+  if (MAGIC[1].every((b, i) => bytes[i] === b)) return 'image/jpeg';
+  if (MAGIC[2].every((b, i) => bytes[i] === b) && String.fromCharCode(...bytes.subarray(8, 12)) === 'WEBP') return 'image/webp';
+  return null;
+}
 
 const clean = (v, n) => typeof v === 'string' ? v.replace(/[\u0000-\u001f<>]/g, '').trim().slice(0, n) : '';
 /** Coinbase symbols are written AAPLc; the API may give AAPLC or AAPL. */
@@ -58,11 +68,12 @@ export function createCoinbaseStocks({ fetchImpl = fetch, now = () => Date.now()
     if ((failed.get(symbol) ?? 0) > now()) return null;
     try {
       const r = await fetchImpl(t.icon, { redirect: 'follow', signal: AbortSignal.timeout(10_000) });
-      const type = r.headers.get('content-type') ?? '';
-      if (!r.ok || !/^image\/(png|jpeg|webp)\b/.test(type)) throw new Error(`HTTP ${r.status} ${type}`);
+      // Coinbase's CDN may label icons as binary/octet-stream, so the type is read from the bytes, not the header.
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
       const bytes = Buffer.from(await r.arrayBuffer());
-      if (bytes.length < 64 || bytes.length > MAX_ICON_BYTES || !MAGIC.some(m => m.every((b, i) => bytes[i] === b))) throw new Error('not an image');
-      const value = { bytes, type: type.split(';')[0] };
+      const type = sniffImage(bytes);
+      if (bytes.length < 64 || bytes.length > MAX_ICON_BYTES || !type) throw new Error(`not a PNG, JPEG or WebP (${r.headers.get('content-type') ?? 'no type'})`);
+      const value = { bytes, type };
       icons.set(symbol, value); return value;
     } catch (e) { failed.set(symbol, now() + ICON_RETRY_MS); log({ event: 'coinbase_stock_icon_unavailable', symbol, error: String(e?.message ?? e).slice(0, 80) }); return null; }
   }

@@ -890,3 +890,9 @@ server (`/api/public/swap/quote`, `swap/build`; client id `elpida`, no key). The
 and sends to Kyber's MetaAggregationRouterV2 `0x6131B5fae19EA4f9D964eAc0408E4408b66337b5` only. Stocks follow the
 region block. Base, BNB Chain and Ethereum; Robinhood Chain once its Kyber slug is confirmed. If Kyber rate-limits us,
 ask KyberSwap for an API key.
+
+Swap fee: KyberSwap charges integrators nothing. Elpida adds 0.5% (`ELPIDA_SWAP_FEE_BPS`, default 50, max 100, `0` turns it
+off) through Kyber's `extraFee`, paid to that network's treasury Safe (`plan.treasury`). It is taken from the native/USDC
+side of a swap where there is one, so the treasury collects ETH/BNB/USDC. The page shows "Elpida fee 0.5%"; the build is
+refused if a route comes back without the fee. On the first stock → ETH swap, check the received amount matches the
+quote (the fee is taken from the output there).
