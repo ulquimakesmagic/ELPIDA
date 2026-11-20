@@ -10,7 +10,18 @@ import { stockRegionOff } from '/pairs.mjs';
 export const KYBER_ROUTER = '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5';
 const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const ERC20 = ['function balanceOf(address) view returns(uint256)', 'function allowance(address,address) view returns(uint256)', 'function approve(address,uint256) returns(bool)'];
-const SLIPPAGES = [50, 100, 200];
+const SLIPPAGES = [50, 100, 200], PORTIONS = [25, 50, 100];
+// Kept back from a 100% native-coin swap so the wallet can still pay gas.
+const GAS_RESERVE = { 'base-mainnet': 200_000_000_000_000n, 'bnb-mainnet': 1_000_000_000_000_000n, 'ethereum-mainnet': 3_000_000_000_000_000n };
+
+/** A share (percent) of a balance in base units; native coin keeps a gas reserve at 100%. */
+export function portionOf(balance, pct, { native = false, reserve = 0n } = {}) {
+  const b = BigInt(balance ?? 0); if (b <= 0n) return 0n;
+  const part = b * BigInt(pct) / 100n;
+  if (!native) return part;
+  const cap = b > reserve ? b - reserve : 0n;
+  return part > cap ? cap : part;
+}
 const same = (a, b) => String(a ?? '').toLowerCase() === String(b ?? '').toLowerCase();
 
 /** Human amount → base units, or null when it is not a positive number with at most `decimals` places. */
@@ -30,7 +41,7 @@ export function renderSwap(ctx) {
   }
   const body = h('div.swap-body', h('p.muted', 'Loading the assets on this network…'));
   root.append(head, body);
-  let tokens = [], from = null, to = null, amount = '', slippage = 100, quote = null, quoteFor = '', busy = false, timer = null, balances = {};
+  let tokens = [], feeBps = 0, from = null, to = null, amount = '', slippage = 100, quote = null, quoteFor = '', busy = false, timer = null, balances = {};
 
   const balanceText = t => balances[t.address] == null ? '' : `Balance: ${number(Number(formatUnits(balances[t.address], t.decimals)), 6)} ${t.symbol}`;
   async function loadBalances() {
@@ -93,6 +104,13 @@ export function renderSwap(ctx) {
     const connected = !!ctx.wallet?.address;
     const input = h('input.input.swap-amount', { inputmode: 'decimal', placeholder: '0.00', value: amount, 'aria-label': `Amount of ${from.symbol} to swap`, on: { input: e => { amount = e.target.value.replace(',', '.'); requestQuote(); } } });
     const flip = h('button.btn.btn-ghost.btn-sm.swap-flip', { type: 'button', 'aria-label': 'Swap direction', on: { click: () => { [from, to] = [to, from]; amount = ''; quote = null; draw(); } } }, icon('arrow-down-up', 'icon-sm'));
+    const setPortion = pct => {
+      const bal = balances[from.address]; if (bal == null) return;
+      const units = portionOf(bal, pct, { native: same(from.address, NATIVE), reserve: GAS_RESERVE[key] ?? 1_000_000_000_000_000n });
+      if (units <= 0n) { amount = ''; quote = null; draw(); return; }
+      amount = formatUnits(units, from.decimals).replace(/\.0$/, ''); input.value = amount; requestQuote();
+    };
+    const portions = h('div.swap-portions', PORTIONS.map(p => h('button.btn.btn-ghost.btn-sm', { type: 'button', disabled: balances[from.address] == null, on: { click: () => setPortion(p) } }, p === 100 ? 'Max' : `${p}%`)));
     const out = quote?.amountOut ? number(Number(formatUnits(BigInt(quote.amountOut), to.decimals)), 6) : quoteFor && !quote && amount ? '…' : '0.00';
     const error = h('p.error-text', { role: 'alert' }, quote?.error ?? '');
     const reason = blocked();
@@ -101,21 +119,22 @@ export function renderSwap(ctx) {
     const outEl = h('strong', out), gasValue = h('strong'), gas = h('div.trade-meta', { hidden: true }, h('span', 'Network fee'), gasValue);
     els = { out: outEl, error, button, gas, gasValue };
     body.replaceChildren(h('div.swap-card.tk-card',
-      h('div.pay-box', h('div.swap-card-top', h('label', 'You pay'), h('span.hint', balanceText(from))), h('div.pay-input', input), picker(from, t => { if (same(t.address, to.address)) to = from; from = t; amount = ''; quote = null; draw(); }, 'Pay with')),
+      h('div.pay-box', h('div.swap-card-top', h('label', 'You pay'), h('span.hint', balanceText(from))), h('div.pay-input', input), portions, picker(from, t => { if (same(t.address, to.address)) to = from; from = t; amount = ''; quote = null; draw(); }, 'Pay with')),
       h('div.swap-direction', flip),
       h('div.receive', h('div.swap-card-top', h('span', 'You receive'), h('span.hint', 'Estimated')), h('div.swap-receive-row', outEl), picker(to, t => { if (same(t.address, from.address)) from = to; to = t; quote = null; requestQuote(); }, 'Receive')),
       h('div.trade-meta', h('span', 'Slippage'), h('div.segmented', SLIPPAGES.map(b => h('button', { type: 'button', 'aria-pressed': String(b === slippage), on: { click: () => { slippage = b; draw(); } } }, `${b / 100}%`)))),
+      feeBps ? h('div.trade-meta', h('span', 'Elpida fee'), h('strong', `${feeBps / 100}%`)) : null,
       gas,
       reason ? callout('warn', 'lock', reason) : null,
       !connected ? h('div', ctx.walletButtons(net, { onDone: () => { loadBalances(); draw(); }, onError: e => { error.textContent = errorText(e); } })) : null,
       error, button,
-      h('p.small.muted', 'Routed by KyberSwap across the network’s DEX pools. You approve and sign in your own wallet; Elpida never holds your funds.')));
+      h('p.small.muted', `Routed by KyberSwap across the network’s DEX pools.${feeBps ? ` The ${feeBps / 100}% Elpida fee is included in the quote above and goes to the Elpida treasury.` : ''} You approve and sign in your own wallet; Elpida never holds your funds.`)));
     update();
   }
 
   fetch(`/api/public/swap/tokens?network=${encodeURIComponent(key)}`).then(r => r.json()).then(d => {
     if (!d.available) { body.replaceChildren(callout('', 'info', `Swap is not available on ${net.name} yet.`)); return; }
-    tokens = d.tokens; from = tokens[0]; to = tokens.find(t => t.kind === 'usdc') ?? tokens[1];
+    tokens = d.tokens; feeBps = Number(d.feeBps ?? 0); from = tokens[0]; to = tokens.find(t => t.kind === 'usdc') ?? tokens[1];
     draw(); loadBalances(); loadStockCatalog().then(() => draw());
   }).catch(() => body.replaceChildren(callout('error', 'triangle-alert', 'Swap is unavailable right now. Refresh shortly.')));
   return { root };

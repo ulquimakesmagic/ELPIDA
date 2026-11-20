@@ -14,7 +14,7 @@ import {createStockCatalog} from './stock-catalog.mjs';
 import {createCoinbaseStocks} from './coinbase-stocks.mjs';
 import {createOndoStatus} from './ondo-status.mjs';
 import {createDexscreener} from './dexscreener.mjs';
-import {createSwap,swapTokens,KYBER_CHAINS} from './swap.mjs';
+import {createSwap,swapTokens,swapFeeFor,KYBER_CHAINS} from './swap.mjs';
 import {testnetDexes} from '../../packages/core/uniswap.mjs';
 import { FeedRelay } from './feed-relay.mjs';
 import { testDexArtifacts } from './test-dex-artifacts.mjs';
@@ -336,7 +336,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // Swap page (apps/api/swap.mjs): native coin, USDC and the network's verified stocks, routed by KyberSwap.
   const stockListFor=key=>{try{return JSON.parse(readFileSync(fileURLToPath(new URL(`../../config/stocks/${key}.json`,import.meta.url)),'utf8'));}catch{return null;}};
   const swapTokensFor=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);return n?swapTokens(n,stockListFor(key)):[];};
-  const swap=injectedSwap??createSwap({tokensFor:swapTokensFor});
+  const swapFee=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);return n?swapFeeFor(n,process.env):null;};
+  const swap=injectedSwap??createSwap({tokensFor:swapTokensFor,feeFor:swapFee});
   const ondoStatus=injectedOndoStatus??createOndoStatus({apiKey:port===0?'':process.env.ONDO_API_KEY,log:e=>console.log(JSON.stringify(e))}).start();
   // ELPIDA V2.0 rewards (vault sizes, rounds, countdowns, flywheel burns): only networks with a pinned V2 deployment.
   const v2Rewards=new V2RewardsService({networks:port===0?[]:evmNetworks,dataDir:port===0?null:resolve(dataDir,dataPrefix+'v2-rewards')}).start();
@@ -584,12 +585,12 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/public/v2-rewards/payouts'){try{return send(200,v2Rewards.payouts(url.searchParams.get('wallet')));}catch(error){return send(400,{error:error.message});}}
         // The verified stock list for a chain (config/stocks/<network>.json, built by scripts/stock-list.mjs): what the operator approves.
         if(url.pathname==='/api/public/stock-list'){const key=String(url.searchParams.get('network')??'');if(!/^[a-z0-9-]{2,40}$/.test(key))return send(400,{error:'Choose a network.'});let list=null;try{list=JSON.parse(readFileSync(fileURLToPath(new URL(`../../config/stocks/${key}.json`,import.meta.url)),'utf8'));}catch{list=null;}res.setHeader('Cache-Control','public, max-age=300');return list?send(200,list):send(404,{error:'No verified stock list for this network yet.'});}
-        if(url.pathname==='/api/public/swap/tokens'){const key=String(url.searchParams.get('network')??'');res.setHeader('Cache-Control','public, max-age=300');return send(200,{network:key,available:!!KYBER_CHAINS[key]&&swapTokensFor(key).length>0,tokens:swapTokensFor(key)});}
+        if(url.pathname==='/api/public/swap/tokens'){const key=String(url.searchParams.get('network')??'');res.setHeader('Cache-Control','public, max-age=300');const fee=swapFee(key);return send(200,{network:key,available:!!KYBER_CHAINS[key]&&swapTokensFor(key).length>0,tokens:swapTokensFor(key),feeBps:fee?.bps??0});}
         if(url.pathname==='/api/public/swap/quote'){res.setHeader('Cache-Control','no-store');try{return send(200,await swap.quote({network:String(url.searchParams.get('network')??''),tokenIn:String(url.searchParams.get('tokenIn')??''),tokenOut:String(url.searchParams.get('tokenOut')??''),amountIn:String(url.searchParams.get('amountIn')??'')}));}catch(error){return send(error.status??502,{error:error.message});}}
         if(url.pathname==='/api/public/dex-chart'){const network=String(url.searchParams.get('network')??''),token=String(url.searchParams.get('token')??'');if(!/^[a-z0-9-]{2,40}$/.test(network)||!/^0x[0-9a-fA-F]{40}$/.test(token))return send(400,{error:'Choose a network and token.'});const r=await dexscreener.lookup(network,token);res.setHeader('Cache-Control','public, max-age=120');return send(200,r);}
         if(url.pathname==='/api/public/stock-status'){const sym=url.searchParams.get('symbol');if(sym!=null&&!/^[A-Za-z0-9.]{1,16}on$/.test(sym))return send(400,{error:'Unknown stock symbol.'});res.setHeader('Cache-Control','public, max-age=300');return send(200,ondoStatus.summary(sym));}
         if(url.pathname==='/api/public/coinbase-stocks'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,coinbaseStocks.summary());}
-        {const m=url.pathname.match(/^\/api\/public\/coinbase-stock-icon\/([A-Z.]{1,8}c)\.png$/);if(m){const img=await coinbaseStocks.icon(m[1]);if(!img)return send(404,{error:'No icon for this stock.'});res.writeHead(200,{'Content-Type':img.type,'Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});return res.end(img.bytes);}}
+        {const m=url.pathname.match(/^\/api\/public\/coinbase-stock-icon\/([A-Z.]{1,8}c)\.png$/);if(m){let img=await coinbaseStocks.icon(m[1]);if(!img){const ondo=await stockCatalog.icon(`${m[1].slice(0,-1)}on`);if(ondo)img={bytes:ondo,type:'image/png'};}if(!img)return send(404,{error:'No icon for this stock.'});res.writeHead(200,{'Content-Type':img.type,'Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});return res.end(img.bytes);}}
         if(url.pathname==='/api/public/stock-catalog'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,stockCatalog.summary());}
         const stockIcon=url.pathname.match(/^\/api\/public\/stock-icon\/([A-Z0-9.]{1,12}on)\.png$/);
         if(stockIcon){const bytes=await stockCatalog.icon(stockIcon[1]);if(!bytes)return send(404,{error:'No icon for this stock.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});return res.end(bytes);}

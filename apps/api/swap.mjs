@@ -2,6 +2,9 @@
 // (Coinbase stocks on Base, Ondo stocks elsewhere, from config/stocks/<network>.json). Routes come from the KyberSwap
 // aggregator (no key; it reaches Aerodrome, Uniswap and PancakeSwap pools). The server only asks for routes and calldata;
 // the visitor's own wallet approves and signs, and the page refuses any router but Kyber's.
+// Fee (Malik, 20 November 2026): KyberSwap charges integrators nothing; Elpida adds its own swap fee (ELPIDA_SWAP_FEE_BPS,
+// default 50 = 0.5%, capped at 1%) through Kyber's extraFee, paid to the network's treasury Safe. It is taken in the native
+// coin or USDC side of the swap where there is one, so the treasury collects ETH/BNB/USDC rather than stock tokens.
 export const KYBER_API = 'https://aggregator-api.kyberswap.com';
 export const KYBER_CHAINS = Object.freeze({ 'base-mainnet': 'base', 'bnb-mainnet': 'bsc', 'ethereum-mainnet': 'ethereum' });
 /** KyberSwap's MetaAggregationRouterV2 (the same address on these chains). */
@@ -19,7 +22,23 @@ export function swapTokens(net, stockList) {
   return out;
 }
 
-export function createSwap({ fetchImpl = fetch, tokensFor }) {
+export const DEFAULT_SWAP_FEE_BPS = 50, MAX_SWAP_FEE_BPS = 100;
+
+/** The swap fee for a mainnet network: { bps, receiver } or null (no treasury, or the fee is set to 0). */
+export function swapFeeFor(net, env = {}) {
+  const raw = env.ELPIDA_SWAP_FEE_BPS, n = raw == null || raw === '' ? DEFAULT_SWAP_FEE_BPS : Number(raw);
+  const bps = Number.isInteger(n) && n >= 0 ? Math.min(n, MAX_SWAP_FEE_BPS) : DEFAULT_SWAP_FEE_BPS;
+  const receiver = net?.v2?.shared?.treasury;
+  return bps > 0 && ADDRESS.test(String(receiver ?? '')) ? { bps, receiver } : null;
+}
+
+/** Which side pays the fee: the input when it is the native coin or USDC, otherwise the output. */
+export function feeSide(tokens, tokenIn) {
+  const t = tokens.find(x => x.address.toLowerCase() === String(tokenIn).toLowerCase());
+  return t && (t.kind === 'native' || t.kind === 'usdc') ? 'currency_in' : 'currency_out';
+}
+
+export function createSwap({ fetchImpl = fetch, tokensFor, feeFor = () => null }) {
   const allowed = (network, a) => tokensFor(network).some(t => t.address.toLowerCase() === String(a).toLowerCase());
   const call = async (url, init) => {
     const r = await fetchImpl(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(15_000), headers: { accept: 'application/json', 'x-client-id': CLIENT, ...(init?.headers ?? {}) } });
@@ -37,14 +56,25 @@ export function createSwap({ fetchImpl = fetch, tokensFor }) {
     async quote({ network, tokenIn, tokenOut, amountIn }) {
       const chain = check(network, String(tokenIn ?? ''), String(tokenOut ?? ''));
       if (!AMOUNT.test(String(amountIn ?? ''))) { const e = new Error('Enter an amount.'); e.status = 400; throw e; }
-      const d = await call(`${KYBER_API}/${chain}/api/v1/routes?tokenIn=${tokenIn}&tokenOut=${tokenOut}&amountIn=${amountIn}&gasInclude=true`);
+      const fee = feeFor(network), side = fee ? feeSide(tokensFor(network), tokenIn) : null;
+      const feeQuery = fee ? `&feeAmount=${fee.bps}&isInBps=true&chargeFeeBy=${side}&feeReceiver=${fee.receiver}` : '';
+      const d = await call(`${KYBER_API}/${chain}/api/v1/routes?tokenIn=${tokenIn}&tokenOut=${tokenOut}&amountIn=${amountIn}&gasInclude=true${feeQuery}`);
       if (String(d.routerAddress ?? '').toLowerCase() !== KYBER_ROUTER.toLowerCase()) { const e = new Error('Unexpected swap router; nothing was sent.'); e.status = 502; throw e; }
       const s = d.routeSummary ?? {};
-      return { routeSummary: s, amountOut: String(s.amountOut ?? '0'), gasUsd: s.gasUsd ?? null, amountInUsd: s.amountInUsd ?? null, amountOutUsd: s.amountOutUsd ?? null, router: KYBER_ROUTER };
+      return { routeSummary: s, amountOut: String(s.amountOut ?? '0'), gasUsd: s.gasUsd ?? null, amountInUsd: s.amountInUsd ?? null, amountOutUsd: s.amountOutUsd ?? null, router: KYBER_ROUTER,
+        fee: fee ? { bps: fee.bps, side: side === 'currency_in' ? 'in' : 'out' } : null };
     },
     async build({ network, routeSummary, sender, slippageBps }) {
       const chain = check(network, String(routeSummary?.tokenIn ?? ''), String(routeSummary?.tokenOut ?? ''));
       if (!ADDRESS.test(String(sender ?? ''))) { const e = new Error('Connect a wallet.'); e.status = 400; throw e; }
+      const fee = feeFor(network);
+      if (fee) {
+        // The fee the quote asked for must still be in the route the page sends back (Kyber builds from routeSummary).
+        const x = routeSummary.extraFee ?? {};
+        if (String(x.feeAmount) !== String(fee.bps) || x.isInBps !== true || String(x.feeReceiver ?? '').toLowerCase() !== fee.receiver.toLowerCase() || x.chargeFeeBy !== feeSide(tokensFor(network), routeSummary.tokenIn)) {
+          const e = new Error('This quote is out of date. Get a new quote and try again.'); e.status = 400; throw e;
+        }
+      }
       const bps = Math.round(Number(slippageBps ?? 100)); if (!(bps >= 10 && bps <= 500)) { const e = new Error('Slippage must be between 0.1% and 5%.'); e.status = 400; throw e; }
       const d = await call(`${KYBER_API}/${chain}/api/v1/route/build`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ routeSummary, sender, recipient: sender, slippageTolerance: bps, deadline: Math.floor(Date.now() / 1000) + 600, source: CLIENT }) });
       if (String(d.routerAddress ?? '').toLowerCase() !== KYBER_ROUTER.toLowerCase() || !/^0x[0-9a-fA-F]*$/.test(String(d.data ?? ''))) { const e = new Error('Unexpected swap router; nothing was sent.'); e.status = 502; throw e; }
