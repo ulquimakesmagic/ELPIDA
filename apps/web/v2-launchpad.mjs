@@ -272,6 +272,28 @@ export async function deployV2UsdcDistributors(w) {
 }
 
 const testStock = (w, address) => (w.approvedQuotes ?? []).find(a => a.kind === 'xstock' && a.test && a.address.toLowerCase() === String(address ?? '').toLowerCase()) ?? null;
+/** A stock a V2 launch may quote: a test stock, or one from the verified stock list (mainnet; see loadV2Pairs). */
+const launchStock = (w, address) => (w.approvedQuotes ?? []).find(a => a.kind === 'xstock' && (a.test || a.verified) && a.address.toLowerCase() === String(address ?? '').toLowerCase()) ?? null;
+
+/**
+ * Mainnet has only the V2 launchpad, so its pairs come from it: USDC when the factory approves it, and the stocks of the
+ * verified stock list (config/stocks/<network>.json). Each launch still checks on chain that its stock is approved.
+ */
+export async function loadV2Pairs(w) {
+  const d = v2Deployment(w.net); if (!d) { w.approvedQuotes = []; return w.approvedQuotes; }
+  const out = [], usdc = w.net.usd?.usdc ?? w.oracle?.usdc;
+  if (usdc && usdc !== ZeroAddress && isAddress(usdc)) {
+    const factory = new Contract(d.factory, V2_FACTORY_ABI, w.provider);
+    if ((await factory.approvedQuotes(usdc)) > 0n) out.push({ id: usdc, address: usdc, kind: 'usdc', symbol: w.net.payoutStable?.symbol ?? 'USDC', name: 'USD Coin', decimals: Number(w.net.payoutStable?.decimals ?? 6) });
+  }
+  const response = await fetch(`/api/public/stock-list?network=${encodeURIComponent(w.net.key)}`);
+  if (response.ok) {
+    const list = checkStockList(await response.json(), w.net.chainId);
+    for (const s of list.stocks) out.push({ id: s.address, address: s.address, kind: 'xstock', symbol: s.symbol, name: s.name, decimals: Number(s.decimals), verified: true });
+  } else if (response.status !== 404) throw new Error('The stock list is unavailable right now. Refresh shortly.');
+  w.approvedQuotes = out;
+  return out;
+}
 
 /** The network's test stocks (approved on its Model 10 launchpad) and whether each is a V2 pair yet. */
 export async function v2StockPairs(w) {
@@ -356,8 +378,8 @@ export function splitPreview(amount, feeBps, decimals = 18) {
 export async function v2LaunchTerms(w, { pair = 'native', feeBps = V2.defaultFeeBps, quoteAsset } = {}) {
   const d = v2Deployment(w.net); if (!d) throw new Error('No V2 launchpad on this network.');
   const factory = new Contract(d.factory, V2_FACTORY_ABI, w.provider), hook = new Contract(d.hook, HOOK_ABI, w.provider);
-  const asset = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? testStock(w, quoteAsset)?.address : ZeroAddress;
-  if (!asset) throw new Error('Choose a test stock approved for V2.');
+  const asset = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? launchStock(w, quoteAsset)?.address : ZeroAddress;
+  if (!asset) throw new Error('Choose a stock approved for V2.');
   const decimals = asset === ZeroAddress ? 18 : Number(await new Contract(asset, ERC20, w.provider).decimals());
   const [vQ, minFee, launchFee] = await Promise.all([v2VirtualQuote(factory, asset), hook.minFeeBps(), factory.launchFee()]);
   if (vQ === 0n) throw new Error('This pair is not approved for V2.');
@@ -388,10 +410,10 @@ export async function launchV2(w, body) {
   const split = body.rewardSplit?.length ? creatorSplitTerms(body.rewardSplit) : null, strategy = body.rewardStrategy ?? null, identities = body.rewardIdentities?.length ? identityTerms(body.rewardIdentities, w.address) : null;
   let reward = split || strategy || identities ? null : body.reward || w.address;
   if (!split && !strategy && !identities && (!isAddress(reward) || reward === ZeroAddress)) throw new Error('Enter a valid creator reward wallet.');
-  const asset = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? getAddress(testStock(w, body.quoteAsset)?.address ?? ZeroAddress) : ZeroAddress;
+  const asset = pair === 'usdc' ? await factory.feeUsdc() : pair === 'xstock' ? getAddress(launchStock(w, body.quoteAsset)?.address ?? ZeroAddress) : ZeroAddress;
   if (pair === 'xstock') {
-    if (asset === ZeroAddress) throw new Error('Choose a test stock that is approved on this network.');
-    if (!(await v2PairApproved(factory, asset))) throw new Error(`${testStock(w, asset)?.symbol ?? 'This stock'} is not a V2 pair yet: the operator approves it in the operator panel (Launchpads, V2 card). Pair with the native coin or USDC instead.`);
+    if (asset === ZeroAddress) throw new Error('Choose a stock that is approved on this network.');
+    if (!(await v2PairApproved(factory, asset))) throw new Error(`${launchStock(w, asset)?.symbol ?? 'This stock'} is not a V2 pair yet: the operator approves it in the operator panel (Launchpads, V2 card). Pair with the native coin or USDC instead.`);
     await w.stockPreflight?.({ pair: 'xstock', quoteAddress: asset }, 'launch');
   }
   const quote = asset === ZeroAddress ? null : new Contract(asset, ERC20, w.signer), decimals = quote ? Number(await quote.decimals()) : 18;

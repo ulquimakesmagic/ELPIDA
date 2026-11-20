@@ -5,7 +5,7 @@ import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './
 import { isV4Token, v4Available, v4Deployment, deployTestPoolManager, v4Quote, v4Trade, v4WithdrawFees, v4TokenState, v4RouterFor } from './v4-launchpad.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
 import { V2_MODEL } from '/v2-economics.mjs';
-import { deployV2, deployV2UsdcDistributors, setupTestPayoutStable, approveV2StockList, launchV2, approveV2Stock, claimCreatorSplit, claimIdentityRow, claimV2CreatorFees } from './v2-launchpad.mjs';
+import { deployV2, deployV2UsdcDistributors, setupTestPayoutStable, approveV2StockList, launchV2, approveV2Stock, loadV2Pairs, claimCreatorSplit, claimIdentityRow, claimV2CreatorFees } from './v2-launchpad.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
 import { stockPairsBlocked } from '/pairs.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress, id as keccakText } from '/vendor/ethers.js';
@@ -241,6 +241,17 @@ export class TestnetWallet {
     const native = this.net.nativeCurrency.symbol;
     const fee = { feeAmount: this.feeText(), feeSymbol: native };
     const approved = kind => (this.approvedQuotes ?? []).filter(a => a.kind === kind).map(a => ({ ...a, ...fee }));
+    // Mainnet: no curve launchpad, only ELPIDA V2 (loadV2Pairs). Paired-token launches are not a V2 pair kind.
+    if (this.net.mainnet && !this.deployment) {
+      const wait = this.v2PairsFor !== this.net.chainId ? 'Loading the approved pairs…' : this.v2PairsError ?? null;
+      const stockOff = stockPairsBlocked(this.net.chainId);
+      return {
+        native: { assets: [{ id: 'native', symbol: native, name: this.net.nativeCurrency.name, decimals: 18, ...fee }] },
+        usdc: approved('usdc').length ? { assets: approved('usdc') } : { assets: [], unavailable: wait ?? `USDC is not a pair on ${this.net.name} yet.` },
+        xstock: stockOff ? { assets: [], unavailable: stockOff } : approved('xstock').length ? { assets: approved('xstock') } : { assets: [], unavailable: wait ?? `No stock is approved on ${this.net.name} yet.` },
+        token: { assets: [], unavailable: 'ELPIDA V2 pairs with the native coin, USDC or an approved stock. Pairing with another token is not offered.' },
+      };
+    }
     const missing = kind => !this.dex
       ? `${this.net.name} uses the basic launchpad, which supports ${native} pairs. oStock and paired-token launches need DEX graduation (Base Sepolia).`
       : !this.deployment ? 'Set up the launchpad on this network first.'
@@ -524,6 +535,15 @@ export class TestnetWallet {
     if(await this.provider.getBalance(this.address)<gas*(data.maxFeePerGas??data.gasPrice??0n))throw new Error('Add native currency for conversion gas. USDC cannot pay gas.');
     const result=await this.wait(router['multicall(uint256,bytes[])'](deadline,calls),'Convert at most '+body.maxUsdc+' USDC into '+body.nativeAmount+' '+this.net.nativeCurrency.symbol+'. Launch or buy is a separate transaction…');
     return {hash:result.tx.hash,nativeAmount:body.nativeAmount,message:'Conversion complete. Native funds are in your wallet; continue with your launch or purchase.'};
+  }
+  /** Mainnet V2 pairs, loaded once per network (the launch page asks after a wallet connects). */
+  loadV2Pairs() {
+    const chainId = this.net.chainId;
+    if (this.v2PairsFor === chainId || this.v2PairsLoading?.chainId === chainId) return this.v2PairsLoading?.promise ?? Promise.resolve();
+    const promise = loadV2Pairs(this).then(() => { this.v2PairsError = null; }, e => { this.approvedQuotes = []; this.v2PairsError = String(e?.message ?? e).slice(0, 200); })
+      .finally(() => { if (this.net.chainId === chainId) this.v2PairsFor = chainId; this.v2PairsLoading = null; });
+    this.v2PairsLoading = { chainId, promise };
+    return promise;
   }
   async loadPairs(factory) {
     if (!this.dex || !this.deployment) { this.approvedQuotes = []; return; }
