@@ -49,7 +49,8 @@ export function stockIdentity(symbol, { provider = null, name = null, catalog = 
   let ticker = raw, issuer = null, test = provider === 'ondo-test';
   const ondo = raw.match(/^(t?)([A-Z.]{1,6})on$/);
   const xstock = raw.match(/^([A-Z.]{1,6})x$/);
-  // Coinbase Tokenized Stocks on Base (AAPLc): issuer icons from /api/public/coinbase-stock-icon (apps/api/coinbase-stocks.mjs).
+  // Coinbase Tokenized Stocks on Base (AAPLc): /api/public/coinbase-stock-icon serves Ondo's icon for the same company, else
+  // Coinbase's (apps/api/server.mjs). `?v=2` replaces URLs that browsers and the CDN cached as 404 before #331.
   const coinbase = provider === 'coinbase' || /\(Coinbase\)/.test(String(name ?? '')) ? raw.match(/^([A-Z.]{1,8})c$/) : null;
   if (ondo) { ticker = ondo[2]; test = test || ondo[1] === 't'; issuer = 'Ondo'; }
   else if (coinbase) { ticker = coinbase[1]; issuer = 'Coinbase'; }
@@ -59,7 +60,7 @@ export function stockIdentity(symbol, { provider = null, name = null, catalog = 
     symbol: raw, ticker, issuer: test ? `${issuer ?? 'Stock'} (test)` : issuer, test,
     company: listed?.name ?? known?.company ?? (name || null), type: listed?.type ?? known?.type ?? 'Stock',
     tone: known?.tone ?? stockTone(ticker),
-    logo: issuer === 'Ondo' ? stockIconUrl(raw) : issuer === 'Coinbase' ? `/api/public/coinbase-stock-icon/${ticker}c.png` : STOCK_LOGOS.has(ticker) ? `/assets/stocks/${ticker}.png` : null,
+    logo: issuer === 'Ondo' ? stockIconUrl(raw) : issuer === 'Coinbase' ? `/api/public/coinbase-stock-icon/${ticker}c.png?v=2` : STOCK_LOGOS.has(ticker) ? `/assets/stocks/${ticker}.png` : null,
   };
 }
 
