@@ -410,7 +410,7 @@ export function renderLaunch(ctx) {
     const error = h('p.error-text', { role: 'alert' });
     const local = draft.chain === 'local';
     const grid = h('div.choice-grid', { role: 'radiogroup', 'aria-label': 'Reward strategy' }, Object.entries(STRATEGIES).map(([key, s]) => h('label.choice', h('input', { type: 'radio', name: 'strategy', value: key, checked: draft.rewardMode === key, disabled: !strategyAllowed(key), on: { change: () => { draft.rewardMode = key; if (key === 'creator') draft.recipients = draft.recipients.map(r => ({ ...r, kind: 'wallet' })); save(); draw(); } } }),
-      h('span.choice-title', icon(s.glyph), s.name), h('p', STRATEGY_TEXT[key]), !strategyAllowed(key) ? h('span.chip', 'Local simulation only') : null)));
+      h('span.choice-title', icon(s.glyph), s.name), h('p', STRATEGY_TEXT[key]), !strategyAllowed(key) ? h('span.chip', net()?.mainnet ? 'Coming to mainnet' : 'Local simulation only') : null)));
     const settings = h('div.stack.reveal');
     const automated = ['holders', 'paired'].includes(draft.rewardMode);
     if (draft.rewardMode === 'paired' && !local && !publicRewardAssets().some(a => sameAsset(a.address, draft.rewardToken))) draft.rewardToken = solana() ? publicRewardAssets()[0]?.address : publicRewardAssets()[0]?.address.toLowerCase();
