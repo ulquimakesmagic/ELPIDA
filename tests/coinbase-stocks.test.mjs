@@ -40,7 +40,7 @@ test('icons: fetched once, image types only; the API is read with pagination', a
 
 test('Coinbase stocks get their icon in the pickers; pair cards are brief', () => {
   const id = stockIdentity('AAPLc', { name: 'Apple (Coinbase)' });
-  assert.equal(id.issuer, 'Coinbase'); assert.equal(id.ticker, 'AAPL'); assert.equal(id.logo, '/api/public/coinbase-stock-icon/AAPLc.png');
+  assert.equal(id.issuer, 'Coinbase'); assert.equal(id.ticker, 'AAPL'); assert.equal(id.logo, '/api/public/coinbase-stock-icon/AAPLc.png?v=2');
   assert.equal(stockIdentity('AAPLc').issuer, null, 'a bare c-suffix is not assumed to be Coinbase');
   assert.equal(PAIR_INFO.xstock.note(), 'Buyers pay in a tokenized stock. Choose it below.');
   const server = readFileSync(new URL('../apps/api/server.mjs', import.meta.url), 'utf8');
@@ -60,5 +60,5 @@ test('icons: type read from the bytes (Coinbase CDN may say octet-stream); Ondo 
   const cb = createCoinbaseStocks({ fetchImpl, autoRefresh: false }); await cb.refresh();
   const img = await cb.icon('AAPLc'); assert.equal(img.type, 'image/png'); assert.equal(img.bytes.length, png.length);
   const server = readFileSync(new URL('../apps/api/server.mjs', import.meta.url), 'utf8');
-  assert.ok(server.includes('stockCatalog.icon(`${m[1].slice(0,-1)}on`)'), 'falls back to the Ondo icon for the same company');
+  assert.ok(server.includes('const ondo=await stockCatalog.icon(`${m[1].slice(0,-1)}on`);const img=ondo?'), 'Ondo icon for the same company first');
 });
