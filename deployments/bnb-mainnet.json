@@ -1,0 +1,243 @@
+{
+  "network": "bnb-mainnet",
+  "name": "BNB Chain",
+  "chainId": 56,
+  "planSha256": "c22caba9b8be2780b0de66569bc20b19a63a3e53be15aa5a383bf9fa4a5db8aa",
+  "approval": "bnb-mainnet-c22caba9b8be2780.json",
+  "model": "v2-hook",
+  "compiler": "solc 0.8.26 (cancun, via IR, 200 runs)",
+  "gitCommit": "2103140659df715759319ba52bf9968da017fb87",
+  "startMcapUsd": 20000,
+  "contracts": {
+    "create2": "0x8460Fc1bFe9140375D59B7f5Af0AB66FC562Ef3E",
+    "factory": "0x060742Fba64Ed98f159d9F99bdd0Cb268ECCa8B1",
+    "airdrop": "0x0a928fcf86Da6062F86ADB23F4eCc64A4fBB0173",
+    "holder": "0xD6D11BD5f4d6f6A3ed510413243b4dD8cD6EF87D",
+    "flywheel": "0xdb959eB794a0C6976f6321C337469B4b925591c9",
+    "hook": "0xe843acBa3505cE2842b09F32aa5c9147615DE8Cc",
+    "router": "0xcA3743B66245410886Abb2eE6DCC5781F544aA51"
+  },
+  "txs": {
+    "create2": {
+      "hash": "0x1adddb221278438a2f9428d52818009b81cb7fe58eae733f151943355a0e349a",
+      "block": 134752940
+    },
+    "factory": {
+      "hash": "0xbc630ac3ae9ccd322c366a71786ab6062b4bb3ca05fa018073eebe6ceed8e980",
+      "block": 134752955
+    },
+    "airdrop": {
+      "hash": "0x7a7eefbf554784b040de225cbc063706f5173d204f2d447cd465454827abe6f5",
+      "block": 134752960
+    },
+    "holder": {
+      "hash": "0x78a93691efdcc815a73d7afda7cf46fb3c640c1a9fe78c6e1cec36ef26509354",
+      "block": 134752974
+    },
+    "flywheel": {
+      "hash": "0x72b85c49580fdfc2bd9ff551580e7a98693514c174f7c3fcecb0cde5477cbb61",
+      "block": 134752987
+    },
+    "hook": {
+      "hash": "0xf9fab71a8e51be031e50968101b0067d10a4b7048e94c79787baa1329a7ea4d5",
+      "block": 134752994
+    },
+    "router": {
+      "hash": "0xd3745e93b1ec0179810e58109fece89c97dd2650625d5eed7f12e717a9ab0eec",
+      "block": 134753007
+    }
+  },
+  "deployer": "0x47C1A7C7d89D2C6bF6fd6835b913a6cCe010062e",
+  "block": 134752955,
+  "airdropGenesis": 1793491200,
+  "holderGenesis": 1795132800,
+  "hookSalt": "0x0000000000000000000000000000000000000000000000000000000000000012",
+  "gate": {
+    "recordedAt": "2026-11-20T19:42:15.522Z",
+    "plan": {
+      "chainId": 56,
+      "network": "BNB Chain",
+      "mainnet": true,
+      "startMcapUsd": 20000,
+      "treasury": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01",
+      "recipients": [
+        "0x0a928fcf86Da6062F86ADB23F4eCc64A4fBB0173",
+        "0xdb959eB794a0C6976f6321C337469B4b925591c9",
+        "0xD6D11BD5f4d6f6A3ed510413243b4dD8cD6EF87D"
+      ],
+      "minFeeBps": 100,
+      "metadataRequired": true,
+      "approver": "Malik",
+      "approvedAt": 1795132800000,
+      "planHash": "0xb74ac41e3ab98e7d8025f051da6ad88229308cf893ad11ac533f74db40795371"
+    },
+    "deployment": {
+      "factory": "0x060742Fba64Ed98f159d9F99bdd0Cb268ECCa8B1",
+      "hook": "0xe843acBa3505cE2842b09F32aa5c9147615DE8Cc",
+      "router": "0xcA3743B66245410886Abb2eE6DCC5781F544aA51",
+      "blockNumber": 134752955,
+      "transactions": [
+        "0x1adddb221278438a2f9428d52818009b81cb7fe58eae733f151943355a0e349a",
+        "0xbc630ac3ae9ccd322c366a71786ab6062b4bb3ca05fa018073eebe6ceed8e980",
+        "0x7a7eefbf554784b040de225cbc063706f5173d204f2d447cd465454827abe6f5",
+        "0x78a93691efdcc815a73d7afda7cf46fb3c640c1a9fe78c6e1cec36ef26509354",
+        "0x72b85c49580fdfc2bd9ff551580e7a98693514c174f7c3fcecb0cde5477cbb61",
+        "0xf9fab71a8e51be031e50968101b0067d10a4b7048e94c79787baa1329a7ea4d5",
+        "0xd3745e93b1ec0179810e58109fece89c97dd2650625d5eed7f12e717a9ab0eec"
+      ]
+    }
+  },
+  "constructorChecks": [
+    {
+      "check": "factory treasury",
+      "ok": true,
+      "detail": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01"
+    },
+    {
+      "check": "factory start $20,000",
+      "ok": true,
+      "detail": "20000"
+    },
+    {
+      "check": "factory requires metadata",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "check": "factory has launch controls",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "check": "hook factory",
+      "ok": true,
+      "detail": "0x060742Fba64Ed98f159d9F99bdd0Cb268ECCa8B1"
+    },
+    {
+      "check": "hook treasury",
+      "ok": true,
+      "detail": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01"
+    },
+    {
+      "check": "hook PoolManager",
+      "ok": true,
+      "detail": "0x28e2Ea090877bF75740558f6BFB36A5ffeE9e9dF"
+    },
+    {
+      "check": "hook airdrop vault",
+      "ok": true,
+      "detail": "0x0a928fcf86Da6062F86ADB23F4eCc64A4fBB0173"
+    },
+    {
+      "check": "hook flywheel vault",
+      "ok": true,
+      "detail": "0xdb959eB794a0C6976f6321C337469B4b925591c9"
+    },
+    {
+      "check": "hook holder vault",
+      "ok": true,
+      "detail": "0xD6D11BD5f4d6f6A3ed510413243b4dD8cD6EF87D"
+    },
+    {
+      "check": "hook minimum fee",
+      "ok": true,
+      "detail": "100"
+    },
+    {
+      "check": "airdrop operator is the keeper",
+      "ok": true,
+      "detail": "0x10299c3Cff25C3e775e91463c5D9c8670483d39F"
+    },
+    {
+      "check": "airdrop period",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "check": "holder operator is the keeper",
+      "ok": true,
+      "detail": "0x10299c3Cff25C3e775e91463c5D9c8670483d39F"
+    },
+    {
+      "check": "holder period",
+      "ok": true,
+      "detail": "604800"
+    },
+    {
+      "check": "flywheel operator is the keeper",
+      "ok": true,
+      "detail": "0x10299c3Cff25C3e775e91463c5D9c8670483d39F"
+    },
+    {
+      "check": "flywheel factory",
+      "ok": true,
+      "detail": "0x060742Fba64Ed98f159d9F99bdd0Cb268ECCa8B1"
+    },
+    {
+      "check": "router hook",
+      "ok": true,
+      "detail": "0xe843acBa3505cE2842b09F32aa5c9147615DE8Cc"
+    },
+    {
+      "check": "router PoolManager",
+      "ok": true,
+      "detail": "0x28e2Ea090877bF75740558f6BFB36A5ffeE9e9dF"
+    },
+    {
+      "check": "gate (#234) verifyDeployment: no mismatches",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "safeBatch": "bnb-mainnet-safe-batch.json",
+  "status": "ready",
+  "pending": {
+    "safe": "Execute the Safe batch (setHook, configureUsdPricing, approveQuote USDC, setGuardian, setDailyLaunchCap), then run verify.",
+    "keeper": "flywheel.setRouter(router) from the keeper, before the flywheel is switched on (it stays off in the first release)."
+  },
+  "verify": {
+    "at": "2026-11-20T20:32:15.525Z",
+    "checks": [
+      {
+        "check": "factory hook",
+        "ok": true,
+        "detail": "0xe843acBa3505cE2842b09F32aa5c9147615DE8Cc"
+      },
+      {
+        "check": "USD feed",
+        "ok": true,
+        "detail": "0x0567F2323251f0Aab15c8dFb1967E4e8A7D42aeE"
+      },
+      {
+        "check": "USDC approved at $25,000 virtual",
+        "ok": true,
+        "detail": "25000000000000000000000"
+      },
+      {
+        "check": "guardian",
+        "ok": true,
+        "detail": "0xfC08505EfEf934c3fF19d82D189f60f28a0255eB"
+      },
+      {
+        "check": "daily launch cap",
+        "ok": true,
+        "detail": "1000"
+      },
+      {
+        "check": "launches paused",
+        "ok": true,
+        "detail": "false"
+      },
+      {
+        "check": "native start price readable",
+        "ok": true,
+        "detail": "46.838469799182308984 native = $25,000 virtual"
+      },
+      {
+        "check": "flywheel router (keeper, before the flywheel is switched on)",
+        "ok": true,
+        "detail": "not set yet (flywheel off in the first release)"
+      }
+    ]
+  }
+}
