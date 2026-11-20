@@ -896,3 +896,19 @@ off) through Kyber's `extraFee`, paid to that network's treasury Safe (`plan.tre
 side of a swap where there is one, so the treasury collects ETH/BNB/USDC. The page shows "Elpida fee 0.5%"; the build is
 refused if a route comes back without the fee. On the first stock → ETH swap, check the received amount matches the
 quote (the fee is taken from the output there).
+
+## Every Ondo stock and ETF in Swap on BNB Chain (20 November 2026)
+
+Swap needs no price feed (Kyber prices each swap from DEX pools), so Swap can offer all of Ondo's BNB Chain tokens, not
+only the 13 that launches can price. `config/stocks/candidates/bnb-ondo-all.json` holds Ondo's 344 stocks and 130 ETFs
+from Ondo's GM token CSV (docs.ondo.finance/addresses, downloaded 20 Nov); the 13 launch candidates match it.
+
+1. Check them on chain and write the list (reads only; about a minute):
+   ```
+   $env:STOCK_LIST_RPC_URL="<BNB RPC>"
+   node scripts/swap-list.mjs bnb config/stocks/candidates/bnb-ondo-all.json --source "Ondo GM token CSV (docs.ondo.finance/addresses), 20 November 2026"
+   ```
+2. Commit `config/swap/bnb-mainnet.json` on a branch and push. Once merged, Swap on BNB lists them all. A swap goes
+   through only where a DEX pool exists for that token; otherwise the page says there is no route.
+
+These tokens are swap-only. Launch pairs still need an on-chain price (the 13 adapters, later Pyth).

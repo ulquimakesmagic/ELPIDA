@@ -13,12 +13,16 @@ export const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/, AMOUNT = /^[1-9][0-9]{0,77}$/, CLIENT = 'elpida';
 
 /** Tokens a network's Swap offers: native, its USDC and its verified stocks. */
-export function swapTokens(net, stockList) {
+export function swapTokens(net, stockList, swapList = null) {
   if (!net || !KYBER_CHAINS[net.key]) return [];
   const out = [{ address: NATIVE, symbol: net.nativeCurrency?.symbol ?? 'ETH', name: net.nativeCurrency?.name ?? 'Native coin', decimals: 18, kind: 'native' }];
   const usdc = net.payoutStable?.address ?? net.usd?.usdc;
   if (ADDRESS.test(String(usdc ?? ''))) out.push({ address: usdc, symbol: net.payoutStable?.symbol ?? 'USDC', name: 'USD Coin', decimals: Number(net.payoutStable?.decimals ?? 6), kind: 'usdc' });
   for (const s of stockList?.stocks ?? []) if (ADDRESS.test(String(s.address ?? ''))) out.push({ address: s.address, symbol: s.symbol, name: s.name, decimals: Number(s.decimals), kind: 'xstock' });
+  // Swap-only tokens (config/swap/<network>.json, e.g. every Ondo stock and ETF on BNB Chain): no price feed needed here.
+  const have = new Set(out.map(t => t.address.toLowerCase()));
+  if (swapList?.chainId == null || Number(swapList.chainId) === Number(net.chainId ?? swapList.chainId))
+    for (const t of swapList?.tokens ?? []) if (ADDRESS.test(String(t.address ?? '')) && !have.has(t.address.toLowerCase()) && Number(t.decimals) >= 6 && Number(t.decimals) <= 18) { have.add(t.address.toLowerCase()); out.push({ address: t.address, symbol: t.symbol, name: t.name, decimals: Number(t.decimals), kind: 'xstock' }); }
   return out;
 }
 
