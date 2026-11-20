@@ -912,3 +912,26 @@ from Ondo's GM token CSV (docs.ondo.finance/addresses, downloaded 20 Nov); the 1
    through only where a DEX pool exists for that token; otherwise the page says there is no route.
 
 These tokens are swap-only. Launch pairs still need an on-chain price (the 13 adapters, later Pyth).
+## Ondo stocks priced by Pyth on BNB Chain (20 November 2026)
+
+Malik, 20 Nov: as many Ondo stocks as possible for launches, not only the 13 Chainlink prices on BNB Chain. Pyth
+publishes US equity prices; `ElpidaPythOndoStockFeed` answers Pyth's share price × Ondo's sValue like a Chainlink feed
+(8 decimals, Pyth's publish time as the round), refuses while Ondo pauses the token or when Pyth's confidence interval
+is wider than 2% of the price, and cannot be changed after deployment. The V2 factory takes it unchanged. Pyth only
+stores a price when someone pushes a signed update, so the launch page pushes the latest one (via
+`/api/public/pyth-update`, a tiny Pyth fee) just before a launch on such a stock. Pyth Core on BNB Chain:
+`0x4D7E825f80bDf85e913E0DD2A2D54927e9dE1594` (docs.pyth.network contract addresses). This contract is new and not
+externally audited; tested on a local chain with the real V2 factory.
+
+After the Chainlink adapters (the 13) are deployed:
+1. `node scripts/ondo-pyth-feeds.mjs map --network bnb` (Hermes only, no key, no RPC). Writes
+   `config/stocks/candidates/bnb-ondo-pyth.json` and lists the Ondo tokens Pyth has no feed for.
+2. `node scripts/ondo-pyth-feeds.mjs check --network bnb` (reads; needs `ELPIDA_MAINNET_RPC_URL`). Send me the output.
+3. `node scripts/ondo-pyth-feeds.mjs deploy --network bnb` (one adapter per passing stock, a cent or two each; hidden
+   key prompt, typed DEPLOY). Writes `deployments/bnb-ondo-pyth-feeds.json` and
+   `config/stocks/candidates/bnb-ondo-feeds-all.json` (the 13 Chainlink adapters plus these).
+4. `node scripts/ondo-pyth-feeds.mjs push --network bnb` (stores the latest Pyth prices on chain; typed PUSH).
+5. `node scripts/stock-list.mjs bnb config/stocks/candidates/bnb-ondo-feeds-all.json` (with `STOCK_LIST_RPC_URL`),
+   push everything on a branch.
+6. Operator panel → Launchpads → V2 card → Approve N more stocks → Safe batches. Each approval reads the stored price,
+   so execute them within 4 days of step 4 (or push again first).
