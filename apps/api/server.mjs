@@ -335,7 +335,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const dexscreener=injectedDexscreener??createDexscreener();
   // Swap page (apps/api/swap.mjs): native coin, USDC and the network's verified stocks, routed by KyberSwap.
   const stockListFor=key=>{try{return JSON.parse(readFileSync(fileURLToPath(new URL(`../../config/stocks/${key}.json`,import.meta.url)),'utf8'));}catch{return null;}};
-  const swapTokensFor=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);return n?swapTokens(n,stockListFor(key)):[];};
+  const swapListFor=key=>{try{return JSON.parse(readFileSync(fileURLToPath(new URL(`../../config/swap/${key}.json`,import.meta.url)),'utf8'));}catch{return null;}};
+  const swapTokensFor=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);return n?swapTokens(n,stockListFor(key),swapListFor(key)):[];};
   const swapFee=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);return n?swapFeeFor(n,process.env):null;};
   const swap=injectedSwap??createSwap({tokensFor:swapTokensFor,feeFor:swapFee});
   const ondoStatus=injectedOndoStatus??createOndoStatus({apiKey:port===0?'':process.env.ONDO_API_KEY,log:e=>console.log(JSON.stringify(e))}).start();
