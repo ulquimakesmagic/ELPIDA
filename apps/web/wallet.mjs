@@ -243,10 +243,11 @@ export class TestnetWallet {
     const approved = kind => (this.approvedQuotes ?? []).filter(a => a.kind === kind).map(a => ({ ...a, ...fee }));
     // Mainnet: no curve launchpad, only ELPIDA V2 (loadV2Pairs). Paired-token launches are not a V2 pair kind.
     if (this.net.mainnet && !this.deployment) {
+      const approved = kind => (this.approvedQuotes ?? []).filter(a => a.kind === kind).map(a => ({ ...a, ...fee, ...(a.v2Vq ? { curve: { v2vq: a.v2Vq } } : {}) }));
       const wait = this.v2PairsFor !== this.net.chainId ? 'Loading the approved pairs…' : this.v2PairsError ?? null;
       const stockOff = stockPairsBlocked(this.net.chainId);
       return {
-        native: { assets: [{ id: 'native', symbol: native, name: this.net.nativeCurrency.name, decimals: 18, ...fee }] },
+        native: { assets: [{ id: 'native', symbol: native, name: this.net.nativeCurrency.name, decimals: 18, ...fee, ...(this.v2NativeVq ? { curve: { v2vq: this.v2NativeVq } } : {}) }] },
         usdc: approved('usdc').length ? { assets: approved('usdc') } : { assets: [], unavailable: wait ?? `USDC is not a pair on ${this.net.name} yet.` },
         xstock: stockOff ? { assets: [], unavailable: stockOff } : approved('xstock').length ? { assets: approved('xstock') } : { assets: [], unavailable: wait ?? `No stock is approved on ${this.net.name} yet.` },
         token: { assets: [], unavailable: 'ELPIDA V2 pairs with the native coin, USDC or an approved stock. Pairing with another token is not offered.' },

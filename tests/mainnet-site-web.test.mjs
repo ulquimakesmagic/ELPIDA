@@ -15,7 +15,7 @@ test('the mainnet site serves index.html without testnet wording; the testnet si
   assert.deepEqual([...page.matchAll(/.{0,40}test ?net.{0,40}/gi)].map(m => m[0]), [], 'no testnet wording left');
   assert.match(page, /<meta name="description" content="[^"]*Elpida is live on Base mainnet\."/);
   assert.equal((page.match(/Live on Base mainnet\./g) ?? []).length, 2, 'Open Graph and Twitter previews');
-  assert.match(page, /<span id="footer-note">Base mainnet: real funds\. The contracts are not independently audited\.<\/span>/);
+  assert.match(page, /<span id="footer-note" hidden><\/span>/);
   assert.match(page, /graduates in that same pool/);
   assert.match(siteHtml(html, { mode: 'mainnet', names: ['Base', 'BNB Chain'] }), /Live on Base, BNB Chain mainnet\./);
 });

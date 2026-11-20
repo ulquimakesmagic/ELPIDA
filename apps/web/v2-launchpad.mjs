@@ -291,6 +291,10 @@ export async function loadV2Pairs(w) {
     const list = checkStockList(await response.json(), w.net.chainId);
     for (const s of list.stocks) out.push({ id: s.address, address: s.address, kind: 'xstock', symbol: s.symbol, name: s.name, decimals: Number(s.decimals), verified: true });
   } else if (response.status !== 404) throw new Error('The stock list is unavailable right now. Refresh shortly.');
+  // Each pair's virtual quote now (the launch page estimates a first buy from it; stocks follow their feed price).
+  const factory = new Contract(d.factory, V2_FACTORY_ABI, w.provider);
+  try { w.v2NativeVq = Number(formatUnits(await factory.nativeVirtualQuote(), 18)); } catch { w.v2NativeVq = null; }
+  await Promise.all(out.map(async a => { try { a.v2Vq = Number(formatUnits(await v2VirtualQuote(factory, a.address), a.decimals)); } catch { a.v2Vq = null; } }));
   w.approvedQuotes = out;
   return out;
 }

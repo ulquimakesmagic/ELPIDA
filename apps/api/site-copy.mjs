@@ -12,7 +12,8 @@ export function siteHtml(html, { mode, names = [] } = {}) {
     ['Live on public testnets.', `Live on ${where} mainnet.`],
     ['Currently running on public testnets.', `Live on ${where} mainnet with real funds; the contracts are not independently audited.`],
     ['Elpida currently runs on a local simulation and public testnets only. No mainnet launch is available.', `Elpida runs on ${where} mainnet with real funds. The contracts have not been independently audited.`],
-    ['Prototype on test networks. Test tokens have no monetary value.', `${where} mainnet: real funds. The contracts are not independently audited.`],
+    // The mainnet footer carries no notice (Malik, 20 Nov): it is on How it works (#how-network-note).
+    ['<span id="footer-note">Prototype on test networks. Test tokens have no monetary value.</span>', '<span id="footer-note" hidden></span>'],
     // Mainnet launches are V2 only: liquidity sits in a Uniswap v4 pool from launch and graduates in that same pool.
     ['When the curve sells out, its trading reserve and the remaining tokens open a DEX pool at the final curve price: Uniswap v3 on Base Sepolia and the local DEX simulation. Other EVM testnets use a locked test pool. Existing Solana tokens use PumpSwap. That liquidity is locked permanently.',
       'Every token trades in its own Uniswap v4 pool from the first block. At five times its starting market cap it graduates in that same pool: what the sale raised becomes permanent liquidity that nobody can withdraw.'],
