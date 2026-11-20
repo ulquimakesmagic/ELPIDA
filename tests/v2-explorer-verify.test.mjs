@@ -102,3 +102,12 @@ test('verifyOnExplorer refuses the wrong chain or an unknown explorer, and repor
   const out = await verifyOnExplorer({ provider, plan: { chainId: 8453 }, record, apiKey: KEY, fetch: e.fetch, sleep });
   assert.deepEqual(out, [{ check: 'factory', ok: true, detail: 'already verified: https://basescan.org/address/0x167bff77A4Ed0054784186B89Cf8A33D83e2213D#code' }]);
 });
+
+test('creation tx is read raw where ethers refuses an empty "to" (BNB Chain, 20 Nov)', async () => {
+  const { creationTx } = await import('../scripts/v2-explorer-verify.mjs');
+  const calls = [];
+  const provider = { send: async (m, p) => { calls.push(m); return { to: '', input: '0x60c0abcd' }; }, getTransaction: async () => { throw new Error('invalid value for value.to'); } };
+  assert.deepEqual(await creationTx(provider, '0x' + '1'.repeat(64)), { data: '0x60c0abcd' });
+  assert.deepEqual(calls, ['eth_getTransactionByHash']);
+  assert.equal(await creationTx({ send: async () => null }, '0x' + '2'.repeat(64)), null);
+});
