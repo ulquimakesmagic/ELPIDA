@@ -135,17 +135,28 @@ export class V2Keeper {
   due(w, job, everySeconds) { const last = this.get(`${w.chain}:${job}:last`, 0); return this.now() - last >= everySeconds; }
   done(w, job) { this.set(`${w.chain}:${job}:last`, this.now()); }
 
-  /** Daily: pays every V2 token's unpaid fee shares to their five recipients. */
-  async fees(w, { force = false } = {}) {
+  /**
+   * Daily: pays every V2 token's unpaid fee shares to their five recipients.
+   *
+   * The status is what an operator and the public API see, so it says what happened: `ok` only when every collection
+   * succeeded, `partial` when some tokens paid and some did not, `failed` when none did. The job used to record `ok`
+   * unconditionally — on 20 November five share claims failed on Base and the run still read `ok`. `hook` is
+   * injectable so the outcome can be tested without a chain.
+   */
+  async fees(w, { force = false, hook: injected } = {}) {
     if (!force && !this.due(w, 'fees', DAY)) return;
     const index = w.index(); if (!index) return;
-    const hook = new Contract(w.deployment.hook, HOOK, w.signer); let paid = 0;
+    const hook = injected ?? new Contract(w.deployment.hook, HOOK, w.signer);
+    let collected = 0; const failures = [];
     for (const t of index.listings()) {
       const { owed } = await hook.ledgers(t.address);
       if (owed.slice(1, 4).every(x => x === 0n)) continue;
-      await this.collect(w, hook, t.address); paid++;
+      const result = await this.collect(w, hook, t.address);
+      if (result.ok) collected++; else failures.push({ token: t.address, failures: result.failures });
     }
-    this.done(w, 'fees'); this.record(w.chain, 'fees', 'ok', { tokens: paid });
+    this.done(w, 'fees');
+    if (!failures.length) this.record(w.chain, 'fees', 'ok', { tokens: collected });
+    else this.record(w.chain, 'fees', collected ? 'partial' : 'failed', { tokens: collected, failed: failures.length, failures: failures.slice(0, 3) });
   }
 
   /**
@@ -154,10 +165,12 @@ export class V2Keeper {
    * recipient never holds back the other four.
    */
   async collect(w, hook, token) {
-    try { await this.send(w, () => hook.withdrawFees(token)); return; }
+    try { await this.send(w, () => hook.withdrawFees(token)); return { ok: true }; }
     catch (e) { if (e.code === 'lease_lost' || e.code === 'budget_reached') throw e; }
     const { owed } = await hook.ledgers(token);
-    for (let i = 0; i < 5; i++) if (owed[i] > 0n) { try { await this.send(w, () => hook.claim(token, i)); } catch (e) { if (e.code === 'lease_lost' || e.code === 'budget_reached') throw e; this.record(w.chain, 'fees', 'recipient-failed', { token, recipient: i, error: e }); } }
+    const failures = [];
+    for (let i = 0; i < 5; i++) if (owed[i] > 0n) { try { await this.send(w, () => hook.claim(token, i)); } catch (e) { if (e.code === 'lease_lost' || e.code === 'budget_reached') throw e; failures.push({ share: i, reason: String(e.shortMessage ?? e.message ?? e).slice(0, 160) }); } }
+    return failures.length ? { ok: false, failures } : { ok: true };
   }
 
   /** Wallets linked to each token's creator: the creator, its reward vault, and wallets it sent the token to. */
