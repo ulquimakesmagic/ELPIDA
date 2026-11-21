@@ -428,16 +428,25 @@ export async function launchV2(w, body) {
   // (at most 1% below the quote); the launch then buys with the swap's guaranteed minimum. Any extra stays in the wallet.
   const coin = w.net.nativeCurrency.symbol, payNative = body.firstBuyPayment === 'native' && !!quote;
   if (body.firstBuyPayment === 'native' && !quote) throw new Error('This pair already uses the native coin. Enter the first buy directly. Nothing was submitted.');
-  if (payNative && w.net.mainnet) throw new Error('Paying the first buy in the native coin is testnet-only for now. Nothing was submitted.');
-  if (payNative && !w.dex?.router) throw new Error(`There is no ${coin} conversion route on ${w.net.name}. Pay the first buy in the pair asset. Nothing was submitted.`);
+  const viaKyber = payNative && !!w.net.mainnet;
+  if (payNative && !viaKyber && !w.dex?.router) throw new Error(`There is no ${coin} conversion route on ${w.net.name}. Pay the first buy in the pair asset. Nothing was submitted.`);
   const nativeIn = payNative && Number(body.nativeBuy) > 0 ? parseUnits(w.nativeAmount(body.nativeBuy), 18) : 0n;
-  const conversion = nativeIn > 0n ? await quoteNativePairConversion({ Contract, provider: w.provider, dex: w.dex, asset, amountIn: nativeIn }) : null;
-  const firstBuy = payNative ? conversion?.minimum ?? 0n : parseUnits(String(body.firstBuy || '0'), decimals), cap = maxFirstBuyGross({ feeBps, vQ });
+  const kyber = viaKyber && nativeIn > 0n ? await kyberFirstBuyQuote(w.net.key, asset, nativeIn) : null;
+  const conversion = !viaKyber && nativeIn > 0n ? await quoteNativePairConversion({ Contract, provider: w.provider, dex: w.dex, asset, amountIn: nativeIn }) : null;
+  let firstBuy = payNative ? (kyber ? kyber.amountOut * 99n / 100n : conversion?.minimum ?? 0n) : parseUnits(String(body.firstBuy || '0'), decimals), cap = maxFirstBuyGross({ feeBps, vQ });
   if (firstBuy > cap) throw new Error(`The first buy can take at most 3% of the supply: up to ${formatUnits(cap, decimals)} ${quote ? await quote.symbol() : w.net.nativeCurrency.symbol} at a ${(feeBps / 100).toFixed(2)}% fee. Nothing was submitted.`);
   const slippage = BigInt(Math.round(Math.min(5, Math.max(0.1, Number(body.slippage ?? 1))) * 100));
-  const minOut = v2FirstBuyTokens(vQ, firstBuy, feeBps) * (10000n - slippage) / 10000n;
+  let minOut = v2FirstBuyTokens(vQ, firstBuy, feeBps) * (10000n - slippage) / 10000n;
   const fee = await factory.launchFee(), value = (fee * 101n + 99n) / 100n + (quote ? 0n : firstBuy);
   if (await w.provider.getBalance(w.address) < value + nativeIn) throw new Error(`You need ${formatUnits(value + nativeIn, 18)} ${coin} for the $10 launch fee${quote && !nativeIn ? '' : ' and your first buy'}, plus gas.`);
+  if (kyber) {
+    // What actually arrived (at least 99% of the quote) is the first buy, capped at 3% of the supply; any extra stays.
+    const sym = await quote.symbol();
+    const got = await kyberFirstBuySwap(w, asset, nativeIn, `Convert ${formatUnits(nativeIn, 18)} ${coin} to ${sym} for your first buy (KyberSwap). This is a separate swap: if the launch then stops, the ${sym} stays in your wallet…`);
+    if (got <= 0n) throw new Error(`The conversion delivered no ${sym}. Nothing else was submitted.`);
+    firstBuy = got > cap ? cap : got;
+    minOut = v2FirstBuyTokens(vQ, firstBuy, feeBps) * (10000n - slippage) / 10000n;
+  }
   if (conversion) {
     const deadline = BigInt((await w.provider.getBlock('latest')).timestamp + 300);
     const data = swapCalldata(Interface, w.dex.routerVersion ?? 2, w.dex.router, { tokenIn: conversion.tokenIn, tokenOut: conversion.tokenOut, fee: conversion.fee, recipient: w.address, amountIn: nativeIn, amountOutMinimum: conversion.minimum }, { deadline, refundETH: true });
@@ -762,6 +771,28 @@ async function creatorSplit(w, { wallets, shares }) {
   if (!await hasCode(w.provider, address, { wait: true })) throw new Error('The creator split contract is not visible on the network yet. Try again; nothing else was submitted.');
   write(key, { address });
   return address;
+}
+
+// First buy paid in the native coin on mainnet (Malik, 21 Nov): swapped into the pair asset through KyberSwap via
+// /api/public/swap (no Elpida swap fee for this conversion), right before the launch. The router must be Kyber's.
+export const KYBER_ROUTER = '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5';
+const KYBER_NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+/** Kyber's quote for native → `asset` (base units in and out). */
+export async function kyberFirstBuyQuote(network, asset, amountIn, { fetchImpl = fetch } = {}) {
+  const r = await fetchImpl(`/api/public/swap/quote?network=${encodeURIComponent(network)}&tokenIn=${KYBER_NATIVE}&tokenOut=${asset}&amountIn=${amountIn}&purpose=first-buy`);
+  const q = await r.json().catch(() => ({}));
+  if (!r.ok || !q.routeSummary || String(q.router ?? '').toLowerCase() !== KYBER_ROUTER.toLowerCase()) throw new Error(q.error ?? 'No conversion route right now. Pay the first buy in the pair asset, or try a smaller amount.');
+  return { routeSummary: q.routeSummary, amountOut: BigInt(q.amountOut ?? '0') };
+}
+/** Swaps native → `asset` for the first buy and returns how much arrived in the wallet. */
+async function kyberFirstBuySwap(w, asset, amountIn, label) {
+  const { routeSummary } = await kyberFirstBuyQuote(w.net.key, asset, amountIn);
+  const r = await fetch('/api/swap/build', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': w.config.csrf }, body: JSON.stringify({ network: w.net.key, routeSummary, sender: w.address, slippageBps: 100, purpose: 'first-buy' }) });
+  const tx = await r.json().catch(() => ({}));
+  if (!r.ok || String(tx.to ?? '').toLowerCase() !== KYBER_ROUTER.toLowerCase() || BigInt(tx.value ?? '0') !== amountIn) throw new Error(`${tx.error ?? 'The conversion could not be prepared.'} Nothing was submitted.`);
+  const token = new Contract(asset, ERC20, w.provider), before = await token.balanceOf(w.address);
+  await step(w, w.signer.sendTransaction({ to: KYBER_ROUTER, data: tx.data, value: amountIn }), label);
+  return (await token.balanceOf(w.address)) - before;
 }
 
 const PYTH_FEED_ABI = ['function pyth() view returns(address)', 'function priceId() view returns(bytes32)'];

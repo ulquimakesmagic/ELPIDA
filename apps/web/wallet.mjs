@@ -5,7 +5,7 @@ import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './
 import { isV4Token, v4Available, v4Deployment, deployTestPoolManager, v4Quote, v4Trade, v4WithdrawFees, v4TokenState, v4RouterFor, v2Deployment } from './v4-launchpad.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
 import { V2_MODEL } from '/v2-economics.mjs';
-import { deployV2, deployV2UsdcDistributors, setupTestPayoutStable, approveV2StockList, launchV2, approveV2Stock, loadV2Pairs, claimCreatorSplit, claimIdentityRow, claimV2CreatorFees } from './v2-launchpad.mjs';
+import { deployV2, deployV2UsdcDistributors, setupTestPayoutStable, approveV2StockList, launchV2, approveV2Stock, loadV2Pairs, claimCreatorSplit, claimIdentityRow, claimV2CreatorFees, kyberFirstBuyQuote } from './v2-launchpad.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
 import { stockPairsBlocked } from '/pairs.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress, id as keccakText } from '/vendor/ethers.js';
@@ -363,7 +363,13 @@ export class TestnetWallet {
    */
   async firstBuyConversionQuote({ quoteAsset, nativeAmount, v2 = false }) {
     await this.checkNetwork();
-    if (this.net.mainnet) throw new Error('Paying the first purchase in the native coin is testnet-only for now.');
+    // Mainnet ELPIDA V2: converted through KyberSwap right before the launch (v2-launchpad.mjs), at most 1% below the quote.
+    if (this.net.mainnet) {
+      if (!v2 || !isAddress(quoteAsset)) throw new Error('Paying the first purchase in the native coin needs an ELPIDA V2 pair.');
+      const coin = new Contract(quoteAsset, ['function decimals() view returns(uint8)', 'function symbol() view returns(string)'], this.provider), [decimals, symbol] = await Promise.all([coin.decimals(), coin.symbol()]);
+      const { amountOut } = await kyberFirstBuyQuote(this.net.key, quoteAsset, parseUnits(this.nativeAmount(nativeAmount), 18));
+      return { output: formatUnits(amountOut, decimals), minimum: formatUnits(amountOut * 99n / 100n, decimals), symbol, pending: null };
+    }
     // ELPIDA V2 launches: any pair asset its launchpad accepts; the swap runs right before the launch (v2-launchpad.mjs).
     if (v2) {
       if (!isAddress(quoteAsset) || !this.dex) throw new Error(`There is no ${this.net.nativeCurrency.symbol} conversion route on ${this.net.name}.`);

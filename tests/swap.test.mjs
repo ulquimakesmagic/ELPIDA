@@ -77,3 +77,31 @@ test('page: 25/50/Max portions keep a gas reserve on the native coin', async () 
   assert.equal(portionOf(1000n, 50, { native: true, reserve: 200n }), 500n);
   assert.equal(portionOf(100n, 100, { native: true, reserve: 200n }), 0n);
 });
+
+test('first-buy conversion: native → launch pair carries no Elpida fee; anything else with that purpose is refused', async () => {
+  const { swapFeeFor } = await import('../apps/api/swap.mjs');
+  const net = { ...base, v2: { shared: { treasury: '0x' + '7'.repeat(40) } } }, tokens = swapTokens(base, list), urls = [];
+  const fetchImpl = async (url, init) => { urls.push({ url, body: init?.body });
+    if (url.includes('/routes')) { const q = new URL(url).searchParams; return new Response(JSON.stringify({ data: { routerAddress: KYBER_ROUTER, routeSummary: { tokenIn: q.get('tokenIn'), tokenOut: q.get('tokenOut'), amountIn: '1000', amountOut: '7' } } })); }
+    return new Response(JSON.stringify({ data: { routerAddress: KYBER_ROUTER, data: '0xab', transactionValue: '1000', amountOut: '7', amountIn: '1000' } })); };
+  const swap = createSwap({ fetchImpl, tokensFor: () => tokens, feeFor: () => swapFeeFor(net, {}), launchPairsFor: () => [AAPL, base.payoutStable.address] });
+  const q = await swap.quote({ network: 'base-mainnet', tokenIn: NATIVE, tokenOut: AAPL, amountIn: '1000', purpose: 'first-buy' });
+  assert.doesNotMatch(urls[0].url, /feeAmount/); assert.equal(q.fee, null);
+  await swap.build({ network: 'base-mainnet', routeSummary: q.routeSummary, sender: '0x' + '1'.repeat(40), slippageBps: 100, purpose: 'first-buy' });
+  await assert.rejects(swap.quote({ network: 'base-mainnet', tokenIn: AAPL, tokenOut: NATIVE, amountIn: '1000', purpose: 'first-buy' }), /native coin to the launch pair/, 'selling is not a first buy');
+  await assert.rejects(swap.build({ network: 'base-mainnet', routeSummary: q.routeSummary, sender: '0x' + '1'.repeat(40), slippageBps: 100 }), /out of date/, 'a fee-free route cannot be built as an ordinary swap');
+  const normal = await swap.quote({ network: 'base-mainnet', tokenIn: NATIVE, tokenOut: AAPL, amountIn: '1000' });
+  assert.deepEqual(normal.fee, { bps: 50, side: 'in' }, 'ordinary swaps still pay 0.5%');
+});
+
+test('launch page: first buy can be paid in the native coin on mainnet V2, converted through KyberSwap first', () => {
+  const flow = readFileSync(new URL('../apps/web/launch-flow.mjs', import.meta.url), 'utf8');
+  assert.match(flow, /connected\(\) && \(!net\(\)\?\.mainnet \|\| v2Chosen\(\)\) && typeof ctx\.wallet\.firstBuyConversionQuote/);
+  assert.match(flow, /net\(\)\?\.mainnet \? 'KyberSwap'/);
+  const v2 = readFileSync(new URL('../apps/web/v2-launchpad.mjs', import.meta.url), 'utf8');
+  assert.match(v2, /purpose=first-buy/); assert.match(v2, /firstBuy = got > cap \? cap : got;/);
+  assert.match(v2, /String\(tx\.to \?\? ''\)\.toLowerCase\(\) !== KYBER_ROUTER\.toLowerCase\(\) \|\| BigInt\(tx\.value \?\? '0'\) !== amountIn/);
+  assert.doesNotMatch(v2, /testnet-only for now/);
+  const wallet = readFileSync(new URL('../apps/web/wallet.mjs', import.meta.url), 'utf8');
+  assert.doesNotMatch(wallet, /testnet-only for now/); assert.match(wallet, /kyberFirstBuyQuote\(this\.net\.key, quoteAsset/);
+});
