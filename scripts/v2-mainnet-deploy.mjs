@@ -331,7 +331,7 @@ export async function rehearse({ plan: given, fork = null, node = null, local = 
     const stockResults = [], forkBlock = stocks.length ? await provider.getBlockNumber() : null;
     for (const s of stocks) stockResults.push(await rehearseStock({ provider, signer: signers[0], plan, record, art, stock: s, findHolder, log }));
     // The guardian can stop new launches.
-    await (await new Contract(record.contracts.factory, ['function pauseLaunches()'], signers.find((_, i) => addrs[i] === plan.guardian) ?? signers[4]).pauseLaunches()).wait();
+    await guardianStop({ provider, signers, addrs, guardian: plan.guardian, factory: record.contracts.factory });
     const paused = await new Contract(record.contracts.factory, FACTORY_READ, provider).launchesPaused();
     return { record, checks, verified, launch: { token: launched.args.token, startMcapUsd: startMcap }, stocks: stockResults, forkBlock, guardianPaused: paused };
   } finally { provider.destroy(); await connection?.close(); }
@@ -411,6 +411,17 @@ async function graduateStockCurve({ provider, signer, record, art, stock, token,
 }
 
 /** Sends as an impersonated account (fork only) and waits with the time limit. */
+/**
+ * The rehearsal's guardian stop, sent as the plan's own guardian: one of the test wallets on a local chain, the real
+ * guardian wallet impersonated on a fork (BNB Chain, 21 Nov: the plan names Malik's guardian, none of the test wallets).
+ */
+export async function guardianStop({ provider, signers, addrs, guardian, factory }) {
+  const data = new Interface(['function pauseLaunches()']).encodeFunctionData('pauseLaunches', []);
+  const i = addrs.findIndex(a => a.toLowerCase() === String(guardian).toLowerCase());
+  if (i >= 0) return (await signers[i].sendTransaction({ to: factory, data })).wait();
+  await devRpc(provider, 'impersonateAccount', [guardian]); await devRpc(provider, 'setBalance', [guardian, '0x' + (10n ** 18n).toString(16)]);
+  return sendAs(provider, guardian, factory, data, 'guardian stops launches');
+}
 const sendAs = async (provider, from, to, data, what) => minedOrExplained(provider, await provider.send('eth_sendTransaction', [{ from, to, data }]), what);
 /** A signer's contract call, waited with the time limit. */
 const sent = async (provider, txPromise, what) => minedOrExplained(provider, (await txPromise).hash, what);
