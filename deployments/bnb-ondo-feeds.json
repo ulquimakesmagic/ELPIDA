@@ -1,0 +1,111 @@
+{
+  "network": "bnb",
+  "chainId": 56,
+  "sharesOracle": "0xF4Fd8a1B412633e10527454137A29Db7Aa35F15e",
+  "feeds": {
+    "COINon": {
+      "symbol": "COINon",
+      "name": "Coinbase Global (Ondo)",
+      "token": "0xf8589b526fdd65f7f301c605a6e04f0f1b4b3620",
+      "underlyingFeed": "0x2d1AB79D059e21aE519d88F978cAF39d74E31AEB",
+      "adapter": "0x5a6BEBe349e283bF7261Ea31724E2f54EbbDF89d",
+      "tx": "0x0f7e2f2a796716d82774821cae6161fa975aacdeb9653ffdec6b282f7d304131"
+    },
+    "NVDAon": {
+      "symbol": "NVDAon",
+      "name": "NVIDIA (Ondo)",
+      "token": "0xa9ee28c80f960b889dfbd1902055218cba016f75",
+      "underlyingFeed": "0xea5c2Cbb5cD57daC24E26180b19a929F3E9699B8",
+      "adapter": "0x53DB384005805165665FE3AE8C4dC09B3e453Be0",
+      "tx": "0x87b7ab20323a50f0b2f98832ad628da96a9794d97014a39ec90376258fd3ff29"
+    },
+    "TSLAon": {
+      "symbol": "TSLAon",
+      "name": "Tesla (Ondo)",
+      "token": "0x2494b603319d4d9f9715c9f4496d9e0364b59d93",
+      "underlyingFeed": "0xEEA2ae9c074E87596A85ABE698B2Afebc9B57893",
+      "adapter": "0xf2A06eEcf7Df4e53a1E70E03dfEDf26FACb38E21",
+      "tx": "0x4fde3acca0d108a63fd7ad2c471ace72d4713b20b88206aa66cbad6180e71f29"
+    },
+    "PFEon": {
+      "symbol": "PFEon",
+      "name": "Pfizer (Ondo)",
+      "token": "0x8a83c31d6751833b4940b6e871c48d9a15a07b46",
+      "underlyingFeed": "0xe96fFdE2ba50E0e869520475ee1bC73cA2dEE326",
+      "adapter": "0x329ce5317e67D0eC9E3dc3e6B7f70bC8B5880f48",
+      "tx": "0x744dae5fb4b22ea4d4d8fe9b9da6d19a03690e181ea8902953daf564635e057a"
+    },
+    "GMEon": {
+      "symbol": "GMEon",
+      "name": "GameStop (Ondo)",
+      "token": "0xdabb9aff4cf02f26d2014e4ca9f94ac6fe6572a3",
+      "underlyingFeed": "0x66cD2975d02f5F5cdEF2E05cBca12549B1a5022D",
+      "adapter": "0xD4a04C4e6B4241eB94e376B13b55C8055AC51D6b",
+      "tx": "0x9058ade7fbe22190858252decab7902f909fa0f8088cd59d048ffc9e4613ea5e"
+    },
+    "JPMon": {
+      "symbol": "JPMon",
+      "name": "JPMorgan Chase (Ondo)",
+      "token": "0x317bf42b43a394860718266dec445dcc9fd9da49",
+      "underlyingFeed": "0x8f26ba94180371baA2D2C143f96b6886DCACA250",
+      "adapter": "0x3a74Ea52BC722636A3Fd322837E8290436F81d69",
+      "tx": "0x2c5d827b215d004e996027003d6736e272e5385194690bf5baefa129a50aa21b"
+    },
+    "GOOGLon": {
+      "symbol": "GOOGLon",
+      "name": "Alphabet Class A (Ondo)",
+      "token": "0x091fc7778e6932d4009b087b191d1ee3bac5729a",
+      "underlyingFeed": "0xeDA73F8acb669274B15A977Cb0cdA57a84F18c2a",
+      "adapter": "0x5062100949Bf2982CD5605E643178d5E67920c1d",
+      "tx": "0xba902d76003e79ecde3061b4dbdd698e1dd504901870fd2f3f1ab2a2005da593"
+    },
+    "AMZNon": {
+      "symbol": "AMZNon",
+      "name": "Amazon (Ondo)",
+      "token": "0x4553cfe1c09f37f38b12dc509f676964e392f8fc",
+      "underlyingFeed": "0x51d08ca89d3e8c12535BA8AEd33cDf2557ab5b2a",
+      "adapter": "0xf33365b91E35cf24Bb92a889aFCcc375cBf8a601",
+      "tx": "0x0b1d4da88665344bbfd1c0a44ca71ffe6c4d0ab3c6fe01bb3c05fa0f23c426ff"
+    },
+    "AAPLon": {
+      "symbol": "AAPLon",
+      "name": "Apple (Ondo)",
+      "token": "0x390a684ef9cade28a7ad0dfa61ab1eb3842618c4",
+      "underlyingFeed": "0xb7Ed5bE7977d61E83534230f3256C021e0fae0B6",
+      "adapter": "0x11bb2cE3e9938846C43Df77D79CAABbd7C7590E7",
+      "tx": "0xa63c390808409656271e48758c6ae5ec779766a72c9645fbeac41f701eb445a5"
+    },
+    "MSFTon": {
+      "symbol": "MSFTon",
+      "name": "Microsoft (Ondo)",
+      "token": "0x6bfe75d1ad432050ea973c3a3dcd88f02e2444c3",
+      "underlyingFeed": "0x5D209cE1fBABeAA8E6f9De4514A74FFB4b34560F",
+      "adapter": "0x181f6A30057426d4e27aB441D8B45275Baf9cc10",
+      "tx": "0x1b12175923c7c35bd7650f8669135d7d831f1d3db2e648c49a5ddf0f96a0fdc6"
+    },
+    "METAon": {
+      "symbol": "METAon",
+      "name": "Meta Platforms (Ondo)",
+      "token": "0xd7df5863a3e742f0c767768cdfcb63f09e0422f6",
+      "underlyingFeed": "0xfc76E9445952A3C31369dFd26edfdfb9713DF5Bb",
+      "adapter": "0x24c0AC2b6D7cB012928f93498ef4CA4670F86B06",
+      "tx": "0xfbc9c9b479017a15816593e37758869d11d78375a0a237370dc1fc29c16a18b4"
+    },
+    "NFLXon": {
+      "symbol": "NFLXon",
+      "name": "Netflix (Ondo)",
+      "token": "0x7048f5227b032326cc8dbc53cf3fddd947a2c757",
+      "underlyingFeed": "0x1fE6c9Bd9B29e5810c2819f37dDa8559739ebeC9",
+      "adapter": "0x63ba9F9449c70f348285244ec38673C010a20fE9",
+      "tx": "0xd311b908b3d4c46c250b5df70f5f85664f91732eda2909e4e98c01b77081f4dd"
+    },
+    "MRNAon": {
+      "symbol": "MRNAon",
+      "name": "Moderna (Ondo)",
+      "token": "0x01486675da0764ee780ea7cb65c33062e9b2d28c",
+      "underlyingFeed": "0x6101F4DFBb24Cac3D64e28A815255B428b93639f",
+      "adapter": "0x8E129a10777837ADEF4aA29639be3F84288d09E9",
+      "tx": "0x6f9d644aa5899ce0a02a08d1828997e5d0ae640f910de64c72be30d29345baf9"
+    }
+  }
+}

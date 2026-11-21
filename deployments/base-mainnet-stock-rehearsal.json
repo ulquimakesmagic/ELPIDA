@@ -1,0 +1,139 @@
+{
+  "network": "base-mainnet",
+  "chainId": 8453,
+  "at": "2026-11-16T22:17:25.483Z",
+  "scope": "LOCAL FORK ONLY: nothing was sent to the public chain",
+  "via": "a dev node forking the chain (--node)",
+  "forkBlock": 58372950,
+  "gitCommit": "e37cb16125b11a552c400997665e39643b1046ff",
+  "stocks": [
+    {
+      "symbol": "GOOGLc",
+      "address": "0xb2000000000000000000002D0BA3164cc74f58B7",
+      "feed": "0x5bF49E0ffA937CE2FfF033c739aD7C634c4D34F2",
+      "ok": true,
+      "startMcapUsd": 20012.883800262316,
+      "bought": "7357915283687639882928392",
+      "returned": "51398487",
+      "detail": "starts at $20013, a GOOGLc buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": true,
+        "raisedUsd": 30931,
+        "chunks": 1,
+        "detail": "graduated at the ×5 milestone, raising $30,931 of GOOGLc into the locked pool; a sell and a buy then traded in the graduated pool"
+      }
+    },
+    {
+      "symbol": "METAc",
+      "address": "0xb2000000000000000000008bC8786B856E61707C",
+      "feed": "0x6526aE6797A76123638b863AeE4dD27Ba4E4b27D",
+      "ok": true,
+      "startMcapUsd": 20009.79844932387,
+      "bought": "7359039381933610107125086",
+      "returned": "23331442",
+      "detail": "starts at $20010, a METAc buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": true,
+        "raisedUsd": 30927,
+        "chunks": 1,
+        "detail": "graduated at the ×5 milestone, raising $30,927 of METAc into the locked pool; a sell and a buy then traded in the graduated pool"
+      }
+    },
+    {
+      "symbol": "MSFTc",
+      "address": "0xB200000000000000000000Ab99cFa739E253872B",
+      "feed": "0xeB10A6c9aa7E537aEd766C08c35Dae35B321b18c",
+      "ok": true,
+      "startMcapUsd": 20000.53214450024,
+      "bought": "7362427756460075372249909",
+      "returned": "28226336",
+      "detail": "starts at $20001, a MSFTc buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": true,
+        "raisedUsd": 30912,
+        "chunks": 2,
+        "detail": "graduated at the ×5 milestone, raising $30,912 of MSFTc into the locked pool (bought in 2 chunks); a sell and a buy then traded in the graduated pool"
+      }
+    },
+    {
+      "symbol": "MSTRc",
+      "address": "0xb2000000000000000000004884b426556b92883d",
+      "feed": "0xB3cE282CD188b35DA0E38D8Bc7d58e33173D202a",
+      "ok": true,
+      "startMcapUsd": 20017.88197701508,
+      "bought": "7356083145558997426683488",
+      "returned": "142068223",
+      "detail": "starts at $20018, a MSTRc buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": true,
+        "raisedUsd": 30939,
+        "chunks": 1,
+        "detail": "graduated at the ×5 milestone, raising $30,939 of MSTRc into the locked pool; a sell and a buy then traded in the graduated pool"
+      }
+    },
+    {
+      "symbol": "NVDAc",
+      "address": "0xb20000000000000000000078ee7ce2fE4908108C",
+      "feed": "0x04689a41629776563E6822F76f2e57D148d28513",
+      "ok": true,
+      "startMcapUsd": 20019.163274851348,
+      "bought": "7355616864292585432280123",
+      "returned": "93061891",
+      "detail": "starts at $20019, a NVDAc buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": true,
+        "raisedUsd": 30941,
+        "chunks": 1,
+        "detail": "graduated at the ×5 milestone, raising $30,941 of NVDAc into the locked pool; a sell and a buy then traded in the graduated pool"
+      }
+    },
+    {
+      "symbol": "SNDKc",
+      "address": "0xb200000000000000000000397293Cb8cda9a10c5",
+      "feed": "0x388b0dC46C0Fb05A74BeE0994fa5b02c6Fcca2eA",
+      "ok": true,
+      "startMcapUsd": 20014.726473549097,
+      "bought": "7357246980073225360122072",
+      "returned": "17967596",
+      "detail": "starts at $20015, a SNDKc buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": true,
+        "raisedUsd": 30934,
+        "chunks": 5,
+        "detail": "graduated at the ×5 milestone, raising $30,934 of SNDKc into the locked pool (bought in 5 chunks); a sell and a buy then traded in the graduated pool"
+      }
+    },
+    {
+      "symbol": "SPCXc",
+      "address": "0xb2000000000000000000007b9fcbd005511aCBd5",
+      "feed": "0x6A634B235903C4ad6376892180d6fF8612e3Fa68",
+      "ok": true,
+      "startMcapUsd": 20013.444811622496,
+      "bought": "7357705017928985207961574",
+      "returned": "106862546",
+      "detail": "starts at $20013, a SPCXc buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": true,
+        "raisedUsd": 30932,
+        "chunks": 1,
+        "detail": "graduated at the ×5 milestone, raising $30,932 of SPCXc into the locked pool; a sell and a buy then traded in the graduated pool"
+      }
+    },
+    {
+      "symbol": "TSLAc",
+      "address": "0xb2000000000000000000001e800a7f5189430cD0",
+      "feed": "0xFaf869185383a24F8cb00e27BdA6b63B9905DCb4",
+      "ok": true,
+      "startMcapUsd": 20005.99379814599,
+      "bought": "7360429567020602275306131",
+      "returned": "38588980",
+      "detail": "starts at $20006, a TSLAc buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": true,
+        "raisedUsd": 30921,
+        "chunks": 2,
+        "detail": "graduated at the ×5 milestone, raising $30,921 of TSLAc into the locked pool (bought in 2 chunks); a sell and a buy then traded in the graduated pool"
+      }
+    }
+  ]
+}
