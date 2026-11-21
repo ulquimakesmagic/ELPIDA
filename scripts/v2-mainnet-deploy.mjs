@@ -499,7 +499,11 @@ export function deployerKey(input) {
 }
 
 /** Reads one line from the terminal without echoing it. */
-export async function askHidden(prompt) {
+/** askHidden, but the typed characters are shown: for typed confirmations such as DEPLOY. Uses the same raw reader as
+ * askHidden because a readline interface closes the terminal's input on Windows, so a later key prompt hears nothing. */
+export const askTyped = prompt => askHidden(prompt, { echo: true });
+
+export async function askHidden(prompt, { echo = false } = {}) {
   const { stdin, stdout } = process;
   if (!stdin.isTTY) throw new Error('Run deploy in a terminal (it asks for the deployer key), or set ELPIDA_MAINNET_DEPLOYER_KEY.');
   stdout.write(prompt);
@@ -511,7 +515,8 @@ export async function askHidden(prompt) {
       for (const ch of chunk) {
         if (ch === '\r' || ch === '\n') return done(buf);
         if (ch === '\u0003') return done(new Error('Cancelled. Nothing was deployed.'));
-        if (ch === '\u007f' || ch === '\b') { buf = buf.slice(0, -1); continue; }
+        if (ch === '\u007f' || ch === '\b') { if (echo && buf) stdout.write('\b \b'); buf = buf.slice(0, -1); continue; }
+        if (echo) stdout.write(ch);
         buf += ch;
       }
     };

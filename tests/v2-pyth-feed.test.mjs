@@ -103,3 +103,11 @@ test('launch page pushes a fresh Pyth price before a Pyth-priced stock launch, t
   const { latestUpdate } = await import('../apps/api/pyth-hermes.mjs');
   await assert.rejects(latestUpdate(['nope']), /feed ids/);
 });
+
+test('deploy scripts ask DEPLOY/PUSH with the raw reader, not readline (Windows lost the key prompt after it, 21 Nov)', () => {
+  for (const f of ['ondo-stock-feeds.mjs', 'ondo-pyth-feeds.mjs']) {
+    const src = readFileSync(new URL(`../scripts/${f}`, import.meta.url), 'utf8');
+    assert.doesNotMatch(src, /readline/, f); assert.match(src, /await askTyped\(`Deploy/, f);
+  }
+  assert.match(readFileSync(new URL('../scripts/v2-mainnet-deploy.mjs', import.meta.url), 'utf8'), /export const askTyped = prompt => askHidden\(prompt, \{ echo: true \}\);/);
+});

@@ -14,10 +14,9 @@
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { createInterface } from 'node:readline/promises';
 import { Contract, ContractFactory, JsonRpcProvider, Wallet, getAddress } from 'ethers';
 import { compileV4 } from './compile-v4.mjs';
-import { askHidden, deployerKey } from './v2-mainnet-deploy.mjs';
+import { askHidden, askTyped, deployerKey } from './v2-mainnet-deploy.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 /** Ondo's SyntheticSharesOracle per chain (docs.ondo.finance/addresses). */
@@ -88,8 +87,7 @@ async function main() {
   const todo = good.filter(e => !record.feeds[e.symbol]?.adapter);
   if (!todo.length) console.log('Every passing stock already has its feed.');
   else {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    const answer = await rl.question(`Deploy ${todo.length} price feed contracts to ${net.name} with real gas? Type DEPLOY to continue: `); rl.close();
+    const answer = await askTyped(`Deploy ${todo.length} price feed contracts to ${net.name} with real gas? Type DEPLOY to continue: `);
     if (answer.trim() !== 'DEPLOY') { console.log('Nothing was deployed.'); process.exit(1); }
     const signer = new Wallet(deployerKey(process.env.ELPIDA_MAINNET_DEPLOYER_KEY ?? await askHidden('Deployer private key (hidden, then Enter): ')), provider);
     await deployOndoFeeds({ signer, sharesOracle: net.sharesOracle, entries: todo, record, save: r => writeFileSync(recordPath, JSON.stringify(r, null, 2) + '\n'), log: m => console.log(m) });
