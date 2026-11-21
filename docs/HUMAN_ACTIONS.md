@@ -923,6 +923,10 @@ stores a price when someone pushes a signed update, so the launch page pushes th
 `0x4D7E825f80bDf85e913E0DD2A2D54927e9dE1594` (docs.pyth.network contract addresses). This contract is new and not
 externally audited; tested on a local chain with the real V2 factory.
 
+Pyth API key (21 Nov): since Pyth's Core upgrade on 26 August 2026, Hermes answers 401 without a key. Get one at Pyth
+Terminal (free trial, then a paid plan), then set `PYTH_API_KEY` in Railway (mainnet service: the launch page's price
+push) and in the terminal for `check` and `push` (`$env:PYTH_API_KEY="…"`). Never commit it.
+
 After the Chainlink adapters (the 13) are deployed:
 1. `node scripts/ondo-pyth-feeds.mjs map --network bnb` (Hermes only, no key, no RPC). Writes
    `config/stocks/candidates/bnb-ondo-pyth.json` and lists the Ondo tokens Pyth has no feed for.

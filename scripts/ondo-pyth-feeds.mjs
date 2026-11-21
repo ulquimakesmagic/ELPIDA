@@ -130,7 +130,7 @@ async function main() {
     return;
   }
   const rpc = process.env.ELPIDA_MAINNET_RPC_URL; if (!rpc) throw new Error(`Set ELPIDA_MAINNET_RPC_URL to a ${net.name} RPC.`);
-  const provider = new JsonRpcProvider(rpc, undefined, { staticNetwork: true });
+  const provider = new JsonRpcProvider(rpc, undefined, { staticNetwork: true, batchMaxCount: 1 });
   if (Number((await provider.getNetwork()).chainId) !== net.chainId) throw new Error(`The RPC is not ${net.name}.`);
   if ((await provider.getCode(pyth)) === '0x') throw new Error(`No Pyth Core contract at ${pyth} on ${net.name}.`);
   const entries = JSON.parse(readFileSync(mappedPath, 'utf8')), now = (await provider.getBlock('latest')).timestamp;
