@@ -195,3 +195,16 @@ test('rehearse --only re-runs named stocks and refuses a name that is not in the
   // Known names pass the filter and the run goes on to the node (unreachable here), so the error is about the node.
   assert.doesNotMatch(run('googlc, TSLAc').stderr, /--only names a stock/);
 });
+
+test('rehearsal: the guardian stop runs as the plan\'s own guardian when it is none of the test wallets (BNB fork, 21 Nov)', async () => {
+  const { guardianStop } = await import('../scripts/v2-mainnet-deploy.mjs');
+  const guardian = '0x00000000000000000000000000000000000Ab0C1', factory = '0x' + '22'.repeat(20), calls = [];
+  const provider = { send: async (m, p) => { calls.push([m, p?.[0]]); return m === 'eth_sendTransaction' ? '0x' + 'aa'.repeat(32) : null; }, waitForTransaction: async () => ({ status: 1 }) };
+  const notGuardian = { sendTransaction: async () => assert.fail('a test wallet must not send the stop') };
+  await guardianStop({ provider, signers: [notGuardian], addrs: ['0x' + '11'.repeat(20)], guardian, factory });
+  assert.deepEqual(calls.map(c => c[0]), ['hardhat_impersonateAccount', 'hardhat_setBalance', 'eth_sendTransaction']);
+  assert.equal(calls[2][1].from, guardian); assert.equal(calls[2][1].to, factory); const { id } = await import('ethers'); assert.equal(calls[2][1].data, id('pauseLaunches()').slice(0, 10));
+  let sent = null;
+  await guardianStop({ provider, signers: [{ sendTransaction: async tx => { sent = tx; return { wait: async () => ({}) }; } }], addrs: [guardian], guardian, factory });
+  assert.equal(sent.to, factory, 'a test wallet that is the guardian sends it itself');
+});
