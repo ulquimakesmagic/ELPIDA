@@ -6,14 +6,20 @@ export const SWAP_LIST_SCHEMA = 'elpida-swap-list-v1';
 const TOKEN_ABI = ['function symbol() view returns(string)', 'function decimals() view returns(uint8)'];
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 
+// RPC providers rate-limit bursts (Alchemy on BNB Chain, 21 Nov: "missing revert data" / "could not coalesce error" for
+// tokens that read fine one at a time), so each read is retried with a growing pause before a token is rejected.
+export async function retry(read, { tries = 4, pauseMs = 400, sleep = ms => new Promise(r => setTimeout(r, ms)) } = {}) {
+  for (let i = 1; ; i++) { try { return await read(); } catch (e) { if (i >= tries) throw e; await sleep(pauseMs * 2 ** (i - 1)); } }
+}
+
 export async function verifySwapToken({ Contract, provider }, c) {
   const symbol = String(c?.symbol ?? '').trim(), fail = reason => ({ ok: false, symbol: symbol || '(no symbol)', address: c?.address ?? null, reason });
   if (!/^[A-Za-z0-9.]{1,16}$/.test(symbol)) return fail('symbol missing or malformed');
   if (!ADDRESS.test(c.address ?? '')) return fail('token address malformed');
   try {
-    if ((await provider.getCode(c.address)) === '0x') return fail('no contract at the token address');
+    if ((await retry(() => provider.getCode(c.address))) === '0x') return fail('no contract at the token address');
     const token = new Contract(c.address, TOKEN_ABI, provider);
-    const [onSymbol, decimals] = await Promise.all([token.symbol(), token.decimals()]);
+    const onSymbol = await retry(() => token.symbol()), decimals = await retry(() => token.decimals());
     if (onSymbol !== symbol) return fail(`the token's symbol is ${onSymbol}, not ${symbol}`);
     if (Number(decimals) < 6 || Number(decimals) > 18) return fail(`unsupported decimals ${decimals}`);
     return { ok: true, token: { symbol, name: c.name ?? symbol, address: c.address, decimals: Number(decimals), type: c.type ?? 'Stock' } };
@@ -21,7 +27,7 @@ export async function verifySwapToken({ Contract, provider }, c) {
 }
 
 /** Checks every candidate, a few at a time; duplicates by address or symbol are refused. */
-export async function buildSwapList({ Contract, provider, network, chainId, source, candidates, concurrency = 6, now = new Date() }) {
+export async function buildSwapList({ Contract, provider, network, chainId, source, candidates, concurrency = 2, now = new Date() }) {
   const seen = new Set(), rejected = [], tokens = [], queue = [];
   for (const c of candidates) {
     const keys = [String(c?.address ?? '').toLowerCase(), String(c?.symbol ?? '')];
