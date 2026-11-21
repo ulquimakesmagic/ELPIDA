@@ -36,3 +36,24 @@ test('BNB candidates: 474 Ondo stocks and ETFs from Ondo\'s list, including the 
   const server = readFileSync(new URL('../apps/api/server.mjs', import.meta.url), 'utf8');
   assert.ok(server.includes('swapTokens(n,stockListFor(key),swapListFor(key))'));
 });
+
+test('swap list retries rate-limited reads before rejecting a token (Alchemy on BNB, 21 Nov)', async () => {
+  const { retry, verifySwapToken } = await import('../packages/core/swap-list.mjs');
+  let n = 0; const flaky = async () => { if (++n < 3) throw new Error('could not coalesce error'); return 'ok'; };
+  assert.equal(await retry(flaky, { sleep: async () => {} }), 'ok'); assert.equal(n, 3);
+  await assert.rejects(retry(async () => { throw new Error('missing revert data'); }, { tries: 2, sleep: async () => {} }), /missing revert data/);
+  let calls = 0;
+  const provider = { getCode: async () => { if (++calls < 2) throw new Error('could not coalesce error'); return '0x60'; } };
+  class C { async symbol() { return 'TSLAon'; } async decimals() { return 18; } }
+  const r = await verifySwapToken({ Contract: C, provider }, { symbol: 'TSLAon', address: A(1) });
+  assert.ok(r.ok, JSON.stringify(r));
+  assert.match(readFileSync(new URL('../scripts/swap-list.mjs', import.meta.url), 'utf8'), /batchMaxCount: 1/);
+});
+
+test('Hermes calls send the Pyth API key as a bearer token and explain a 401', async () => {
+  const { latestUpdate } = await import('../apps/api/pyth-hermes.mjs');
+  const id = '0x' + 'ab'.repeat(32); let seen;
+  const ok = async (url, init) => { seen = init.headers; return new Response(JSON.stringify({ binary: { data: ['0102'] }, parsed: [{ id: id.slice(2), price: { price: '1', conf: '0', expo: -5, publish_time: 1 } }] })); };
+  await latestUpdate([id], { fetchImpl: ok, apiKey: 'k123' }); assert.equal(seen.authorization, 'Bearer k123');
+  await assert.rejects(latestUpdate([id], { fetchImpl: async () => new Response('{}', { status: 401 }), apiKey: 'bad' }), /needs an API key: set PYTH_API_KEY/);
+});

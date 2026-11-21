@@ -12,7 +12,7 @@ const [given, file] = process.argv.slice(2), at = process.argv.indexOf('--source
 const key = ALIASES[given] ?? given, net = EVM_MAINNETS.find(n => n.key === key);
 if (!net || !file) { console.error('Usage: STOCK_LIST_RPC_URL=<rpc> node scripts/swap-list.mjs <bnb|ethereum|…> <candidates.json> [--source "…"]'); process.exit(2); }
 const rpc = process.env.STOCK_LIST_RPC_URL ?? process.env.ELPIDA_MAINNET_RPC_URL ?? net.rpcUrl;
-const provider = new JsonRpcProvider(rpc, undefined, { staticNetwork: true });
+const provider = new JsonRpcProvider(rpc, undefined, { staticNetwork: true, batchMaxCount: 1 });
 if (Number((await provider.getNetwork()).chainId) !== Number(net.chainId)) { console.error(`The RPC is not ${net.name} (chain ${net.chainId}).`); process.exit(2); }
 const candidates = JSON.parse(readFileSync(file, 'utf8'));
 console.log(`checking ${candidates.length} tokens on ${net.name}…`);
