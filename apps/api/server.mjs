@@ -339,7 +339,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const swapListFor=key=>{try{return JSON.parse(readFileSync(fileURLToPath(new URL(`../../config/swap/${key}.json`,import.meta.url)),'utf8'));}catch{return null;}};
   const swapTokensFor=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);return n?swapTokens(n,stockListFor(key),swapListFor(key)):[];};
   const swapFee=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);return n?swapFeeFor(n,process.env):null;};
-  const swap=injectedSwap??createSwap({tokensFor:swapTokensFor,feeFor:swapFee});
+  const swapLaunchPairs=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);if(!n)return [];return [n.payoutStable?.address??n.usd?.usdc,...(stockListFor(key)?.stocks??[]).map(x=>x.address)].filter(a=>/^0x[0-9a-fA-F]{40}$/.test(String(a??'')));};
+  const swap=injectedSwap??createSwap({tokensFor:swapTokensFor,feeFor:swapFee,launchPairsFor:swapLaunchPairs});
   const ondoStatus=injectedOndoStatus??createOndoStatus({apiKey:port===0?'':process.env.ONDO_API_KEY,log:e=>console.log(JSON.stringify(e))}).start();
   // ELPIDA V2.0 rewards (vault sizes, rounds, countdowns, flywheel burns): only networks with a pinned V2 deployment.
   const v2Rewards=new V2RewardsService({networks:port===0?[]:evmNetworks,dataDir:port===0?null:resolve(dataDir,dataPrefix+'v2-rewards')}).start();
@@ -591,7 +592,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         // Pyth-priced stock launches: the latest signed Pyth update for one feed id, which the launch page stores in Pyth Core
         // just before launching (apps/api/pyth-hermes.mjs). Pyth's signatures are checked on chain; this only relays.
         if(url.pathname==='/api/public/pyth-update'){res.setHeader('Cache-Control','no-store');const id=String(url.searchParams.get('id')??'');if(!PYTH_ID.test(id))return send(400,{error:'Unknown price feed.'});try{const u=await pythLatestUpdate([id]);const p=[...u.parsed.values()][0];return send(200,{data:u.data,publishTime:p?.publishTime??null});}catch{return send(502,{error:'Pyth prices are unavailable right now. Try again shortly.'});}}
-        if(url.pathname==='/api/public/swap/quote'){res.setHeader('Cache-Control','no-store');try{return send(200,await swap.quote({network:String(url.searchParams.get('network')??''),tokenIn:String(url.searchParams.get('tokenIn')??''),tokenOut:String(url.searchParams.get('tokenOut')??''),amountIn:String(url.searchParams.get('amountIn')??'')}));}catch(error){return send(error.status??502,{error:error.message});}}
+        if(url.pathname==='/api/public/swap/quote'){res.setHeader('Cache-Control','no-store');try{return send(200,await swap.quote({network:String(url.searchParams.get('network')??''),tokenIn:String(url.searchParams.get('tokenIn')??''),tokenOut:String(url.searchParams.get('tokenOut')??''),amountIn:String(url.searchParams.get('amountIn')??''),purpose:url.searchParams.get('purpose')==='first-buy'?'first-buy':null}));}catch(error){return send(error.status??502,{error:error.message});}}
         if(url.pathname==='/api/public/dex-chart'){const network=String(url.searchParams.get('network')??''),token=String(url.searchParams.get('token')??'');if(!/^[a-z0-9-]{2,40}$/.test(network)||!/^0x[0-9a-fA-F]{40}$/.test(token))return send(400,{error:'Choose a network and token.'});const r=await dexscreener.lookup(network,token);res.setHeader('Cache-Control','public, max-age=120');return send(200,r);}
         if(url.pathname==='/api/public/stock-status'){const sym=url.searchParams.get('symbol');if(sym!=null&&!/^[A-Za-z0-9.]{1,16}on$/.test(sym))return send(400,{error:'Unknown stock symbol.'});res.setHeader('Cache-Control','public, max-age=300');return send(200,ondoStatus.summary(sym));}
         if(url.pathname==='/api/public/coinbase-stocks'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,coinbaseStocks.summary());}
@@ -756,7 +757,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         else return send(404,{error:'Unknown network.'});
         return send(202,{queued:true});
       }
-      if(action==='swap/build'){try{return send(200,await swap.build({network:String(body.network??''),routeSummary:body.routeSummary,sender:String(body.sender??''),slippageBps:body.slippageBps}));}catch(error){return send(error.status??502,{error:error.message});}}
+      if(action==='swap/build'){try{return send(200,await swap.build({network:String(body.network??''),routeSummary:body.routeSummary,sender:String(body.sender??''),slippageBps:body.slippageBps,purpose:body.purpose==='first-buy'?'first-buy':null}));}catch(error){return send(error.status??502,{error:error.message});}}
       if(action==='telemetry'){
         if(telemetryLimit(clientAddress(req)))return send(429,{error:'Too many events.'});
         try{const event=cleanEvent(body,{networks:new Set([...evmNetworks.map(n=>n.key),solanaNet.key,'local']),ownHost:siteHost});return send(202,siteAnalytics.record(event,{country:req.headers['cf-ipcountry'],userAgent:req.headers['user-agent']}));}
