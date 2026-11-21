@@ -1,9 +1,11 @@
-// Pyth's public Hermes API (https://hermes.pyth.network): the latest signed price updates for feed ids. The update data is
+// Pyth's public Hermes API (pyth.dourolabs.app/hermes): the latest signed price updates for feed ids. The update data is
 // signed by Pyth's publishers and verified by Pyth Core on chain, so relaying it through this server cannot alter it.
 // Used by the launch page (push a fresh stock price just before a Pyth-priced launch) and scripts/ondo-pyth-feeds.mjs.
 // Since Pyth's Core upgrade (26 August 2026) Hermes needs an API key, sent as `Authorization: Bearer` (docs.pyth.network,
 // "Pyth Core Upgrade"): PYTH_API_KEY in Railway for the server, in the terminal for the script. Never sent to browsers.
-export const HERMES = 'https://hermes.pyth.network';
+// The upgraded Hermes from Pyth's upgrade guide (docs.pyth.network, "Pyth Core Upgrade"): the old hermes.pyth.network
+// still lists feeds without a key but answered 403 to a valid key for prices (Malik, 21 Nov). PYTH_HERMES_URL overrides.
+export const HERMES = (process.env.PYTH_HERMES_URL ?? 'https://pyth.dourolabs.app/hermes').replace(/\/+$/, '');
 export const PYTH_ID = /^(0x)?[0-9a-fA-F]{64}$/;
 export const pythHex = id => (String(id).startsWith('0x') ? String(id) : `0x${id}`).toLowerCase();
 

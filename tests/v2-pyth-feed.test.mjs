@@ -79,7 +79,7 @@ test('scripts/ondo-pyth-feeds.mjs: maps Ondo tickers to Pyth equity feeds, check
   assert.match(noPrice.reason, /no price/);
 
   const update = AbiCoder.defaultAbiCoder().encode(['bytes32', 'int64', 'uint64', 'int32', 'uint256'], [ID, 25_000_000n, 10_000n, -5, now]);
-  const fetchImpl = async url => { assert.match(url, /^https:\/\/hermes\.pyth\.network\/v2\/updates\/price\/latest\?encoding=hex&parsed=true&ids\[\]=0xabab/); return new Response(JSON.stringify({ binary: { data: [update.slice(2)] }, parsed: [{ id: ID.slice(2), price: { price: '25000000', conf: '10000', expo: -5, publish_time: now } }] })); };
+  const fetchImpl = async url => { assert.match(url, /^https:\/\/pyth\.dourolabs\.app\/hermes\/v2\/updates\/price\/latest\?encoding=hex&parsed=true&ids\[\]=0xabab/); return new Response(JSON.stringify({ binary: { data: [update.slice(2)] }, parsed: [{ id: ID.slice(2), price: { price: '25000000', conf: '10000', expo: -5, publish_time: now } }] })); };
   const hashes = await pushPythPrices({ signer: f.signers[0], pyth: pyth.target, ids: [ID], fetchImpl });
   assert.equal(hashes.length, 1);
 
