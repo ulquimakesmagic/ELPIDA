@@ -108,7 +108,7 @@ export function renderLaunch(ctx) {
   // (apps/web/launch-conversion.mjs). Public EVM testnets with a DEX only; the quote shows what the swap delivers.
   // Solana: stock pairs only, converted in the program's devnet SOL/stock pool (Jupiter on mainnet later).
   // ELPIDA V2 converts right before its launch (v2-launchpad.mjs), on the network's conversion pool.
-  const canPayNative = () => !(draft.launchModel === 'v11' && v4Offered()) && (!solana() || !!selectedAsset()?.lockedPool) && isPublic() && draft.pair !== 'native' && connected() && !net()?.mainnet && typeof ctx.wallet.firstBuyConversionQuote === 'function' && !!selectedAsset();
+  const canPayNative = () => !(draft.launchModel === 'v11' && v4Offered()) && (!solana() || !!selectedAsset()?.lockedPool) && isPublic() && draft.pair !== 'native' && connected() && (!net()?.mainnet || v2Chosen()) && typeof ctx.wallet.firstBuyConversionQuote === 'function' && !!selectedAsset();
   const payNative = () => draft.buyWith === 'native' && canPayNative();
   let conversion = { key: '', state: 'idle' };
   const conversionFor = () => `${draft.chain}:${selectedAsset()?.id}:${draft.nativeBuy}`;
@@ -174,7 +174,7 @@ export function renderLaunch(ctx) {
   const modelsOffered = () => v4Offered() || v2Offered();
   // Where a native-coin first buy is swapped into the pair asset: V2 trades on its own v4 pool but converts on the
   // network's conversion DEX.
-  const swapDex = () => v2Chosen() ? ctx.config.publicDexes?.[draft.chain]?.name ?? 'the conversion pool' : dexName();
+  const swapDex = () => v2Chosen() ? (net()?.mainnet ? 'KyberSwap' : ctx.config.publicDexes?.[draft.chain]?.name ?? 'the conversion pool') : dexName();
   const feePercent = () => (Number(draft.feeBps ?? V2.defaultFeeBps) / 100).toFixed(2);
   const modelName = () => v2Chosen() ? `ELPIDA V2${net()?.mainnet ? '' : ' test'} · ${feePercent()}% fee` : v4Chosen() ? 'Model 11 test · Uniswap v4' : 'Bonding curve (local simulation)';
   const dexName = () => v2Chosen() && solana() ? 'Raydium' : v4Chosen() || v2Chosen() ? 'Uniswap v4' : !draft.chain ? 'DEX' : solana() ? 'Raydium' : draft.chain === 'local' ? (ctx.config.dex ? 'Uniswap v3' : 'test') : draft.chain === 'base-sepolia' ? 'Uniswap v3' : ctx.config.publicDexes?.[draft.chain]?.name ?? 'test';
