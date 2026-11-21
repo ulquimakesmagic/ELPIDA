@@ -3,7 +3,7 @@
  "network": "bnb-mainnet",
  "chainId": 56,
  "source": "Ondo GM token CSV (docs.ondo.finance/addresses), 20 November 2026",
- "checkedAt": "2026-11-21T03:51:01.920Z",
+ "checkedAt": "2026-11-21T04:53:07.427Z",
  "tokens": [
   {
    "symbol": "AALon",
@@ -888,11 +888,32 @@
    "type": "ETF"
   },
   {
+   "symbol": "IWMon",
+   "name": "iShares Russell 2000 ETF (Ondo)",
+   "address": "0x500eafc69b68acd6f27064f9b75f1c7d91cc4d9f",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "IWNon",
+   "name": "iShares Russell 2000 Value ETF (Ondo)",
+   "address": "0xf54b94ea21e1da5d51ef00fd4502225e5394f874",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
    "symbol": "JAAAon",
    "name": "Janus Henderson AAA CLO ETF (Ondo)",
    "address": "0x84719a1082ed487c7eeac7d69885e3cc2009ea78",
    "decimals": 18,
    "type": "ETF"
+  },
+  {
+   "symbol": "JDon",
+   "name": "JD.com (Ondo)",
+   "address": "0xe92be960ae64f6a914ca77014cac9e56de7f36c1",
+   "decimals": 18,
+   "type": "Stock"
   },
   {
    "symbol": "JNJon",
@@ -902,9 +923,254 @@
    "type": "Stock"
   },
   {
+   "symbol": "JPMon",
+   "name": "JPMorgan Chase (Ondo)",
+   "address": "0x317bf42b43a394860718266dec445dcc9fd9da49",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "KLACon",
+   "name": "KLA (Ondo)",
+   "address": "0xfc263946439b0d802bf4c5a6fcd34e2885259f91",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "KOon",
+   "name": "Coca-Cola (Ondo)",
+   "address": "0x405f38b90bebf1259062cf29da299f3398662bcb",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "KWEBon",
+   "name": "KraneShares CSI China Internet ETF (Ondo)",
+   "address": "0x7437203800140BA7d9081ddE8cEF09EE40E3Bf03",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
    "symbol": "LINon",
    "name": "Linde plc (Ondo)",
    "address": "0xe1743616f705954620aa351465c8885fbde5a8a9",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "LIon",
+   "name": "Li Auto (Ondo)",
+   "address": "0x9810beac9af3c30d14cfb61cdd557e160f60fd50",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "LLYon",
+   "name": "Eli Lilly (Ondo)",
+   "address": "0x341d31b2be1fee9c00e395a62ba41837f4322eed",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "LMTon",
+   "name": "Lockheed (Ondo)",
+   "address": "0xd09f7b75b9659b864c6f82bb00ff096f9d277998",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "LOWon",
+   "name": "Lowe's (Ondo)",
+   "address": "0x2ec46eed30c94caa5979e6a0395abe824138335f",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "LRCXon",
+   "name": "Lam Research (Ondo)",
+   "address": "0x35895a1fa1aff7fb3204fb01257409fd75acb24c",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "LUNRon",
+   "name": "Intuitive Machines (Ondo)",
+   "address": "0xA3b7B7cfEb023a6C4f444f5ca9a3Fc85809Ece15",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MAon",
+   "name": "Mastercard (Ondo)",
+   "address": "0x25ffda07f585c39848db6573e533d7585679c52d",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MARAon",
+   "name": "MARA Holdings (Ondo)",
+   "address": "0xd226d8170ee38793430c7dec6903df4b818bb74c",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MCDon",
+   "name": "McDonald's (Ondo)",
+   "address": "0x995add4ba29a628a57930a8a185c62ca044ec090",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MELIon",
+   "name": "MercadoLibre (Ondo)",
+   "address": "0x60a8f8e05200ff73afde9e2cae819bf1605f0bdd",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "METAon",
+   "name": "Meta Platforms (Ondo)",
+   "address": "0xd7df5863a3e742f0c767768cdfcb63f09e0422f6",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MPon",
+   "name": "MP Materials (Ondo)",
+   "address": "0x4baf4dc56cf6a525a0874e25cc6372a6a8915135",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MRKon",
+   "name": "Merck (Ondo)",
+   "address": "0x869027261075c3c239d6a26842579b93802606f4",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MRNAon",
+   "name": "Moderna (Ondo)",
+   "address": "0x01486675da0764ee780ea7cb65c33062e9b2d28c",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MRVLon",
+   "name": "Marvell Technology (Ondo)",
+   "address": "0x1501ec83ffef405b4331cc4f73277a40fb0c627d",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MSFTon",
+   "name": "Microsoft (Ondo)",
+   "address": "0x6bfe75d1ad432050ea973c3a3dcd88f02e2444c3",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MSTRon",
+   "name": "MicroStrategy (Ondo)",
+   "address": "0x7313ea16493b2f55054df0131a3a14b043ec8992",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MTZon",
+   "name": "MasTec (Ondo)",
+   "address": "0xf49046aae76eaeb7ffd3ef116ce0f7cd0f52d93e",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MUon",
+   "name": "Micron Technology (Ondo)",
+   "address": "0x8b6acf6041a81567f012ff6a4c6d96d5818d74bf",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NBISon",
+   "name": "Nebius Group (Ondo)",
+   "address": "0xee268780473E7a0e47baC41547C6E01512555A16",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NEEon",
+   "name": "NextEra Energy (Ondo)",
+   "address": "0xe9d43f7e6b2237e8873a7003b3f43c6b03160be5",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NEMon",
+   "name": "Newmont (Ondo)",
+   "address": "0x5E63232993789601CE362e0240a299C1DfCBfbEc",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NFLXon",
+   "name": "Netflix (Ondo)",
+   "address": "0x7048f5227b032326cc8dbc53cf3fddd947a2c757",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NIKLon",
+   "name": "Sprott Nickel Miners ETF (Ondo)",
+   "address": "0xe23f03d2907cdc38a10f6ccdc1a157bf1afe51de",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "NIOon",
+   "name": "NIO (Ondo)",
+   "address": "0xc6f9edbee6042a237d72493bbda3ee2c3c62f708",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NKEon",
+   "name": "Nike (Ondo)",
+   "address": "0x04b5e199f2ec84f78b111035f57b16bee448db6f",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NOCon",
+   "name": "Northrop Grumman (Ondo)",
+   "address": "0x4D3442D884202584F1729bCA20Db05472B886B52",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NOWon",
+   "name": "ServiceNow (Ondo)",
+   "address": "0xeb19c13c54b1cd48afc62f6503375e92d5f1e856",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NTESon",
+   "name": "NetEase (Ondo)",
+   "address": "0x282973969118f9fe39bf2ff3d8dd1efee82ccb11",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NVDAon",
+   "name": "NVIDIA (Ondo)",
+   "address": "0xa9ee28c80f960b889dfbd1902055218cba016f75",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NVOon",
+   "name": "Novo Nordisk (Ondo)",
+   "address": "0x08a513779f46ffb7a34f16094a94016d010128a8",
    "decimals": 18,
    "type": "Stock"
   },
@@ -930,9 +1196,23 @@
    "type": "Stock"
   },
   {
+   "symbol": "ONon",
+   "name": "ON Semiconductor (Ondo)",
+   "address": "0xb35a9eab5d25282f4e668798b629a9294e9a47aa",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "OPENon",
    "name": "Opendoor Technologies (Ondo)",
    "address": "0xa09699fc0cbb1f85128450a0ff6a3c4d3a7e7b9b",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "OPRAon",
+   "name": "Opera (Ondo)",
+   "address": "0x88672043905bdd272df55a5a7bb1b7e1e693cbc5",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1021,9 +1301,51 @@
    "type": "Stock"
   },
   {
+   "symbol": "PGon",
+   "name": "Procter & Gamble (Ondo)",
+   "address": "0x400f1e257f86d25578a0928c94dc95115f09d5c9",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "PINSon",
    "name": "Pinterest (Ondo)",
    "address": "0xcfd1f0df84300ea1a4e2ba5238043a2fa5a7237c",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "PLTRon",
+   "name": "Palantir Technologies (Ondo)",
+   "address": "0x9351abd19f42101dd36025e495b98e910b255d78",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "PLUGon",
+   "name": "Plug Power (Ondo)",
+   "address": "0x4752ae8f910b25e64e4406eaad50c1b4e8de7e6d",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "PPLTon",
+   "name": "abrdn Physical Platinum Shares ETF (Ondo)",
+   "address": "0x3EC23F52F6573FC0587A0631dd8C3b107f6bcb35",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "PSQon",
+   "name": "ProShares Short QQQ (Ondo)",
+   "address": "0x3802dc739ef9e226f36421a9c15efa519153bbbe",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "PYPLon",
+   "name": "PayPal (Ondo)",
+   "address": "0x374d03a6c0d5bd4be0a5117ebe1b49d52ac8a53f",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1035,11 +1357,95 @@
    "type": "Stock"
   },
   {
+   "symbol": "QCOMon",
+   "name": "Qualcomm (Ondo)",
+   "address": "0xfbd4d681c92ead6af0e49950c8b2e47eeacbb2db",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "QQQon",
    "name": "Invesco QQQ (Ondo)",
    "address": "0x0cde6936d305d5b34667fc46425e852efd73559a",
    "decimals": 18,
    "type": "ETF"
+  },
+  {
+   "symbol": "QUBTon",
+   "name": "Quantum Computing (Ondo)",
+   "address": "0x82E07C1017032cFd889b1Ca81EBe722c4D4de825",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "RDDTon",
+   "name": "Reddit (Ondo)",
+   "address": "0x4da12f47578ef89c76179b760c778e70b668f80b",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "RDWon",
+   "name": "Redwire (Ondo)",
+   "address": "0x23e39D94807a8bb7e3f8294b4911D04EE26DcE39",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "REGNon",
+   "name": "Regeneron Pharmaceuticals (Ondo)",
+   "address": "0x30BD85fD4286c5c9857679F5B188f737B4a7B8C0",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "REMXon",
+   "name": "VanEck Rare Earth and Strategic Metals ETF (Ondo)",
+   "address": "0xc16f47c4a7ed39372b9a0e3e2016cede9b4cb83a",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "RGTIon",
+   "name": "Rigetti Computing (Ondo)",
+   "address": "0xed2a500eb2b66679e0bbd76e51a60049ae5f3271",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "RIOTon",
+   "name": "Riot Platforms (Ondo)",
+   "address": "0xc4a88a72b848255fd24da3c1ad6755d980535fb1",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "RIVNon",
+   "name": "Rivian Automotive (Ondo)",
+   "address": "0x277e1fa8704c5511fed7e30bc691f922aa30101b",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "RKLBon",
+   "name": "Rocket Lab (Ondo)",
+   "address": "0xb4D695569236273745B4CD54B539b1b9Cc1513af",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "RTXon",
+   "name": "RTX (Ondo)",
+   "address": "0x44fde2c6bc2c2b54962c69fcef57a2a50121dbd7",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "SBETon",
+   "name": "SharpLink Gaming, Inc (Ondo)",
+   "address": "0x99e01f02d66455bb106d91d469c9eaf6ab4904f6",
+   "decimals": 18,
+   "type": "Stock"
   },
   {
    "symbol": "SBUXon",
@@ -1049,9 +1455,79 @@
    "type": "Stock"
   },
   {
+   "symbol": "SCCOon",
+   "name": "Southern Copper (Ondo)",
+   "address": "0xF15B8f7465b92799F6EE440F86B3CAB5A4dbc65A",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "SCHWon",
    "name": "Charles Schwab (Ondo)",
    "address": "0xe5ba472c98b7e4695bd856290de66bdedaffc123",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "SEDGon",
+   "name": "SolarEdge Technologies (Ondo)",
+   "address": "0x8755c5C39b1AA9053a83AC731242a2cf4D04B0Fe",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "SGOVon",
+   "name": "iShares 0-3 Month Treasury Bond ETF (Ondo)",
+   "address": "0xc008c5f579ec1450f20099c39f587547e27c7523",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "SHOPon",
+   "name": "Shopify (Ondo)",
+   "address": "0x43d0b380c33cd004a6a69abd61843881a2de4113",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "SHYon",
+   "name": "iShares 1-3 Year Treasury Bond ETF (Ondo)",
+   "address": "0xf95e50BE5Efc96117c28775F80C7Cdb41Ebc4888",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "SLVon",
+   "name": "iShares Silver Trust (Ondo)",
+   "address": "0x8b872732b07be325a8803cdb480d9d20b6f8d11b",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "SMCIon",
+   "name": "Super Micro Computer (Ondo)",
+   "address": "0xc142ba8ccd36d80c3a001342fb83e4c3d218a873",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "SNAPon",
+   "name": "Snap (Ondo)",
+   "address": "0xf325884d9bcac457271fe7f7b6be1765348fcca2",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "SNDKon",
+   "name": "SanDisk (Ondo)",
+   "address": "0x4Fd67CB8CFEdc718BAc984b5936abE3330d0a2A4",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "SNOWon",
+   "name": "Snowflake (Ondo)",
+   "address": "0x138ed6833ff4e8811e1fea0d005e13726c8886f9",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1070,11 +1546,39 @@
    "type": "Stock"
   },
   {
+   "symbol": "SOUNon",
+   "name": "SoundHound AI (Ondo)",
+   "address": "0xedcf71b2e2217064038adcb54a3c3a5fc3488ef1",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "SOXXon",
+   "name": "iShares Semiconductor ETF (Ondo)",
+   "address": "0x2A3cbF64C8181DB4a25D41D4d7a7Db9984C59DAC",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "SPGIon",
+   "name": "S&P Global (Ondo)",
+   "address": "0x55b370b704240a914f42b5bbb3195431c031f9f8",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "SPOTon",
    "name": "Spotify (Ondo)",
    "address": "0x50356167a4dbc38bea6779c045e24e25facedfdc",
    "decimals": 18,
    "type": "Stock"
+  },
+  {
+   "symbol": "SPYon",
+   "name": "SPDR S&P 500 ETF (Ondo)",
+   "address": "0x6a708ead771238919d85930b5a0f10454e1c331a",
+   "decimals": 18,
+   "type": "ETF"
   },
   {
    "symbol": "SQQQon",
@@ -1133,9 +1637,37 @@
    "type": "Stock"
   },
   {
+   "symbol": "TMOon",
+   "name": "Thermo Fisher Scientific (Ondo)",
+   "address": "0xbcf7d958791152128710565a5fc6f68342ed71c8",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "TMUSon",
+   "name": "T-Mobile US (Ondo)",
+   "address": "0x2588f20bad92da8dcce7fac8311b5f8ab4690e43",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "Ton",
    "name": "AT&T (Ondo)",
    "address": "0x4255279af47cf10efb9a5c8839f90170f4ef759f",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "TQQQon",
+   "name": "ProShares UltraPro QQQ (Ondo)",
+   "address": "0xe42cfb20e00912409b77a602b5bdcff3c7acc5f4",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "TSLAon",
+   "name": "Tesla (Ondo)",
+   "address": "0x2494b603319d4d9f9715c9f4496d9e0364b59d93",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1147,9 +1679,37 @@
    "type": "Stock"
   },
   {
+   "symbol": "TXNon",
+   "name": "Texas Instruments (Ondo)",
+   "address": "0xca3a5c955f1f01f20aacf9501b03e4aa235e478b",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "UBERon",
+   "name": "Uber (Ondo)",
+   "address": "0xde9d6036fca870f7efc5a82722ae694c371ac909",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "UECon",
    "name": "Uranium Energy (Ondo)",
    "address": "0xE7ddF606841ee278A30E5C90486681e68ddd8cbF",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "UNGon",
+   "name": "US Natural Gas Fund (Ondo)",
+   "address": "0xA5351C9bf08055E03642b6b8649A0f7e895501BF",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "UNHon",
+   "name": "UnitedHealth (Ondo)",
+   "address": "0x3385cb29cca0ac66f5d2354d13ef977b49a2510f",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1189,9 +1749,30 @@
    "type": "Stock"
   },
   {
+   "symbol": "VNQon",
+   "name": "Vanguard Real Estate ETF (Ondo)",
+   "address": "0x10b58A3d9DCeC59bB1c3bf6b9c9414eAfCE711C9",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
    "symbol": "Von",
    "name": "Visa (Ondo)",
    "address": "0x1cde419fae0ef7f7931ae3e29e5f411c8c5e5fa1",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "VRTon",
+   "name": "Vertiv (Ondo)",
+   "address": "0x9cea8a7be1ab0320b709d368ad60d8500f55995f",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "VRTXon",
+   "name": "Vertex Pharmaceuticals (Ondo)",
+   "address": "0x8c9979Dc208f74a5602c38691aa920F121e2f863",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1203,9 +1784,58 @@
    "type": "Stock"
   },
   {
+   "symbol": "VTIon",
+   "name": "Vanguard Total Stock Market ETF (Ondo)",
+   "address": "0x158734153f354cb326ee690c3d55f810dcb0fc90",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "VTVon",
+   "name": "Vanguard Value ETF (Ondo)",
+   "address": "0xc2dd31b1b3a2f515ce0d48de712c6744c3475170",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
    "symbol": "VZon",
    "name": "Verizon (Ondo)",
    "address": "0xa3b089c886e6d721f49def8e050f3b9d4362560b",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "WDCon",
+   "name": "Western Digital (Ondo)",
+   "address": "0xcEb29848d04Ad3Cb46E1fE8E45B82ffAc39D797d",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "WFCon",
+   "name": "Wells Fargo (Ondo)",
+   "address": "0x629520dee1620def11596f84e85de9f1ff653012",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "WMon",
+   "name": "Waste Management (Ondo)",
+   "address": "0xCE0466Bae0e867239719dC386CA84b1F3eFE6914",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "WMTon",
+   "name": "Walmart (Ondo)",
+   "address": "0xa7d1e886acf66ec0656df2decb4b7c893a3bab4c",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "WULFon",
+   "name": "Terawulf (Ondo)",
+   "address": "0xad56701d9e57957e28e546db7db508a16d4f86cc",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1217,9 +1847,72 @@
    "type": "Stock"
   },
   {
+   "symbol": "XYZon",
+   "name": "Block (Ondo)",
+   "address": "0xe778a2e5d953c82eb9475cf3b87654226a867344",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "GLWon",
+   "name": "Corning (Ondo)",
+   "address": "0x25a4DbAE9a0Cd8C75656D6b50FFDf4900CC20d8f",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "LITEon",
+   "name": "Lumentum Holdings (Ondo)",
+   "address": "0x0fAcaFB97ffDbA3cAe88512070AF49bd30674cD9",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "AAOIon",
    "name": "Applied Optoelectronics (Ondo)",
    "address": "0x149Bda9e7251DC36f536d1fE7F92A5ea203F4F3D",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "AXTIon",
+   "name": "AXT (Ondo)",
+   "address": "0x0C50323AF81D5C33822c6Add256Fb9093D42BC74",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NVTon",
+   "name": "nVent Electric (Ondo)",
+   "address": "0x484Ce83BB55b50D70236C7D1E29E0Ba7524f905B",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "LASRon",
+   "name": "nLIGHT (Ondo)",
+   "address": "0x476a2caD3197Df68186b61bC36296E8d3d2d1b85",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "FORMon",
+   "name": "FormFactor (Ondo)",
+   "address": "0xD678F3F86436Ee298d28A3C414c367aDFeD65337",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MKSIon",
+   "name": "MKS Inc. (Ondo)",
+   "address": "0xd41699aA1BfC1c5f172c27f387372bd30717a5db",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "ICHRon",
+   "name": "Ichor Holdings (Ondo)",
+   "address": "0xFb836dc42EBDfF6aA8DB9339336899061D1C4f3F",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1231,6 +1924,20 @@
    "type": "Stock"
   },
   {
+   "symbol": "CAMTon",
+   "name": "Camtek (Ondo)",
+   "address": "0xc2f65e745Fd13af1d00d5c81dD33F762FB81C264",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "WOLFon",
+   "name": "Wolfspeed (Ondo)",
+   "address": "0x55b56CC2cdcbC2C58668F72663bE7599a46Ed79F",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "POWIon",
    "name": "Power Integrations (Ondo)",
    "address": "0x5417b7CFDb8a187004067297EbF1491c8D6D5C09",
@@ -1238,9 +1945,51 @@
    "type": "Stock"
   },
   {
+   "symbol": "TELon",
+   "name": "TE Connectivity (Ondo)",
+   "address": "0x5C50fFD365c852f5e72BFBc2c1aE621e2ACa5Ece",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "HUBBon",
+   "name": "Hubbell (Ondo)",
+   "address": "0x1C42C07257F936a7c4f84B8D756c95817E23631A",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "WSon",
+   "name": "Worthington Steel (Ondo)",
+   "address": "0x50e66EDb7D0b79Ee988f098754A27aFaa643B4f5",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "ATKRon",
+   "name": "Atkore (Ondo)",
+   "address": "0xaFAA2087093b7B396ADAB8216506D9066c6A6F13",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NETon",
+   "name": "Cloudflare (Ondo)",
+   "address": "0xfEb0793EEa97585Eb3a541F3FD53450D225b2B87",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "USARon",
    "name": "USA Rare Earth (Ondo)",
    "address": "0x2206E07410A8fE9Ef595e7184B2E9d160fdb7211",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "HIMXon",
+   "name": "Himax Technologies (Ondo)",
+   "address": "0x6cF3b84f0Ba4d86d9f6987812A11Db2c447D9483",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1287,9 +2036,100 @@
    "type": "Stock"
   },
   {
+   "symbol": "ENBon",
+   "name": "Enbridge (Ondo)",
+   "address": "0x5397cB3f1E419050D9d7160756dE0f4eD4f5f898",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "MYRGon",
+   "name": "MYR Group (Ondo)",
+   "address": "0x93b83111c54aa3993B2De5FCcD4c70B26c522D5d",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "ENTGon",
+   "name": "Entegris (Ondo)",
+   "address": "0xfB4a89A077B9020C7101b1Af760BEB708F37a416",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "HPEon",
+   "name": "Hewlett Packard Enterprise (Ondo)",
+   "address": "0x492E678c1ea048C70eDc635047cdBB87FF5362a2",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "BOTon",
+   "name": "RoboStrategy (Ondo)",
+   "address": "0xC43Ae29aFE58bf90dA6Fe3Edd570C2E735fb2850",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "AOSLon",
+   "name": "Alpha and Omega Semiconductor (Ondo)",
+   "address": "0x55B8cc618C4209A97250Dff926d3d708814d36aa",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "BEon",
+   "name": "Bloom Energy (Ondo)",
+   "address": "0x17D03aE104a9D12E9E5794Efb109B817Dd7f3404",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "SMRon",
+   "name": "NuScale Power (Ondo)",
+   "address": "0xf4b674D4E33c36F8db4b928A5eEC4E1F87b386e3",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "STMon",
+   "name": "STMicroelectronics (Ondo)",
+   "address": "0x8B46599e0E80a34F37e97DF58E741ca904cdfaBd",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "EQTon",
+   "name": "EQT (Ondo)",
+   "address": "0x9A1C88ac479906A7f03e76605b15B72DF10d8E51",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "SAPon",
+   "name": "SAP (Ondo)",
+   "address": "0x111f6F2B9F1C5f3Ec841690e1deEc606086727dA",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "WMBon",
+   "name": "Williams (Ondo)",
+   "address": "0x7B7AbD762a400c9768CDeeEF3C01DaE39e0B8427",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "NNEon",
    "name": "NANO Nuclear Energy (Ondo)",
    "address": "0x3c276Dd9f9Eab5510f9eAfD3a6Ea54879b27CA3D",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "FLNCon",
+   "name": "Fluence Energy (Ondo)",
+   "address": "0xF1a96d4B591E446445600789D60C73Dd636B357c",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1322,6 +2162,20 @@
    "type": "Stock"
   },
   {
+   "symbol": "FNon",
+   "name": "Fabrinet (Ondo)",
+   "address": "0xA1DaaB37dA2a29A1eC721922b55962eB8B481001",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "ARQQon",
+   "name": "Arqit Quantum (Ondo)",
+   "address": "0x1161989389A991532dCE453D04d6346C2581c907",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "ALABon",
    "name": "Astera Labs (Ondo)",
    "address": "0x573e11CC667A8E5BE0c7Af2410403371088D3d0D",
@@ -1350,9 +2204,30 @@
    "type": "Stock"
   },
   {
+   "symbol": "PENGon",
+   "name": "Penguin Solutions (Ondo)",
+   "address": "0x2144d620E3471441b12Bf256E01a09EAA5ea7F12",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "FCELon",
+   "name": "FuelCell Energy (Ondo)",
+   "address": "0x47Bfe4921Bd74C66c6B0C35C517aBdFB5E3BAFb3",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "VPGon",
    "name": "Vishay Precision Group (Ondo)",
    "address": "0xAd8920aFa9d158F5eBAb77c9FfcAD650D72e473D",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "LPTHon",
+   "name": "LightPath Technologies (Ondo)",
+   "address": "0x6AD19E0A57Cfea0bC521A12C6c82372852842933",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1378,9 +2253,23 @@
    "type": "Stock"
   },
   {
+   "symbol": "CLSon",
+   "name": "Celestica (Ondo)",
+   "address": "0x7b695132b165cb6703F0212bBB1e91A782526156",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "KOPNon",
    "name": "Kopin (Ondo)",
    "address": "0xED5615c5280E897241b9e4f019562A581cD49390",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "GNRCon",
+   "name": "Generac Holdings (Ondo)",
+   "address": "0x237c9F794EDAaA0071cDF64a41c25EB76771754b",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1399,9 +2288,51 @@
    "type": "ETF"
   },
   {
+   "symbol": "GFSon",
+   "name": "GlobalFoundries (Ondo)",
+   "address": "0xAff6b836d3eBd29aEb0C8b840Add04EF79d79678",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "UUUUon",
+   "name": "Energy Fuels (Ondo)",
+   "address": "0xD2C06fef2ca2375a9C7ceB4AbcA9DBc2aB6aF981",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "PWRon",
+   "name": "Quanta Services (Ondo)",
+   "address": "0x2418c2e1aE3B8D767594b3974D32610743f88155",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "CORZon",
    "name": "Core Scientific (Ondo)",
    "address": "0x25eD86472cf3012607DC6576c58e6432968255C2",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "HUTon",
+   "name": "Hut 8 (Ondo)",
+   "address": "0x3A82f1C847cc55e52e597fD81c63a812C6722541",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "VICRon",
+   "name": "Vicor (Ondo)",
+   "address": "0xa59469D91563CaeedDd2ffC731f41215E7b691ef",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "APHon",
+   "name": "Amphenol (Ondo)",
+   "address": "0x70AfC3a600f843d2018dF16B0b316E4BC9c603E9",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1420,6 +2351,125 @@
    "type": "Stock"
   },
   {
+   "symbol": "CCJon",
+   "name": "Cameco (Ondo)",
+   "address": "0xa75F08b9a91439DAac9cc7072857cC0a98Cf527A",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NVTSon",
+   "name": "Navitas Semiconductor (Ondo)",
+   "address": "0xB56B7C2F9988448790B0F78697F405aB5e8597E6",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "BRLNon",
+   "name": "iShares Floating Rate Loan Active ETF (Ondo)",
+   "address": "0xD41829Dec8b51119176Ee0a6b73BC8B2718546A9",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "IGEBon",
+   "name": "iShares Investment Grade Systematic Bond ETF (Ondo)",
+   "address": "0x9e609E96B688927aa49Dcd9758E2081f0c48ccAB",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "QLTAon",
+   "name": "iShares Aaa - A Rated Corporate Bond ETF (Ondo)",
+   "address": "0xBC34D36B70E5A256F3D16F9cA9D3ca3838f6cC4F",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "BRHYon",
+   "name": "iShares High Yield Active ETF (Ondo)",
+   "address": "0x6860a2f969A8133A23421ddce21397995139D7e8",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "BLCRon",
+   "name": "iShares Large Cap Core Active ETF (Ondo)",
+   "address": "0x398aE5B33505f121C359f22B300FbcFa81DB79AE",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "INROon",
+   "name": "iShares US Industry Rotation Active ETF (Ondo)",
+   "address": "0x790cFb394B1f399a3543Ba1F835DdE114A387eeb",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "DYNFon",
+   "name": "iShares US Equity Factor Rotation Active ETF (Ondo)",
+   "address": "0x96A1b43C8146E6D1f6e66B226A3c520CbE3d8a50",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "BAIon",
+   "name": "iShares A.I. Innovation and Tech Active ETF (Ondo)",
+   "address": "0x2659Dd96deF34ceD3679901E5500779BE297fE5a",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "COROon",
+   "name": "iShares International Country Rotation Active ETF (Ondo)",
+   "address": "0x23def658ea0B4081161d9AB8fDfEef5345bcaFBD",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "BRTRon",
+   "name": "iShares Total Return Active ETF (Ondo)",
+   "address": "0x463196CC72cBad2D1AC1896CDE0766bfBBd64443",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "IALTon",
+   "name": "iShares Systematic Alternatives Active ETF (Ondo)",
+   "address": "0x879Fc0D8DFdb13b4aF3513d9838f82c4Df8F57E8",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "OIIon",
+   "name": "Oceaneering International (Ondo)",
+   "address": "0x4321366277d4a6E170F1f28148C93E8c47636c14",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "IRDMon",
+   "name": "Iridium Communications (Ondo)",
+   "address": "0x3cE678692a60Fb5F31963b05CB158F0cE0Ff1736",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "DRSon",
+   "name": "Leonardo DRS (Ondo)",
+   "address": "0x2A0A317660F497d4c4836d1ef5fAF5970e69437b",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "HIIon",
+   "name": "Huntington Ingalls Industries (Ondo)",
+   "address": "0x4Dc8dCeE22a56fEECa930dfF45581aa9A14D5E05",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "GDon",
    "name": "General Dynamics (Ondo)",
    "address": "0x5d1a9d8aa362a6424b65Fcb601e52FefcE5b4EFA",
@@ -1430,6 +2480,13 @@
    "symbol": "VDEon",
    "name": "Vanguard Energy ETF (Ondo)",
    "address": "0x9e23662f540C6bc117AdF91230730D9B2FDF5643",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "URNMon",
+   "name": "Sprott Uranium Miners ETF (Ondo)",
+   "address": "0xCa626a74420aAaf285987Da23d829f9159Ab867c",
    "decimals": 18,
    "type": "ETF"
   },
@@ -1770,6 +2827,27 @@
    "type": "Stock"
   },
   {
+   "symbol": "TASKon",
+   "name": "TaskUs (Ondo)",
+   "address": "0xDB69bEcc323fEc440cA8eb0C3564802E77cE2827",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "INODon",
+   "name": "Innodata (Ondo)",
+   "address": "0x517A25e696421C88218B43cbb7EA0f873B6973A6",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "HSAIon",
+   "name": "Hesai Group (Ondo)",
+   "address": "0x847ef23A3F99aF79A185ce033e1664165b846eEa",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "UAMYon",
    "name": "United States Antimony (Ondo)",
    "address": "0xf8919fe7D586b11D0A900E987c4A41bC6c3195F5",
@@ -1777,9 +2855,163 @@
    "type": "Stock"
   },
   {
+   "symbol": "ALOYon",
+   "name": "REalloys (Ondo)",
+   "address": "0x941e3a7A6fC97B094C63a0348367cf90D93Ff090",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "ACMRon",
+   "name": "ACM Research (Ondo)",
+   "address": "0xC5EFD0c3a8fF6D9816DA7B56625aB4C398Eb9e08",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "NVMIon",
+   "name": "Nova (Ondo)",
+   "address": "0x8a5f83A4b3AD2B9604F53c4dDf8DcE1329f9d433",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "AMKRon",
+   "name": "Amkor Technology (Ondo)",
+   "address": "0xb84e150A1d18380cFeEeBCdE8756368dD489A1A3",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "AAONon",
+   "name": "AAON (Ondo)",
+   "address": "0x0B61036b5182A29A228d8eD9e647a16f62baD1bC",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "HLITon",
+   "name": "Harmonic (Ondo)",
+   "address": "0xfF6f45B2D761CDE4dAb7F5d7A1A5f691F52F3bC3",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "DRAMon",
+   "name": "Roundhill Memory ETF (Ondo)",
+   "address": "0x087b5761b161429013d41eA54cd2fb6022A21564",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "ARGTon",
+   "name": "Global X MSCI Argentina ETF (Ondo)",
+   "address": "0x2b08f1c28Cb1EdE3b11D397929F00215fA97ecFA",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "PURRon",
+   "name": "Hyperliquid Strategies (Ondo)",
+   "address": "0x89CC700F308a4C59889fBF3286216554C53B0601",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "SHLDon",
+   "name": "Global X Defense Tech ETF (Ondo)",
+   "address": "0xe5ca1585c6053EE891027fD0A2548cB3B27D7f01",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "BOTZon",
+   "name": "Global X Robotics & Artificial Intelligence ETF (Ondo)",
+   "address": "0xb42f5597EAdd424de67b46Fe5d1EC4b61367A4e5",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "LITon",
+   "name": "Global X Lithium & Battery Tech ETF (Ondo)",
+   "address": "0xfd7778D5d4e804b5B512471Df36d60C465199A52",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "DTCRon",
+   "name": "Global X Data Center & Digital Infrastructure ETF (Ondo)",
+   "address": "0xEc4C1944682B8c7ba6c825e9A8B2B32Cb5EcacE5",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "ORBXon",
+   "name": "Global X Space Tech ETF (Ondo)",
+   "address": "0x2bC97B1c5F83F080798ee9E38Da5FBF621454FCf",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "EUHYon",
+   "name": "iShares Euro High Yield Corporate Bond USD Hedged ETF (Ondo)",
+   "address": "0x93eb8376ec73dD07F46ba7ae1EE9b0bbD937Ad93",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "LEMBon",
+   "name": "iShares J.P. Morgan EM Local Currency Bond ETF (Ondo)",
+   "address": "0x653156b9a46E21906Dddc82414871bBDB0261319",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "IDEFon",
+   "name": "iShares Defense Industrials Active ETF (Ondo)",
+   "address": "0x5Fb339393773414039295ea97A92614fed85D556",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "GGOVon",
+   "name": "iShares Global Government Bond USD Hedged Active ETF (Ondo)",
+   "address": "0x8Dd51E233E2344498F876c231a3Bd962E9750a6C",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
    "symbol": "QYLDon",
    "name": "Global X NASDAQ 100 Covered Call ETF (Ondo)",
    "address": "0x64E023411215C3b75b9F339B7B77F179cd04C527",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "SILon",
+   "name": "Global X Silver Miners ETF (Ondo)",
+   "address": "0x6A4c1B7aA18638fac4C8e0d1961405E27C25baf1",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "AIQon",
+   "name": "Global X Artificial Intelligence & Technology ETF (Ondo)",
+   "address": "0x333932F15E6E14f4a630163D3224548a721DdfA4",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "BKCHon",
+   "name": "Global X Blockchain ETF (Ondo)",
+   "address": "0x2291E5361F4ef7bB0d6703377bF497bFe4325152",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "EFVon",
+   "name": "iShares MSCI EAFE Value ETF (Ondo)",
+   "address": "0x40375E3Dd70232eaF264706e5662b90A079e3D31",
    "decimals": 18,
    "type": "ETF"
   },
@@ -1791,9 +3023,30 @@
    "type": "ETF"
   },
   {
+   "symbol": "IYWon",
+   "name": "iShares US Technology ETF (Ondo)",
+   "address": "0xbEeEF4361F6603eDAceF5205b343C6bb6473A099",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "XYLDon",
+   "name": "Global X S&P 500 Covered Call ETF (Ondo)",
+   "address": "0x1FE12ABDF560C753aCbC63533519d74801E04958",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
    "symbol": "BILon",
    "name": "SPDR Bloomberg 1-3 Month T-Bill ETF (Ondo)",
    "address": "0x03f09E2EF6e64D804a5579E21E7b519db174cf54",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "IEIon",
+   "name": "iShares 3-7 Year Treasury Bond ETF (Ondo)",
+   "address": "0x4E07B55E62f443859706E03aeA0b3fe3a1bfEA8B",
    "decimals": 18,
    "type": "ETF"
   },
@@ -1805,6 +3058,13 @@
    "type": "ETF"
   },
   {
+   "symbol": "SATAon",
+   "name": "Strive Preferred (Ondo)",
+   "address": "0x732823512Ba98D1BCDE471ca023ee2A0C9f117b7",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
    "symbol": "SPCXon",
    "name": "SpaceX (Ondo)",
    "address": "0xd0a58BC9D88D3FF48C0294Cb7e45937d0E41A928",
@@ -1812,9 +3072,79 @@
    "type": "Stock"
   },
   {
+   "symbol": "SKHYon",
+   "name": "SK Hynix (Ondo)",
+   "address": "0x4268F2Bfb23A7496504AA5eD1Ee325248586299F",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "SYSBon",
+   "name": "iShares Systematic Bond ETF (Ondo)",
+   "address": "0xeBe1408A7cce4f38dE15467e5139C3D82E4641F8",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "SECUon",
+   "name": "iShares Securitized Income Active ETF (Ondo)",
+   "address": "0xB0D7D4b65A654d43F91272Bb94E011Ce6812A2eF",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "HYGWon",
+   "name": "iShares High Yield Corporate Bond BuyWrite Strategy ETF (Ondo)",
+   "address": "0x85b53A9344884ae428E0E15f05A1819D280D4bE7",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
    "symbol": "RXRXon",
    "name": "Recursion Pharmaceuticals, Inc. (Ondo)",
    "address": "0xCB6D74afF24AFc94514727eE0FCDA6bb6B64f3F9",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "HTZon",
+   "name": "Hertz Global Holdings, Inc. (Ondo)",
+   "address": "0xB18C6A83490DDDbc9A83b011173b5B2Fb5dC1272",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "WENon",
+   "name": "The Wendy's Company (Ondo)",
+   "address": "0x79ed7f4d9668E8e7AaadD12A711d19064840B9A5",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "HYDBon",
+   "name": "iShares High Yield Systematic Bond ETF (Ondo)",
+   "address": "0x97B2FD5fC2F3e0dfD72D45734e360961528B6c63",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "USHYon",
+   "name": "iShares Broad USD High Yield Corporate Bond ETF (Ondo)",
+   "address": "0xc992e5f8dA1b99cB941B0a259bE9014CFfE89Ccf",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "NEARon",
+   "name": "iShares Short Duration Bond Active ETF (Ondo)",
+   "address": "0x031d85943ba7ca0304323195e7086a76c35366fB",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "GOOGon",
+   "name": "Alphabet Inc (Ondo)",
+   "address": "0x817f1f6780F99BCaAc394A59CB0261962df5Da8b",
    "decimals": 18,
    "type": "Stock"
   },
@@ -1826,9 +3156,65 @@
    "type": "Stock"
   },
   {
+   "symbol": "ZJANon",
+   "name": "Innovator ZJAN ETF (Ondo)",
+   "address": "0x7b5D01D315485280e6C4FE620405fB9c2E226a33",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "ZFEBon",
+   "name": "Innovator ZFEB ETF (Ondo)",
+   "address": "0x6E2BE4514B705c9faD357E6E556c67C710190bb9",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "ZMARon",
+   "name": "Innovator ZMAR ETF (Ondo)",
+   "address": "0xc83075d19dfBA5FB16DfCC7e1901127797B41804",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "ZAPRon",
+   "name": "Innovator ZAPR ETF (Ondo)",
+   "address": "0x7c2494b59500aeb76EB942579a0f2c080da4bDa0",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "ZMAYon",
+   "name": "Innovator ZMAY ETF (Ondo)",
+   "address": "0xB41d89c61Aa53097184E2f47aBCB23Cc15aC266e",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "ZJUNon",
+   "name": "Innovator ZJUN ETF (Ondo)",
+   "address": "0xC5337e92BB8ec00722985F85287C928961Bd82df",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "ZJULon",
+   "name": "Innovator ZJUL ETF (Ondo)",
+   "address": "0x16b384878990f94Fe3A6A18E5E46a5Eff1A50A08",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
    "symbol": "ZAUGon",
    "name": "Innovator ZAUG ETF (Ondo)",
    "address": "0x11b664414291512f3b13C7127768bA16fBEa35a5",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "ZSEPon",
+   "name": "Innovator ZSEP ETF (Ondo)",
+   "address": "0x2c4846bB54b2D232D89F9ce763005F0861c72921",
    "decimals": 18,
    "type": "ETF"
   },
@@ -1838,6 +3224,48 @@
    "address": "0x4F1a7E696E2550FFFd3C241FfAFa3cfbe603078a",
    "decimals": 18,
    "type": "ETF"
+  },
+  {
+   "symbol": "ZNOVon",
+   "name": "Innovator ZNOV ETF (Ondo)",
+   "address": "0xb041e45025eF1d3d149F37B984191Faf9AF55Dea",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "ZDEKon",
+   "name": "Innovator ZDEK ETF (Ondo)",
+   "address": "0xB5f44eb9e3f97254fE9Fe4Bbb20A32d683fdC529",
+   "decimals": 18,
+   "type": "ETF"
+  },
+  {
+   "symbol": "TWSTon",
+   "name": "Twist Bioscience Corporation (Ondo)",
+   "address": "0x820f09C2EBe7852E14a1310008BF7aF4d29d4F09",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "INSMon",
+   "name": "Insmed Incorporated (Ondo)",
+   "address": "0xaC0919D699eE1725d30d5ceD86cfd553C33DC36A",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "ERASon",
+   "name": "Erasca, Inc. (Ondo)",
+   "address": "0x56Bb3F07aB727D9a68c77eB132BCbbF294177222",
+   "decimals": 18,
+   "type": "Stock"
+  },
+  {
+   "symbol": "BNTXon",
+   "name": "BioNTech SE (Ondo)",
+   "address": "0x0f3931104d9ce770fE33b1032bedF32D67273fE0",
+   "decimals": 18,
+   "type": "Stock"
   },
   {
    "symbol": "PTGXon",
