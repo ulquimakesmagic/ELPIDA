@@ -5,7 +5,7 @@
 import { Contract, ContractFactory, AbiCoder, Interface, concat, getAddress, parseUnits, formatUnits, isAddress, ZeroAddress, id as keccakText } from '/vendor/ethers.js';
 import { swapCalldata } from '/dex-router.mjs';
 import { quoteNativePairConversion } from './usdc-conversion.mjs';
-import { V2, V2_MODEL, V2_FEE_SPLIT, V2_PROPOSED_MIN_FEE_BPS, V2_TESTNET_START_FDV_USD_E6, maxFirstBuyGross, firstBuyCapTokens, virtualToken, splitFee, feeOn } from '/v2-economics.mjs';
+import { V2, V2_MODEL, V2_FEE_SPLIT, feeSplitOf, V2_PROPOSED_MIN_FEE_BPS, V2_TESTNET_START_FDV_USD_E6, maxFirstBuyGross, firstBuyCapTokens, virtualToken, splitFee, feeOn } from '/v2-economics.mjs';
 import { v4Available, v4PoolManager, v2Deployment, v2DeploymentFor, saveV2Deployment, mineHookSalt, hasCode, walletCaughtUp, V4_ROUTER_ABI } from './v4-launchpad.mjs';
 import { normalizeMetadata } from './metadata.mjs';
 import { checkStockList, stockApprovalGroups } from '/stock-list.mjs';
@@ -373,9 +373,10 @@ export function feeBpsFrom(percent) {
 }
 
 /** What one trade of `amount` (in the pair asset, as typed) pays, and where each part goes, at `feeBps`. */
-export function splitPreview(amount, feeBps, decimals = 18) {
-  const gross = parseUnits(String(amount || '0'), decimals), fee = feeOn(gross, feeBps), s = splitFee(fee);
-  return { fee: formatUnits(fee, decimals), parts: Object.keys(V2_FEE_SPLIT).map(k => ({ key: k, bps: V2_FEE_SPLIT[k], amount: formatUnits(s[k], decimals) })) };
+export function splitPreview(amount, feeBps, decimals = 18, split = V2_FEE_SPLIT) {
+  const gross = parseUnits(String(amount || '0'), decimals), fee = feeOn(gross, feeBps);
+  // Each share rounded down, as the hook computes it (V2.0: 30/30/10/10/20; V2.3: 30/50/20).
+  return { fee: formatUnits(fee, decimals), parts: Object.keys(split).map(k => ({ key: k, bps: split[k], amount: formatUnits(fee * BigInt(split[k]) / 10_000n, decimals) })) };
 }
 
 /** The launch form's numbers: the minimum fee, the largest first buy within 3% of supply, and the launch fee. */

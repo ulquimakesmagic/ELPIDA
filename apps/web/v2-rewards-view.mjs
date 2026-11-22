@@ -115,7 +115,7 @@ export function rewardsSection({ api, onData = () => {}, mainnetSite = false }) 
         h('p.an-tile-label', icon(v.glyph, 'icon-sm'), v.label),
         h('strong', now.headline),
         now.detail ? h('p.small', now.detail) : null,
-        h('p.small.muted', `${v.share}${growth}`),
+        h('p.small.muted', `${shareText(v)}${growth}`),
         now.extra.length ? h('p.small.muted', `Not in the total until its price feed answers: ${now.extra.join(', ')}`) : null);
     }));
   }
@@ -308,12 +308,16 @@ export function rewardsSection({ api, onData = () => {}, mainnetSite = false }) 
     return [h('h3', 'Your progress this month'), h('p.small.muted', 'An estimate from confirmed trades so far. What you receive is set when the month is scored and posted on chain; payouts are listed below.'), ...rows];
   }
 
+  /** V2.3 (23 Nov 2026): 50% to traders on new launches; holder rewards and the flywheel exist only on V2.0 tokens. */
+  const v23 = () => chains().some(c => c.launchpad === 'v2.3-hook');
+  const shareText = v => !v23() ? v.share : v.key === 'airdrop' ? '50% of every V2.3 fee · 30% on earlier tokens' : '10% of fees of tokens launched before V2.3';
+
   const tile = (title, value, note, glyph) => h('div.tile.analytics-metric', h('p.an-tile-label', icon(glyph, 'icon-sm'), title), h('strong', value), h('p.small.muted', note));
 
   function draw() {
     const on = chains().map(c => c.name);
     root.replaceChildren(
-      h('div.analytics-section-head', h('div', h('h2', { id: 'rw-title' }, 'Rewards'), h('p.small.muted', `Where every fee goes, on ${names(on)} together: 30% creator, 30% trader airdrop, 10% flywheel, 10% holder rewards, 20% treasury. Read from the contracts.${mainnetSite ? ' On mainnet the trader airdrop is paid monthly in USDC; the holder and flywheel shares accrue in their contracts.' : ''}`)), h('div.analytics-controls', h('span.badge', mainnetSite ? 'Mainnet' : 'Test networks · no monetary value'))),
+      h('div.analytics-section-head', h('div', h('h2', { id: 'rw-title' }, 'Rewards'), h('p.small.muted', (v23() ? `Where every fee goes, on ${names([...new Set(chains().map(c => c.name.replace(/ · earlier launchpad$/, '')))])} together: on V2.3 launches 50% to traders, 30% to the creator and 20% to Elpida; tokens launched before V2.3 keep their own split (30% creator, 30% traders, 10% flywheel, 10% holder rewards, 20% treasury). Read from the contracts.` : `Where every fee goes, on ${names(on)} together: 30% creator, 30% trader airdrop, 10% flywheel, 10% holder rewards, 20% treasury. Read from the contracts.${mainnetSite ? ' On mainnet the trader airdrop is paid monthly in USDC; the holder and flywheel shares accrue in their contracts.' : ''}`))), h('div.analytics-controls', h('span.badge', mainnetSite ? 'Mainnet' : 'Test networks · no monetary value'))),
       h('div.rw-countdowns', ...countdownCards('airdrop', 'Trader airdrop'), ...countdownCards('holder', 'Holder rewards')),
       vaultTiles(),
       h('div.rw-block', h('h3', 'Reward pool by chain'), h('p.small.muted', 'One pool across every chain. Each chain\'s share of what the trader airdrop, holder rewards and flywheel vaults hold now, in dollars at today\'s prices.'), breakdown()),

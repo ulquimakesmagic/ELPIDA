@@ -23,6 +23,10 @@ export const V2_PROPOSED_MIN_FEE_BPS = 100;
 
 /** Five-way split of collected trading fees, in basis points of the whole fee (spec §11). Sums to 10,000. */
 export const V2_FEE_SPLIT = Object.freeze({ creator: 3_000, traderAirdrop: 3_000, flywheel: 1_000, holderRewards: 1_000, treasury: 2_000 });
+/** V2.3 (contracts/evm/v2/ElpidaV23Hook.sol; Malik, 23 November 2026): 50% traders / 30% creator / 20% Elpida. */
+export const V23_FEE_SPLIT = Object.freeze({ creator: 3_000, traderAirdrop: 5_000, treasury: 2_000 });
+/** The split a launchpad record pays (`model` 'v2.3-hook' or the V2.0 hook). */
+export const feeSplitOf = model => (model === 'v2.3-hook' ? V23_FEE_SPLIT : V2_FEE_SPLIT);
 const BPS = 10_000n;
 
 /** Graduation price multiple r = graduation FDV / start FDV (×5 under V2). */

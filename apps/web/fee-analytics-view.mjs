@@ -20,14 +20,14 @@ const DEFINITIONS = {
   launch: 'Launch fees from the factory\'s LaunchFeePaid events. USDC at face value; native coins at the price of the hour paid.',
 };
 const MODELS = { v1: 'V1', 'model-10': 'Model 10 (other)', 'curve-tax-v10': 'Model 10 tax curves', 'curve-dex-v9': 'Model 9 curves', 'curve-beta-v8': 'Model 8 curves', 'v4-hook': 'Model 11', 'solana-curve': 'Solana curves' };
-const SPLIT = { creator: '30% V2 · 50% M10', traderAirdrop: '30% V2', holderRewards: '10% V2', flywheel: '10% V2', treasury: '20% V2 · 50% M10', buybackBurn: 'part of M10 Elpida half' };
+const SPLIT = { creator: '30% V2 · 50% M10', traderAirdrop: '50% V2.3 · 30% V2.0', holderRewards: '10% V2.0 only', flywheel: '10% V2.0 only', treasury: '20% V2 · 50% M10', buybackBurn: 'part of M10 Elpida half' };
 // How each V2 share is paid out (Malik, 22 November 2026). The split itself is fixed in each deployed hook; the trader
 // airdrop is shared monthly by EWPR score and paid in USDC (packages/core/ewpr.mjs).
 const PAYOUT = { creator: 'Claimable by the creator at any time', traderAirdrop: 'Monthly, in USDC, by EWPR score: fees^0.8 × consistency', holderRewards: 'Builds up in its vault', flywheel: 'Buy-and-burn of Elpida tokens', treasury: 'Elpida revenue' };
 const usd = n => n > 0 && n < 1 ? '$' + n.toFixed(n < 0.01 ? 4 : 2) : n < 1000 ? '$' + Math.round(n).toLocaleString() : '$' + compact(n);
 
 export function feesSection({ api }) {
-  let scope = null, data = null, revision = 0, period = '7d', network = 'all';
+  let scope = null, data = null, revision = 0, period = '7d', network = 'all', v23Live = false;
   const root = h('section.panel.analytics-fees', { hidden: true }), status = h('p.small.muted', { role: 'status' });
   const scopes = h('div.analytics-filters', { 'aria-label': 'Mainnet or test networks' });
   function tile(title, value, note, glyph, definition) {
@@ -65,12 +65,22 @@ export function feesSection({ api }) {
         tile('Paid to creators', usd(g.shares.creator.withdrawnUsd), `of ${usd(g.shares.creator.earnedUsd)} earned · selected period${tag}`, 'user-round', DEFINITIONS.creators),
         tile('Launch fees', usd(g.launchFeesUsd), `${number(g.launches)} launches paid · selected period${tag}`, 'sparkles', DEFINITIONS.launch)),
       h('h3', 'Revenue model'),
-      h('div.analytics-policy.an-split',
-        h('div', h('strong', '30%'), h('span', 'Trader airdrop · monthly, in USDC')),
-        h('div', h('strong', '30%'), h('span', 'Token creators')),
-        h('div', h('strong', '20%'), h('span', 'Elpida treasury')),
-        h('div', h('strong', '20%'), h('span', 'Holder rewards and flywheel, 10% each'))),
-      h('p.small.muted', 'Every V2 trade pays a fee, 1.25% by default, shared as above by the launchpad\'s contract; the split is fixed for every token already launched. The trader airdrop goes to every qualifying trader by score each month: fees paid count with diminishing returns (fees^0.8), and trading on more days counts more, up to 12. Next: a V2.3 launchpad where new launches share 50% with traders, 30% with creators and 20% with the treasury.'),
+      // Malik, 23 November 2026: 50% traders / 30% creators / 20% platform. Shown as the current model only once a V2.3
+      // launchpad is live (from /api/public/v2-rewards); until then the V2.0 split is what new launches get.
+      ...(v23Live ? [
+        h('div.analytics-policy',
+          h('div', h('strong', '50%'), h('span', 'Traders · monthly airdrop in USDC')),
+          h('div', h('strong', '30%'), h('span', 'Token creators')),
+          h('div', h('strong', '20%'), h('span', 'Elpida platform revenue'))),
+        h('p.small.muted', 'Every trade of a token launched on Elpida V2.3 pays a fee, 1.25% by default, split as above by the launchpad\'s contract. The traders\' half goes each month to every qualifying trader by score: fees paid count with diminishing returns (fees^0.8), and trading on more days counts more, up to 12. Tokens launched before V2.3 keep the split fixed in their own contract: 30% creator, 30% traders, 20% treasury, and 10% each to holder rewards and the flywheel, which accrue in their contracts.'),
+      ] : [
+        h('div.analytics-policy.an-split',
+          h('div', h('strong', '30%'), h('span', 'Trader airdrop · monthly, in USDC')),
+          h('div', h('strong', '30%'), h('span', 'Token creators')),
+          h('div', h('strong', '20%'), h('span', 'Elpida treasury')),
+          h('div', h('strong', '20%'), h('span', 'Holder rewards and flywheel, 10% each'))),
+        h('p.small.muted', 'Every V2 trade pays a fee, 1.25% by default, shared as above by the launchpad\'s contract; the split is fixed for every token already launched. The trader airdrop goes to every qualifying trader by score each month: fees paid count with diminishing returns (fees^0.8), and trading on more days counts more, up to 12. Next: the V2.3 launchpad, where new launches share 50% with traders, 30% with creators and 20% with the platform.'),
+      ]),
       h('h3', 'Where the fees went'),
       h('p.small.muted', 'Earned is each share of the fees generated in the period. Claimed is what the V2 hook or a Model 10 curve paid out to each share in the period. In vault is what they still hold for it today, at today\'s price. The columns are never added together.'),
       h('div.analytics-table-scroll', h('table.analytics-table', h('caption.visually-hidden', `V2 fee shares${tag}`),
@@ -85,8 +95,9 @@ export function feesSection({ api }) {
     period = nextPeriod; network = nextNetwork;
     const id = ++revision;
     try {
-      const next = await api(`public/fees?period=${period}&network=${encodeURIComponent(network)}`);
+      const [next, rewards] = await Promise.all([api(`public/fees?period=${period}&network=${encodeURIComponent(network)}`), api('public/v2-rewards').catch(() => null)]);
       if (id !== revision) return;
+      v23Live = !!rewards?.chains?.some(c => c.launchpad === 'v2.3-hook');
       data = next; status.textContent = ''; draw();
     } catch (e) {
       if (id !== revision) return;
