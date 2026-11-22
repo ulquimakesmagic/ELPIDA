@@ -67,3 +67,11 @@ test('a few tokens per run', async () => {
   const r = await v.run({ chainId: 8453, provider: {}, hook: tokens[0].address, tokens, state, now: 0 });
   assert.equal(r.submitted.length, 2); assert.equal(r.pending, 1);
 });
+
+test('an address typed with the wrong capitals is accepted (22 Nov: a bad checksum stopped verify-token)', async () => {
+  const e = explorer(() => ({ status: '1', result: [{ SourceCode: 'x' }] }));
+  const v = new TokenVerifier({ apiKey: 'K', fetch: e.fetch, sleep });
+  const r = await v.run({ chainId: 56, provider: {}, hook: '0x' + '1'.repeat(40), tokens: [{ address: '0xEEcA39F2aF81296De89685e6dDdA58acD5BA1053' }], state: memory(), now: 0 });
+  assert.equal(r.submitted[0].ok, true);
+  assert.equal(r.submitted[0].address.toLowerCase(), '0xeeca39f2af81296de89685e6ddda58acd5ba1053');
+});
