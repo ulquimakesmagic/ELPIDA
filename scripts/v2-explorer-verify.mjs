@@ -90,7 +90,10 @@ export async function creationTx(provider, hash) {
 export async function explorerJobs({ provider, record, art = artifacts(), build = buildBytecode }) {
   const jobs = [], built = new Map(), build1 = build;
   build = (cn, eol) => { const k = `${cn}|${eol}`; if (!built.has(k)) built.set(k, build1(cn, eol)); return built.get(k); };
-  for (const [key, contractName] of Object.entries(CONTRACTS)) {
+  // A V2.3 launchpad's hook is ElpidaV23Hook (23 November 2026); it has no holder or flywheel contract.
+  const v23 = record.model === 'v2.3-hook';
+  for (const [key, name] of Object.entries(CONTRACTS)) {
+    const contractName = v23 && key === 'hook' ? 'contracts/evm/v2/ElpidaV23Hook.sol:ElpidaV23Hook' : name;
     const address = record.contracts?.[key], hash = record.txs?.[key]?.hash;
     if (!address) continue;
     if (!hash) { jobs.push({ key, address, contractName, ok: false, detail: 'no creation transaction in the record' }); continue; }
@@ -98,7 +101,7 @@ export async function explorerJobs({ provider, record, art = artifacts(), build 
     if (!tx) { jobs.push({ key, address, contractName, ok: false, detail: `creation transaction ${hash} not found on this RPC` }); continue; }
     let initCode = tx.data.toLowerCase();
     if (key === 'hook') { try { initCode = CREATE2.decodeFunctionData('deploy', tx.data)[0].toLowerCase(); } catch { /* not a CREATE2 deployment: use the data as is */ } }
-    let eol = 'disk', bytecode = '0x' + art[ART_KEY[key]].bytecode.replace(/^0x/, '').toLowerCase();
+    let eol = 'disk', bytecode = '0x' + art[v23 && key === 'hook' ? 'hookV23' : ART_KEY[key]].bytecode.replace(/^0x/, '').toLowerCase();
     for (const other of ['crlf', 'lf']) {
       if (initCode.startsWith(bytecode)) break;
       const built = '0x' + build(contractName, other);
