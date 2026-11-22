@@ -56,6 +56,32 @@ export function v2Deployment(net) {
   return saved?.factory && saved.poolManager?.toLowerCase() === manager.toLowerCase() ? { ...saved, pinned: false } : null;
 }
 export const saveV2Deployment = (net, record) => write(v2Key(net.chainId), record);
+
+/**
+ * Every V2 launchpad of a network, newest first (23 November 2026: V2.3 takes new launches, tokens of the V2.0
+ * launchpad keep trading on it). `net.v2.previous`: earlier launchpads, from their deployment records.
+ */
+export function v2Deployments(net) {
+  const current = v2Deployment(net);
+  if (!current) return [];
+  return [current, ...(net?.v2?.previous ?? []).filter(p => p?.factory && p?.hook).map(p => ({ ...p, poolManager: current.poolManager, pinned: true }))];
+}
+
+/** The launchpad a token belongs to, from its listing (factory or hook); the current one when it does not say. */
+export function v2DeploymentOf(net, token) {
+  const all = v2Deployments(net), f = String(token?.factory ?? '').toLowerCase(), hk = String(token?.hook ?? token?.curve ?? '').toLowerCase();
+  return all.find(d => (f && d.factory.toLowerCase() === f) || (hk && d.hook.toLowerCase() === hk)) ?? all[0] ?? null;
+}
+
+/** The launchpad whose hook launched `token` (an address), asked on chain; the current one if none did. */
+export async function v2DeploymentFor(provider, net, token) {
+  const all = v2Deployments(net);
+  if (all.length < 2 || !token) return all[0] ?? null;
+  for (const d of all) {
+    try { const info = await new Contract(d.hook, ['function launchOf(address) view returns(address,address,uint64,uint16,bool,int24,int24,uint128,uint128)'], provider).launchOf(token); if (info[2] > 0n) return d; } catch { /* not this hook */ }
+  }
+  return all[0];
+}
 /** A test copy of the PoolManager this browser deployed and that is not pinned yet ({ address, block }), or null. */
 export function savedTestPoolManager(net) {
   if (!v4Available(net) || net.v4.poolManager) return null;
@@ -305,7 +331,7 @@ export async function launchV4(w, body) {
 }
 
 function routerFor(w, item, runner) {
-  const v2 = isV2Token(item), d = v2 ? v2Deployment(w.net) : v4Deployment(w.net), name = v2 ? 'V2' : 'Model 11';
+  const v2 = isV2Token(item), d = v2 ? v2DeploymentOf(w.net, item) : v4Deployment(w.net), name = v2 ? 'V2' : 'Model 11';
   if (!d?.router) throw new Error(`This network has no ${name} router. Trading is unavailable.`);
   if (item.factory && item.factory.toLowerCase() !== d.factory.toLowerCase()) throw new Error(`This token belongs to another ${name} launchpad.`);
   return { router: new Contract(d.router, V4_ROUTER_ABI, runner), hook: new Contract(d.hook, HOOK_ABI, runner), d };

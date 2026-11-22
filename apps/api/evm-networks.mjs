@@ -25,7 +25,9 @@ export function loadEvmNetworks({ env = process.env, root = ROOT, mainnets = EVM
   for (const template of mainnets) {
     let result;
     try {
-      result = mainnetNetwork(template, readJson(join(root, 'deployments', `${template.planKey}.json`)), readJson(join(root, 'deployments', 'plans', `${template.planKey}.json`)));
+      const files = key => ({ record: readJson(join(root, 'deployments', `${key}.json`)), plan: readJson(join(root, 'deployments', 'plans', `${key}.json`)) });
+      const v20 = files(template.planKey), v23 = files(`${template.planKey}-v23`);
+      result = mainnetNetwork(template, v20.record, v20.plan, v23.record ? v23 : null);
     } catch (error) { result = { net: null, reason: `${template.name}: the deployment files could not be read (${String(error.message).slice(0, 80)}).` }; }
     if (result.net) networks.push(result.net); else skipped.push({ key: template.key, reason: result.reason });
   }

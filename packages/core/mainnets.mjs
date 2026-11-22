@@ -48,36 +48,58 @@ export const EVM_MAINNETS = Object.freeze([
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
 const CONTRACTS = ['factory', 'hook', 'router', 'airdrop', 'holder', 'flywheel'];
+/** V2.3 launchpads (23 November 2026) have no holder-reward distributor and no flywheel vault. */
+const CONTRACTS_V23 = ['factory', 'hook', 'router', 'airdrop'];
+const isV23Record = record => record?.model === 'v2.3-hook';
+
+/** Why a deployment record cannot be used, or null. */
+function unusable(template, record, plan) {
+  if (!record) return `${template.name}: no mainnet deployment record yet.`;
+  if (record.status !== 'ready') return `${template.name}: the deployment record is "${record.status ?? 'unknown'}", not "ready" (run the Safe batch, then verify).`;
+  if (Number(record.chainId) !== template.chainId) return `${template.name}: the deployment record is for chain ${record.chainId}, not ${template.chainId}.`;
+  if (!plan || Number(plan.chainId) !== template.chainId) return `${template.name}: the deployment plan is missing or for another chain.`;
+  const c = record.contracts ?? {};
+  const missing = (isV23Record(record) ? CONTRACTS_V23 : CONTRACTS).filter(k => !ADDRESS.test(String(c[k] ?? '')));
+  if (missing.length) return `${template.name}: the deployment record has no ${missing.join(', ')}.`;
+  for (const k of ['poolManager', 'usdFeed', 'usdc', 'keeper', 'treasury']) if (!ADDRESS.test(String(plan[k] ?? ''))) return `${template.name}: the plan has no ${k}.`;
+  if (!Number.isInteger(record.block) || record.block <= 0) return `${template.name}: the deployment record has no deploy block.`;
+  return null;
+}
+
+/** One launchpad's `v2.shared` entry from its record and plan. */
+function sharedOf(record, plan) {
+  const c = record.contracts, v23 = isV23Record(record);
+  return { factory: c.factory, hook: c.hook, router: c.router, airdrop: c.airdrop, ...(v23 ? {} : { holder: c.holder, flywheel: c.flywheel }),
+    model: v23 ? 'v2.3-hook' : 'v2-hook', split: v23 ? { creator: 30, traders: 50, treasury: 20 } : { creator: 30, traders: 30, flywheel: 10, holders: 10, treasury: 20 },
+    keeper: plan.keeper, treasury: plan.treasury, block: record.block, minFeeBps: Number(plan.minFeeBps ?? 100), distributions: false,
+    // The USDC trader-airdrop distributor, once `usdc-airdrop` has deployed and recorded it (22 November 2026).
+    ...(ADDRESS.test(String(c.usdcAirdrop ?? '')) ? { usdcAirdrop: c.usdcAirdrop } : {}) };
+}
 
 /**
  * The network entry for `template` from its deployment `record` and `plan`, or `{ net: null, reason }` while it is not
  * usable: no record yet, not "ready", another chain, or a contract or plan address missing.
+ * `next`: the chain's V2.3 launchpad ({ record, plan }, 23 November 2026). Once ready it takes new launches
+ * (`v2.shared`) and the V2.0 launchpad stays in `v2.previous`, so its tokens keep trading and earning; a chain with only
+ * a V2.3 record (Robinhood Chain) runs on it alone.
  */
-export function mainnetNetwork(template, record, plan) {
-  if (!record) return { net: null, reason: `${template.name}: no mainnet deployment record yet.` };
-  if (record.status !== 'ready') return { net: null, reason: `${template.name}: the deployment record is "${record.status ?? 'unknown'}", not "ready" (run the Safe batch, then verify).` };
-  if (Number(record.chainId) !== template.chainId) return { net: null, reason: `${template.name}: the deployment record is for chain ${record.chainId}, not ${template.chainId}.` };
-  if (!plan || Number(plan.chainId) !== template.chainId) return { net: null, reason: `${template.name}: the deployment plan is missing or for another chain.` };
-  const c = record.contracts ?? {};
-  const missing = CONTRACTS.filter(k => !ADDRESS.test(String(c[k] ?? '')));
-  if (missing.length) return { net: null, reason: `${template.name}: the deployment record has no ${missing.join(', ')}.` };
-  for (const k of ['poolManager', 'usdFeed', 'usdc', 'keeper', 'treasury']) if (!ADDRESS.test(String(plan[k] ?? ''))) return { net: null, reason: `${template.name}: the plan has no ${k}.` };
-  if (!Number.isInteger(record.block) || record.block <= 0) return { net: null, reason: `${template.name}: the deployment record has no deploy block.` };
-  const { planKey, usdMaxAge, payoutDex, ...facts } = template;
+export function mainnetNetwork(template, record, plan, next = null) {
+  const nextReady = next?.record && !unusable(template, next.record, next.plan) ? next : null;
+  const why = unusable(template, record, plan);
+  if (why && !nextReady) return { net: null, reason: why };
+  const main = nextReady ?? { record, plan }, previous = nextReady && !why ? [sharedOf(record, plan)] : [];
+  const { planKey, usdMaxAge, payoutDex, ...facts } = template, p = main.plan, r = main.record;
   return {
     net: {
       ...facts, enabled: true,
-      v4: { poolManager: plan.poolManager },
-      v2: { shared: { factory: c.factory, hook: c.hook, router: c.router, airdrop: c.airdrop, holder: c.holder, flywheel: c.flywheel,
-        keeper: plan.keeper, treasury: plan.treasury, block: record.block, minFeeBps: Number(plan.minFeeBps ?? 100), distributions: false,
-        // The USDC trader-airdrop distributor, once `usdc-airdrop` has deployed and recorded it (22 November 2026).
-        ...(ADDRESS.test(String(c.usdcAirdrop ?? '')) ? { usdcAirdrop: c.usdcAirdrop } : {}) } },
-      usd: { feed: plan.usdFeed, usdc: plan.usdc, maxAge: usdMaxAge ?? 3600 },
+      v4: { poolManager: p.poolManager },
+      v2: { shared: sharedOf(r, p), ...(previous.length ? { previous } : {}) },
+      usd: { feed: p.usdFeed, usdc: p.usdc, maxAge: usdMaxAge ?? 3600 },
       // The plan's dollar: USDC (18 decimals on BNB Chain), or USDG on Robinhood Chain. Pinned so payouts and amounts use
       // the plan's own symbol and decimals instead of assuming a 6-decimal USDC.
-      payoutStable: { address: plan.usdc, symbol: plan.usdcSymbol ?? 'USDC', decimals: Number(plan.usdcDecimals ?? 6), test: false },
+      payoutStable: { address: p.usdc, symbol: p.usdcSymbol ?? 'USDC', decimals: Number(p.usdcDecimals ?? 6), test: false },
       ...(payoutDex ? { payoutDex } : {}),
-      deployment: { planSha256: record.planSha256 ?? null, approval: record.approval ?? null, gitCommit: record.gitCommit ?? null },
+      deployment: { planSha256: r.planSha256 ?? null, approval: r.approval ?? null, gitCommit: r.gitCommit ?? null },
     },
     reason: null,
   };
