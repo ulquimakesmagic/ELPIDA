@@ -64,3 +64,12 @@ test('the dashboard: this month\'s progress for a wallet, from indexed trades, a
   assert.ok(c.you.share > 50 / 550, 'F^0.8 favours the smaller trader against plain pro rata');
   assert.equal(k.ewprStatus(a(0xdead)).chains[0].you, null);
 });
+
+test('stock-pair fees count: the keeper prices a real stock from its approved feed, fresh only', () => {
+  const stock = a(0x5106);
+  const k = configuredV2Keeper({ env: { ELPIDA_V2_KEEPER_KEY: keeper.privateKey }, networks: [net('bnb-mainnet')], indexFor: () => null, prices: () => ({}), path: ':memory:', stockUsd: (key, asset) => (key === 'bnb-mainnet' && asset === stock ? 345.5 : null) });
+  const w = k.workers[0];
+  assert.equal(w.usdPerUnit(stock), 345.5);
+  assert.equal(w.usdPerUnit(a(0x5107)), null, 'an unknown asset stays unpriced (counts $0)');
+  assert.equal(w.usdPerUnit(w.usdc), 1);
+});

@@ -741,7 +741,7 @@ export function etherscanFunder(chainId, apiKey, fetchImpl = fetch) {
  * On the mainnet site (17 Nov) the networks are mainnets: the keeper runs as 'mainnet' (fee collection and creator
  * rewards only; distributions stay off), uses the private RPC, and skips a network whose plan names another keeper.
  */
-export function configuredV2Keeper({ env, networks, indexFor, prices, path, publicUrl, log }) {
+export function configuredV2Keeper({ env, networks, indexFor, prices, path, publicUrl, log, stockUsd = () => null }) {
   const key = env.ELPIDA_V2_KEEPER_KEY;
   const valid = !!key && /^(0x)?[0-9a-fA-F]{64}$/.test(key);
   const pinned = networks.filter(n => n.v2?.shared?.hook && n.v2.shared.airdrop), mainnet = pinned.some(n => n.mainnet);
@@ -764,7 +764,9 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
     return { chain: net.key, net, provider, signer: Object.assign(new NonceManager(new Wallet(key, provider)), { address }), deployment: { ...d, poolManager: net.v4?.poolManager },
       dex: testnetDexes[net.key]?.enabled ? testnetDexes[net.key] : net.payoutDex ?? null, usdc: payoutStable(net, oracles)?.address ?? null, usdcDecimals: payoutStable(net, oracles)?.decimals ?? 6,
       index: () => indexFor(net.key), funderOf: env.ELPIDA_EXPLORER_API_KEY ? etherscanFunder(net.chainId, env.ELPIDA_EXPLORER_API_KEY) : null, ignoredFunders,
-      usdPerUnit: asset => { if (lower(asset) === lower(ZeroAddress)) { const p = prices()[net.key]; return p?.status === 'fresh' ? p.usd : null; } const usdc = oracles[net.key]?.usdc; return usdc && lower(asset) === lower(usdc) ? 1 : null; } };
+      usdPerUnit: asset => { if (lower(asset) === lower(ZeroAddress)) { const p = prices()[net.key]; return p?.status === 'fresh' ? p.usd : null; } const usdc = oracles[net.key]?.usdc; if (usdc && lower(asset) === lower(usdc)) return 1;
+        // A real tokenized stock (SPIDERMAN/AAPLon): its approved feed, fresh only (apps/api/stock-prices.mjs, #347).
+        const stock = stockUsd(net.key, asset); return Number.isFinite(stock) && stock > 0 ? stock : null; } };
   });
   const gasTarget = /^\d+(\.\d{1,18})?$/.test(String(env.ELPIDA_V2_KEEPER_GAS_TARGET ?? '')) ? parseEther(env.ELPIDA_V2_KEEPER_GAS_TARGET) : undefined;
   const share = Number(env.ELPIDA_V2_KEEPER_GAS_SHARE_BPS), gasShareBps = Number.isInteger(share) && share >= 0 && share <= 5000 ? share : undefined;
