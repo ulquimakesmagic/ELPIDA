@@ -182,3 +182,13 @@ test('the in-app docs take their numbers from the V2 economics and drop the reti
   for (const stale of ['split equally', 'Uniswap v3', 'has no cap', 'BASE_FEE_BPS', 'invite-only beta'])
     assert.ok(!src.includes(stale), `stale wording: ${stale}`);
 });
+
+test('a mainnet token page does not call its chain a test network, and gives a stock pair\'s FDV in dollars (22 Nov)', async () => {
+  const { tokenMeta, tokenFacts } = await import('../packages/core/token-seo.mjs');
+  const spiderman = { name: 'spiderman', symbol: 'SPIDERMAN', quoteSymbol: 'AAPLon', fdvQuote: '58.1009', usdReference: { status: 'fresh', usd: 345 } };
+  const m = tokenMeta(spiderman, 'BNB Chain', false);
+  assert.doesNotMatch(m.description, /test network/);
+  assert.match(m.description, /FDV \$20,045/);
+  assert.match(tokenMeta(spiderman, 'BNB Chain testnet').description, /a test network/);
+  assert.deepEqual(tokenFacts({ ...spiderman, usdReference: { status: 'stale', usd: 345 } })[0], 'FDV 58.1009 AAPLon', 'no stale dollar figure');
+});

@@ -18,23 +18,25 @@ const num = (value, digits = 4) => { const n = Number(value); return Number.isFi
 /** Short factual stats line; only fields the indexer actually returned, nothing invented. */
 export function tokenFacts(token) {
   const facts = [], quote = cleanText(token.quoteSymbol, 12) || 'native';
-  const fdv = num(token.fdvQuote, 4); if (fdv) facts.push(`FDV ${fdv} ${quote}`);
+  // In dollars when the pair asset has a fresh dollar rate (a stock's feed, #347), otherwise in the pair asset.
+  const rate = token.usdReference?.status === 'fresh' ? Number(token.usdReference.usd) : null, fdvUsd = rate && Number.isFinite(Number(token.fdvQuote)) ? Number(token.fdvQuote) * rate : null;
+  if (fdvUsd) facts.push(`FDV $${num(fdvUsd, 0)}`); else { const fdv = num(token.fdvQuote, 4); if (fdv) facts.push(`FDV ${fdv} ${quote}`); }
   if (token.priceUsd != null && Number.isFinite(Number(token.priceUsd))) facts.push(`$${Number(token.priceUsd).toPrecision(4)}`);
   facts.push(token.graduated ? 'Graduated to a DEX pool' : token.complete ? 'Curve complete, awaiting graduation' : 'Trading on the bonding curve');
   return facts;
 }
 
-export function tokenMeta(token, networkName) {
+export function tokenMeta(token, networkName, testnet = true) {
   const name = cleanText(token.name, 48) || 'Unnamed token', symbol = cleanText(token.symbol, 16).replace(/^\$/, '') || '?';
   const about = cleanText(token.metadata?.description, 110);
-  const description = cleanText(`${about ? about + ' ' : ''}${name} ($${symbol}) on ${networkName}, a test network. ${tokenFacts(token).join('. ')}. Not financial advice.`, 200);
+  const description = cleanText(`${about ? about + ' ' : ''}${name} ($${symbol}) on ${networkName}${testnet ? ', a test network' : ''}. ${tokenFacts(token).join('. ')}. Not financial advice.`, 200);
   return { name, symbol, title: cleanText(`${name} ($${symbol}) on ${networkName}`, 70), description };
 }
 
 /** HTML for a token that exists. `origin` is the canonical https origin. */
 export function renderTokenPage({ token, network, networkName, origin, testnet = true }) {
   const address = token.address, here = `${origin}/token/${network}/${address}`;
-  const meta = tokenMeta(token, networkName);
+  const meta = tokenMeta(token, networkName, testnet);
   const own = tokenWalletImage({ ...token, network }, origin);
   const image = own ?? `${origin}${OG_IMAGE_PATH}`, imageAlt = own ? `${meta.name} logo` : 'Elpida logo';
   const app = `/#/token/${address}?network=${encodeURIComponent(network)}`;
