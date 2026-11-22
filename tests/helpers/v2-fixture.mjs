@@ -31,7 +31,7 @@ const hex = s => (s.startsWith('0x') ? s : '0x' + s);
  * distributor its USDC → native conversion. `usdcPayouts: true` (with convert) also deploys the two USDC payout
  * distributors (contracts.usdcAirdrop, contracts.usdcHolder) fed by the airdrop and holder distributors.
  */
-export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN_FEE_BPS, requireMetadata = false, vaults: realVaults = false, convert = false, usdcPayouts = false, usdcDecimals = 6 } = {}) {
+export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN_FEE_BPS, requireMetadata = false, vaults: realVaults = false, convert = false, usdcPayouts = false, usdcDecimals = 6, v23 = false } = {}) {
   const connection = await network.create('localCancun'), provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 });
   provider.pollingInterval = 10; t.after(async () => { provider.destroy(); await connection.close(); });
   const signers = await Promise.all([0, 1, 2, 3, 4].map(i => provider.getSigner(i))), addresses = await Promise.all(signers.map(s => s.getAddress()));
@@ -64,7 +64,9 @@ export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN
   await mined(factory.connect(owner).approveQuote(usdc.target, USDC_VIRTUAL_QUOTE * BigInt(startMcapUsd) / 20_000n * usdcUnit / 10n ** 6n));
   for (const a of addresses) { await mined(usdc.mint(a, 1_000_000n * usdcUnit)); await mined(stock.mint(a, parseEther('1000000'))); }
   const create2 = await deploy(v4Art('ElpidaCreate2Deployer'));
-  const hookArt = v4Art('ElpidaV2Hook');
+  // `v23: true`: the V2.3 hook (50% traders / 30% creator / 20% treasury), with no flywheel or holder-reward vault.
+  if (v23) Object.assign(vaults, { flywheel: ZeroAddress, holderRewards: ZeroAddress });
+  const hookArt = v4Art(v23 ? 'ElpidaV23Hook' : 'ElpidaV2Hook');
   const args = AbiCoder.defaultAbiCoder().encode(['address', 'address', 'address', 'address', 'address', 'address', 'uint256'],
     [manager.target, factory.target, treasury, vaults.traderAirdrop, vaults.flywheel, vaults.holderRewards, minFeeBps]);
   const initCode = concat([hex(hookArt.evm.bytecode.object), args]);
@@ -73,7 +75,7 @@ export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN
   const hook = new Contract(address, hookArt.abi, signers[0]);
   await mined(factory.connect(owner).setHook(address));
   const router = await deploy(v4Art('ElpidaV4Router'), manager.target, address);
-  if (realVaults) await mined(contracts.flywheel.connect(signers[4]).setRouter(router.target));
+  if (realVaults && !v23) await mined(contracts.flywheel.connect(signers[4]).setRouter(router.target));
   const f = { provider, signers, addresses, treasury, owner, vaults, contracts, manager, swapRouter, liquidityRouter, factory, hook, router, feed, usdc, usdcUnit, stock, deploy };
   f.recipient = (l, r) => (r === 'creator' ? l.reward : r === 'treasury' ? treasury : vaults[r]);
   f.now = async () => (await provider.getBlock('latest')).timestamp;
