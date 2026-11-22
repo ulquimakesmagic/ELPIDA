@@ -34,6 +34,8 @@ export class PublicIndexer {
   constructor({networks,contracts,dataDir,metadataStore,onTrades,providerFactory=rpc=>new JsonRpcProvider(rpc,undefined,{cacheTimeout:-1,batchMaxCount:1}),log=console.log}){
     this.entries=new Map();this.legacy=new Map();this.metadataStore=metadataStore;this.log=log;this.stopping=false;
     this.providerFactory=providerFactory;this.rpcs=new Map();this.onTrades=onTrades??null;
+    // Set by the server (apps/api/stock-prices.mjs): marks real stock pairs 'xstock' with their dollar rate.
+    this.decorate=(key,t)=>t;
     // A mainnet chain has only its ELPIDA V2 launchpad (no curve `shared`): the V2 index is then the network's main entry.
     for(const net of networks.filter(n=>n.shared?.factory||n.v2?.shared?.factory&&n.v4?.poolManager)){
       // ELPIDA_INDEX_RPC_<chainId> (comma-separated) is for the indexer alone: its log scans need wide block ranges,
@@ -136,6 +138,8 @@ export class PublicIndexer {
   static FAILOVER_AFTER=3;
   start(){this.job=this.tick();this.timer=setInterval(()=>{this.job=this.tick();},TICK_MS);this.timer.unref();return this;}
   /** The V2 trading index of a network, for the V2 keeper (null until V2 is pinned and validated there). */
+  /** The provider indexing a network (read-only), for the stock price reader. */
+  providerFor(key){return this.entries.get(key)?.provider??null;}
   v2Index(key){const e=this.all(key).find(x=>x.v2&&x.validated);return e?.index??null;}
   status(key){const e=this.entries.get(key);return e?{...e.index.status(),error:e.error,errorCode:e.errorCode??null,rpc:rpcHost(this.rpcs?.get(key)),lastSuccess:e.lastSuccess,enabled:true,
     // Earlier launchpads on the same network have their own index; a stuck one must be visible too.
@@ -146,9 +150,9 @@ export class PublicIndexer {
   listing(key,address,extra){
     const e=this.entryFor(key,address),t=e?.index.tokenAt(address);if(!t)return null;
     const d=deploymentOf(e),s=e.index.snapshot(t.address)??{};
-    return {...t,...s,metadata:publicMetadata(e,t),metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})};
+    return this.decorate(key,{...t,...s,metadata:publicMetadata(e,t),metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})});
   }
-  listings(key,extra){return this.all(key).flatMap(e=>{const d=deploymentOf(e);return e.index.listings().map(t=>({...t,metadata:publicMetadata(e,t),metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})}));});}
+  listings(key,extra){return this.all(key).flatMap(e=>{const d=deploymentOf(e);return e.index.listings().map(t=>this.decorate(key,{...t,metadata:publicMetadata(e,t),metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})}));});}
   // No post-launch metadata path: details are published only in the launch transaction. Details a creator signed
   // before this rule (22-23 Oct 2026 testnet) are still loaded from metadata.json and shown as before.
   /** Latest trades on every indexed network, each with the token's public name, symbol and image. */

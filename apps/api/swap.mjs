@@ -46,7 +46,11 @@ export function createSwap({ fetchImpl = fetch, tokensFor, feeFor = () => null, 
   // A creator's first buy paid in the native coin (Malik, 21 Nov: "pay first buy with native or the stock"): native →
   // a launch pair asset (USDC or an approved stock), swapped just before the launch. Creators already pay the $10 launch
   // fee, so these carry no Elpida swap fee. Only native → launch pair qualifies; every other swap pays the fee.
-  const launchConversion = (network, tokenIn, tokenOut) => String(tokenIn).toLowerCase() === NATIVE.toLowerCase() && launchPairsFor(network).some(a => a.toLowerCase() === String(tokenOut).toLowerCase());
+  const isPair = (network, a) => launchPairsFor(network).some(x => x.toLowerCase() === String(a).toLowerCase()), isNative = a => String(a).toLowerCase() === NATIVE.toLowerCase();
+  // 'first-buy': native → pair only. 'pair' (a token page trade paid or received in the native coin, 21 Nov): either way
+  // between the native coin and a launch pair asset; the token's own 1.25% trading fee applies to the trade itself.
+  const launchConversion = (network, tokenIn, tokenOut, purpose = 'first-buy') => isNative(tokenIn) && isPair(network, tokenOut) || purpose === 'pair' && isPair(network, tokenIn) && isNative(tokenOut);
+  const PURPOSES = new Set(['first-buy', 'pair']);
   const allowed = (network, a) => tokensFor(network).some(t => t.address.toLowerCase() === String(a).toLowerCase());
   const call = async (url, init) => {
     const r = await fetchImpl(url, { ...init, redirect: 'error', signal: AbortSignal.timeout(15_000), headers: { accept: 'application/json', 'x-client-id': CLIENT, ...(init?.headers ?? {}) } });
@@ -64,8 +68,8 @@ export function createSwap({ fetchImpl = fetch, tokensFor, feeFor = () => null, 
     async quote({ network, tokenIn, tokenOut, amountIn, purpose = null }) {
       const chain = check(network, String(tokenIn ?? ''), String(tokenOut ?? ''));
       if (!AMOUNT.test(String(amountIn ?? ''))) { const e = new Error('Enter an amount.'); e.status = 400; throw e; }
-      if (purpose === 'first-buy' && !launchConversion(network, tokenIn, tokenOut)) { const e = new Error('A first-buy conversion goes from the native coin to the launch pair.'); e.status = 400; throw e; }
-      const fee = purpose === 'first-buy' ? null : feeFor(network), side = fee ? feeSide(tokensFor(network), tokenIn) : null;
+      if (PURPOSES.has(purpose) && !launchConversion(network, tokenIn, tokenOut, purpose)) { const e = new Error('A launch conversion goes between the native coin and the launch pair.'); e.status = 400; throw e; }
+      const fee = PURPOSES.has(purpose) ? null : feeFor(network), side = fee ? feeSide(tokensFor(network), tokenIn) : null;
       const feeQuery = fee ? `&feeAmount=${fee.bps}&isInBps=true&chargeFeeBy=${side}&feeReceiver=${fee.receiver}` : '';
       const d = await call(`${KYBER_API}/${chain}/api/v1/routes?tokenIn=${tokenIn}&tokenOut=${tokenOut}&amountIn=${amountIn}&gasInclude=true${feeQuery}`);
       if (String(d.routerAddress ?? '').toLowerCase() !== KYBER_ROUTER.toLowerCase()) { const e = new Error('Unexpected swap router; nothing was sent.'); e.status = 502; throw e; }
@@ -76,8 +80,8 @@ export function createSwap({ fetchImpl = fetch, tokensFor, feeFor = () => null, 
     async build({ network, routeSummary, sender, slippageBps, purpose = null }) {
       const chain = check(network, String(routeSummary?.tokenIn ?? ''), String(routeSummary?.tokenOut ?? ''));
       if (!ADDRESS.test(String(sender ?? ''))) { const e = new Error('Connect a wallet.'); e.status = 400; throw e; }
-      if (purpose === 'first-buy' && !launchConversion(network, routeSummary.tokenIn, routeSummary.tokenOut)) { const e = new Error('A first-buy conversion goes from the native coin to the launch pair.'); e.status = 400; throw e; }
-      const fee = purpose === 'first-buy' ? null : feeFor(network);
+      if (PURPOSES.has(purpose) && !launchConversion(network, routeSummary.tokenIn, routeSummary.tokenOut, purpose)) { const e = new Error('A launch conversion goes between the native coin and the launch pair.'); e.status = 400; throw e; }
+      const fee = PURPOSES.has(purpose) ? null : feeFor(network);
       if (fee) {
         // The fee the quote asked for must still be in the route the page sends back (Kyber builds from routeSummary).
         const x = routeSummary.extraFee ?? {};

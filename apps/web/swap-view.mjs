@@ -44,11 +44,23 @@ export function renderSwap(ctx) {
   let tokens = [], feeBps = 0, from = null, to = null, amount = '', slippage = 100, quote = null, quoteFor = '', busy = false, timer = null, balances = {};
 
   const balanceText = t => balances[t.address] == null ? '' : `Balance: ${number(Number(formatUnits(balances[t.address], t.decimals)), 6)} ${t.symbol}`;
-  async function loadBalances() {
-    const me = ctx.wallet?.address; if (!me || !ctx.wallet.provider) return;
-    await Promise.all(tokens.map(async t => { try { balances[t.address] = same(t.address, NATIVE) ? await ctx.wallet.provider.getBalance(me) : await new Contract(t.address, ERC20, ctx.wallet.provider).balanceOf(me); } catch { /* shown blank */ } }));
-    draw();
+  // The two assets on screen first, then the native coin, USDC and launch stocks a few at a time: reading all 476 BNB Chain
+  // assets at once through the wallet's RPC took long enough that the page looked empty (Malik, 21 Nov). A swap-only
+  // asset's balance is read when it is picked.
+  async function balanceOf(t) {
+    const me = ctx.wallet?.address; if (!me || !ctx.wallet.provider || !t) return;
+    try { balances[t.address] = same(t.address, NATIVE) ? await ctx.wallet.provider.getBalance(me) : await new Contract(t.address, ERC20, ctx.wallet.provider).balanceOf(me); } catch { /* shown blank */ }
   }
+  let balanceRun = 0;
+  async function loadBalances() {
+    if (!ctx.wallet?.address) return;
+    const run = ++balanceRun;
+    await Promise.all([from, to].map(balanceOf)); update();
+    const rest = tokens.slice(0, 40).filter(t => balances[t.address] == null);
+    for (let i = 0; i < rest.length && run === balanceRun; i += 4) await Promise.all(rest.slice(i, i + 4).map(balanceOf));
+    if (run === balanceRun) update();
+  }
+  const pickBalance = t => { if (t && balances[t.address] == null) balanceOf(t).then(update); };
   const blocked = () => (from?.kind === 'xstock' || to?.kind === 'xstock') ? stockRegionOff() : null;
   const picker = (sel, onPick, label) => stockPicker({ assets: tokens.map(t => ({ ...t, id: t.address })), selectedId: sel?.address, label, noun: 'asset', emptyText: 'No asset matches.', onSelect: a => onPick(tokens.find(t => same(t.address, a.address))) });
 
@@ -98,6 +110,9 @@ export function renderSwap(ctx) {
     els.error.textContent = quote?.error ?? '';
     els.gas.hidden = quote?.gasUsd == null; els.gasValue.textContent = quote?.gasUsd != null ? `≈ $${number(Number(quote.gasUsd), 2)}` : '';
     els.button.disabled = !connected || !quote?.routeSummary || !!reason || busy;
+    // Balances arrive after the page is drawn: refresh their text and the 25/50/Max buttons in place.
+    els.hint.textContent = balanceText(from);
+    for (const b of els.portions.children) b.disabled = balances[from.address] == null;
   }
   function draw() {
     if (!tokens.length) return;
@@ -117,11 +132,12 @@ export function renderSwap(ctx) {
     const button = h('button.btn.btn-block.btn-lg.btn-buy', { type: 'button', disabled: !connected || !quote?.routeSummary || !!reason || busy }, !connected ? 'Connect a wallet' : `Swap ${from.symbol} for ${to.symbol}`);
     button.addEventListener('click', () => execute(button, error));
     const outEl = h('strong', out), gasValue = h('strong'), gas = h('div.trade-meta', { hidden: true }, h('span', 'Network fee'), gasValue);
-    els = { out: outEl, error, button, gas, gasValue };
+    const hint = h('span.hint', balanceText(from));
+    els = { out: outEl, error, button, gas, gasValue, hint, portions };
     body.replaceChildren(h('div.swap-card.tk-card',
-      h('div.pay-box', h('div.swap-card-top', h('label', 'You pay'), h('span.hint', balanceText(from))), h('div.pay-input', input), portions, picker(from, t => { if (same(t.address, to.address)) to = from; from = t; amount = ''; quote = null; draw(); }, 'Pay with')),
+      h('div.pay-box', h('div.swap-card-top', h('label', 'You pay'), hint), h('div.pay-input', input), portions, picker(from, t => { if (same(t.address, to.address)) to = from; from = t; amount = ''; quote = null; draw(); pickBalance(t); }, 'Pay with')),
       h('div.swap-direction', flip),
-      h('div.receive', h('div.swap-card-top', h('span', 'You receive'), h('span.hint', 'Estimated')), h('div.swap-receive-row', outEl), picker(to, t => { if (same(t.address, from.address)) from = to; to = t; quote = null; requestQuote(); }, 'Receive')),
+      h('div.receive', h('div.swap-card-top', h('span', 'You receive'), h('span.hint', 'Estimated')), h('div.swap-receive-row', outEl), picker(to, t => { if (same(t.address, from.address)) from = to; to = t; quote = null; requestQuote(); pickBalance(t); }, 'Receive')),
       h('div.trade-meta', h('span', 'Slippage'), h('div.segmented', SLIPPAGES.map(b => h('button', { type: 'button', 'aria-pressed': String(b === slippage), on: { click: () => { slippage = b; draw(); } } }, `${b / 100}%`)))),
       feeBps ? h('div.trade-meta', h('span', 'Elpida fee'), h('strong', `${feeBps / 100}%`)) : null,
       gas,

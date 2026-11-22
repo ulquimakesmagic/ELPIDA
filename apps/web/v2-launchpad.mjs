@@ -776,22 +776,30 @@ async function creatorSplit(w, { wallets, shares }) {
 // First buy paid in the native coin on mainnet (Malik, 21 Nov): swapped into the pair asset through KyberSwap via
 // /api/public/swap (no Elpida swap fee for this conversion), right before the launch. The router must be Kyber's.
 export const KYBER_ROUTER = '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5';
-const KYBER_NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
-/** Kyber's quote for native → `asset` (base units in and out). */
-export async function kyberFirstBuyQuote(network, asset, amountIn, { fetchImpl = fetch } = {}) {
-  const r = await fetchImpl(`/api/public/swap/quote?network=${encodeURIComponent(network)}&tokenIn=${KYBER_NATIVE}&tokenOut=${asset}&amountIn=${amountIn}&purpose=first-buy`);
+export const KYBER_NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
+/** Kyber's quote between the native coin and a launch pair asset (base units in and out); `purpose` 'first-buy' or 'pair'. */
+export async function kyberPairQuote(network, tokenIn, tokenOut, amountIn, { purpose = 'first-buy', fetchImpl = fetch } = {}) {
+  const r = await fetchImpl(`/api/public/swap/quote?network=${encodeURIComponent(network)}&tokenIn=${tokenIn}&tokenOut=${tokenOut}&amountIn=${amountIn}&purpose=${purpose}`);
   const q = await r.json().catch(() => ({}));
-  if (!r.ok || !q.routeSummary || String(q.router ?? '').toLowerCase() !== KYBER_ROUTER.toLowerCase()) throw new Error(q.error ?? 'No conversion route right now. Pay the first buy in the pair asset, or try a smaller amount.');
+  if (!r.ok || !q.routeSummary || String(q.router ?? '').toLowerCase() !== KYBER_ROUTER.toLowerCase()) throw new Error(q.error ?? 'No conversion route right now. Use the pair asset, or try a smaller amount.');
   return { routeSummary: q.routeSummary, amountOut: BigInt(q.amountOut ?? '0') };
+}
+export const kyberFirstBuyQuote = (network, asset, amountIn, opts) => kyberPairQuote(network, KYBER_NATIVE, asset, amountIn, opts);
+/** Kyber's calldata for a quoted route, checked: Kyber's router, and the native value equal to what is swapped in. */
+export async function kyberPairCall(w, routeSummary, { purpose = 'first-buy', slippageBps = 100 } = {}) {
+  const r = await fetch('/api/swap/build', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': w.config.csrf }, body: JSON.stringify({ network: w.net.key, routeSummary, sender: w.address, slippageBps, purpose }) });
+  const tx = await r.json().catch(() => ({}));
+  const nativeIn = String(routeSummary.tokenIn).toLowerCase() === KYBER_NATIVE.toLowerCase() ? BigInt(routeSummary.amountIn) : 0n;
+  if (!r.ok || String(tx.to ?? '').toLowerCase() !== KYBER_ROUTER.toLowerCase() || BigInt(tx.value ?? '0') !== nativeIn) throw new Error(`${tx.error ?? 'The conversion could not be prepared.'} Nothing was submitted.`);
+  return { to: KYBER_ROUTER, data: tx.data, value: nativeIn };
 }
 /** Swaps native → `asset` for the first buy and returns how much arrived in the wallet. */
 async function kyberFirstBuySwap(w, asset, amountIn, label) {
   const { routeSummary } = await kyberFirstBuyQuote(w.net.key, asset, amountIn);
-  const r = await fetch('/api/swap/build', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': w.config.csrf }, body: JSON.stringify({ network: w.net.key, routeSummary, sender: w.address, slippageBps: 100, purpose: 'first-buy' }) });
-  const tx = await r.json().catch(() => ({}));
-  if (!r.ok || String(tx.to ?? '').toLowerCase() !== KYBER_ROUTER.toLowerCase() || BigInt(tx.value ?? '0') !== amountIn) throw new Error(`${tx.error ?? 'The conversion could not be prepared.'} Nothing was submitted.`);
+  const call = await kyberPairCall(w, routeSummary);
+  if (call.value !== amountIn) throw new Error('The conversion amount changed. Nothing was submitted.');
   const token = new Contract(asset, ERC20, w.provider), before = await token.balanceOf(w.address);
-  await step(w, w.signer.sendTransaction({ to: KYBER_ROUTER, data: tx.data, value: amountIn }), label);
+  await step(w, w.signer.sendTransaction(call), label);
   return (await token.balanceOf(w.address)) - before;
 }
 

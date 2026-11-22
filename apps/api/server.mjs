@@ -16,6 +16,7 @@ import {createOndoStatus} from './ondo-status.mjs';
 import {createDexscreener} from './dexscreener.mjs';
 import {createSwap,swapTokens,swapFeeFor,KYBER_CHAINS} from './swap.mjs';
 import {latestUpdate as pythLatestUpdate,PYTH_ID} from './pyth-hermes.mjs';
+import {StockPrices} from './stock-prices.mjs';
 import {testnetDexes} from '../../packages/core/uniswap.mjs';
 import { FeedRelay } from './feed-relay.mjs';
 import { testDexArtifacts } from './test-dex-artifacts.mjs';
@@ -336,6 +337,10 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const dexscreener=injectedDexscreener??createDexscreener();
   // Swap page (apps/api/swap.mjs): native coin, USDC and the network's verified stocks, routed by KyberSwap.
   const stockListFor=key=>{try{return JSON.parse(readFileSync(fileURLToPath(new URL(`../../config/stocks/${key}.json`,import.meta.url)),'utf8'));}catch{return null;}};
+  // Real stocks as pair assets on mainnet (21 Nov): marked 'xstock' in listings, with dollars from their approved feed.
+  const stockPrices=new StockPrices({networks:port===0?[]:evmNetworks.filter(n=>n.mainnet).map(n=>n.key),listFor:stockListFor,providerFor:key=>publicIndex.providerFor(key),log:line=>console.log(line)});
+  if(port!==0)stockPrices.start();
+  publicIndex.decorate=(key,t)=>stockPrices.decorate(key,t);
   const swapListFor=key=>{try{return JSON.parse(readFileSync(fileURLToPath(new URL(`../../config/swap/${key}.json`,import.meta.url)),'utf8'));}catch{return null;}};
   const swapTokensFor=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);return n?swapTokens(n,stockListFor(key),swapListFor(key)):[];};
   const swapFee=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);return n?swapFeeFor(n,process.env):null;};
@@ -592,7 +597,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         // Pyth-priced stock launches: the latest signed Pyth update for one feed id, which the launch page stores in Pyth Core
         // just before launching (apps/api/pyth-hermes.mjs). Pyth's signatures are checked on chain; this only relays.
         if(url.pathname==='/api/public/pyth-update'){res.setHeader('Cache-Control','no-store');const id=String(url.searchParams.get('id')??'');if(!PYTH_ID.test(id))return send(400,{error:'Unknown price feed.'});try{const u=await pythLatestUpdate([id]);const p=[...u.parsed.values()][0];return send(200,{data:u.data,publishTime:p?.publishTime??null});}catch{return send(502,{error:'Pyth prices are unavailable right now. Try again shortly.'});}}
-        if(url.pathname==='/api/public/swap/quote'){res.setHeader('Cache-Control','no-store');try{return send(200,await swap.quote({network:String(url.searchParams.get('network')??''),tokenIn:String(url.searchParams.get('tokenIn')??''),tokenOut:String(url.searchParams.get('tokenOut')??''),amountIn:String(url.searchParams.get('amountIn')??''),purpose:url.searchParams.get('purpose')==='first-buy'?'first-buy':null}));}catch(error){return send(error.status??502,{error:error.message});}}
+        if(url.pathname==='/api/public/swap/quote'){res.setHeader('Cache-Control','no-store');try{return send(200,await swap.quote({network:String(url.searchParams.get('network')??''),tokenIn:String(url.searchParams.get('tokenIn')??''),tokenOut:String(url.searchParams.get('tokenOut')??''),amountIn:String(url.searchParams.get('amountIn')??''),purpose:['first-buy','pair'].includes(url.searchParams.get('purpose'))?url.searchParams.get('purpose'):null}));}catch(error){return send(error.status??502,{error:error.message});}}
         if(url.pathname==='/api/public/dex-chart'){const network=String(url.searchParams.get('network')??''),token=String(url.searchParams.get('token')??'');if(!/^[a-z0-9-]{2,40}$/.test(network)||!/^0x[0-9a-fA-F]{40}$/.test(token))return send(400,{error:'Choose a network and token.'});const r=await dexscreener.lookup(network,token);res.setHeader('Cache-Control','public, max-age=120');return send(200,r);}
         if(url.pathname==='/api/public/stock-status'){const sym=url.searchParams.get('symbol');if(sym!=null&&!/^[A-Za-z0-9.]{1,16}on$/.test(sym))return send(400,{error:'Unknown stock symbol.'});res.setHeader('Cache-Control','public, max-age=300');return send(200,ondoStatus.summary(sym));}
         if(url.pathname==='/api/public/coinbase-stocks'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,coinbaseStocks.summary());}
@@ -757,7 +762,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         else return send(404,{error:'Unknown network.'});
         return send(202,{queued:true});
       }
-      if(action==='swap/build'){try{return send(200,await swap.build({network:String(body.network??''),routeSummary:body.routeSummary,sender:String(body.sender??''),slippageBps:body.slippageBps,purpose:body.purpose==='first-buy'?'first-buy':null}));}catch(error){return send(error.status??502,{error:error.message});}}
+      if(action==='swap/build'){try{return send(200,await swap.build({network:String(body.network??''),routeSummary:body.routeSummary,sender:String(body.sender??''),slippageBps:body.slippageBps,purpose:['first-buy','pair'].includes(body.purpose)?body.purpose:null}));}catch(error){return send(error.status??502,{error:error.message});}}
       if(action==='telemetry'){
         if(telemetryLimit(clientAddress(req)))return send(429,{error:'Too many events.'});
         try{const event=cleanEvent(body,{networks:new Set([...evmNetworks.map(n=>n.key),solanaNet.key,'local']),ownHost:siteHost});return send(202,siteAnalytics.record(event,{country:req.headers['cf-ipcountry'],userAgent:req.headers['user-agent']}));}
