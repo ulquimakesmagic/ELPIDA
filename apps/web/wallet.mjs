@@ -5,7 +5,7 @@ import {launchPublicTax,readTaxMarket,quoteTaxMarket,transactTaxMarket} from './
 import { isV4Token, v4Available, v4Deployment, deployTestPoolManager, v4Quote, v4Trade, v4WithdrawFees, v4TokenState, v4RouterFor, v2Deployment } from './v4-launchpad.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
 import { V2_MODEL } from '/v2-economics.mjs';
-import { deployV2, deployV2UsdcDistributors, setupTestPayoutStable, approveV2StockList, launchV2, approveV2Stock, loadV2Pairs, claimCreatorSplit, claimIdentityRow, claimV2CreatorFees, kyberFirstBuyQuote } from './v2-launchpad.mjs';
+import { deployV2, deployV2UsdcDistributors, setupTestPayoutStable, approveV2StockList, launchV2, approveV2Stock, loadV2Pairs, claimCreatorSplit, claimIdentityRow, claimV2CreatorFees, kyberFirstBuyQuote, kyberPairQuote, kyberPairCall, KYBER_NATIVE, KYBER_ROUTER } from './v2-launchpad.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
 import { stockPairsBlocked } from '/pairs.mjs';
 import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress, id as keccakText } from '/vendor/ethers.js';
@@ -489,6 +489,7 @@ export class TestnetWallet {
   async v4NativeQuote(item,body){
     if(item.pair==='native')throw new Error('This token already trades in the native coin.');
     if(!['buy','sell'].includes(body?.side))throw new Error('Invalid native trade side.');
+    if(this.net.mainnet)return this.v4KyberQuote(item,body);
     if(!this.dex?.router)throw new Error(`There is no native conversion route on ${this.net.name}. Pay with ${item.quoteSymbol}.`);
     const {router}=v4RouterFor(this,item,this.provider),asset=item.quoteAddress,buy=body.side==='buy',input=parseUnits(this.nativeAmount(body.amount),18);
     let route,pairAmount,output;
@@ -505,7 +506,44 @@ export class TestnetWallet {
     if(minimum<=0n||pairAmount<=0n)throw new Error('Trade amount is too small.');
     return {token:body.token,side:body.side,amount:body.amount,minimum:minimum.toString(),output:formatUnits(output,18),quotedAt:Date.now(),pairAmount:pairAmount.toString(),route,via:'the conversion pool',execution:'v4'};
   }
+  /**
+   * Mainnet (Malik, 21 Nov: "native buy not functional"): the native leg goes through KyberSwap instead of a test
+   * conversion pool. A buy swaps the coin into the pair asset, then buys on the token's pool with 99% of the swap's quote;
+   * a sell sells for at least 99% of its quote, then swaps exactly that much back to the coin. No Elpida swap fee on
+   * this leg (the token's trading fee applies). Any extra pair asset stays in the wallet.
+   */
+  async v4KyberQuote(item,body){
+    const {router}=v4RouterFor(this,item,this.provider),asset=item.quoteAddress,buy=body.side==='buy',input=parseUnits(this.nativeAmount(body.amount),18);
+    let pairAmount,output,route;
+    if(buy){
+      route=await kyberPairQuote(this.net.key,KYBER_NATIVE,asset,input,{purpose:'pair'});
+      pairAmount=route.amountOut*9900n/10000n;[,output]=await router.quote.staticCall(item.address,true,pairAmount);
+    }else{
+      const [,pairOut]=await router.quote.staticCall(item.address,false,input);pairAmount=pairOut*9900n/10000n;
+      route=await kyberPairQuote(this.net.key,asset,KYBER_NATIVE,pairAmount,{purpose:'pair'});output=route.amountOut;
+    }
+    const minimum=output*9900n/10000n;
+    if(minimum<=0n||pairAmount<=0n)throw new Error('Trade amount is too small.');
+    return {token:body.token,side:body.side,amount:body.amount,minimum:minimum.toString(),output:formatUnits(output,18),quotedAt:Date.now(),pairAmount:pairAmount.toString(),via:'KyberSwap',execution:'v4'};
+  }
+  async v4KyberTrade(item,body){
+    const q=await this.v4KyberQuote(item,body),minimum=BigInt(body.minimum);
+    if(minimum<=0n||BigInt(q.minimum)<minimum)throw new Error('Native trade price moved. Get a fresh quote.');
+    if(item.pair==='xstock')await this.stockPreflight?.(item,body.side);
+    const {router}=v4RouterFor(this,item,this.signer),buy=body.side==='buy',coin=this.net.nativeCurrency.symbol,input=parseUnits(body.amount,18),pairAmount=BigInt(q.pairAmount);
+    const deadline=BigInt((await this.provider.getBlock('latest')).timestamp+300),erc20=new Interface(['function approve(address,uint256) returns(bool)']);
+    const approve=(token,spender,amount,label)=>({to:token,data:erc20.encodeFunctionData('approve',[spender,amount]),label});
+    const trade=(amount,min)=>({to:router.target,data:router.interface.encodeFunctionData(buy?'buy':'sell',[item.address,amount,min,this.address,deadline]),label:`${buy?'Buy':'Sell'} ${item.symbol}…`});
+    const route=buy?await kyberPairQuote(this.net.key,KYBER_NATIVE,item.quoteAddress,input,{purpose:'pair'}):await kyberPairQuote(this.net.key,item.quoteAddress,KYBER_NATIVE,pairAmount,{purpose:'pair'});
+    if(buy&&route.amountOut*9900n/10000n<pairAmount)throw new Error('Native trade price moved. Get a fresh quote.');
+    const swap=await kyberPairCall(this,route.routeSummary,{purpose:'pair'});
+    const calls=buy?[{...swap,label:`Convert ${coin} to ${item.quoteSymbol} (KyberSwap)…`},approve(item.quoteAddress,router.target,pairAmount,`Approve ${item.quoteSymbol} for this buy…`),trade(pairAmount,minimum)]
+      :[approve(item.address,router.target,input,`Approve ${item.symbol} for this sale…`),trade(input,pairAmount),approve(item.quoteAddress,KYBER_ROUTER,pairAmount,`Approve ${item.quoteSymbol} for the conversion…`),{...swap,label:`Convert ${item.quoteSymbol} to ${coin} (KyberSwap)…`}];
+    const result=await this.sendCalls(calls,'Confirm the native trade.');
+    return {hash:result.tx.hash,message:`Trade confirmed on ${this.net.name}: ${buy?`${coin} converted to ${item.quoteSymbol}, then ${item.symbol} bought`:`${item.symbol} sold, then ${item.quoteSymbol} converted to ${coin}`}. Any extra ${item.quoteSymbol} stays in your wallet.`};
+  }
   async v4NativeTrade(item,body){
+    if(this.net.mainnet)return this.v4KyberTrade(item,body);
     const q=await this.v4NativeQuote(item,body),minimum=BigInt(body.minimum);
     if(minimum<=0n||BigInt(q.minimum)<minimum)throw new Error('Native trade price moved. Get a fresh quote.');
     if(item.pair==='xstock')await this.stockPreflight?.(item,body.side);
@@ -951,7 +989,10 @@ export class TestnetWallet {
       // Quotes and trades look tokens up in this.launches (filled from the curve factory elsewhere): fill it from the index.
       this.launches.clear(); for (const item of entries) this.launches.set(item.address.toLowerCase(), { ...item });
       const tokens = await Promise.all(entries.map(async item => { if (!isV4Token(item)) return item; try { return await v4TokenState(this, item); } catch { return item; } }));
-      return { ...base, tokens };
+      // The wallet's balance of each pair asset in use (a stock, USDC), for the token page's "Available" (21 Nov).
+      const pairBalances = {}, quotes = [...new Set(entries.filter(t => t.pair !== 'native' && isAddress(t.quoteAddress ?? '')).map(t => t.quoteAddress.toLowerCase()))];
+      await Promise.all(quotes.map(async a => { try { const c = new Contract(a, ['function balanceOf(address) view returns(uint256)', 'function decimals() view returns(uint8)'], this.provider); const [b, d] = await Promise.all([c.balanceOf(this.address), c.decimals()]); pairBalances[a] = formatUnits(b, Number(d)); } catch { /* shown blank */ } }));
+      return { ...base, tokens, pairBalances };
     }
     const factory = await this.verifyFactory();
     if(this.dex){try{this.needsMetadataUpgrade=await factory.METADATA_VERSION()!==1n;}catch{this.needsMetadataUpgrade=true;}}
