@@ -1,0 +1,21 @@
+{
+ "key": "base-mainnet-v23",
+ "name": "Base",
+ "chainId": 8453,
+ "startMcapUsd": 20000,
+ "minFeeBps": 100,
+ "dailyLaunchCap": 1000,
+ "treasury": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01",
+ "keeper": "0x10299c3Cff25C3e775e91463c5D9c8670483d39F",
+ "guardian": "0xfC08505EfEf934c3fF19d82D189f60f28a0255eB",
+ "minSafeThreshold": 2,
+ "poolManager": "0x498581fF718922c3f8e6A244956aF099B2652b2b",
+ "usdFeed": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70",
+ "feedMaxAge": 86400,
+ "usdc": "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913",
+ "confirmations": 2,
+ "minDeployerBalance": "0.01",
+ "notes": "ELPIDA V2.3 launchpad on Base (Malik, 23 November 2026): every fee split 50% traders (monthly EWPR airdrop in USDC) / 30% creator / 20% treasury; no flywheel or holder-reward vault. New launches go here; tokens of the V2.0 launchpad keep their own split. Same treasury Safe, keeper, guardian, PoolManager, feed and dollar as the Base V2.0 plan. treasury: the Base Safe Elpida Treasury (2 of 3, same address and owners as the Base Sepolia rehearsal Safe); keeper: a fresh wallet under its own recovery phrase; guardian: the launch-stop wallet (18 Nov 2026). PoolManager: Uniswap's v4 deployment on Base. usdFeed and usdc are checked on chain by `check` (description ETH / USD, fresh answer; 6-decimal USDC). minFeeBps 100 (1% minimum fee) and dailyLaunchCap 1000 confirmed by Malik on 18 Nov 2026; the Safe can change the cap later with setDailyLaunchCap. explorerApi: Blockscout, only to find an existing stock holder to impersonate on a fork (`rehearse --fork <rpc> --stocks config/stocks/candidates/base-coinbase.json`; Coinbase stocks, decided 16 Nov 2026).",
+ "explorerApi": "https://base.blockscout.com",
+ "model": "v2.3-hook"
+}
