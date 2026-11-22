@@ -9,13 +9,15 @@
 import { DatabaseSync } from 'node:sqlite';
 import { Contract, JsonRpcProvider, NonceManager, Wallet, ZeroAddress, getAddress, parseEther, solidityPacked } from 'ethers';
 import { buildRound } from '../../packages/core/v2-rounds.mjs';
-import { airdropRound, holderRound, flywheelOrders, personalFunder, boundedFunderLinks, HOLDER_RULES, FLYWHEEL_RULES, latestJobs } from '../../packages/core/v2-keeper-plan.mjs';
+import { airdropPlanFor, holderRound, flywheelOrders, personalFunder, boundedFunderLinks, HOLDER_RULES, FLYWHEEL_RULES, latestJobs } from '../../packages/core/v2-keeper-plan.mjs';
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { testnetDexes } from '../../packages/core/uniswap.mjs';
 import { payoutStable } from '../../packages/core/payout-stable.mjs';
 import { serverRpcUrl } from '../../packages/core/mainnets.mjs';
 import { holderDistribution } from '../web/reward-policy.mjs';
 import { KeeperLease, safeError } from '../../packages/core/keeper-lease.mjs';
+import { TokenVerifier } from './token-verifier.mjs';
+import { EXPLORERS } from '../../scripts/v2-explorer-verify.mjs';
 
 const DAY = 86_400, BATCH = 80;
 // Audit of 11 November 2026 (docs/AUDIT_TRIAGE_2026-11-11.md): every transaction goes through send(), which holds the
@@ -63,7 +65,8 @@ export class V2Keeper {
    * `dailyGas`: native coin the keeper may spend per chain per rolling 24 hours. `confirmations`: blocks to wait for.
    */
   constructor({ workers, path = ':memory:', publicUrl = 'https://elpida.fun', now = () => Math.floor(Date.now() / 1000), log = () => {}, tickMs = 300_000, network = 'testnet', gasTarget = GAS_TARGET, gasShareBps = GAS_SHARE_BPS,
-    confirmations = CONFIRMATIONS, distributions = network !== 'mainnet', dailyGas = DAILY_GAS, maxRoundsPerTick = MAX_ROUNDS_PER_TICK, leaseTtl = 15 * 60 }) {
+    confirmations = CONFIRMATIONS, distributions = network !== 'mainnet', dailyGas = DAILY_GAS, maxRoundsPerTick = MAX_ROUNDS_PER_TICK, leaseTtl = 15 * 60, verifier = null }) {
+    this.verifier = verifier;
     this.gasTarget = gasTarget; this.gasShareBps = gasShareBps;
     Object.assign(this, { workers, publicUrl, now, log, tickMs, network, confirmations, distributions, dailyGas: BigInt(dailyGas), maxRoundsPerTick });
     this.db = new DatabaseSync(path);
@@ -113,7 +116,10 @@ export class V2Keeper {
   async close() { clearInterval(this.timer); this.timer = null; if (!this.busy) { this.lease.release(); try { this.db.close(); } catch { /* already closed */ } } }
 
   /** The jobs this keeper runs: creator rewards and fee collection always; the rest only with distributions on. */
-  jobs() { return this.distributions ? ['fees', 'airdrop', 'holder', 'creator', 'flywheel'] : ['fees', 'creator']; }
+  jobs() {
+    const base = this.distributions === 'airdrop' ? ['fees', 'airdrop', 'creator'] : this.distributions ? ['fees', 'airdrop', 'holder', 'creator', 'flywheel'] : ['fees', 'creator'];
+    return this.verifier ? [...base, 'verify'] : base;
+  }
 
   async tick() {
     if (this.busy) return; this.busy = true;
@@ -130,6 +136,19 @@ export class V2Keeper {
       }
     }
     finally { this.busy = false; }
+  }
+
+  /**
+   * Hourly: publishes the source of this chain's launched tokens on its explorer (token-verifier.mjs), a few per run.
+   * Read-only: no transaction, no gas. Chains without an Etherscan-family explorer are skipped.
+   */
+  async verify(w) {
+    if (!this.verifier || !EXPLORERS[Number(w.net.chainId)] || !this.due(w, 'verify', 3600)) return;
+    const index = w.index(); if (!index) return;
+    const tokens = index.listings().filter(t => t.address);
+    const r = await this.verifier.run({ chainId: Number(w.net.chainId), provider: w.provider, hook: w.deployment.hook, tokens, state: { get: (k, f) => this.get(k, f), set: (k, v) => this.set(k, v) }, now: this.now() });
+    this.done(w, 'verify');
+    if (r.submitted.length) this.record(w.chain, 'verify', r.submitted.every(x => x.ok) ? 'ok' : 'partial', r);
   }
 
   due(w, job, everySeconds) { const last = this.get(`${w.chain}:${job}:last`, 0); return this.now() - last >= everySeconds; }
@@ -392,6 +411,12 @@ export class V2Keeper {
     return open.length;
   }
 
+  /** Elpida's own contracts and the keeper: never counted as traders in the airdrop. */
+  protocolAddresses(w) {
+    const d = w.deployment;
+    return [d.hook, d.airdrop, d.holder, d.flywheel, d.router, d.factory, d.usdcAirdrop, d.usdcHolder, d.poolManager, d.treasury, w.signer?.address].filter(Boolean);
+  }
+
   /** The USDC distributor that pays `kind` ('airdrop' | 'holder') on this chain, or null while rewards pay in kind. */
   usdcDistributor(w, kind) {
     const a = w.deployment[kind === 'airdrop' ? 'usdcAirdrop' : 'usdcHolder'];
@@ -444,6 +469,9 @@ export class V2Keeper {
   async airdrop(w) {
     const index = w.index(); if (!index) return;
     if (this.usdcDistributor(w, 'airdrop')) return this.airdropUsdc(w, index);
+    // Mainnet pays the trader airdrop in USDC only (Malik, 22 November 2026): until the chain's USDC airdrop distributor
+    // is deployed and recorded, the airdrop share keeps accruing in the hook's distributor and nothing is posted.
+    if (this.network === 'mainnet') { this.record(w.chain, 'airdrop', 'waiting', { reason: 'no USDC airdrop distributor recorded for this chain yet' }); return; }
     const drop = new Contract(w.deployment.airdrop, DISTRIBUTOR, w.signer), current = Number(await drop.currentRound());
     for (let round = this.get(`${w.chain}:airdrop:next`, 0), stop = round + this.maxRoundsPerTick; round < current && round < stop; round++) {
       const [start, end] = (await Promise.all([drop.roundStart(round), drop.roundEnd(round)])).map(Number);
@@ -455,7 +483,8 @@ export class V2Keeper {
       const carried = this.get(`${w.chain}:airdrop:carried`, {}), carriedMaps = Object.fromEntries(Object.entries(carried).map(([a, m]) => [a, new Map(Object.entries(m).map(([k, v]) => [k, BigInt(v)]))]));
       const pools = {};
       for (const a of assets) { const held = [...(carriedMaps[a]?.values() ?? [])].reduce((x, y) => x + y, 0n), avail = await drop.available(a); if (avail > held) pools[a] = avail - held; }
-      const plan = airdropRound({ trades: trades.map(t => ({ ...t, quoteUsd: Number(t.quoteAmount ?? 0) * usd(t.asset) })), start, end, usdPerUnit: usd, firstSeen: a => firstSeen.get(a), pools, carried: carriedMaps, links: await this.links(w, trades.map(t => t.account)) });
+      const plan = airdropPlanFor(round, { trades: trades.map(t => ({ ...t, quoteUsd: Number(t.quoteAmount ?? 0) * usd(t.asset) })), start, end, usdPerUnit: usd, firstSeen: a => firstSeen.get(a), pools, carried: carriedMaps, links: await this.links(w, trades.map(t => t.account)),
+        creatorLinked: [...linked.values()].flatMap(s => [...s]), exclude: this.protocolAddresses(w) }, { mainnet: this.network === 'mainnet' });
       const results = {};
       for (const [asset, p] of Object.entries(plan.byAsset)) {
         carried[asset] = Object.fromEntries([...p.carried].map(([k, v]) => [k, v.toString()]));
@@ -463,7 +492,7 @@ export class V2Keeper {
         results[asset] = await this.post(w, drop, round, asset, p.payouts);
       }
       this.set(`${w.chain}:airdrop:carried`, carried); this.set(`${w.chain}:airdrop:next`, round + 1);
-      this.record(w.chain, 'airdrop', 'ok', { round, qualified: plan.qualified.length, results });
+      this.record(w.chain, 'airdrop', 'ok', { round, model: plan.model ?? 'blend', qualified: plan.qualified.length, results });
     }
   }
 
@@ -498,16 +527,18 @@ export class V2Keeper {
       const usd = a => lower(a) === usdc ? 1 : w.usdPerUnit(a) ?? 0;
       const carried = new Map(Object.entries(this.get(`${w.chain}:airdrop:usdcCarried`, {})).map(([k, v]) => [k, BigInt(v)]));
       const held = [...carried.values()].reduce((x, y) => x + y, 0n), avail = await target.available(usdc), pools = avail > held ? { [usdc]: avail - held } : {};
-      const plan = airdropRound({ trades: trades.map(t => ({ ...t, quoteUsd: Number(t.quoteAmount ?? 0) * usd(t.asset) })), start, end, usdPerUnit: usd, firstSeen: a => firstSeen.get(a), pools, carried: { [usdc]: carried }, decimals: { [usdc]: 6 },
-        links: await this.links(w, trades.map(t => lower(t.account ?? ''))), creatorLinked: [...linked.values()].flatMap(s => [...s]) });
+      const plan = airdropPlanFor(round, { trades: trades.map(t => ({ ...t, quoteUsd: Number(t.quoteAmount ?? 0) * usd(t.asset) })), start, end, usdPerUnit: usd, firstSeen: a => firstSeen.get(a), pools, carried: { [usdc]: carried }, decimals: { [usdc]: w.usdcDecimals ?? 6 },
+        links: await this.links(w, trades.map(t => lower(t.account ?? ''))), creatorLinked: [...linked.values()].flatMap(s => [...s]), exclude: this.protocolAddresses(w) }, { mainnet: this.network === 'mainnet' });
       const p = plan.byAsset[usdc];
       let result = null;
       if (p) {
         this.set(`${w.chain}:airdrop:usdcCarried`, Object.fromEntries([...p.carried].map(([k, v]) => [k, v.toString()])));
         if (p.payouts.size && (await target.rounds(round, usdc)).root === ZERO_ROOT) result = await this.post(w, target, round, usdc, p.payouts);
       }
+      // Each round's scores, public on the rewards page (who qualified, their fees, days and score), so anyone can check them.
+      if (plan.scores) this.set(`${w.chain}:airdrop:scores:${round}`, { start, end, model: plan.model, pool: (pools[usdc] ?? 0n).toString(), unallocated: (p?.unallocated ?? 0n).toString(), scores: plan.scores });
       this.set(`${w.chain}:airdrop:next`, round + 1);
-      this.record(w.chain, 'airdrop', 'ok', { round, usdc: true, moved, converted, skipped, keeperGas: gas.toString(), qualified: plan.qualified.length, result });
+      this.record(w.chain, 'airdrop', 'ok', { round, model: plan.model ?? 'blend', usdc: true, moved, converted, skipped, keeperGas: gas.toString(), qualified: plan.qualified.length, result });
     }
   }
 
@@ -692,7 +723,7 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
   const workers = nets.map(net => {
     const provider = new JsonRpcProvider(serverRpcUrl(net, env), undefined, { cacheTimeout: -1, batchMaxCount: 1 }), d = net.v2.shared;
     return { chain: net.key, net, provider, signer: Object.assign(new NonceManager(new Wallet(key, provider)), { address }), deployment: { ...d, poolManager: net.v4?.poolManager },
-      dex: testnetDexes[net.key]?.enabled ? testnetDexes[net.key] : null, usdc: payoutStable(net, oracles)?.address ?? null,
+      dex: testnetDexes[net.key]?.enabled ? testnetDexes[net.key] : net.payoutDex ?? null, usdc: payoutStable(net, oracles)?.address ?? null, usdcDecimals: payoutStable(net, oracles)?.decimals ?? 6,
       index: () => indexFor(net.key), funderOf: env.ELPIDA_EXPLORER_API_KEY ? etherscanFunder(net.chainId, env.ELPIDA_EXPLORER_API_KEY) : null, ignoredFunders,
       usdPerUnit: asset => { if (lower(asset) === lower(ZeroAddress)) { const p = prices()[net.key]; return p?.status === 'fresh' ? p.usd : null; } const usdc = oracles[net.key]?.usdc; return usdc && lower(asset) === lower(usdc) ? 1 : null; } };
   });
@@ -704,8 +735,12 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
   const dailyGas = /^\d+(\.\d{1,18})?$/.test(String(env.ELPIDA_V2_KEEPER_DAILY_GAS ?? '')) ? parseEther(env.ELPIDA_V2_KEEPER_DAILY_GAS) : undefined;
   // Mainnet distributes only with ELPIDA_V2_DISTRIBUTIONS=on (20 November 2026: Malik turned the airdrop, holder rewards and
   // flywheel on for mainnet, reversing the creator-rewards-only Option B). Test networks distribute unless it is 'off'.
-  const distributions = mainnet ? env.ELPIDA_V2_DISTRIBUTIONS === 'on' : env.ELPIDA_V2_DISTRIBUTIONS === 'off' ? false : env.ELPIDA_V2_DISTRIBUTIONS === 'on' ? true : undefined;
-  const keeper = new V2Keeper({ workers, path, publicUrl, log, gasTarget, gasShareBps, confirmations, dailyGas, network: mainnet ? 'mainnet' : 'testnet', ...(distributions === undefined ? {} : { distributions }) });
+  // 'airdrop' (22 November 2026): only the EWPR trader airdrop, in USDC; holder rewards and the flywheel keep accruing.
+  const mode = env.ELPIDA_V2_DISTRIBUTIONS;
+  const distributions = mode === 'airdrop' ? 'airdrop' : mainnet ? mode === 'on' : mode === 'off' ? false : mode === 'on' ? true : undefined;
+  // Explorer verification of launched tokens (22 November 2026): on with ELPIDA_EXPLORER_API_KEY, off with ELPIDA_TOKEN_VERIFY=off.
+  const verifier = env.ELPIDA_EXPLORER_API_KEY && env.ELPIDA_TOKEN_VERIFY !== 'off' ? new TokenVerifier({ apiKey: env.ELPIDA_EXPLORER_API_KEY }) : null;
+  const keeper = new V2Keeper({ workers, path, publicUrl, log, gasTarget, gasShareBps, confirmations, dailyGas, verifier, network: mainnet ? 'mainnet' : 'testnet', ...(distributions === undefined ? {} : { distributions }) });
   keeper.enabled = true; keeper.address = getAddress(address);
   return keeper;
 }

@@ -11,6 +11,7 @@
 //    9 November): wallets first funded by the same personal wallet (never an exchange, faucet, bridge or other
 //    service: LINK_RULES), and wallets that received a token directly from its creator.
 import { AIRDROP_RULES, allocateAirdrop, linkWallets, qualifies, walletPayouts } from './v2-airdrop.mjs';
+import { EWPR_RULES, EWPR_TESTNET_RULES, EWPR_FROM_ROUND, allocateEwpr, ewprScores } from './ewpr.mjs';
 
 /**
  * Which first funders link wallets (Malik, 9 November: wallets funded by an exchange must not be joined). A funder
@@ -98,6 +99,33 @@ export function airdropRound({ trades, start, end, usdPerUnit, firstSeen, pools,
   }
   return { byAsset, traders: traders.length, groups: groups.size, qualified: qualified.map(g => g.id) };
 }
+
+/**
+ * The month's trader airdrop by EWPR (ewpr.mjs; Malik, 22 November 2026): same inputs and result shape as airdropRound,
+ * so the keeper posts it the same way. Each group's reward is split among its wallets by the fees each paid; payouts
+ * under the minimum are carried to the next month.
+ */
+export function ewprAirdropRound({ trades, start, end, usdPerUnit, pools, carried = {}, decimals = {}, links = [], creatorLinked = [], exclude = [], rules = EWPR_RULES }) {
+  const { groups, scored, wallets } = ewprScores({ trades, start, end, usdPerUnit, links, creatorLinked, exclude, rules });
+  const byAsset = {};
+  for (const [asset, pool] of Object.entries(pools)) {
+    const a = lower(asset), { allocations, unallocated } = allocateEwpr(pool, scored);
+    const unit = usdPerUnit(a), places = decimals[a] ?? trades.find(t => lower(t.asset) === a)?.quoteDecimals ?? 18;
+    const min = unit > 0 ? BigInt(Math.ceil(rules.minPayoutUsd / unit * 10 ** places)) : 0n;
+    const { payouts, carried: next } = walletPayouts(allocations, wallets.filter(w => allocations.has(w.group)), min, carried[a] ?? new Map());
+    byAsset[a] = { payouts, carried: next, unallocated };
+  }
+  const qualified = scored.map(s => s.id);
+  return { byAsset, traders: qualified.length, groups: groups.size, qualified, model: rules.version,
+    scores: Object.fromEntries(scored.map(s => { const g = groups.get(s.id); return [s.id, { score: s.score.toString(), feesUsd: g.feesUsd, volumeUsd: g.volumeUsd, trades: g.trades, days: g.days, weeks: g.weeks }]; })) };
+}
+
+/**
+ * The airdrop plan for `round`: EWPR from EWPR_FROM_ROUND on, the earlier blend before (rounds keep their rules).
+ * `mainnet`: the full thresholds; test networks use EWPR_TESTNET_RULES.
+ */
+export const airdropPlanFor = (round, args, { mainnet = true } = {}) =>
+  (round >= EWPR_FROM_ROUND ? ewprAirdropRound({ ...args, rules: mainnet ? EWPR_RULES : EWPR_TESTNET_RULES }) : airdropRound(args));
 
 /**
  * Seconds × balance held by each wallet in [start, end), from a token's Transfer events ({ from, to, amount, timestamp })

@@ -17,12 +17,18 @@ export const EVM_MAINNETS = Object.freeze([
     // Uniswap v3 on Base (developers.uniswap.org, Base deployments): the market a "Buy a reward token" holder strategy
     // swaps the creator share through. SwapRouter02 (no deadline field), as ElpidaV2CreatorRewards expects.
     rewardDex: Object.freeze({ factory: '0x33128a8fC17869897dcE68Ed026d694621f6FDfD', router: '0x2626664c2603336E57B271c5C0b26F421741e481', weth: '0x4200000000000000000000000000000000000006', routerVersion: 2 }),
+    // Where the trader airdrop converts its fees into USDC (Malik, 22 November 2026): Uniswap v3 on Base, SwapRouter02 and
+    // QuoterV2 (developers.uniswap.org, Base deployments). `rehearse-usdc-airdrop` checks them on a fork before deploying.
+    payoutDex: Object.freeze({ name: 'Uniswap v3', router: '0x2626664c2603336E57B271c5C0b26F421741e481', quoter: '0x3d4e44Eb1374240CE5F1B871ab261CD16335B76a', weth: '0x4200000000000000000000000000000000000006', routerVersion: 2 }),
   }),
   Object.freeze({
     key: 'bnb-mainnet', planKey: 'bnb-mainnet', name: 'BNB Chain', short: 'BNB', kind: 'evm', mainnet: true,
     chainId: 56, rpcUrl: 'https://bsc-dataseed.bnbchain.org', explorer: 'https://bscscan.com',
     nativeCurrency: Object.freeze({ name: 'BNB', symbol: 'BNB', decimals: 18 }), gasFaucet: null,
     usdMaxAge: 3600,
+    // PancakeSwap v3 on BNB Chain (developer.pancakeswap.finance, v3 addresses): its SwapRouter takes a deadline
+    // (routerVersion 1), QuoterV2, WBNB. Used to convert the trader airdrop into USDC.
+    payoutDex: Object.freeze({ name: 'PancakeSwap v3', router: '0x1b81D678ffb9C0263b24A97847620C99d213eB14', quoter: '0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997', weth: '0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c', routerVersion: 1 }),
   }),
   Object.freeze({
     key: 'robinhood-mainnet', planKey: 'robinhood-mainnet', name: 'Robinhood Chain', short: 'ROBINHOOD', kind: 'evm', mainnet: true,
@@ -57,17 +63,20 @@ export function mainnetNetwork(template, record, plan) {
   if (missing.length) return { net: null, reason: `${template.name}: the deployment record has no ${missing.join(', ')}.` };
   for (const k of ['poolManager', 'usdFeed', 'usdc', 'keeper', 'treasury']) if (!ADDRESS.test(String(plan[k] ?? ''))) return { net: null, reason: `${template.name}: the plan has no ${k}.` };
   if (!Number.isInteger(record.block) || record.block <= 0) return { net: null, reason: `${template.name}: the deployment record has no deploy block.` };
-  const { planKey, usdMaxAge, ...facts } = template;
+  const { planKey, usdMaxAge, payoutDex, ...facts } = template;
   return {
     net: {
       ...facts, enabled: true,
       v4: { poolManager: plan.poolManager },
       v2: { shared: { factory: c.factory, hook: c.hook, router: c.router, airdrop: c.airdrop, holder: c.holder, flywheel: c.flywheel,
-        keeper: plan.keeper, treasury: plan.treasury, block: record.block, minFeeBps: Number(plan.minFeeBps ?? 100), distributions: false } },
+        keeper: plan.keeper, treasury: plan.treasury, block: record.block, minFeeBps: Number(plan.minFeeBps ?? 100), distributions: false,
+        // The USDC trader-airdrop distributor, once `usdc-airdrop` has deployed and recorded it (22 November 2026).
+        ...(ADDRESS.test(String(c.usdcAirdrop ?? '')) ? { usdcAirdrop: c.usdcAirdrop } : {}) } },
       usd: { feed: plan.usdFeed, usdc: plan.usdc, maxAge: usdMaxAge ?? 3600 },
       // The plan's dollar: USDC (18 decimals on BNB Chain), or USDG on Robinhood Chain. Pinned so payouts and amounts use
       // the plan's own symbol and decimals instead of assuming a 6-decimal USDC.
       payoutStable: { address: plan.usdc, symbol: plan.usdcSymbol ?? 'USDC', decimals: Number(plan.usdcDecimals ?? 6), test: false },
+      ...(payoutDex ? { payoutDex } : {}),
       deployment: { planSha256: record.planSha256 ?? null, approval: record.approval ?? null, gitCommit: record.gitCommit ?? null },
     },
     reason: null,
