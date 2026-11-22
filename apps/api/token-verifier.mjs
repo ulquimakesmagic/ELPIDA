@@ -61,7 +61,7 @@ export class TokenVerifier {
     });
     const submitted = [];
     for (const t of due.slice(0, this.perTick)) {
-      const address = getAddress(t.address), prev = state.get(key(address), null), attempts = (prev?.attempts ?? 0) + 1;
+      const address = getAddress(String(t.address).toLowerCase()), prev = state.get(key(address), null), attempts = (prev?.attempts ?? 0) + 1;
       let result;
       try {
         if (await isVerified({ fetch: this.fetchImpl, sleep: this.sleep, chainId, apiKey: this.apiKey, address })) result = { ok: true, detail: 'already verified' };
