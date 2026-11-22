@@ -55,9 +55,10 @@ export function combine(items) {
 }
 
 /** `onData(summary | null)`: called after each load, for the page headline. */
-export function rewardsSection({ api, onData = () => {} }) {
+export function rewardsSection({ api, onData = () => {}, mainnetSite = false }) {
   const root = h('section.panel.rw-section', { hidden: true, 'aria-labelledby': 'rw-title' });
-  let data = null, ticker = null, timer = null;
+  let data = null, ticker = null, timer = null, ewpr = null, mine = null;
+  const ewprOut = h('div.rw-ewpr-you', { 'aria-live': 'polite' });
 
   const chains = () => data.chains;
   const chainOf = key => data.chains.find(c => c.key === key) ?? { assets: {}, name: key };
@@ -213,7 +214,7 @@ export function rewardsSection({ api, onData = () => {} }) {
       h('div.analytics-summary',
         tile('Traders paid', `${number(latest.reduce((n, r) => n + r.paidRecipients, 0), 0)} of ${number(latest.reduce((n, r) => n + r.recipients, 0), 0)}`, `Round ${lead.round + 1} · ${dateOf(lead.start)}–${dateOf(lead.end - 1)} · pool ${pool.headline}`, 'users'),
         tile('Median payout', one(s.median), latest.length > 1 ? `${chain.name}, the largest round · half of traders received more` : 'Half of traders received more', 'percent'),
-        tile('Smallest / largest', `${one(s.smallest)} / ${one(s.largest)}`, 'No trader above 1% of the pool', 'arrow-down-up'),
+        tile('Smallest / largest', `${one(s.smallest)} / ${one(s.largest)}`, 'One trader, linked wallets together', 'arrow-down-up'),
         tile('Top 1% of traders', `${number(s.top1Share * 100, 1)}%`, 'Share of what was paid', 'chart-column')),
       h('div.rw-bands', { role: 'list', 'aria-label': `Payouts by size, ${chain.name}` }, ...s.bands.map(b => {
         const fill = h('span.rw-band-fill'); fill.style.width = `${(b.count / maxBand * 100).toFixed(1)}%`;
@@ -229,15 +230,16 @@ export function rewardsSection({ api, onData = () => {} }) {
     const out = h('div.rw-lookup-out', { 'aria-live': 'polite' });
     const go = async () => {
       out.replaceChildren(h('p.small.muted', 'Checking…'));
+      loadMine(input.value.trim());
       try {
         const r = await api(`public/v2-rewards/payouts?wallet=${encodeURIComponent(input.value.trim())}`);
         const rows = r.chains.flatMap(c => c.payouts.map(p => ({ ...p, chain: chainOf(c.key) }))).sort((a, b) => (b.time ?? 0) - (a.time ?? 0));
         out.replaceChildren(rows.length ? h('div.analytics-table-scroll', h('table.analytics-table', h('thead', h('tr', ...['Received', 'Chain', 'Reward', 'Round', 'Transaction'].map(t => h('th', { scope: 'col' }, t)))),
           h('tbody', ...rows.map(p => h('tr', h('td', money(p.chain, p.asset, p.amount)), h('td', chainTag(p.chain)), h('td', p.kind === 'airdrop' ? 'Trader airdrop' : 'Holder rewards'), h('td', `Round ${p.round + 1}`),
-            h('td', p.chain.explorer ? h('a.mono', { href: `${p.chain.explorer}/tx/${p.tx}`, target: '_blank', rel: 'noopener noreferrer' }, short(p.tx)) : h('span.mono', short(p.tx)))))))) : h('p.small.muted', 'No payouts to this wallet yet. Trade Elpida V2 tokens on at least two days in a round to qualify.'));
+            h('td', p.chain.explorer ? h('a.mono', { href: `${p.chain.explorer}/tx/${p.tx}`, target: '_blank', rel: 'noopener noreferrer' }, short(p.tx)) : h('span.mono', short(p.tx)))))))) : h('p.small.muted', 'No payouts to this wallet yet. Your progress towards this month\'s airdrop is shown above.'));
       } catch (e) { out.replaceChildren(h('p.error-text', { role: 'alert' }, e.message)); }
     };
-    return h('div.rw-lookup', h('form.rw-lookup-form', { on: { submit: e => { e.preventDefault(); go(); } } }, input, h('button.btn.btn-secondary', { type: 'submit' }, 'Check payouts')), out);
+    return h('div.rw-lookup', h('form.rw-lookup-form', { on: { submit: e => { e.preventDefault(); go(); } } }, input, h('button.btn.btn-secondary', { type: 'submit' }, 'Check wallet')), out);
   }
 
   function flywheel() {
@@ -255,18 +257,70 @@ export function rewardsSection({ api, onData = () => {} }) {
           h('td', compact(units(b.supplyAfter))), h('td', b.chain.explorer ? h('a.mono', { href: `${b.chain.explorer}/tx/${b.tx}`, target: '_blank', rel: 'noopener noreferrer' }, dateOf(b.time)) : dateOf(b.time))))))) : h('p.small.muted', 'No buy-and-burn cycle has run yet.'));
   }
 
+  /** This month's EWPR program across chains, and the checked wallet's progress (an estimate until the month is scored). */
+  function ewprBlock() {
+    if (!ewpr) return null;
+    const r = ewpr.rules, live = ewpr.chains.filter(c => c.available);
+    const reqs = [`$${number(r.minVolumeUsd, 0)} traded`, `${r.minTrades} trades of $${number(r.minTradeUsd, 0)}+`, `${r.minDays} active days`, `in ${r.minWeeks} different weeks`, `$${number(r.minFeesUsd, 2)} in fees`];
+    return h('div.rw-ewpr',
+      h('div.analytics-summary',
+        tile('This month', `${dateOf(ewpr.epoch.start)}–${dateOf(ewpr.epoch.end - 1)}`, 'Calendar month, UTC · paid in USDC after it ends', 'clock'),
+        tile('Qualifying so far', number(live.reduce((n, c) => n + c.participants, 0), 0), `of ${number(live.reduce((n, c) => n + c.traders, 0), 0)} traders this month${live.length > 1 ? ` · ${names(live.map(c => chainOf(c.chain).name))}` : ''}`, 'users'),
+        tile('Score', 'fees^0.8 × C', 'C = 0.8 + 0.2 × min(active days, 12) ÷ 12', 'percent'),
+        tile('Your reward', 'pool × your score ÷ all scores', 'Pushed to your wallet in USDC · no claim needed', 'gift')),
+      h('p.small.muted', `To qualify in a month: ${reqs.join(', ')}. An active day is a UTC day with at least $${number(r.minDayFeesUsd, 2)} in fees. Buys and sells count the same. Linked wallets count as one trader; wallets linked to a token's creator, and Elpida's own contracts, are excluded.`),
+      ewprOut);
+  }
+
+  async function loadMine(wallet) {
+    if (!/^0x[0-9a-fA-F]{40}$/.test(wallet)) { ewprOut.replaceChildren(); return; }
+    ewprOut.replaceChildren(h('p.small.muted', 'Checking this month\'s progress…'));
+    try { mine = await api(`public/v2-rewards/ewpr?wallet=${encodeURIComponent(wallet)}`); ewprOut.replaceChildren(...mineView(mine)); }
+    catch (e) { ewprOut.replaceChildren(h('p.small.muted', e.message)); }
+  }
+
+  /** One chain's progress for the checked wallet: the requirement checklist, consistency, score share, history. */
+  function mineView(m) {
+    const max = m.rules.maxDays, rows = [];
+    for (const c of m.chains.filter(x => x.available)) {
+      const chain = chainOf(c.chain), y = c.you;
+      if (!y) { rows.push(h('div.rw-ewpr-chain', h('h4', chainTag(chain)), h('p.small.muted', 'No Elpida V2 trades from this wallet this month yet.'))); continue; }
+      const k = y.checks, done = x => (x.ok ? 'Complete' : null);
+      const line = (label, x, fmt = v => number(v, 0)) => h('li', { 'data-ok': String(!!x.ok) }, h('span', label), h('strong', done(x) ?? `${fmt(x.have)} / ${fmt(x.need)}`));
+      const days = Math.min(y.days, max), fill = h('span.rw-progress-fill'); fill.style.width = `${(days / max * 100).toFixed(1)}%`;
+      const pool = combine((chainOf(c.chain).airdrop?.assets ?? []).map(a => holding(chain, a.asset, a.size)));
+      const est = y.eligible && pool.usd !== null ? usdText(pool.usd * y.share) : '—';
+      rows.push(h('div.rw-ewpr-chain',
+        h('h4', chainTag(chain), h('span.badge', y.eligible ? 'Qualified' : 'Not yet qualified')),
+        h('ul.rw-checks', line('Qualified volume', k.volume, v => usdText(v)), line('Qualified trades', k.trades), line('Active days', k.days), line('Distinct weeks', k.weeks), line('Minimum fees', k.fees, v => usdText(v)),
+          k.independent.ok ? null : h('li', { 'data-ok': 'false' }, h('span', 'Independent of token creators'), h('strong', 'Linked to a creator'))),
+        h('p', `Your qualified active days: ${days} / ${max}`),
+        h('div.rw-progress', { role: 'progressbar', 'aria-valuemin': '0', 'aria-valuemax': String(max), 'aria-valuenow': String(days), 'aria-label': 'Consistency progress' }, fill),
+        h('p.small.muted', days >= max ? 'Maximum consistency multiplier reached.' : `${max - days} more qualified day${max - days === 1 ? '' : 's'} to reach the maximum consistency multiplier.`),
+        h('div.analytics-summary',
+          tile('Fees paid', usdText(y.feesUsd), `${number(y.trades, 0)} qualified trades${y.linkedWallets > 1 ? ` · ${y.linkedWallets} linked wallets` : ''}`, 'receipt-text'),
+          tile('Multiplier', number(y.multiplier, 4), `${days} of ${max} days`, 'trending-up'),
+          tile('Share of scores', y.eligible ? `${number(y.share * 100, 2)}%` : '—', 'So far this month · changes as others trade', 'percent'),
+          tile('Estimated reward', est, 'Estimate at today\'s pool · final after the month is scored', 'gift')),
+        c.history?.length ? h('div.analytics-table-scroll', h('table.analytics-table', h('thead', h('tr', ...['Month', 'Scoring', 'Your score', 'Fees', 'Days'].map(t => h('th', { scope: 'col' }, t)))),
+          h('tbody', ...c.history.map(x => h('tr', h('td', `${dateOf(x.start)}–${dateOf(x.end - 1)}`), h('td', x.model), h('td', x.you ? x.you.score : 'Not qualified'), h('td', x.you ? usdText(x.you.feesUsd) : '—'), h('td', x.you ? String(x.you.days) : '—')))))) : null));
+    }
+    return [h('h3', 'Your progress this month'), h('p.small.muted', 'An estimate from confirmed trades so far. What you receive is set when the month is scored and posted on chain; payouts are listed below.'), ...rows];
+  }
+
   const tile = (title, value, note, glyph) => h('div.tile.analytics-metric', h('p.an-tile-label', icon(glyph, 'icon-sm'), title), h('strong', value), h('p.small.muted', note));
 
   function draw() {
     const on = chains().map(c => c.name);
     root.replaceChildren(
-      h('div.analytics-section-head', h('div', h('h2', { id: 'rw-title' }, 'Rewards'), h('p.small.muted', `Where every fee goes, on ${names(on)} together: 30% creator, 30% trader airdrop, 10% flywheel, 10% holder rewards, 20% treasury. Read from the contracts.`)), h('div.analytics-controls', h('span.badge', 'Test networks · no monetary value'))),
+      h('div.analytics-section-head', h('div', h('h2', { id: 'rw-title' }, 'Rewards'), h('p.small.muted', `Where every fee goes, on ${names(on)} together: 30% creator, 30% trader airdrop, 10% flywheel, 10% holder rewards, 20% treasury. Read from the contracts.${mainnetSite ? ' On mainnet the trader airdrop is paid monthly in USDC; the holder and flywheel shares accrue in their contracts.' : ''}`)), h('div.analytics-controls', h('span.badge', mainnetSite ? 'Mainnet' : 'Test networks · no monetary value'))),
       h('div.rw-countdowns', ...countdownCards('airdrop', 'Trader airdrop'), ...countdownCards('holder', 'Holder rewards')),
       vaultTiles(),
       h('div.rw-block', h('h3', 'Reward pool by chain'), h('p.small.muted', 'One pool across every chain. Each chain\'s share of what the trader airdrop, holder rewards and flywheel vaults hold now, in dollars at today\'s prices.'), breakdown()),
       h('div.rw-block', h('h3', 'Vault sizes by day'), h('p.small.muted', 'Earned from fees so far on every chain, less what has been paid out or burned, in dollars at today\'s prices. Updated as trades confirm.'), sizeChart()),
-      h('div.rw-block', { id: 'rw-distribution' }, h('h3', 'How the last airdrop was shared'), h('p.small.muted', 'Each month: 20% of the pool equally among qualifying traders, 40% by the square root of fees paid, 40% in proportion to fees paid; no trader above 1% of the pool. Linked wallets count as one trader; creator-linked wallets are excluded.'), distribution(), keeperGas()),
-      h('div.rw-block', h('h3', 'Check your payouts'), lookup()),
+      ewpr ? h('div.rw-block', { id: 'rw-ewpr' }, h('h3', 'Trader rewards'), h('p.small.muted', 'Every month the trader airdrop vault is shared among qualifying traders by score: fees paid count with diminishing returns, and trading on more days counts more. Every qualifying trader gets a share; there is no leaderboard cut-off.'), ewprBlock()) : null,
+      h('div.rw-block', h('h3', 'Check your wallet'), h('p.small.muted', 'This month\'s progress and every payout received.'), lookup()),
+      h('div.rw-block', { id: 'rw-distribution' }, h('h3', 'How the last airdrop was shared'), h('p.small.muted', 'Shared by score (see Trader rewards). Test-network rounds before December 2026 used the earlier blend: 20% equal, 40% square root of fees, 40% pro rata, capped at 1% of the pool.'), distribution(), keeperGas()),
       h('div.rw-block', { id: 'rw-flywheel' }, h('h3', 'Flywheel buy-and-burn'), h('p.small.muted', 'The flywheel vault can only buy Elpida V2 tokens and burn them. The treasury never holds its funds.'), flywheel()));
     root.hidden = false;
     tick();
@@ -276,7 +330,10 @@ export function rewardsSection({ api, onData = () => {} }) {
     try {
       const next = await api('public/v2-rewards');
       if (!next?.deployed || !next.chains?.length) { root.hidden = true; root.replaceChildren(); onData(null); return; }
-      data = next; draw(); onData(data);
+      data = next;
+      ewpr = await api('public/v2-rewards/ewpr').catch(() => null);
+      draw(); onData(data);
+      if (mine) ewprOut.replaceChildren(...mineView(mine));
     } catch { if (!data) { root.hidden = true; onData(null); } }
   }
 

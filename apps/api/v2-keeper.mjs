@@ -17,6 +17,7 @@ import { serverRpcUrl } from '../../packages/core/mainnets.mjs';
 import { holderDistribution } from '../web/reward-policy.mjs';
 import { KeeperLease, safeError } from '../../packages/core/keeper-lease.mjs';
 import { TokenVerifier } from './token-verifier.mjs';
+import { EWPR_RULES, EWPR_TESTNET_RULES, ewprScores } from '../../packages/core/ewpr.mjs';
 import { EXPLORERS } from '../../scripts/v2-explorer-verify.mjs';
 
 const DAY = 86_400, BATCH = 80;
@@ -409,6 +410,44 @@ export class V2Keeper {
     }
     this.set(key, left); this.done(w, `creator-vest:${lower(vault.target)}`);
     return open.length;
+  }
+
+  /**
+   * The trader-rewards dashboard (EWPR, 22 November 2026): this calendar month so far on every chain, from the indexed
+   * trades, with the same rules the keeper pays by. Funding links come only from the keeper's cache here (no explorer
+   * calls), so a wallet's figures are an estimate until the month is scored; finalized amounts are the posted rounds.
+   * `wallet` (optional): that wallet's group, its progress against each requirement, its multiplier and score share.
+   * Past months: each round's published scores for the wallet.
+   */
+  ewprStatus(wallet = null) {
+    const rules = this.network === 'mainnet' ? EWPR_RULES : EWPR_TESTNET_RULES, now = this.now(), d = new Date(now * 1000);
+    const start = Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1) / 1000, end = Date.UTC(d.getUTCFullYear(), d.getUTCMonth() + 1, 1) / 1000;
+    const me = wallet ? lower(wallet) : null;
+    const cachedLinks = this.db.prepare('SELECT f.funder, f.wallet FROM v2k_funders f JOIN v2k_sources s ON s.address = f.funder WHERE f.funder IS NOT NULL AND s.personal = 1').all().map(r => [r.funder, r.wallet]);
+    const chains = this.workers.map(w => {
+      const index = w.index?.(); if (!index) return { chain: w.chain, available: false };
+      const linked = this.creatorLinked(index), usdc = lower(w.usdc ?? '');
+      const usd = a => (usdc && lower(a) === usdc ? 1 : w.usdPerUnit(a) ?? 0);
+      const trades = index.tradesBetween(start, now + 1).filter(t => !linked.get(lower(t.token))?.has(lower(t.account ?? '')));
+      const { groups, scored } = ewprScores({ trades: trades.map(t => ({ ...t, quoteUsd: Number(t.quoteAmount ?? 0) * usd(t.asset) })), start, end, usdPerUnit: usd,
+        links: boundedFunderLinks(cachedLinks), creatorLinked: [...linked.values()].flatMap(x => [...x]), exclude: this.protocolAddresses(w), rules });
+      const total = scored.reduce((a, x) => a + x.score, 0n);
+      const out = { chain: w.chain, available: true, payout: this.usdcDistributor(w, 'airdrop') ? 'USDC' : null, participants: scored.length, traders: groups.size, totalScore: total.toString() };
+      if (me) {
+        const g = [...groups.values()].find(x => x.wallets.has(me) || x.id === me) ?? null;
+        out.you = g ? { feesUsd: g.feesUsd, volumeUsd: g.volumeUsd, trades: g.trades, days: g.days, weeks: g.weeks, linkedWallets: g.wallets.size, checks: g.eligibility.checks, eligible: g.eligibility.eligible,
+          multiplier: Number(g.multiplierScaled) / 12_000, score: g.score.toString(), share: total > 0n && g.score > 0n ? Number(g.score * 1_000_000n / total) / 1_000_000 : 0 } : null;
+        const history = [];
+        for (let round = 0; round < this.get(`${w.chain}:airdrop:next`, 0); round++) {
+          const r = this.get(`${w.chain}:airdrop:scores:${round}`, null); if (!r) continue;
+          const mine = Object.entries(r.scores).find(([id]) => id === me);
+          history.push({ round, start: r.start, end: r.end, model: r.model, qualified: Object.keys(r.scores).length, you: mine ? mine[1] : null });
+        }
+        out.history = history;
+      }
+      return out;
+    });
+    return { model: rules.version, rules, epoch: { start, end }, estimate: true, chains };
   }
 
   /** Elpida's own contracts and the keeper: never counted as traders in the airdrop. */
