@@ -45,3 +45,22 @@ test('a recorded USDC airdrop distributor reaches the keeper; without one mainne
   const run = k.status().chains[0].runs.find(r => r.job === 'airdrop');
   assert.equal(run.status, 'waiting');
 });
+
+test('the dashboard: this month\'s progress for a wallet, from indexed trades, as an estimate', () => {
+  const k = make([net('base-mainnet', { usdcAirdrop: a(9) })], { ELPIDA_V2_DISTRIBUTIONS: 'airdrop' }), w = k.workers[0];
+  const now = Date.UTC(2026, 10, 22, 12) / 1000; k.now = () => now;
+  const usdc = w.usdc.toLowerCase(), me = a(0xbeef), other = a(0xcafe);
+  const trade = (account, day, value) => ({ account, timestamp: Date.UTC(2026, 10, day, 10) / 1000, feeRaw: String(Math.round(value * 0.0125 * 1e6)), quoteAmount: String(value), token: a(0x77), asset: usdc, quoteDecimals: 6 });
+  const trades = [];
+  for (const day of [3, 5, 10, 12, 16]) for (let i = 0; i < 2; i++) { trades.push(trade(me, day, 50)); trades.push(trade(other, day, 500)); }
+  trades.push(trade(w.deployment.flywheel, 12, 10_000));
+  w.index = () => ({ listings: () => [{ address: a(0x77), creator: a(0xc0) }], transfersOf: () => [], tradesBetween: (from, to) => trades.filter(t => t.timestamp >= from && t.timestamp < to) });
+  const s = k.ewprStatus(me), c = s.chains[0];
+  assert.equal(s.model, 'ewpr-1'); assert.equal(s.estimate, true); assert.equal(c.payout, 'USDC');
+  assert.equal(c.participants, 2, 'the flywheel vault is not a trader');
+  assert.equal(c.you.days, 5); assert.equal(c.you.trades, 10); assert.equal(c.you.eligible, true);
+  assert.equal(c.you.multiplier, (9_600 + 200 * 5) / 12_000);
+  assert.ok(c.you.share > 0 && c.you.share < 0.5, 'less fees, smaller share, but more than pro rata');
+  assert.ok(c.you.share > 50 / 550, 'F^0.8 favours the smaller trader against plain pro rata');
+  assert.equal(k.ewprStatus(a(0xdead)).chains[0].you, null);
+});

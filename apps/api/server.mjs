@@ -14,6 +14,7 @@ import {createStockCatalog} from './stock-catalog.mjs';
 import {createCoinbaseStocks} from './coinbase-stocks.mjs';
 import {createOndoStatus} from './ondo-status.mjs';
 import {createDexscreener} from './dexscreener.mjs';
+import {gmgnChart} from './gmgn.mjs';
 import {createSwap,swapTokens,swapFeeFor,KYBER_CHAINS} from './swap.mjs';
 import {latestUpdate as pythLatestUpdate,PYTH_ID} from './pyth-hermes.mjs';
 import {StockPrices} from './stock-prices.mjs';
@@ -468,7 +469,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     if (/^\/(api\/|health|ready)/.test(String(req.url))) res.setHeader('X-Robots-Tag', 'noindex, nofollow');
     res.setHeader('X-Content-Type-Options', 'nosniff');
     res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' ${connectSources}; frame-src https://dexscreener.com; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
+    res.setHeader('Content-Security-Policy', `default-src 'self'; script-src 'self'; style-src 'self'; img-src 'self' data: https:; connect-src 'self' ${connectSources}; frame-src https://www.gmgn.cc; frame-ancestors 'none'; base-uri 'none'; form-action 'self'`);
     // Crawlers and link checkers probe public pages with HEAD. Node drops the body of a HEAD response itself, so a public
     // non-API path is handled exactly like GET; the API keeps its strict method rules.
     if (req.method === 'HEAD' && !/^\/(api\/|health)/.test(String(req.url))) req.method = 'GET';
@@ -600,7 +601,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         // just before launching (apps/api/pyth-hermes.mjs). Pyth's signatures are checked on chain; this only relays.
         if(url.pathname==='/api/public/pyth-update'){res.setHeader('Cache-Control','no-store');const id=String(url.searchParams.get('id')??'');if(!PYTH_ID.test(id))return send(400,{error:'Unknown price feed.'});try{const u=await pythLatestUpdate([id]);const p=[...u.parsed.values()][0];return send(200,{data:u.data,publishTime:p?.publishTime??null});}catch{return send(502,{error:'Pyth prices are unavailable right now. Try again shortly.'});}}
         if(url.pathname==='/api/public/swap/quote'){res.setHeader('Cache-Control','no-store');try{return send(200,await swap.quote({network:String(url.searchParams.get('network')??''),tokenIn:String(url.searchParams.get('tokenIn')??''),tokenOut:String(url.searchParams.get('tokenOut')??''),amountIn:String(url.searchParams.get('amountIn')??''),purpose:['first-buy','pair'].includes(url.searchParams.get('purpose'))?url.searchParams.get('purpose'):null}));}catch(error){return send(error.status??502,{error:error.message});}}
-        if(url.pathname==='/api/public/dex-chart'){const network=String(url.searchParams.get('network')??''),token=String(url.searchParams.get('token')??'');if(!/^[a-z0-9-]{2,40}$/.test(network)||!/^0x[0-9a-fA-F]{40}$/.test(token))return send(400,{error:'Choose a network and token.'});const r=await dexscreener.lookup(network,token);res.setHeader('Cache-Control','public, max-age=120');return send(200,r);}
+        if(url.pathname==='/api/public/dex-chart'){const network=String(url.searchParams.get('network')??''),token=String(url.searchParams.get('token')??'');if(!/^[a-z0-9-]{2,40}$/.test(network)||!/^0x[0-9a-fA-F]{40}$/.test(token))return send(400,{error:'Choose a network and token.'});const r=gmgnChart(network,token);res.setHeader('Cache-Control','public, max-age=3600');return send(200,r);}
         if(url.pathname==='/api/public/stock-status'){const sym=url.searchParams.get('symbol');if(sym!=null&&!/^[A-Za-z0-9.]{1,16}on$/.test(sym))return send(400,{error:'Unknown stock symbol.'});res.setHeader('Cache-Control','public, max-age=300');return send(200,ondoStatus.summary(sym));}
         if(url.pathname==='/api/public/coinbase-stocks'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,coinbaseStocks.summary());}
         {const m=url.pathname.match(/^\/api\/public\/coinbase-stock-icon\/([A-Z.]{1,8}c)\.png$/);if(m){/* Ondo's icon for the same company first (Malik, 20 Nov), then Coinbase's own. */const ondo=await stockCatalog.icon(`${m[1].slice(0,-1)}on`);const img=ondo?{bytes:ondo,type:'image/png'}:await coinbaseStocks.icon(m[1]);if(!img){res.setHeader('Cache-Control','no-store');return send(404,{error:'No icon for this stock.'});}res.writeHead(200,{'Content-Type':img.type,'Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});return res.end(img.bytes);}}
