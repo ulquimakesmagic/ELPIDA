@@ -33,18 +33,21 @@ test('lookup: mainnets only, cached, and a failure means no embed', async () => 
   assert.equal((await down.lookup('base-mainnet', EBD)).embed, null);
 });
 
-test('the server serves /api/public/dex-chart and lets pages frame dexscreener.com only; the token page swaps the chart', async t => {
+test('the server serves GMGN\'s chart widget for mainnet tokens and lets pages frame www.gmgn.cc only; the token page swaps the chart', async t => {
+  const { gmgnChart } = await import('../apps/api/gmgn.mjs');
+  assert.deepEqual(gmgnChart('bnb-mainnet', EBD.toUpperCase().replace('0X', '0x')), { embed: `https://www.gmgn.cc/kline/bsc/${EBD}?theme=dark&interval=15`, page: `https://gmgn.ai/bsc/token/${EBD}`, source: 'GMGN' });
+  assert.equal(gmgnChart('base-sepolia', EBD).embed, null);
+  assert.equal(gmgnChart('base-mainnet', 'javascript:x').embed, null);
   const server = readFileSync(new URL('../apps/api/server.mjs', import.meta.url), 'utf8');
-  assert.match(server, /frame-src https:\/\/dexscreener\.com; frame-ancestors 'none'/);
+  assert.match(server, /frame-src https:\/\/www\.gmgn\.cc; frame-ancestors 'none'/);
   const { startServer } = await import('../apps/api/server.mjs');
-  const fake = { lookup: async (n, tk) => ({ pair: v4Pair, embed: dexscreenerEmbed('base', v4Pair), page: 'https://dexscreener.com/base/' + v4Pair, n, tk }) };
-  const app = await startServer({ port: 0, seed: false, publicUrl: 'https://elpida-preview.up.railway.app', dexscreener: fake });
+  const app = await startServer({ port: 0, seed: false, publicUrl: 'https://elpida-preview.up.railway.app' });
   t.after(() => app.close());
   const r = await fetch(`${app.url}/api/public/dex-chart?network=base-mainnet&token=${EBD}`);
-  assert.equal(r.status, 200); assert.equal((await r.json()).pair, v4Pair);
+  assert.equal(r.status, 200); assert.equal((await r.json()).embed, `https://www.gmgn.cc/kline/base/${EBD}?theme=dark&interval=15`);
   assert.equal((await fetch(`${app.url}/api/public/dex-chart?network=base-mainnet&token=nope`)).status, 400);
   const page = readFileSync(new URL('../apps/web/token-page.mjs', import.meta.url), 'utf8');
   assert.match(page, /\/api\/public\/dex-chart\?network=/);
   assert.match(page, /chart\.replaceWith\(frame\)/);
-  assert.match(page, /\^https:\\\/\\\/dexscreener\\\.com\\\//);
+  assert.match(page, /\^https:\\\/\\\/www\\\.gmgn\\\.cc\\\/kline\\\//);
 });

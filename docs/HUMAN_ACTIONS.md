@@ -11,6 +11,25 @@
 > `contracts, unit and full suite` and `solana program` checks on `main`; (2) create a Safe on Base for the treasury
 > and pick a guardian wallet for the launch stop; (3) a fresh, separate Base keeper key.
 
+## Mainnet: EWPR trader airdrop in USDC, and per-token explorer verification, 22 November 2026
+
+**Decided (Malik, 22 Nov):** the monthly trader airdrop is scored by EWPR (packages/core/ewpr.mjs: S = F^0.8 × C,
+C = 0.8 + 0.2 × min(D, 12) / 12; $100 volume, 8 trades, 4 days, 2 weeks, $1 fees) and paid in USDC, on mainnet now.
+Existing launchpads keep their fixed split (30% creator, 30% airdrop, 10% flywheel, 10% holders, 20% treasury); the
+50 / 30 / 20 split needs a new V2.3 hook and factory (a separate PR). Holder rewards and the flywheel keep accruing.
+
+Per chain (Base, then BNB Chain), in your ELPIDA folder after `git pull`:
+1. Rehearse on a fork. Window 1: `& "$HOME\.foundry\bin\anvil.exe" --fork-url <chain RPC>` (Base: add `--hardfork base:Cobalt`).
+   Window 2: `node scripts/v2-usdc-airdrop.mjs rehearse --plan deployments/plans/base-mainnet.json --node http://127.0.0.1:8545`.
+   It must end "Rehearsal passed" (it deploys, moves native coin in, converts it to USDC and pays a wallet, on the fork only).
+2. `$env:ELPIDA_MAINNET_RPC_URL = "<chain RPC>"; node scripts/v2-usdc-airdrop.mjs check --plan deployments/plans/base-mainnet.json`: all ok.
+3. `node scripts/v2-usdc-airdrop.mjs deploy --plan deployments/plans/base-mainnet.json` (deployer key in the hidden prompt,
+   then type DEPLOY; a few cents of gas). It adds `usdcAirdrop` to deployments/base-mainnet.json: commit that and the
+   rehearsal file on a branch and open a PR.
+4. On the mainnet Railway service: `ELPIDA_V2_DISTRIBUTIONS=airdrop` (only the airdrop), and `ELPIDA_EXPLORER_API_KEY`
+   (Etherscan API V2) if it is not set: the keeper then verifies every launched token on BaseScan and BscScan, a few an
+   hour. The first airdrop (November) is scored and paid in the first days of December.
+
 ## Base mainnet: Coinbase stocks as pairs, 16 November 2026
 
 Neither Ondo (docs.ondo.finance/addresses: Ethereum, BNB Chain, HyperEVM, Robinhood Chain, Solana) nor xStocks issues

@@ -147,15 +147,15 @@ export function renderToken(ctx, address) {
           h('div.tk-links', ...linkPills, explorerHref ? h('a.tk-pill.tk-pill-end', { href: explorerHref, target: '_blank', rel: 'noopener noreferrer', title: 'Open in explorer' }, 'Explorer', icon('arrow-up-right', 'icon-sm')) : null, txUrl(launchHash) ? h('a.tk-pill', { href: txUrl(launchHash), target: '_blank', rel: 'noopener noreferrer', title: 'The transaction that created this token' }, 'Launch transaction', icon('arrow-up-right', 'icon-sm')) : null)))));
   const chart = terminalChart(ctx, token, q);
   const priceCard = h('section.tk-card.tk-pricecard', { 'aria-label': 'Chart' }, chart, h('p.tk-foot', priceSource));
-  // Mainnet (Malik, 20 Nov): once DexScreener lists the token's pair, its chart replaces Elpida's own. The server looks the
-  // pair up (/api/public/dex-chart); until then, or if the lookup fails, Elpida's chart stays.
+  // Mainnet: GMGN's chart replaces Elpida's own (Malik, 22 Nov; DexScreener before). The server names the widget
+  // (/api/public/dex-chart); if that fails, Elpida's chart stays.
   const chainKey = token.network ?? ctx.wallet?.net?.key;
   if (ctx.mode !== 'local' && ctx.wallet?.net?.mainnet && /^[a-z0-9-]+-mainnet$/.test(String(chainKey ?? '')))
     fetch(`/api/public/dex-chart?network=${encodeURIComponent(chainKey)}&token=${encodeURIComponent(token.address)}`).then(r => r.ok ? r.json() : null).then(d => {
-      if (!d?.embed || !/^https:\/\/dexscreener\.com\//.test(d.embed) || !priceCard.isConnected) return;
-      const frame = h('iframe.tk-dexscreener', { src: d.embed, title: `${token.symbol ?? 'Token'} chart on DexScreener`, loading: 'lazy', referrerpolicy: 'no-referrer', sandbox: 'allow-scripts allow-same-origin allow-popups' });
+      if (!d?.embed || !/^https:\/\/www\.gmgn\.cc\/kline\//.test(d.embed) || !priceCard.isConnected) return;
+      const frame = h('iframe.tk-dexscreener', { src: d.embed, title: `${token.symbol ?? 'Token'} chart on GMGN`, loading: 'lazy', referrerpolicy: 'no-referrer', sandbox: 'allow-scripts allow-same-origin allow-popups' });
       chart.replaceWith(frame);
-      priceCard.querySelector('.tk-foot')?.replaceChildren('Chart by ', h('a', { href: d.page, target: '_blank', rel: 'noopener noreferrer' }, 'DexScreener'), '.');
+      priceCard.querySelector('.tk-foot')?.replaceChildren('Chart by ', h('a', { href: d.page, target: '_blank', rel: 'noopener noreferrer' }, 'GMGN'), '.');
     }).catch(() => {});
 
   const addresses = h('section.address-row', { 'aria-label': 'Contract addresses and dates' },

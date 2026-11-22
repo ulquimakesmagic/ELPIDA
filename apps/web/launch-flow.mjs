@@ -491,14 +491,18 @@ export function renderLaunch(ctx) {
     return policy;
   }
 
+  // The creator's first buy is required (Malik, 22 November 2026): a launch always opens with a real trade, so the token
+  // page, explorers and scanners have a price, market cap and pool from the start. Local simulations are exempt.
+  const buyRequired = () => draft.chain !== 'local';
+
   function purchaseStep() {
     const est = estimate();
     const amount = input('firstBuy', { type: 'number', min: '0', step: 'any', inputmode: 'decimal', onInput: e => { draft.firstBuy = e.target.value; drawEstimate(); } });
     const nativeAmount = input('nativeBuy', { type: 'number', min: '0', step: 'any', inputmode: 'decimal', onInput: e => { draft.nativeBuy = e.target.value; quoteConversion(); drawEstimate(); } });
     const amountField = h('div');
     const drawAmount = () => amountField.replaceChildren(payNative()
-      ? field({ label: 'Purchase amount', control: h('div.input-affix', nativeAmount, h('span.affix', nativeSymbol())), hint: `Optional. Swapped into ${pairSymbol()} on ${swapDex()} at the live pool price, at most 1% below the quote, in a separate confirmation before the launch. If the launch then stops, the ${pairSymbol()} stays in your wallet and your next attempt uses it.` })
-      : field({ label: 'Purchase amount', control: h('div.input-affix', amount, h('span.affix', pairSymbol())), hint: v2Chosen() ? 'Optional. Your first buy can receive at most 3% of the supply (30,000,000 tokens); a larger amount is refused before anything is sent. Enter 0 to launch without buying.' : 'Optional. Enter 0 to launch without buying. Launch fees and network gas still apply.' }));
+      ? field({ label: 'Purchase amount', control: h('div.input-affix', nativeAmount, h('span.affix', nativeSymbol())), hint: `${buyRequired() ? 'Required: every launch opens with your first buy.' : 'Optional.'} Swapped into ${pairSymbol()} on ${swapDex()} at the live pool price, at most 1% below the quote, in a separate confirmation before the launch. If the launch then stops, the ${pairSymbol()} stays in your wallet and your next attempt uses it.` })
+      : field({ label: 'Purchase amount', control: h('div.input-affix', amount, h('span.affix', pairSymbol())), hint: buyRequired() ? `Required: every launch opens with your first buy, so the token has a price and market cap from the first block.${v2Chosen() ? ' It can receive at most 3% of the supply (30,000,000 tokens); a larger amount is refused before anything is sent.' : ''}` : v2Chosen() ? 'Optional. Your first buy can receive at most 3% of the supply (30,000,000 tokens); a larger amount is refused before anything is sent. Enter 0 to launch without buying.' : 'Optional. Enter 0 to launch without buying. Launch fees and network gas still apply.' }));
     const buyWith = canPayNative() ? h('select.select', { on: { change: e => { draft.buyWith = e.target.value; save(); drawAmount(); quoteConversion(); drawEstimate(); } } },
       h('option', { value: 'pair', selected: !payNative() }, `${pairSymbol()} from your wallet`),
       h('option', { value: 'native', selected: payNative() }, `${nativeSymbol()}, converted to ${pairSymbol()} first`)) : null;
@@ -540,6 +544,7 @@ export function renderLaunch(ctx) {
     ], validate: () => {
       if (payNative()) {
         if (!(Number(draft.nativeBuy) >= 0) || !/^\d+(\.\d{0,18})?$/.test(draft.nativeBuy)) { setError(nativeAmount, 'Enter zero or a positive amount, at most 18 decimal places.'); nativeAmount.focus(); return false; }
+        if (buyRequired() && !(Number(draft.nativeBuy) > 0) && !(Number(converted()?.pending) > 0)) { setError(nativeAmount, 'A first buy is required. Enter an amount above zero.'); nativeAmount.focus(); return false; }
         if (Number(draft.nativeBuy) > 0 && !converted()) { setError(nativeAmount, conversion.state === 'loading' ? 'Wait for the conversion quote.' : `This amount cannot be converted to ${pairSymbol()} right now.`); return false; }
         if (estimate()?.exceeds) { setError(nativeAmount, 'This amount exceeds the curve. Reduce your first purchase.'); return false; }
         return true;
@@ -547,6 +552,7 @@ export function renderLaunch(ctx) {
       const control = amount;
       if(estimate()?.exceeds){setError(control,v2Chosen()?'A first buy can receive at most 3% of the supply. Reduce your first purchase.':'This amount exceeds the curve. Reduce your first purchase.');control.focus();return false;}
       if (!(Number(draft.firstBuy) >= 0)) { setError(control, 'Enter zero or a positive amount.'); control.focus(); return false; }
+      if (buyRequired() && !(Number(draft.firstBuy) > 0)) { setError(control, 'A first buy is required. Enter an amount above zero.'); control.focus(); return false; }
       const places = assetDecimals();
       if (!new RegExp(`^\\d+(\\.\\d{0,${places}})?$`).test(draft.firstBuy)) { setError(control, `Use at most ${places} decimal places.`); return false; }
       return true;
