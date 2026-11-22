@@ -8,6 +8,7 @@ import { V2RewardsIndexer, toJson } from '../../packages/indexer/v2-rewards.mjs'
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { payoutStable } from '../../packages/core/payout-stable.mjs';
 import { testPairReference } from '../../packages/core/pairs.mjs';
+import { serverRpcUrl } from '../../packages/core/mainnets.mjs';
 
 const hostOf = u => { try { return new URL(u).host; } catch { return 'rpc'; } };
 const TICK_MS = 60_000, FEED_MAX_AGE = 4 * 86_400, PRICE_TTL_MS = 5 * 60_000;
@@ -33,13 +34,15 @@ export async function stockUsd(provider, factory, asset) {
 
 export class V2RewardsService {
   /** `dataDir`: where each network's index snapshot is kept, so a deploy resumes instead of re-reading from deployment. */
-  constructor({ networks, providerFactory = rpc => new JsonRpcProvider(rpc, undefined, { cacheTimeout: -1, batchMaxCount: 1 }), log = console.log, oracles = usdOracles(), dataDir = null }) {
+  constructor({ networks, providerFactory = rpc => new JsonRpcProvider(rpc, undefined, { cacheTimeout: -1, batchMaxCount: 1 }), log = console.log, oracles = usdOracles(), dataDir = null, env = {} }) {
     this.log = log; this.entries = []; this.oracles = oracles; this.dataDir = dataDir;
-    for (const net of networks.filter(n => !n.mainnet && n.v2?.shared?.hook)) {
+    // Mainnets too (22 November 2026: the analytics page hid the rewards section on the mainnet site), read through the
+    // server's private RPC (ELPIDA_RPC_<chainId>) first, as the keeper does, then the public one.
+    for (const net of networks.filter(n => n.v2?.shared?.hook)) {
       const d = net.v2.shared;
       // Every configured RPC, in order: a node that keeps failing (pruned history after a restart re-sync, rate limits)
       // is swapped for the next one, as the trading indexer does (Malik, 11 Nov: Sepolia's vaults read $0 after a deploy).
-      const rpcs = [...new Set([net.rpcUrl, ...(net.rpcFallbacks ?? [])].filter(Boolean))], provider = providerFactory(rpcs[0]);
+      const rpcs = [...new Set([net.mainnet ? serverRpcUrl(net, env) : null, net.rpcUrl, ...(net.rpcFallbacks ?? [])].filter(Boolean))], provider = providerFactory(rpcs[0]);
       this.providerFactory = providerFactory;
       this.entries.push({ net, provider, rpcs, rpc: 0, failures: 0, prices: new Map(), index: new V2RewardsIndexer({ provider, contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel, usdcAirdrop: d.usdcAirdrop, usdcHolder: d.usdcHolder }, keeper: d.keeper, fromBlock: d.block, batchSize: 100, maxBatch: 5000, parallel: 4, onProgress: ix => this.save(net.key, ix) }), busy: false });
       this.load(net.key, this.entries.at(-1).index);
@@ -107,7 +110,7 @@ export class V2RewardsService {
       for (const t of quotes(net.key) ?? []) if (t?.quoteAddress && t.pair !== 'native' && !assets[t.quoteAddress.toLowerCase()]) { const a = t.quoteAddress.toLowerCase(); assets[a] = { symbol: t.quoteSymbol ?? 'token', decimals: Number(t.quoteDecimals ?? 18), usd: t.pair === 'usdc' ? 1 : priced(a) ?? testPairReference({ ...t, network: net.key })?.usd ?? null }; }
       // Pair assets the index saw that the public listings have not (yet): still priced when their feed answers.
       for (const [a, p] of this.entries.find(x => x.net === net)?.prices ?? []) if (!assets[a] && p.usd) assets[a] = { symbol: 'stock', decimals: 18, usd: p.usd };
-      return { key: net.key, name: net.name, explorer: net.explorer ?? null, testnet: true, assets, ...toJson(index.summary(now)) };
+      return { key: net.key, name: net.name, explorer: net.explorer ?? null, testnet: !net.mainnet, mainnet: !!net.mainnet, assets, ...toJson(index.summary(now)) };
     }) };
   }
 

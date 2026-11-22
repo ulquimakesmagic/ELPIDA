@@ -21,6 +21,9 @@ const DEFINITIONS = {
 };
 const MODELS = { v1: 'V1', 'model-10': 'Model 10 (other)', 'curve-tax-v10': 'Model 10 tax curves', 'curve-dex-v9': 'Model 9 curves', 'curve-beta-v8': 'Model 8 curves', 'v4-hook': 'Model 11', 'solana-curve': 'Solana curves' };
 const SPLIT = { creator: '30% V2 · 50% M10', traderAirdrop: '30% V2', holderRewards: '10% V2', flywheel: '10% V2', treasury: '20% V2 · 50% M10', buybackBurn: 'part of M10 Elpida half' };
+// How each V2 share is paid out (Malik, 22 November 2026). The split itself is fixed in each deployed hook; the trader
+// airdrop is shared monthly by EWPR score and paid in USDC (packages/core/ewpr.mjs).
+const PAYOUT = { creator: 'Claimable by the creator at any time', traderAirdrop: 'Monthly, in USDC, by EWPR score: fees^0.8 × consistency', holderRewards: 'Builds up in its vault', flywheel: 'Buy-and-burn of Elpida tokens', treasury: 'Elpida revenue' };
 const usd = n => n > 0 && n < 1 ? '$' + n.toFixed(n < 0.01 ? 4 : 2) : n < 1000 ? '$' + Math.round(n).toLocaleString() : '$' + compact(n);
 
 export function feesSection({ api }) {
@@ -49,7 +52,7 @@ export function feesSection({ api }) {
     const valued = g.valuation, revalued = valued.revalued ? `${number(valued.revalued)} amounts valued at today's price (no hourly price recorded yet)` : null;
     const rows = SHARES.filter(s => !s.optional || g.shares[s.key]?.earnedUsd || g.shares[s.key]?.withdrawnUsd).map(s => {
       const x = g.shares[s.key];
-      return h('tr', h('th', { scope: 'row' }, icon(s.glyph, 'icon-sm'), ` ${s.label}`, h('span.small.muted.share-basis', SPLIT[s.key])),
+      return h('tr', h('th', { scope: 'row' }, icon(s.glyph, 'icon-sm'), ` ${s.label}`, h('span.small.muted.share-basis', SPLIT[s.key]), PAYOUT[s.key] ? h('p.small.muted', PAYOUT[s.key]) : null),
         h('td', usd(x.earnedUsd)), h('td', usd(x.withdrawnUsd), x.failedPayouts ? h('p.small.muted', `${number(x.failedPayouts)} failed payouts, retried by the hook`) : null), h('td', usd(x.outstandingUsd)));
     });
     const untracked = g.untracked.reduce((m, u) => m.set(u.model, (m.get(u.model) ?? 0) + u.tokens), new Map());
@@ -61,14 +64,21 @@ export function feesSection({ api }) {
         tile('Elpida revenue', usd(g.revenueUsd), `${usd(g.launchFeesUsd)} launch fees + ${usd(g.shares.treasury.earnedUsd)} trading-fee share${tag}`, 'circle-dollar-sign', DEFINITIONS.revenue),
         tile('Paid to creators', usd(g.shares.creator.withdrawnUsd), `of ${usd(g.shares.creator.earnedUsd)} earned · selected period${tag}`, 'user-round', DEFINITIONS.creators),
         tile('Launch fees', usd(g.launchFeesUsd), `${number(g.launches)} launches paid · selected period${tag}`, 'sparkles', DEFINITIONS.launch)),
+      h('h3', 'Revenue model'),
+      h('div.analytics-policy.an-split',
+        h('div', h('strong', '30%'), h('span', 'Trader airdrop · monthly, in USDC')),
+        h('div', h('strong', '30%'), h('span', 'Token creators')),
+        h('div', h('strong', '20%'), h('span', 'Elpida treasury')),
+        h('div', h('strong', '20%'), h('span', 'Holder rewards and flywheel, 10% each'))),
+      h('p.small.muted', 'Every V2 trade pays a fee, 1.25% by default, shared as above by the launchpad\'s contract; the split is fixed for every token already launched. The trader airdrop goes to every qualifying trader by score each month: fees paid count with diminishing returns (fees^0.8), and trading on more days counts more, up to 12. Next: a V2.3 launchpad where new launches share 50% with traders, 30% with creators and 20% with the treasury.'),
       h('h3', 'Where the fees went'),
       h('p.small.muted', 'Earned is each share of the fees generated in the period. Claimed is what the V2 hook or a Model 10 curve paid out to each share in the period. In vault is what they still hold for it today, at today\'s price. The columns are never added together.'),
       h('div.analytics-table-scroll', h('table.analytics-table', h('caption.visually-hidden', `V2 fee shares${tag}`),
         h('thead', h('tr', ...['Share', 'Earned', 'Claimed', 'In vault'].map(t => h('th', { scope: 'col' }, t)))), h('tbody', rows))),
-      h('p.small.muted', [['v2', 'V2'], ['model10', 'Model 10 curves']].filter(([k]) => g.byModel?.[k]).map(([k, label]) => `${label}: ${usd(g.byModel[k].feesGeneratedUsd)} from ${number(g.byModel[k].trades)} trades`).join(' · ') || null),
+      (t => t ? h('p.small.muted', t) : null)([['v2', 'V2'], ['model10', 'Model 10 curves']].filter(([k]) => g.byModel?.[k]).map(([k, label]) => `${label}: ${usd(g.byModel[k].feesGeneratedUsd)} from ${number(g.byModel[k].trades)} trades`).join(' · ')),
       ...(monthsTable(g, tag) ?? []),
       untracked.size ? h('p.small.muted', `Graduated Model 10 pools' LP fees are not counted yet. Not tracked here yet: ${[...untracked].map(([m, n]) => `${MODELS[m] ?? m} (${number(n)} token${n === 1 ? '' : 's'})`).join(', ')}. Their fees follow different rules and are not estimated.`) : null,
-      h('p.small.muted', [revalued, valued.unpriced ? `${number(valued.unpriced)} amounts have no USD price and are left out of dollar totals` : null, data.pricesSince ? `Hourly prices recorded since ${new Date(data.pricesSince * 1000).toLocaleString()}` : null].filter(Boolean).join('. ') || null));
+      (t => t ? h('p.small.muted', t) : null)([revalued, valued.unpriced ? `${number(valued.unpriced)} amounts have no USD price and are left out of dollar totals` : null, data.pricesSince ? `Hourly prices recorded since ${new Date(data.pricesSince * 1000).toLocaleString()}` : null].filter(Boolean).join('. ')));
     root.hidden = false;
   }
   async function load(nextPeriod = period, nextNetwork = network) {

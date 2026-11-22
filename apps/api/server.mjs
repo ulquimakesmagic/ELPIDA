@@ -70,6 +70,7 @@ import { evm, evmNetworks } from './evm-networks.mjs';
 import { siteHtml, seoText } from './site-copy.mjs';
 import { isDexModel } from '../../packages/core/curve-model.mjs';
 import { V2RewardsService } from './v2-rewards-service.mjs';
+import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { configuredV2Keeper } from './v2-keeper.mjs';
 import { configuredSolanaV2Keeper } from './v2-keeper-solana.mjs';
 import { V2Identities, xResultLink } from './v2-identities.mjs';
@@ -350,7 +351,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const swap=injectedSwap??createSwap({tokensFor:swapTokensFor,feeFor:swapFee,launchPairsFor:swapLaunchPairs});
   const ondoStatus=injectedOndoStatus??createOndoStatus({apiKey:port===0?'':process.env.ONDO_API_KEY,log:e=>console.log(JSON.stringify(e))}).start();
   // ELPIDA V2.0 rewards (vault sizes, rounds, countdowns, flywheel burns): only networks with a pinned V2 deployment.
-  const v2Rewards=new V2RewardsService({networks:port===0?[]:evmNetworks,dataDir:port===0?null:resolve(dataDir,dataPrefix+'v2-rewards')}).start();
+  const v2Rewards=new V2RewardsService({networks:port===0?[]:evmNetworks,env:process.env,oracles:usdOracles(process.env,evmNetworks),dataDir:port===0?null:resolve(dataDir,dataPrefix+'v2-rewards')}).start();
   // Tokens the flywheels bought and burned on a network (V2 vault burns on chain, plus the Model 10 keeper's burns),
   // keyed by lowercase token address, in base units. Explore cards and token pages show it as a share of supply.
   const flywheelBurns=key=>{const total=new Map();for(const m of [v2Rewards.burnedByToken(key),flywheelKeeper.burnedByToken?.(key)])for(const [token,amount] of m??[])total.set(token,(total.get(token)??0n)+amount);return total;};
