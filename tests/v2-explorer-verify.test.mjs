@@ -123,3 +123,10 @@ test('Robinhood Chain verifies on its Blockscout (no Etherscan key, its own API,
   await submit({ fetch: base.fetch, sleep, chainId: 8453, apiKey: KEY, job });
   assert.match(base.calls[0].url, /^https:\/\/api\.etherscan\.io\/v2\/api\?chainid=8453&/, 'Etherscan chains unchanged');
 });
+
+test('an HTTP 429 from the explorer is waited out and retried, not reported as a failure', async () => {
+  let n = 0; const waits = [];
+  const fetch = async () => (++n < 3 ? { ok: false, status: 429, json: async () => ({}) } : { ok: true, status: 200, json: async () => ({ status: '1', result: [{ SourceCode: 'x' }] }) });
+  assert.deepEqual(await submit({ fetch, sleep: async ms => { waits.push(ms); }, chainId: 4663, apiKey: '', job }), { ok: true, detail: 'already verified' });
+  assert.equal(n, 3); assert.deepEqual(waits, [3000, 6000]);
+});
