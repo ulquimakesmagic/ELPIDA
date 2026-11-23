@@ -36,6 +36,9 @@ export const EVM_MAINNETS = Object.freeze([
     nativeCurrency: Object.freeze({ name: 'Ether', symbol: 'ETH', decimals: 18 }), gasFaucet: null,
     // Chainlink's Robinhood Chain ETH / USD heartbeat is not published with the address; allow a day, as the plan does.
     usdMaxAge: 86400,
+    // Uniswap v3 on Robinhood Chain (developers.uniswap.org, v3 Robinhood Chain deployments): SwapRouter02 and QuoterV2;
+    // WETH read from SwapRouter02.WETH9() on chain by Malik (24 November 2026). The airdrop converts ETH into USDG here.
+    payoutDex: Object.freeze({ name: 'Uniswap v3', router: '0xCaf681a66D020601342297493863E78C959E5cb2', quoter: '0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7', weth: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73', routerVersion: 2 }),
   }),
   Object.freeze({
     key: 'ethereum-mainnet', planKey: 'ethereum-mainnet', name: 'Ethereum', short: 'ETH', kind: 'evm', mainnet: true,
