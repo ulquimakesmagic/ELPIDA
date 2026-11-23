@@ -2,8 +2,8 @@
   "schema": "elpida-stock-list-v1",
   "network": "base-mainnet",
   "chainId": 8453,
-  "source": "base.org/stocks and Chainlink feeds, 18 November 2026",
-  "checkedAt": "2026-11-18T21:34:55.000Z",
+  "source": "config/stocks/candidates/base-coinbase.json",
+  "checkedAt": "2026-11-23T17:16:16.000Z",
   "stocks": [
     {
       "symbol": "AAPLc",
@@ -14,8 +14,8 @@
       "feedDecimals": 8,
       "feedDescription": "Coinbase AAPL",
       "maxAge": 345600,
-      "priceUsd": 352.83646728,
-      "priceUpdatedAt": 1795016602
+      "priceUsd": 348.72566131,
+      "priceUpdatedAt": 1795450581
     },
     {
       "symbol": "AMZNc",
@@ -26,8 +26,8 @@
       "feedDecimals": 8,
       "feedDescription": "Coinbase AMZN",
       "maxAge": 345600,
-      "priceUsd": 266.989,
-      "priceUpdatedAt": 1795024536
+      "priceUsd": 256.8225,
+      "priceUpdatedAt": 1795453978
     },
     {
       "symbol": "GOOGLc",
@@ -38,8 +38,8 @@
       "feedDecimals": 8,
       "feedDescription": "Coinbase GOOGL",
       "maxAge": 345600,
-      "priceUsd": 283.09922175,
-      "priceUpdatedAt": 1795033880
+      "priceUsd": 283.6831919,
+      "priceUpdatedAt": 1795453466
     },
     {
       "symbol": "METAc",
@@ -50,8 +50,8 @@
       "feedDecimals": 8,
       "feedDescription": "Coinbase META",
       "maxAge": 345600,
-      "priceUsd": 615.40404846,
-      "priceUpdatedAt": 1795035759
+      "priceUsd": 595.83145866,
+      "priceUpdatedAt": 1795452864
     },
     {
       "symbol": "MSFTc",
@@ -62,8 +62,8 @@
       "feedDecimals": 8,
       "feedDescription": "Coinbase MSFT",
       "maxAge": 345600,
-      "priceUsd": 508.6555,
-      "priceUpdatedAt": 1795035441
+      "priceUsd": 499.29749999,
+      "priceUpdatedAt": 1795453153
     },
     {
       "symbol": "MSTRc",
@@ -74,8 +74,8 @@
       "feedDecimals": 8,
       "feedDescription": "Coinbase MSTR",
       "maxAge": 345600,
-      "priceUsd": 90.356,
-      "priceUpdatedAt": 1795035537
+      "priceUsd": 86.7375,
+      "priceUpdatedAt": 1795453590
     },
     {
       "symbol": "NVDAc",
@@ -86,8 +86,8 @@
       "feedDecimals": 8,
       "feedDescription": "Coinbase NVDA",
       "maxAge": 345600,
-      "priceUsd": 151.35887815,
-      "priceUpdatedAt": 1795034635
+      "priceUsd": 166.79517748,
+      "priceUpdatedAt": 1795454071
     },
     {
       "symbol": "SNDKc",
@@ -98,8 +98,8 @@
       "feedDecimals": 8,
       "feedDescription": "Coinbase SNDK",
       "maxAge": 345600,
-      "priceUsd": 779.066,
-      "priceUpdatedAt": 1795036735
+      "priceUsd": 731.72,
+      "priceUpdatedAt": 1795453737
     },
     {
       "symbol": "SPCXc",
@@ -110,8 +110,8 @@
       "feedDecimals": 8,
       "feedDescription": "Coinbase SPCX",
       "maxAge": 345600,
-      "priceUsd": 143.735,
-      "priceUpdatedAt": 1795035261
+      "priceUsd": 136.76,
+      "priceUpdatedAt": 1795452968
     },
     {
       "symbol": "TSLAc",
@@ -122,8 +122,8 @@
       "feedDecimals": 8,
       "feedDescription": "Coinbase TSLA",
       "maxAge": 345600,
-      "priceUsd": 382.175,
-      "priceUpdatedAt": 1795036376
+      "priceUsd": 391.4175,
+      "priceUpdatedAt": 1795454094
     }
   ]
 }
