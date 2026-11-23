@@ -2,8 +2,8 @@
   "schema": "elpida-stock-list-v1",
   "network": "bnb-mainnet",
   "chainId": 56,
-  "source": "Ondo addresses, Chainlink share feeds x Ondo sValue, 21 November 2026",
-  "checkedAt": "2026-11-21T09:12:46.000Z",
+  "source": "config/stocks/candidates/bnb-ondo-adapted.json",
+  "checkedAt": "2026-11-23T20:56:34.000Z",
   "stocks": [
     {
       "symbol": "AAPLon",
@@ -14,8 +14,8 @@
       "feedDecimals": 8,
       "feedDescription": "AAPLon / USD (Chainlink AAPL / USD x Ondo sValue)",
       "maxAge": 345600,
-      "priceUsd": 344.55136816,
-      "priceUpdatedAt": 1795208429
+      "priceUsd": 351.50845269,
+      "priceUpdatedAt": 1795461271
     },
     {
       "symbol": "AMZNon",
@@ -26,8 +26,8 @@
       "feedDecimals": 8,
       "feedDescription": "AMZNon / USD (Chainlink AMZN / USD x Ondo sValue)",
       "maxAge": 345600,
-      "priceUsd": 247.16,
-      "priceUpdatedAt": 1795208421
+      "priceUsd": 255.06,
+      "priceUpdatedAt": 1795467318
     },
     {
       "symbol": "COINon",
@@ -38,8 +38,8 @@
       "feedDecimals": 8,
       "feedDescription": "COINon / USD (Chainlink COIN / USD x Ondo sValue)",
       "maxAge": 345600,
-      "priceUsd": 101.97,
-      "priceUpdatedAt": 1795208134
+      "priceUsd": 108.845,
+      "priceUpdatedAt": 1795466232
     },
     {
       "symbol": "GMEon",
@@ -50,8 +50,8 @@
       "feedDecimals": 8,
       "feedDescription": "GMEon / USD (Chainlink GME / USD x Ondo sValue)",
       "maxAge": 345600,
-      "priceUsd": 27.08639328,
-      "priceUpdatedAt": 1795208403
+      "priceUsd": 27.74244749,
+      "priceUpdatedAt": 1795466467
     },
     {
       "symbol": "GOOGLon",
@@ -62,8 +62,8 @@
       "feedDecimals": 8,
       "feedDescription": "GOOGLon / USD (Chainlink GOOGL / USD x Ondo sValue)",
       "maxAge": 345600,
-      "priceUsd": 267.47145205,
-      "priceUpdatedAt": 1795209762
+      "priceUsd": 282.71887361,
+      "priceUpdatedAt": 1795467330
     },
     {
       "symbol": "JPMon",
@@ -74,8 +74,8 @@
       "feedDecimals": 8,
       "feedDescription": "JPMon / USD (Chainlink JPM / USD x Ondo sValue)",
       "maxAge": 345600,
-      "priceUsd": 315.7130402,
-      "priceUpdatedAt": 1795206238
+      "priceUsd": 323.37020254,
+      "priceUpdatedAt": 1795452057
     },
     {
       "symbol": "METAon",
@@ -86,8 +86,8 @@
       "feedDecimals": 8,
       "feedDescription": "METAon / USD (Chainlink META / USD x Ondo sValue)",
       "maxAge": 345600,
-      "priceUsd": 565.59939605,
-      "priceUpdatedAt": 1795211684
+      "priceUsd": 598.05087513,
+      "priceUpdatedAt": 1795467325
     },
     {
       "symbol": "MRNAon",
@@ -98,8 +98,8 @@
       "feedDecimals": 8,
       "feedDescription": "MRNAon / USD (Chainlink MRNA / USD x Ondo sValue)",
       "maxAge": 345600,
-      "priceUsd": 195.26,
-      "priceUpdatedAt": 1795208399
+      "priceUsd": 212.22,
+      "priceUpdatedAt": 1795467305
     },
     {
       "symbol": "MSFTon",
@@ -110,8 +110,8 @@
       "feedDecimals": 8,
       "feedDescription": "MSFTon / USD (Chainlink MSFT / USD x Ondo sValue)",
       "maxAge": 345600,
-      "priceUsd": 488.16493153,
-      "priceUpdatedAt": 1795208411
+      "priceUsd": 497.61130338,
+      "priceUpdatedAt": 1795467316
     },
     {
       "symbol": "NFLXon",
@@ -122,8 +122,8 @@
       "feedDecimals": 8,
       "feedDescription": "NFLXon / USD (Chainlink NFLX / USD x Ondo sValue)",
       "maxAge": 345600,
-      "priceUsd": 568.25,
-      "priceUpdatedAt": 1795209648
+      "priceUsd": 580.4,
+      "priceUpdatedAt": 1795467332
     },
     {
       "symbol": "NVDAon",
@@ -134,8 +134,8 @@
       "feedDecimals": 8,
       "feedDescription": "NVDAon / USD (Chainlink NVDA / USD x Ondo sValue)",
       "maxAge": 345600,
-      "priceUsd": 127.56843693,
-      "priceUpdatedAt": 1795211847
+      "priceUsd": 164.73207266,
+      "priceUpdatedAt": 1795467046
     },
     {
       "symbol": "PFEon",
@@ -146,8 +146,8 @@
       "feedDecimals": 8,
       "feedDescription": "PFEon / USD (Chainlink PFE / USD x Ondo sValue)",
       "maxAge": 345600,
-      "priceUsd": 29.32437391,
-      "priceUpdatedAt": 1795208283
+      "priceUsd": 29.53337438,
+      "priceUpdatedAt": 1795457655
     },
     {
       "symbol": "TSLAon",
@@ -158,8 +158,8 @@
       "feedDecimals": 8,
       "feedDescription": "TSLAon / USD (Chainlink TSLA / USD x Ondo sValue)",
       "maxAge": 345600,
-      "priceUsd": 347.2425,
-      "priceUpdatedAt": 1795208931
+      "priceUsd": 386.16,
+      "priceUpdatedAt": 1795467198
     }
   ]
 }
