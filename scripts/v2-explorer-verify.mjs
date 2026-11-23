@@ -137,6 +137,9 @@ async function call(fetchImpl, chainId, params, post, sleep = wait) {
     // 2026): say who is asking and that JSON is wanted, as a browser or Foundry would.
     const headers = { accept: 'application/json', 'user-agent': 'Mozilla/5.0 (compatible; elpida-verify/1.0; +https://elpida.fun)', ...(post ? { 'content-type': 'application/x-www-form-urlencoded' } : {}) };
     const res = await fetchImpl(query, post ? { method: 'POST', headers, body: form(params) } : { headers });
+    // HTTP 429 (Blockscout's per-IP limit without a key, Robinhood Chain 24 November 2026) is waited out like a
+    // rate-limit answer in the body.
+    if (res.status === 429 && attempt < 8) { await sleep(3_000 * (attempt + 1)); continue; }
     if (!res.ok) throw new Error(`explorer answered HTTP ${res.status}${res.status === 403 && BLOCKSCOUT[Number(chainId)] ? ` (Blockscout refused the request; verify by hand at ${BLOCKSCOUT[Number(chainId)].replace(/\/api$/, '')} (Contract, Verify & Publish))` : ''}`);
     const body = await res.json();
     if (attempt < 8 && /rate limit/i.test(String(body.result ?? body.message))) { await sleep(1_500 * (attempt + 1)); continue; }
