@@ -4,7 +4,7 @@
 import { h, icon, copyButton, short } from './ui.mjs';
 import { disclaimerPoints, fullDisclaimer } from './consent.mjs';
 import { SNIPE_START_BPS, SNIPE_WINDOW_SECONDS } from '/curve-model.mjs';
-import { V2, V2_FEE_SPLIT, V2_PROPOSED_MIN_FEE_BPS } from '/v2-economics.mjs';
+import { V2, V23_FEE_SPLIT, V2_PROPOSED_MIN_FEE_BPS } from '/v2-economics.mjs';
 
 const usd = e6 => `$${(Number(e6) / 1e6).toLocaleString('en-US')}`;
 
@@ -88,11 +88,9 @@ export function renderDocs(ctx, section) {
     card(4, SECTIONS[4],
       h('p', `The creator picks the token’s fee at launch, from ${pct(V2_PROPOSED_MIN_FEE_BPS)} to ${pct(V2.maxFeeBps)} (${pct(V2.defaultFeeBps)} by default). It never changes, before or after graduation. Every fee is shared five ways:`),
       h('div.dc-options',
-        tile(`${pct(V2_FEE_SPLIT.creator)} creator`, 'To the creator’s rewards: their wallet, other verified wallets, X accounts or websites, or the token’s holders, as chosen at launch.'),
-        tile(`${pct(V2_FEE_SPLIT.traderAirdrop)} traders`, 'A monthly airdrop to the traders who paid fees, in proportion to the fees they paid.'),
-        tile(`${pct(V2_FEE_SPLIT.flywheel)} flywheel`, 'Buys tokens launched on Elpida and burns them.'),
-        tile(`${pct(V2_FEE_SPLIT.holderRewards)} holders`, 'Weekly rewards to eligible holders, weighted by holdings.'),
-        tile(`${pct(V2_FEE_SPLIT.treasury)} treasury`, 'The Elpida treasury.')),
+        tile(`${pct(V23_FEE_SPLIT.traderAirdrop)} traders`, 'A monthly airdrop in USDC to every qualifying trader, by score: fees paid count with diminishing returns (fees^0.8), and trading on more days counts more, up to 12.'),
+        tile(`${pct(V23_FEE_SPLIT.creator)} creator`, 'To the creator’s rewards: their wallet, other verified wallets, X accounts or websites, as chosen at launch.'),
+        tile(`${pct(V23_FEE_SPLIT.treasury)} Elpida`, 'Platform revenue, to the Elpida treasury.')),
       h('p.small.muted', 'Where a reward is paid out, it is paid in USDC (a labelled test dollar on some test networks). Older test tokens launched before V2 keep the rules they launched with.')),
     card(5, SECTIONS[5], h('p.muted', 'Generated from the network registry. Always compare an address with the explorer before interacting.'), contracts(ctx)),
     card(6, SECTIONS[6], h('div.dc-faq', ...FAQ.map(([q, a]) => h('details.dc-q', h('summary', q, icon('chevron-down', 'icon-sm')), h('p', a))))),

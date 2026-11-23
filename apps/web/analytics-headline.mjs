@@ -2,7 +2,8 @@ import { h, icon, number } from './ui.mjs';
 import { combine, holdingOf } from './v2-rewards-view.mjs';
 
 // Analytics page headline (Malik, 10 November): where Elpida's fees go, at a glance, above everything else. Four large
-// tiles from the V2 contracts (paid to holders, earned by creators, flywheel buybacks, the airdrop vault) and four
+// tiles from the V2 contracts, for the 50 / 30 / 20 model (Malik, 23 November 2026: no flywheel, no holder rewards):
+// paid to traders, earned by creators, Elpida revenue, the airdrop vault; and four
 // small ones (V2 fees, coins launched, graduated, stock pairs in use). Every figure is read from chain data the server
 // already indexes; a tile whose source is not deployed is left out rather than shown as zero. Dollar figures need a
 // fresh price; otherwise the asset amount is shown.
@@ -14,15 +15,15 @@ export function headlineFigures(rewards, analytics) {
   const sum = pick => { const c = combine(chains.flatMap(ch => pick(ch).map(([asset, value]) => holdingOf(ch, asset, value)))); return { ...c, detail: c.extra.length ? `Not in the total until priced: ${c.extra.join(', ')}` : '' }; };
   const out = { large: [], small: [] };
   if (chains.length) {
-    const paid = sum(c => (c.holder?.rounds ?? []).map(r => [r.asset, r.claimed])), waiting = sum(c => (c.holder?.assets ?? []).map(a => [a.asset, a.size]));
-    out.large.push({ key: 'holders', title: 'Paid to holders', value: paid.headline, note: `${waiting.headline} more waiting in the holder vault`, detail: paid.detail, glyph: 'users' });
+    const paid = sum(c => (c.airdrop?.rounds ?? []).map(r => [r.asset, r.claimed]));
+    out.large.push({ key: 'traders', title: 'Paid to traders', value: paid.headline, note: '50% of every fee, shared monthly by score', detail: paid.detail, glyph: 'users', link: { label: 'See every airdrop', target: 'rw-distribution' } });
     const creators = sum(c => (c.fees ?? []).map(f => [f.asset, f.creator]));
-    out.large.push({ key: 'creators', title: 'Earned by creators', value: creators.headline, note: '30% of every V2 fee, paid to each coin\'s creator vault', detail: creators.detail, glyph: 'sparkles' });
-    const spent = sum(c => (c.flywheel?.spentByAsset ?? []).map(s => [s.asset, s.amount])), burned = chains.reduce((n, c) => n + (c.flywheel?.burnedByToken ?? []).filter(b => BigInt(b.amount ?? 0) > 0n).length, 0);
-    out.large.push({ key: 'flywheel', title: 'Flywheel buybacks', value: spent.headline, note: `${number(burned, 0)} ${burned === 1 ? 'coin' : 'coins'} bought and burned so far`, detail: spent.detail, glyph: 'flame', link: { label: 'See every burn', target: 'rw-flywheel' } });
+    out.large.push({ key: 'creators', title: 'Earned by creators', value: creators.headline, note: '30% of every fee, paid to each coin\'s creator vault', detail: creators.detail, glyph: 'sparkles' });
+    const platform = sum(c => (c.fees ?? []).map(f => [f.asset, (BigInt(f.total ?? 0) * 2000n / 10000n).toString()]));
+    out.large.push({ key: 'platform', title: 'Elpida revenue', value: platform.headline, note: '20% of every fee', detail: platform.detail, glyph: 'coins' });
     const vault = sum(c => (c.airdrop?.assets ?? []).map(a => [a.asset, a.size]));
     const symbols = new Set(chains.flatMap(c => (c.airdrop?.assets ?? []).filter(a => BigInt(a.size ?? 0) > 0n).map(a => holdingOf(c, a.asset, 0).symbol)));
-    out.large.push({ key: 'airdrop', title: 'Airdrop vault', value: vault.headline, note: symbols.size === 1 && /USD/.test([...symbols][0]) ? `${[...symbols][0]} for qualifying traders` : 'For qualifying traders, paid monthly', detail: vault.detail, glyph: 'gift', link: { label: 'See every airdrop', target: 'rw-distribution' } });
+    out.large.push({ key: 'airdrop', title: 'Airdrop vault', value: vault.headline, note: symbols.size === 1 && /USD/.test([...symbols][0]) ? `${[...symbols][0]} for qualifying traders` : 'For qualifying traders, paid monthly', detail: vault.detail, glyph: 'gift' });
     const fees = sum(c => (c.fees ?? []).map(f => [f.asset, f.total]));
     out.small.push({ key: 'fees', title: 'V2 fees collected', value: fees.headline });
   }

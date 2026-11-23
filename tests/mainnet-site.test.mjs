@@ -146,13 +146,13 @@ test('BNB Chain, Robinhood Chain and Ethereum: each plan names its chain, its ow
   assert.equal(read('robinhood-mainnet').usdc, '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168', 'USDG on Robinhood Chain');
 });
 
-test('V2.3 (23 Nov): once its record is ready it takes new launches and the V2.0 launchpad stays as previous; V2.3 alone also works', () => {
+test('V2.3 (23 Nov): once its record is ready the chain runs on V2.3 alone, the V2.0 launchpad is dropped', () => {
   const v23record = { chainId: 8453, status: 'ready', block: 39_000_000, model: 'v2.3-hook', planSha256: 'e'.repeat(64), contracts: { create2: a(11), factory: a(12), airdrop: a(13), hook: a(16), router: a(17) } };
   const v23plan = { ...plan, key: 'base-mainnet-v23', model: 'v2.3-hook' };
   const { net } = mainnetNetwork(base, record, plan, { record: v23record, plan: v23plan });
   assert.equal(net.v2.shared.factory, a(12)); assert.equal(net.v2.shared.model, 'v2.3-hook'); assert.deepEqual(net.v2.shared.split, { creator: 30, traders: 50, treasury: 20 });
   assert.equal(net.v2.shared.holder, undefined); assert.equal(net.v2.shared.flywheel, undefined);
-  assert.equal(net.v2.previous.length, 1); assert.equal(net.v2.previous[0].factory, a(2)); assert.equal(net.v2.previous[0].model, 'v2-hook');
+  assert.equal(net.v2.previous, undefined, 'the V2.0 launchpad is not on the site any more');
   assert.equal(mainnetNetwork(base, record, plan, { record: { ...v23record, status: 'awaiting_safe' }, plan: v23plan }).net.v2.shared.factory, a(2), 'not ready: V2.0 keeps launches');
   const alone = mainnetNetwork(base, null, null, { record: v23record, plan: v23plan }).net;
   assert.equal(alone.v2.shared.factory, a(12)); assert.equal(alone.v2.previous, undefined);

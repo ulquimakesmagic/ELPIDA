@@ -1,18 +1,17 @@
 import { h, icon, number, compact, short } from './ui.mjs';
 
 // Analytics page, Rewards section (ELPIDA V2.0), every chain together. Everything here is read from the V2 contracts by
-// the server's rewards index (/api/public/v2-rewards): vault sizes by day, the airdrop and holder-reward rounds and
-// their countdowns, how each round was distributed, and the flywheel's burns. Vaults hold different assets on each
+// the server's rewards index (/api/public/v2-rewards): vault sizes by day, the trader airdrop rounds and
+// their countdowns, and how each round was distributed. Vaults hold different assets on each
 // chain (ETH, BNB, USDC, stocks), so totals are in dollars where the asset has a fresh price and the per-asset amounts
 // are listed beside them; an asset without a price is shown in its own units and never converted. With no V2
 // deployment the section stays hidden: no placeholder figures. Countdowns tick in the page against the round end the
 // contracts fixed; chains whose rounds end together share one countdown.
 
 const SVG = 'http://www.w3.org/2000/svg';
+// The 50 / 30 / 20 model (Malik, 23 November 2026): one reward vault, the traders' airdrop. No flywheel, no holder rewards.
 const VAULTS = [
-  { key: 'airdrop', label: 'Trader airdrop', share: '30% of every fee', glyph: 'gift' },
-  { key: 'holder', label: 'Holder rewards', share: '10% of every fee', glyph: 'users' },
-  { key: 'flywheel', label: 'Flywheel', share: '10% of every fee', glyph: 'flame' },
+  { key: 'airdrop', label: 'Trader airdrop', share: '50% of every fee', glyph: 'gift' },
 ];
 const DAY = 86_400;
 
@@ -84,7 +83,7 @@ export function rewardsSection({ api, onData = () => {}, mainnetSite = false }) 
         h('div.rw-countdown-head', h('p.an-tile-label', icon(kind === 'airdrop' ? 'gift' : 'users', 'icon-sm'), title), h('span.badge', `Round ${c.round + 1}`)),
         h('div.rw-cd', { role: 'timer', 'aria-live': 'off', 'aria-label': `${title} round ends ${dateTimeOf(c.endsAt)}${where}` }, ...cells),
         h('div.rw-progress', h('span.rw-progress-fill')),
-        h('p.small.muted', `Ends ${dateTimeOf(c.endsAt)}${where}. ${kind === 'airdrop' ? 'Payouts are posted on chain after it ends.' : 'Holder rewards are paid each round.'}`));
+        h('p.small.muted', `Ends ${dateTimeOf(c.endsAt)}${where}. Payouts are posted on chain after it ends.`));
     });
   }
 
@@ -196,7 +195,7 @@ export function rewardsSection({ api, onData = () => {}, mainnetSite = false }) 
 
   /** Keeper gas taken from the reward vaults (published in the same round lists as the moves to USDC). */
   function keeperGas() {
-    const items = chains().flatMap(chain => ['airdrop', 'holder'].flatMap(kind => (chain[kind]?.keeperGas ?? []).map(g => holding(chain, g.asset, g.amount))));
+    const items = chains().flatMap(chain => ['airdrop'].flatMap(kind => (chain[kind]?.keeperGas ?? []).map(g => holding(chain, g.asset, g.amount))));
     if (!items.length) return null;
     const total = combine(items);
     return h('p.small.muted', `Keeper gas taken from the reward vaults: ${total.headline}${total.detail ? ` (${total.detail})` : ''}. It is listed in each round's published payout list, before the rest is converted to USDC.`);
@@ -235,27 +234,13 @@ export function rewardsSection({ api, onData = () => {}, mainnetSite = false }) 
         const r = await api(`public/v2-rewards/payouts?wallet=${encodeURIComponent(input.value.trim())}`);
         const rows = r.chains.flatMap(c => c.payouts.map(p => ({ ...p, chain: chainOf(c.key) }))).sort((a, b) => (b.time ?? 0) - (a.time ?? 0));
         out.replaceChildren(rows.length ? h('div.analytics-table-scroll', h('table.analytics-table', h('thead', h('tr', ...['Received', 'Chain', 'Reward', 'Round', 'Transaction'].map(t => h('th', { scope: 'col' }, t)))),
-          h('tbody', ...rows.map(p => h('tr', h('td', money(p.chain, p.asset, p.amount)), h('td', chainTag(p.chain)), h('td', p.kind === 'airdrop' ? 'Trader airdrop' : 'Holder rewards'), h('td', `Round ${p.round + 1}`),
+          h('tbody', ...rows.map(p => h('tr', h('td', money(p.chain, p.asset, p.amount)), h('td', chainTag(p.chain)), h('td', 'Trader airdrop'), h('td', `Round ${p.round + 1}`),
             h('td', p.chain.explorer ? h('a.mono', { href: `${p.chain.explorer}/tx/${p.tx}`, target: '_blank', rel: 'noopener noreferrer' }, short(p.tx)) : h('span.mono', short(p.tx)))))))) : h('p.small.muted', 'No payouts to this wallet yet. Your progress towards this month\'s airdrop is shown above.'));
       } catch (e) { out.replaceChildren(h('p.error-text', { role: 'alert' }, e.message)); }
     };
     return h('div.rw-lookup', h('form.rw-lookup-form', { on: { submit: e => { e.preventDefault(); go(); } } }, input, h('button.btn.btn-secondary', { type: 'submit' }, 'Check wallet')), out);
   }
 
-  function flywheel() {
-    const all = chains().filter(c => c.flywheel);
-    if (!all.length) return null;
-    const burns = all.flatMap(chain => chain.flywheel.burns.map(b => ({ ...b, chain }))).sort((a, b) => b.time - a.time).slice(0, 50);
-    const spent = combine(all.flatMap(chain => chain.flywheel.spentByAsset.map(s => holding(chain, s.asset, s.amount))));
-    return h('div.rw-flywheel',
-      h('div.analytics-summary',
-        tile('Cycles', number(all.reduce((n, c) => n + c.flywheel.cycles, 0), 0), 'Buy-and-burn rounds run', 'refresh-cw'),
-        tile('Spent', spent.headline, [spent.detail, 'From the flywheel vault only'].filter(Boolean).join(' · '), 'flame'),
-        tile('Tokens burned', number(all.reduce((n, c) => n + c.flywheel.burnedByToken.length, 0), 0), 'Supply reduced with burn()', 'sparkles')),
-      burns.length ? h('div.analytics-table-scroll', h('table.analytics-table', h('thead', h('tr', ...['Token', 'Chain', 'Spent', 'Burned', 'Supply after', 'When'].map(t => h('th', { scope: 'col' }, t)))),
-        h('tbody', ...burns.map(b => h('tr', h('td', h('a', { href: `#/token/${b.token}?network=${encodeURIComponent(b.chain.key)}` }, short(b.token))), h('td', chainTag(b.chain)), h('td', money(b.chain, b.asset, b.spent)), h('td', compact(units(b.burned))),
-          h('td', compact(units(b.supplyAfter))), h('td', b.chain.explorer ? h('a.mono', { href: `${b.chain.explorer}/tx/${b.tx}`, target: '_blank', rel: 'noopener noreferrer' }, dateOf(b.time)) : dateOf(b.time))))))) : h('p.small.muted', 'No buy-and-burn cycle has run yet.'));
-  }
 
   /** This month's EWPR program across chains, and the checked wallet's progress (an estimate until the month is scored). */
   function ewprBlock() {
@@ -308,24 +293,22 @@ export function rewardsSection({ api, onData = () => {}, mainnetSite = false }) 
     return [h('h3', 'Your progress this month'), h('p.small.muted', 'An estimate from confirmed trades so far. What you receive is set when the month is scored and posted on chain; payouts are listed below.'), ...rows];
   }
 
-  /** V2.3 (23 Nov 2026): 50% to traders on new launches; holder rewards and the flywheel exist only on V2.0 tokens. */
-  const v23 = () => chains().some(c => c.launchpad === 'v2.3-hook');
-  const shareText = v => !v23() ? v.share : v.key === 'airdrop' ? '50% of every V2.3 fee · 30% on earlier tokens' : '10% of fees of tokens launched before V2.3';
+  const shareText = v => v.share;
 
   const tile = (title, value, note, glyph) => h('div.tile.analytics-metric', h('p.an-tile-label', icon(glyph, 'icon-sm'), title), h('strong', value), h('p.small.muted', note));
 
   function draw() {
     const on = chains().map(c => c.name);
     root.replaceChildren(
-      h('div.analytics-section-head', h('div', h('h2', { id: 'rw-title' }, 'Rewards'), h('p.small.muted', (v23() ? `Where every fee goes, on ${names([...new Set(chains().map(c => c.name.replace(/ · earlier launchpad$/, '')))])} together: on V2.3 launches 50% to traders, 30% to the creator and 20% to Elpida; tokens launched before V2.3 keep their own split (30% creator, 30% traders, 10% flywheel, 10% holder rewards, 20% treasury). Read from the contracts.` : `Where every fee goes, on ${names(on)} together: 30% creator, 30% trader airdrop, 10% flywheel, 10% holder rewards, 20% treasury. Read from the contracts.${mainnetSite ? ' On mainnet the trader airdrop is paid monthly in USDC; the holder and flywheel shares accrue in their contracts.' : ''}`))), h('div.analytics-controls', h('span.badge', mainnetSite ? 'Mainnet' : 'Test networks · no monetary value'))),
-      h('div.rw-countdowns', ...countdownCards('airdrop', 'Trader airdrop'), ...countdownCards('holder', 'Holder rewards')),
+      h('div.analytics-section-head', h('div', h('h2', { id: 'rw-title' }, 'Rewards'), h('p.small.muted', `Where every fee goes, on ${names(on)} together: 50% to traders, 30% to the token's creator, 20% to Elpida. Read from the contracts.${mainnetSite ? ' The traders\' half is paid monthly in USDC.' : ''}`)), h('div.analytics-controls', h('span.badge', mainnetSite ? 'Mainnet' : 'Test networks · no monetary value'))),
+      h('div.rw-countdowns', ...countdownCards('airdrop', 'Trader airdrop')),
       vaultTiles(),
-      h('div.rw-block', h('h3', 'Reward pool by chain'), h('p.small.muted', 'One pool across every chain. Each chain\'s share of what the trader airdrop, holder rewards and flywheel vaults hold now, in dollars at today\'s prices.'), breakdown()),
-      h('div.rw-block', h('h3', 'Vault sizes by day'), h('p.small.muted', 'Earned from fees so far on every chain, less what has been paid out or burned, in dollars at today\'s prices. Updated as trades confirm.'), sizeChart()),
+      h('div.rw-block', h('h3', 'Reward pool by chain'), h('p.small.muted', 'One pool across every chain. Each chain\'s share of what the trader airdrop vault holds now, in dollars at today\'s prices.'), breakdown()),
+      h('div.rw-block', h('h3', 'Vault sizes by day'), h('p.small.muted', 'Earned from fees so far on every chain, less what has been paid out, in dollars at today\'s prices. Updated as trades confirm.'), sizeChart()),
       ewpr ? h('div.rw-block', { id: 'rw-ewpr' }, h('h3', 'Trader rewards'), h('p.small.muted', 'Every month the trader airdrop vault is shared among qualifying traders by score: fees paid count with diminishing returns, and trading on more days counts more. Every qualifying trader gets a share; there is no leaderboard cut-off.'), ewprBlock()) : null,
-      h('div.rw-block', h('h3', 'Check your wallet'), h('p.small.muted', 'This month\'s progress and every payout received.'), lookup()),
-      h('div.rw-block', { id: 'rw-distribution' }, h('h3', 'How the last airdrop was shared'), h('p.small.muted', 'Shared by score (see Trader rewards). Test-network rounds before December 2026 used the earlier blend: 20% equal, 40% square root of fees, 40% pro rata, capped at 1% of the pool.'), distribution(), keeperGas()),
-      h('div.rw-block', { id: 'rw-flywheel' }, h('h3', 'Flywheel buy-and-burn'), h('p.small.muted', 'The flywheel vault can only buy Elpida V2 tokens and burn them. The treasury never holds its funds.'), flywheel()));
+      // No wallet check on the analytics page (Malik, 23 November 2026).
+      h('div.rw-block', { id: 'rw-distribution' }, h('h3', 'How the last airdrop was shared'), h('p.small.muted', 'Shared by score (see Trader rewards).'), distribution(), keeperGas())
+    );
     root.hidden = false;
     tick();
   }

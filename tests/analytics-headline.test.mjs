@@ -1,4 +1,4 @@
-// Analytics headline (Malik, 10 November): paid to holders, earned by creators, flywheel buybacks and the airdrop vault
+// Analytics headline (Malik, 10 November; 50 / 30 / 20 since 23 November): paid to traders, earned by creators, Elpida revenue and the airdrop vault
 // from the V2 rewards summary; V2 fees, coins launched, graduated and stock pairs from the protocol analytics. Tiles
 // whose source is missing are left out, never shown as zero.
 import test from 'node:test';
@@ -10,7 +10,7 @@ const USDC = '0x036cbd53842c5426634e7929541ec2318f3dcf7e', ETH = '0x000000000000
 const base = { key: 'base-sepolia', name: 'Base Sepolia', assets: { [ETH]: { symbol: 'ETH', decimals: 18, usd: 2500 }, [USDC]: { symbol: 'USDC', decimals: 6, usd: 1 } },
   fees: [{ asset: ETH, total: E(1), creator: E(0.3) }, { asset: USDC, total: U(1000), creator: U(300) }],
   holder: { assets: [{ asset: USDC, size: U(40) }], rounds: [{ asset: USDC, claimed: U(60) }] },
-  airdrop: { assets: [{ asset: USDC, size: U(250) }], rounds: [] },
+  airdrop: { assets: [{ asset: USDC, size: U(250) }], rounds: [{ asset: USDC, claimed: U(60) }] },
   flywheel: { spentByAsset: [{ asset: ETH, amount: E(0.02) }], burnedByToken: [{ token: '0x1', amount: '5' }, { token: '0x2', amount: '0' }] } };
 const solana = { key: 'solana-devnet', name: 'Solana devnet', assets: { [SOL]: { symbol: 'SOL', decimals: 9, usd: null } },
   fees: [{ asset: SOL, total: '2000000000', creator: '600000000' }], holder: { assets: [], rounds: [] }, airdrop: { assets: [], rounds: [] },
@@ -19,11 +19,11 @@ const analytics = { totals: { tokens: 5492, graduated: 59 }, assets: [{ key: 'ba
 
 test('the headline adds every chain together, in dollars where priced', () => {
   const f = headlineFigures({ deployed: true, chains: [base, solana] }, analytics), by = k => [...f.large, ...f.small].find(x => x.key === k);
-  assert.deepEqual(f.large.map(x => x.key), ['holders', 'creators', 'flywheel', 'airdrop']);
-  assert.equal(by('holders').value, '$60'); assert.match(by('holders').note, /^\$40 more waiting/);
+  assert.deepEqual(f.large.map(x => x.key), ['traders', 'creators', 'platform', 'airdrop'], 'no holder or flywheel tile');
+  assert.equal(by('traders').value, '$60'); assert.match(by('traders').note, /^50% of every fee/);
   assert.equal(by('creators').value, '$1.05K', '0.3 ETH at $2,500 + 300 USDC');
   assert.match(by('creators').detail, /until priced: SOL/, 'unpriced SOL is named, not shown in SOL');
-  assert.equal(by('flywheel').value, '$50'); assert.match(by('flywheel').note, /^2 coins bought and burned/);
+  assert.equal(by('platform').value, '$700', '20% of 1 ETH at $2,500 + 1,000 USDC'); assert.equal(by('platform').note, '20% of every fee');
   assert.equal(by('airdrop').value, '$250'); assert.equal(by('airdrop').note, 'USDC for qualifying traders');
   assert.equal(by('fees').value, '$3.5K');
   assert.deepEqual(f.small.slice(1).map(x => [x.key, x.value]), [['launched', '5,492'], ['graduated', '59'], ['stocks', '2']]);

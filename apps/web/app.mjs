@@ -450,11 +450,14 @@ async function refreshLastSale() {
   if (!local) renderLastSale(recentBuys, { href: t => `#/token/${t.address}?network=${encodeURIComponent(t.network)}` });
   exploreView?.setTrades(recentBuys);
 }
+let liveListTimer=null;
 /** Inserts streamed trades into the strip and the live feed, newest first, without duplicates. */
 function applyLiveTrades(trades) {
   if(!Array.isArray(trades)||!trades.length)return;
   // The token page listens for trades of its own token (trades table and chart).
   try{window.dispatchEvent(new CustomEvent('elpida:trades',{detail:{trades}}));}catch{}
+  // Market caps on Explore and Portfolio follow trades too (23 Nov 2026), re-read at most every 5 seconds.
+  if(['explore','portfolio'].includes(currentRoute.name)&&!liveListTimer)liveListTimer=setTimeout(()=>{liveListTimer=null;if(document.visibilityState==='visible'&&!busy)refresh({preserveInput:true}).catch(()=>{});},5000);
   const merged=mergeTrades(recentBuys,trades);
   if(!merged.added)return;
   recentBuys=merged.trades;
@@ -509,7 +512,7 @@ async function init() {
     const names = config.testnets.map(n => n.name).join(', ') || 'Mainnet';
     // The mainnet notice lives on How it works, not in the footer (Malik, 20 Nov).
     $('#footer-note').textContent = ''; $('#footer-note').hidden = true;
-    $('#how-network-note').textContent = `Elpida runs on ${names} mainnet with real funds. The contracts have not been independently audited; new launches have a daily cap and a launch stop. ${config.v2Keeper?.distributions ? 'Creator rewards, the trader airdrop, holder rewards and the flywheel are paid out by the Elpida keeper.' : 'Creator rewards are paid from day one; the trader airdrop, holder rewards and flywheel shares build up in their contracts and are not paid out yet.'}`;
+    $('#how-network-note').textContent = `Elpida runs on ${names} mainnet with real funds. The contracts have not been independently audited; new launches have a daily cap and a launch stop. Every trade's fee goes 50% to traders (a monthly airdrop in USDC), 30% to the token's creator and 20% to Elpida.`;
   } else if (config.solana?.mainnet) {
     $('#footer-note').textContent = 'Solana mainnet beta: real funds, new contracts. Other networks are test networks with no monetary value.';
     $('#how-network-note').textContent = 'Solana runs as a mainnet beta with real funds and new, unaudited contracts; launching is invite-only while the beta gate is on. The other networks are test networks.';

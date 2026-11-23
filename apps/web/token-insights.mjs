@@ -2,7 +2,6 @@
 // the safety checklist and quick buy amounts. No DOM, no network: everything here is derived from rows the
 // page already fetched (indexed trades and holders) and from the token record, so it can be tested directly.
 
-import { flywheelCheck } from './burn-labels.mjs';
 import { testStockStatus, TEST_STOCK_PROVIDERS } from './test-stock.mjs';
 
 const lower = value => String(value ?? '').toLowerCase();
@@ -125,8 +124,6 @@ export function safetyChecks(token, { holders, dex } = {}) {
     const own = Number(token.feeBps ?? token.feeSchedule?.base) > 0 ? `${pct(Number(token.feeBps ?? token.feeSchedule.base) / 100)}` : null;
     checks.push({ ok: true, text: token.graduated || !own ? 'No buy or sell tax.' : `No buy or sell tax. The curve fee is ${own} per trade.` });
   }
-  const burn = flywheelCheck(token);
-  if (burn) checks.push(burn);
   const stock = stockCheck(token);
   if (stock) checks.push(stock);
   if (token.metadataURI) checks.push({ ok: true, text: 'Details were published at launch and cannot be edited.' });
