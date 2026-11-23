@@ -95,3 +95,17 @@ test('BNB Chain wallet funders come from NodeReal MegaNode when its key is set (
   calls.length = 0; await funderFor(56, { ELPIDA_MEGANODE_API_KEY: 'K', ELPIDA_EXPLORER_API_KEY: 'E' }, fetchImpl)(wallet); assert.match(calls[0][0], /nodereal/, 'MegaNode first on BNB');
   calls.length = 0; await funderFor(8453, { ELPIDA_MEGANODE_API_KEY: 'K', ELPIDA_EXPLORER_API_KEY: 'E' }, async u => { calls.push([u]); return { json: async () => ({ result: [] }) }; })(wallet); assert.match(calls[0][0], /etherscan/, 'Etherscan on Base');
 });
+
+test('wallet funder lookups return null when nothing funded the wallet, and read every reply shape', async () => {
+  const { megaNodeFunder, etherscanFunder } = await import('../apps/api/v2-keeper.mjs');
+  const wallet = a(0xbeef), funder = a(0xf00d), reply = body => async () => ({ json: async () => body });
+  // MegaNode: transfers list, a bare array, an error reply, transfers to someone else or without a sender
+  assert.equal(await megaNodeFunder('K', reply({ result: [{ from: funder, to: wallet }] }))(wallet), funder, 'a bare array result');
+  assert.equal(await megaNodeFunder('K', reply({ error: { message: 'limit' } }))(wallet), null, 'an error reply');
+  assert.equal(await megaNodeFunder('K', reply({ result: { transfers: [{ from: funder, to: a(1) }, { to: wallet }] } }))(wallet), null, 'no transfer in with a sender');
+  assert.equal(await megaNodeFunder('K', reply({ result: 'nope' }))(wallet), null, 'a non-list result');
+  // Etherscan: zero-value transfers in do not count, nor does an error string
+  assert.equal(await etherscanFunder(8453, 'E', reply({ result: [{ from: funder, to: wallet, value: '0' }, { from: a(2), to: wallet, value: '5' }] }))(wallet), a(2));
+  assert.equal(await etherscanFunder(8453, 'E', reply({ result: [{ from: funder, to: wallet }] }))(wallet), null, 'no value field');
+  assert.equal(await etherscanFunder(56, 'E', reply({ status: '0', result: 'Free API access is not supported for this chain' }))(wallet), null);
+});
