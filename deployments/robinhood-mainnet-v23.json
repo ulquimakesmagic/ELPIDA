@@ -13,7 +13,8 @@
     "factory": "0x29f0D2A8F2DD5B2dF872222f10bE35D6B27aFD71",
     "airdrop": "0x30c8C1f345f68C3b48efEe450FA916F6CE6340a7",
     "hook": "0x87e7C9477ffe0347d729c7D574964e72Ea76A8cc",
-    "router": "0xC3C730EFade65F72B677E877d2ACcb8C5a697960"
+    "router": "0xC3C730EFade65F72B677E877d2ACcb8C5a697960",
+    "usdcAirdrop": "0xDD7620485af435D6f276c99011D03309a04EC95B"
   },
   "txs": {
     "create2": {
@@ -35,6 +36,10 @@
     "router": {
       "hash": "0x3e207169df8db420df28e78e039e6463a6457566b55cec3ae90208891a28fcba",
       "block": 121747126
+    },
+    "usdcAirdrop": {
+      "hash": "0x2199729f01adb9d140ede092d1b0c1c36664fa28b9bbb654a137e011e4b46a1f",
+      "block": 121794301
     }
   },
   "deployer": "0x9c99387c63A5d893D3bDe9c71CF2fe2b1191F08E",
@@ -167,8 +172,53 @@
     }
   ],
   "safeBatch": "robinhood-mainnet-v23-safe-batch.json",
-  "status": "awaiting_safe",
+  "status": "ready",
   "pending": {
     "safe": "Execute the Safe batch (setHook, configureUsdPricing, approveQuote USDC, setGuardian, setDailyLaunchCap), then run verify."
+  },
+  "usdcAirdrop": {
+    "deployedAt": "2026-11-23T23:34:04.054Z",
+    "deployer": "0x9c99387c63A5d893D3bDe9c71CF2fe2b1191F08E",
+    "readBack": "ok"
+  },
+  "verify": {
+    "at": "2026-11-23T23:34:07.570Z",
+    "checks": [
+      {
+        "check": "factory hook",
+        "ok": true,
+        "detail": "0x87e7C9477ffe0347d729c7D574964e72Ea76A8cc"
+      },
+      {
+        "check": "USD feed",
+        "ok": true,
+        "detail": "0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9"
+      },
+      {
+        "check": "USDC approved at $25,000 virtual",
+        "ok": true,
+        "detail": "25000000000"
+      },
+      {
+        "check": "guardian",
+        "ok": true,
+        "detail": "0xfC08505EfEf934c3fF19d82D189f60f28a0255eB"
+      },
+      {
+        "check": "daily launch cap",
+        "ok": true,
+        "detail": "1000"
+      },
+      {
+        "check": "launches paused",
+        "ok": true,
+        "detail": "false"
+      },
+      {
+        "check": "native start price readable",
+        "ok": true,
+        "detail": "14.567471663208446012 native = $25,000 virtual"
+      }
+    ]
   }
 }
