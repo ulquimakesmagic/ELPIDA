@@ -6,8 +6,8 @@
 // accept again. The restricted places come from ELPIDA_RESTRICTED_JURISDICTIONS via /api/config.
 import { h } from './ui.mjs';
 
-export const TERMS_VERSION = 3;
-export const TERMS_UPDATED = '14 November 2026';
+export const TERMS_VERSION = 4;
+export const TERMS_UPDATED = '23 November 2026';
 export const CONTACT = { x: '@elpidadotfun', xUrl: 'https://x.com/elpidadotfun', telegram: 't.me/elpidadotfun', telegramUrl: 'https://t.me/elpidadotfun' };
 
 const list = names => names.length === 1 ? names[0] : `${names.slice(0, -1).join(', ')} or ${names.at(-1)}`;
@@ -55,7 +55,7 @@ export function termsDocument({ mainnet = false, restricted = [] } = {}) {
     ]],
     ['Test networks and the mainnet beta', [
       'Most networks on Elpida are public test networks. Test coins come from free faucets, and tokens on test networks, including test stablecoins and test tokenized stocks such as “tNVDAon”, have no monetary value, cannot be exchanged for money and are not real shares or securities. Test assets are not issued, endorsed or backed by any company whose name or ticker they resemble.',
-      mainnet ? 'Networks marked “mainnet” use real funds. Their contracts are new and have not had an independent security audit, and some features (for example trader airdrops, holder rewards and the flywheel) may stay switched off at first. Use only amounts you can afford to lose completely.' : 'No network on Elpida currently uses real funds. If a mainnet opens, these Terms will be updated and you will be asked to accept them again.',
+      mainnet ? 'Networks marked “mainnet” use real funds. Their contracts are new and have not had an independent security audit, and some features (for example the trader airdrop) may stay switched off at first. Use only amounts you can afford to lose completely.' : 'No network on Elpida currently uses real funds. If a mainnet opens, these Terms will be updated and you will be asked to accept them again.',
     ]],
     ['Tokens and what you submit', [
       'Anyone can launch a token on Elpida. We do not review, approve, endorse or guarantee any token, creator, name, image, link or claim, and a token appearing on the Services is not a recommendation. Token names and images may imitate other projects, brands or people; that does not mean those parties are involved.',
@@ -66,9 +66,9 @@ export function termsDocument({ mainnet = false, restricted = [] } = {}) {
     ]],
     ['Fees', [
       'Launching a token costs a launch fee, and trades on a bonding curve pay a trading fee, at the rates shown on the Services when you act. Creators may also set a token tax at launch where a network supports it. Part of these fees goes to Elpida and part to the wallets the creator chose. The split for each token is fixed in its contracts at launch.',
-      'The contracts split each trading fee into fixed shares, for example the creator’s wallet or wallets, a traders’ airdrop pool, a holders’ reward pool, a flywheel (buy-back) pool and Elpida’s treasury. The creator’s share can be collected by anyone and is only ever paid to the creator’s chosen wallets.',
+      'The contracts split each trading fee into fixed shares: 50% to a traders’ airdrop pool, 30% to the creator’s wallet or wallets and 20% to Elpida’s treasury. The creator’s share can be collected by anyone and is only ever paid to the creator’s chosen wallets.',
       { sub: 'Platform mechanisms' },
-      'Trader airdrops, holder rewards, the flywheel, payouts in stablecoins and any similar distribution (“Platform Mechanisms”) are carried out by services Elpida runs, on a schedule and under rules we describe on the Services, using Elpida’s own wallets to pay network fees. We may pause, delay, change or end any Platform Mechanism at any time and for any reason, including when network fees or price data make it uneconomic or unsafe, and a distribution may wait until those services have the funds for network fees. Platform Mechanisms are not promises, not a return on any investment and not an obligation Elpida owes you; they create no account, balance or claim in your favour, and they may produce nothing. An amount is yours only once it reaches your wallet on chain.',
+      'Trader airdrops, payouts in stablecoins and any similar distribution (“Platform Mechanisms”) are carried out by services Elpida runs, on a schedule and under rules we describe on the Services, using Elpida’s own wallets to pay network fees. We may pause, delay, change or end any Platform Mechanism at any time and for any reason, including when network fees or price data make it uneconomic or unsafe, and a distribution may wait until those services have the funds for network fees. Platform Mechanisms are not promises, not a return on any investment and not an obligation Elpida owes you; they create no account, balance or claim in your favour, and they may produce nothing. An amount is yours only once it reaches your wallet on chain.',
       'Network fees (gas) go to the blockchain, not to Elpida. Fees are not refundable once a transaction is submitted, even if it fails. You are responsible for any taxes on your activity.',
     ]],
     ['Tokenized stock pairs', [

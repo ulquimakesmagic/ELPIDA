@@ -23,9 +23,7 @@ test('the tag is the share of the original 1B supply bought and burned', () => {
   for (const [share, text] of [[0.5, '0.50%'], [0.01, '0.01%'], [0.0099, '0.010%'], [0.0001, '<0.001%'], [42.123, '42.12%']]) assert.equal(percentText(share), text);
 });
 
-test('the token page safety list says what the flywheel burned', () => {
-  assert.deepEqual(flywheelCheck({ symbol: 'X', flywheelBurned: '2500000' }), { ok: true, text: 'The Elpida flywheel has bought and burned 2.50M $X (0.25% of supply).' });
+test('the token page safety list has no flywheel line (no flywheel since 23 Nov 2026)', () => {
   const lines = token => safetyChecks(token).map(c => c.text);
-  assert.ok(lines({ symbol: 'X', flywheelBurned: '10' }).some(t => t.startsWith('The Elpida flywheel has bought and burned')));
-  assert.ok(!lines({ symbol: 'Y' }).some(t => /flywheel/.test(t)));
+  assert.ok(!lines({ symbol: 'X', flywheelBurned: '10' }).some(t => /flywheel/i.test(t)));
 });

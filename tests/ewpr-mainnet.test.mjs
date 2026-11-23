@@ -74,13 +74,12 @@ test('stock-pair fees count: the keeper prices a real stock from its approved fe
   assert.equal(w.usdPerUnit(w.usdc), 1);
 });
 
-test('V2.3 next to V2.0: one keeper worker per launchpad, sharing the signer; the V2.0 worker keeps its key', () => {
+test('V2.3 replaces V2.0: one keeper worker, on the V2.3 launchpad', () => {
   const t = EVM_MAINNETS.find(n => n.key === 'bnb-mainnet');
   const v23 = { record: { chainId: 56, status: 'ready', block: 2, model: 'v2.3-hook', contracts: { factory: a(21), airdrop: a(23), hook: a(26), router: a(27) } }, plan: { ...read('bnb-mainnet'), model: 'v2.3-hook' } };
   const n = mainnetNetwork(t, record(56), read('bnb-mainnet'), v23).net, calls = [];
   const k = configuredV2Keeper({ env: { ELPIDA_V2_KEEPER_KEY: keeper.privateKey }, networks: [n], indexFor: (key, f) => { calls.push([key, f]); return null; }, prices: () => ({}), path: ':memory:' });
-  assert.deepEqual(k.workers.map(w => w.chain), ['bnb-mainnet-v23', 'bnb-mainnet']);
-  assert.equal(k.workers[0].signer, k.workers[1].signer, 'one nonce manager per key and chain');
-  assert.equal(k.workers[0].deployment.holder, undefined); assert.equal(k.workers[1].deployment.holder, a(4));
-  k.workers.forEach(w => w.index()); assert.deepEqual(calls, [['bnb-mainnet', a(21)], ['bnb-mainnet', a(2)]]);
+  assert.deepEqual(k.workers.map(w => w.chain), ['bnb-mainnet-v23']);
+  assert.equal(k.workers[0].deployment.holder, undefined); assert.equal(k.workers[0].deployment.flywheel, undefined);
+  k.workers.forEach(w => w.index()); assert.deepEqual(calls, [['bnb-mainnet', a(21)]]);
 });

@@ -8,7 +8,6 @@ import { assetIcon, chainIcon } from './chain-ui.mjs';
 import { nowSeconds } from './clock.mjs';
 import { devLabel } from '/curve-model.mjs';
 import { PAIR_LIMITS } from '/pairs.mjs';
-import { flywheelChip } from './burn-labels.mjs';
 import { exploreModel, pageOf, pageButtons, trendingTokens, exploreStateFromHash, exploreHash, PER_PAGE_WIDE, isKothContender, kingOfTheHill, curveProgress, KOTH_PROGRESS } from './discovery.mjs';
 
 const reducedMotion = () => { try { return matchMedia('(prefers-reduced-motion: reduce)').matches; } catch { return false; } };
@@ -84,11 +83,8 @@ function kothBadge(token, king) {
   const crowned = king && keyOf(king) === keyOf(token);
   return h('span.koth-badge', { 'data-king': crowned ? 'true' : undefined, title: crowned ? 'King of the Hill: the token closest to graduating' : `King of the Hill contender: ${Math.round(KOTH_PROGRESS * 100)}% or more of its curve sold` }, icon('crown', 'icon-xs'), crowned ? 'King' : 'KOTH');
 }
-/** Flywheel tokens: the share of supply the flywheels have bought and burned. */
-function burnBadge(token) {
-  const chip = flywheelChip(token);
-  return chip ? h('span.burn-badge', { title: chip.title, 'aria-label': chip.title }, icon('flame', 'icon-xs'), chip.text) : null;
-}
+// No flywheel burn badge: the 50 / 30 / 20 model has no flywheel (Malik, 23 November 2026).
+const burnBadge = () => null;
 /** A scroller with prev/next buttons and edge fades that only show while there is more to scroll. */
 function scroller(track, prev, next) {
   const sync = () => {

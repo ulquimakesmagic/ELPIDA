@@ -18,7 +18,6 @@ import {holderChat} from './holder-chat.mjs';
 import {filterTrades} from './trade-filter.mjs';
 import {odometer} from './odometer.mjs';
 import {filterByWho,topTraders,safetyChecks,quickAmounts,walletHolders} from './token-insights.mjs';
-import {flywheelChip} from './burn-labels.mjs';
 import { creatorSplitCard, creatorStrategyCard, identityAllocationCard, claimFeesTag, creatorWalletCard } from './creator-split.mjs';
 import { solanaCreatorVaultCard, solanaClaimTag } from './solana-creator-vault-view.mjs';
 export { exceedsRemaining };
@@ -139,10 +138,9 @@ export function renderToken(ctx, address) {
           h('span.tk-tag.tk-addr', { title: token.address }, short(token.address), copyButton(token.address, '')),
           h('span.tk-tag', { title: 'Copy a link that shows a preview card on X, Telegram and Discord' }, 'Share', copyButton(`${location.origin}/token/${encodeURIComponent(token.network ?? ctx.wallet.net.key)}/${token.address}`, '')),
           claimFeesTag(ctx, token), solanaClaimTag(ctx, token),
-          isV2Token(token) ? h('span.tk-tag.tk-tag-test', { title: `ELPIDA ${token.launchpad === 'v2.3-hook' ? 'V2.3' : 'V2'}: ${((token.feeBps ?? 125) / 100).toFixed(2)}% fee for good, shared ${token.launchpad === 'v2.3-hook' ? '50% traders (monthly airdrop) / 30% creator / 20% Elpida' : '30% creator / 30% trader airdrop / 10% flywheel / 10% holders / 20% treasury'}; liquidity locked from launch in one Uniswap v4 pool. Not independently audited.` }, icon('flask-conical', 'icon-xs'), `V2 ${ctx.wallet?.net?.mainnet ? 'beta' : 'test'} · ${((token.feeBps ?? 125) / 100).toFixed(2)}% fee`) : isV4Token(token) ? h('span.tk-tag.tk-tag-test', { title: 'Model 11: the curve runs inside one Uniswap v4 pool, liquidity locked from launch. Not audited; test networks only.' }, icon('flask-conical', 'icon-xs'), token.graduated ? 'Model 11 test · past the milestone' : 'Model 11 test · Uniswap v4') : token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null,
+          isV2Token(token) ? h('span.tk-tag.tk-tag-test', { title: `ELPIDA: ${((token.feeBps ?? 125) / 100).toFixed(2)}% fee for good, shared 50% traders (monthly airdrop) / 30% creator / 20% Elpida; liquidity locked from launch in one Uniswap v4 pool. Not independently audited.` }, icon('flask-conical', 'icon-xs'), `V2 ${ctx.wallet?.net?.mainnet ? 'beta' : 'test'} · ${((token.feeBps ?? 125) / 100).toFixed(2)}% fee`) : isV4Token(token) ? h('span.tk-tag.tk-tag-test', { title: 'Model 11: the curve runs inside one Uniswap v4 pool, liquidity locked from launch. Not audited; test networks only.' }, icon('flask-conical', 'icon-xs'), token.graduated ? 'Model 11 test · past the milestone' : 'Model 11 test · Uniswap v4') : token.graduated ? h('span.tk-tag.tk-tag-live', dex === 'test' ? 'Graduated' : `On ${dex}`) : null,
           (stock => stock ? h('span.tk-tag.tk-tag-stock', { 'data-ok': String(stock.usable), title: stock.reason ?? 'Stock price is fresh; the curve can graduate.' }, icon('chart-candlestick', 'icon-xs'), `${q} · ${STOCK_LABELS[stock.status] ?? stock.status}`) : null)(testStockStatus(token.stock)),
-          kothTag(ctx, token),
-          (chip => chip ? h('span.tk-tag.tk-tag-burn', { title: chip.title }, icon('flame', 'icon-xs'), chip.text) : null)(flywheelChip(token)))),
+          kothTag(ctx, token))),
         h('div.tk-sub', h('div.tk-about', descText, descMore),
           h('div.tk-links', ...linkPills, explorerHref ? h('a.tk-pill.tk-pill-end', { href: explorerHref, target: '_blank', rel: 'noopener noreferrer', title: 'Open in explorer' }, 'Explorer', icon('arrow-up-right', 'icon-sm')) : null, txUrl(launchHash) ? h('a.tk-pill', { href: txUrl(launchHash), target: '_blank', rel: 'noopener noreferrer', title: 'The transaction that created this token' }, 'Launch transaction', icon('arrow-up-right', 'icon-sm')) : null)))));
   const chart = terminalChart(ctx, token, q);
@@ -205,9 +203,14 @@ export function renderToken(ctx, address) {
   const safety = h('section.tk-card.tk-safety', { 'aria-label': 'Safety' }, h('h2.tk-h', 'Safety'), safetyList, h('p.hint', 'Checks come from the contracts and indexed holders. A warning is worth a look, not a verdict.'));
   const me = ctx.mode === 'testnet' ? ctx.wallet?.address : ctx.state.wallet;
   const info = h('div.tk-info.stack', details, addresses, about, tech);
+  // Price, market cap and liquidity follow every trade (Malik, 23 November 2026: they waited for the app's minute-long
+  // background refresh). The server indexes each block within a few seconds; a trade of this token re-reads the listing,
+  // at most once every 3 seconds.
+  let statsAt = 0, statsTimer = null;
+  const liveStats = () => { if (statsTimer) return; const wait = Math.max(0, statsAt + 3000 - Date.now()); statsTimer = setTimeout(() => { statsTimer = null; statsAt = Date.now(); if (location.hash.toLowerCase().includes(String(token.address).toLowerCase())) ctx.refresh?.({ preserveInput: true }).catch?.(() => {}); }, wait); };
   const activity = marketActivity(ctx, token, q, { addressUrl, isCreator, me, info,
     onCounts: ({ holders }) => { holdersValue.textContent = holders ?? '—'; },
-    onHolders: rows => drawSafety(rows), onLiveTrade: () => { chart.refresh?.(); document.dispatchEvent(new CustomEvent('elpida:trade', { detail: { token: token.address } })); } });
+    onHolders: rows => drawSafety(rows), onLiveTrade: () => { chart.refresh?.(); document.dispatchEvent(new CustomEvent('elpida:trade', { detail: { token: token.address } })); liveStats(); } });
   const desk=holderTerminal(ctx,token,{onVolume:v=>volumeValue.textContent=fmtValue(v,token)});
   const trade = tradePanel(ctx, token, { dex, solana });
   const sideButton = s => h(`button.btn.btn-lg.${s === 'buy' ? 'btn-buy' : 'btn-sell'}`, { type: 'button', on: { click: () => { trade.selectSide?.(s); trade.scrollIntoView({ behavior: matchMedia('(prefers-reduced-motion: reduce)').matches ? 'auto' : 'smooth', block: 'center' }); } } }, s === 'buy' ? `Buy ${token.symbol}` : 'Sell');

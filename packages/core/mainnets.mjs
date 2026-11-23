@@ -79,15 +79,15 @@ function sharedOf(record, plan) {
 /**
  * The network entry for `template` from its deployment `record` and `plan`, or `{ net: null, reason }` while it is not
  * usable: no record yet, not "ready", another chain, or a contract or plan address missing.
- * `next`: the chain's V2.3 launchpad ({ record, plan }, 23 November 2026). Once ready it takes new launches
- * (`v2.shared`) and the V2.0 launchpad stays in `v2.previous`, so its tokens keep trading and earning; a chain with only
- * a V2.3 record (Robinhood Chain) runs on it alone.
+ * `next`: the chain's V2.3 launchpad ({ record, plan }, 23 November 2026). Once ready the chain runs on V2.3 alone
+ * (Malik: "totally remove previous version and only implement the 50, 30, 20"): the V2.0 launchpad is no longer
+ * indexed, traded, kept or shown on the site. Its contracts stay on chain, untouched.
  */
 export function mainnetNetwork(template, record, plan, next = null) {
   const nextReady = next?.record && !unusable(template, next.record, next.plan) ? next : null;
   const why = unusable(template, record, plan);
   if (why && !nextReady) return { net: null, reason: why };
-  const main = nextReady ?? { record, plan }, previous = nextReady && !why ? [sharedOf(record, plan)] : [];
+  const main = nextReady ?? { record, plan }, previous = [];
   const { planKey, usdMaxAge, payoutDex, ...facts } = template, p = main.plan, r = main.record;
   return {
     net: {
