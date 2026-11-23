@@ -1,0 +1,184 @@
+{
+  "network": "base-mainnet-v23",
+  "name": "Base",
+  "chainId": 8453,
+  "planSha256": "99fe98be159c560db58e795fc4bf620b803bd5d3f113a871f9122981d10fb925",
+  "approval": "base-mainnet-v23-99fe98be159c560d.json",
+  "model": "v2.3-hook",
+  "compiler": "solc 0.8.26 (cancun, via IR, 200 runs)",
+  "gitCommit": "4c4f94bc7ea02bdc06cd828f49700b1f642fa7b1",
+  "startMcapUsd": 20000,
+  "contracts": {
+    "create2": "0x84B5af2d2fa874833838Ad0BF7bAEaDA075A129A",
+    "factory": "0xF8E6aF46a5c602F74B90f5977D7587Ce827e1B70",
+    "airdrop": "0x942b76041a3D603c14Dae1799834B42222Bd0b8E",
+    "hook": "0x31bdfd511F7284B7B5c24A13ddE07D2e241D28cc",
+    "router": "0x1908CF65F0650ccf0A211986442f6FF9ed342119",
+    "usdcAirdrop": "0x57ea1102545D4411214B21d8d6E8C952D7b11622"
+  },
+  "txs": {
+    "create2": {
+      "hash": "0xc7ff4101e73739b0f063f36a507ef1c2e26b83993bd8319659aee20b384f634f",
+      "block": 61314678
+    },
+    "factory": {
+      "hash": "0x6cbb002ceccd3f546fd92798ff0220c7ffdaf592e5b440573cceaf595e4d56b2",
+      "block": 61314709
+    },
+    "airdrop": {
+      "hash": "0x7789b3fcc9f9e6fabcd49fe6a37149fe888dfabe28a9916fd5dafaaf3b3a00e4",
+      "block": 61314739
+    },
+    "hook": {
+      "hash": "0x4fe025fa936f6b8e88bba81d969feb79640e33380740d6c6e227b535be481001",
+      "block": 61314754
+    },
+    "router": {
+      "hash": "0x2d5333b20252aca7e7510a25ee776b88a4ed75ca1761ee3cb95a7af7ef9214a0",
+      "block": 61314780
+    },
+    "usdcAirdrop": {
+      "hash": "0xfc72cf429ecaeefb740deb0a920174f8fcd80ac0341bf10cc0931c8f73d79140",
+      "block": 61317583
+    }
+  },
+  "deployer": "0x9c99387c63A5d893D3bDe9c71CF2fe2b1191F08E",
+  "block": 61314709,
+  "airdropGenesis": 1793491200,
+  "hookSalt": "0x0000000000000000000000000000000000000000000000000000000000000537",
+  "gate": {
+    "recordedAt": "2026-11-23T17:02:20.420Z",
+    "plan": {
+      "chainId": 8453,
+      "network": "Base",
+      "mainnet": true,
+      "startMcapUsd": 20000,
+      "treasury": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01",
+      "recipients": [
+        "0x942b76041a3D603c14Dae1799834B42222Bd0b8E",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000"
+      ],
+      "minFeeBps": 100,
+      "metadataRequired": true,
+      "approver": "Malik",
+      "approvedAt": 1795392000000,
+      "planHash": "0xbff4435663f84c3897754586cc91d565d8e61bc18e60488551d4cb80e449f7bb"
+    },
+    "deployment": {
+      "factory": "0xF8E6aF46a5c602F74B90f5977D7587Ce827e1B70",
+      "hook": "0x31bdfd511F7284B7B5c24A13ddE07D2e241D28cc",
+      "router": "0x1908CF65F0650ccf0A211986442f6FF9ed342119",
+      "blockNumber": 61314709,
+      "transactions": [
+        "0xc7ff4101e73739b0f063f36a507ef1c2e26b83993bd8319659aee20b384f634f",
+        "0x6cbb002ceccd3f546fd92798ff0220c7ffdaf592e5b440573cceaf595e4d56b2",
+        "0x7789b3fcc9f9e6fabcd49fe6a37149fe888dfabe28a9916fd5dafaaf3b3a00e4",
+        "0x4fe025fa936f6b8e88bba81d969feb79640e33380740d6c6e227b535be481001",
+        "0x2d5333b20252aca7e7510a25ee776b88a4ed75ca1761ee3cb95a7af7ef9214a0"
+      ]
+    }
+  },
+  "constructorChecks": [
+    {
+      "check": "factory treasury",
+      "ok": true,
+      "detail": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01"
+    },
+    {
+      "check": "factory start $20,000",
+      "ok": true,
+      "detail": "20000"
+    },
+    {
+      "check": "factory requires metadata",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "check": "factory has launch controls",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "check": "hook factory",
+      "ok": true,
+      "detail": "0xF8E6aF46a5c602F74B90f5977D7587Ce827e1B70"
+    },
+    {
+      "check": "hook treasury",
+      "ok": true,
+      "detail": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01"
+    },
+    {
+      "check": "hook PoolManager",
+      "ok": true,
+      "detail": "0x498581fF718922c3f8e6A244956aF099B2652b2b"
+    },
+    {
+      "check": "hook airdrop vault",
+      "ok": true,
+      "detail": "0x942b76041a3D603c14Dae1799834B42222Bd0b8E"
+    },
+    {
+      "check": "hook flywheel vault",
+      "ok": true,
+      "detail": "0x0000000000000000000000000000000000000000"
+    },
+    {
+      "check": "hook holder vault",
+      "ok": true,
+      "detail": "0x0000000000000000000000000000000000000000"
+    },
+    {
+      "check": "hook is V2.3",
+      "ok": true,
+      "detail": "23"
+    },
+    {
+      "check": "hook split 50% traders / 30% creator / 20% treasury / 0 / 0",
+      "ok": true,
+      "detail": "5000/3000/2000/0/0"
+    },
+    {
+      "check": "hook minimum fee",
+      "ok": true,
+      "detail": "100"
+    },
+    {
+      "check": "airdrop operator is the keeper",
+      "ok": true,
+      "detail": "0x10299c3Cff25C3e775e91463c5D9c8670483d39F"
+    },
+    {
+      "check": "airdrop period",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "check": "router hook",
+      "ok": true,
+      "detail": "0x31bdfd511F7284B7B5c24A13ddE07D2e241D28cc"
+    },
+    {
+      "check": "router PoolManager",
+      "ok": true,
+      "detail": "0x498581fF718922c3f8e6A244956aF099B2652b2b"
+    },
+    {
+      "check": "gate (#234) verifyDeployment: no mismatches",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "safeBatch": "base-mainnet-v23-safe-batch.json",
+  "status": "awaiting_safe",
+  "pending": {
+    "safe": "Execute the Safe batch (setHook, configureUsdPricing, approveQuote USDC, setGuardian, setDailyLaunchCap), then run verify."
+  },
+  "usdcAirdrop": {
+    "deployedAt": "2026-11-23T17:11:32.783Z",
+    "deployer": "0x9c99387c63A5d893D3bDe9c71CF2fe2b1191F08E",
+    "readBack": "ok"
+  }
+}
