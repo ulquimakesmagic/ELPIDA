@@ -84,3 +84,15 @@ test('V2.3 next to V2.0: one keeper worker per launchpad, sharing the signer; th
   assert.equal(k.workers[0].deployment.holder, undefined); assert.equal(k.workers[1].deployment.holder, a(4));
   k.workers.forEach(w => w.index()); assert.deepEqual(calls, [['bnb-mainnet', a(21)], ['bnb-mainnet', a(2)]]);
 });
+
+test('BNB Chain wallet funders come from NodeReal MegaNode when its key is set (Etherscan has no free BNB tier)', async () => {
+  const { funderFor, megaNodeFunder } = await import('../apps/api/v2-keeper.mjs');
+  const calls = [], wallet = a(0xbeef), funder = a(0xf00d);
+  const fetchImpl = async (url, opts) => { calls.push([url, opts?.body ? JSON.parse(opts.body) : null]); return { json: async () => ({ jsonrpc: '2.0', id: 1, result: { transfers: [{ from: funder.toUpperCase().replace('0X', '0x'), to: wallet, value: '0x1' }] } }) }; };
+  assert.equal(await megaNodeFunder('KEY', fetchImpl)(wallet), funder);
+  assert.equal(calls[0][0], 'https://bsc-mainnet.nodereal.io/v1/KEY'); assert.equal(calls[0][1].method, 'nr_getAssetTransfers'); assert.equal(calls[0][1].params[0].toAddress, wallet);
+  assert.equal(funderFor(56, {}), null);
+  assert.ok(funderFor(56, { ELPIDA_MEGANODE_API_KEY: 'K' })); assert.ok(funderFor(56, { ELPIDA_EXPLORER_API_KEY: 'E' }));
+  calls.length = 0; await funderFor(56, { ELPIDA_MEGANODE_API_KEY: 'K', ELPIDA_EXPLORER_API_KEY: 'E' }, fetchImpl)(wallet); assert.match(calls[0][0], /nodereal/, 'MegaNode first on BNB');
+  calls.length = 0; await funderFor(8453, { ELPIDA_MEGANODE_API_KEY: 'K', ELPIDA_EXPLORER_API_KEY: 'E' }, async u => { calls.push([u]); return { json: async () => ({ result: [] }) }; })(wallet); assert.match(calls[0][0], /etherscan/, 'Etherscan on Base');
+});

@@ -738,6 +738,28 @@ export function etherscanFunder(chainId, apiKey, fetchImpl = fetch) {
 }
 
 /**
+ * BNB Chain wallet funders through NodeReal's MegaNode (BSCTrace), 23 November 2026: Etherscan API V2 has no free tier
+ * for BNB Chain, so the airdrop's wallet linking could not look funders up there. `nr_getAssetTransfers` (MegaNode's
+ * replacement for `txlist`) returns the first coin transfers into the wallet; the sender of the first one is its funder.
+ */
+export function megaNodeFunder(apiKey, fetchImpl = fetch) {
+  const url = `https://bsc-mainnet.nodereal.io/v1/${encodeURIComponent(apiKey)}`;
+  return async wallet => {
+    const body = { jsonrpc: '2.0', id: 1, method: 'nr_getAssetTransfers', params: [{ toAddress: wallet, category: ['external'], order: 'asc', excludeZeroValue: true, pageSize: 5 }] };
+    const r = await (await fetchImpl(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body), signal: AbortSignal.timeout(10_000) })).json();
+    const list = r?.result?.transfers ?? r?.result ?? [];
+    const tx = (Array.isArray(list) ? list : []).find(t => lower(t.to) === lower(wallet) && t.from);
+    return tx ? lower(tx.from) : null;
+  };
+}
+
+/** The funder lookup for a chain: MegaNode on BNB Chain with ELPIDA_MEGANODE_API_KEY, else Etherscan with its key. */
+export function funderFor(chainId, env, fetchImpl = fetch) {
+  if (Number(chainId) === 56 && env.ELPIDA_MEGANODE_API_KEY) return megaNodeFunder(env.ELPIDA_MEGANODE_API_KEY, fetchImpl);
+  return env.ELPIDA_EXPLORER_API_KEY ? etherscanFunder(chainId, env.ELPIDA_EXPLORER_API_KEY, fetchImpl) : null;
+}
+
+/**
  * The server's keeper: on only with ELPIDA_V2_KEEPER_KEY, on networks with a pinned V2 deployment. Funding links
  * need ELPIDA_EXPLORER_API_KEY (Etherscan multichain); without it only creator transfers link wallets.
  * On the mainnet site (17 Nov) the networks are mainnets: the keeper runs as 'mainnet' (fee collection and creator
@@ -768,7 +790,7 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
     const provider = new JsonRpcProvider(serverRpcUrl(net, env), undefined, { cacheTimeout: -1, batchMaxCount: 1 }), signer = Object.assign(new NonceManager(new Wallet(key, provider)), { address });
     return [net.v2.shared, ...(net.v2.previous ?? [])].filter(d => d?.hook && d.airdrop).map(d => ({ chain: d.model === 'v2.3-hook' ? `${net.key}-v23` : net.key, net, provider, signer, deployment: { ...d, poolManager: net.v4?.poolManager },
       dex: testnetDexes[net.key]?.enabled ? testnetDexes[net.key] : net.payoutDex ?? null, usdc: payoutStable(net, oracles)?.address ?? null, usdcDecimals: payoutStable(net, oracles)?.decimals ?? 6,
-      index: () => indexFor(net.key, d.factory), funderOf: env.ELPIDA_EXPLORER_API_KEY ? etherscanFunder(net.chainId, env.ELPIDA_EXPLORER_API_KEY) : null, ignoredFunders,
+      index: () => indexFor(net.key, d.factory), funderOf: funderFor(net.chainId, env), ignoredFunders,
       usdPerUnit: asset => { if (lower(asset) === lower(ZeroAddress)) { const p = prices()[net.key]; return p?.status === 'fresh' ? p.usd : null; } const usdc = oracles[net.key]?.usdc; if (usdc && lower(asset) === lower(usdc)) return 1;
         // A real tokenized stock (SPIDERMAN/AAPLon): its approved feed, fresh only (apps/api/stock-prices.mjs, #347).
         const stock = stockUsd(net.key, asset); return Number.isFinite(stock) && stock > 0 ? stock : null; } }));
