@@ -111,3 +111,15 @@ test('creation tx is read raw where ethers refuses an empty "to" (BNB Chain, 20 
   assert.deepEqual(calls, ['eth_getTransactionByHash']);
   assert.equal(await creationTx({ send: async () => null }, '0x' + '2'.repeat(64)), null);
 });
+
+test('Robinhood Chain verifies on its Blockscout (no Etherscan key, its own API, no chainid)', async () => {
+  const { BLOCKSCOUT, EXPLORERS, needsApiKey } = await import('../scripts/v2-explorer-verify.mjs');
+  assert.equal(EXPLORERS[4663], 'https://robinhoodchain.blockscout.com'); assert.equal(needsApiKey(4663), false); assert.equal(needsApiKey(8453), true);
+  const e = explorer(p => p.action === 'getsourcecode' ? { status: '1', result: [{ SourceCode: '' }] } : p.action === 'verifysourcecode' ? { status: '1', result: 'guid-1' } : { status: '1', result: 'Pass - Verified' });
+  assert.deepEqual(await submit({ fetch: e.fetch, sleep, chainId: 4663, apiKey: '', job }), { ok: true, detail: 'verified' });
+  for (const c of e.calls) { assert.ok(c.url.startsWith(BLOCKSCOUT[4663]), c.url); assert.doesNotMatch(c.url, /etherscan|chainid=/); }
+  assert.ok(e.calls.find(c => c.post && c.params.action === 'verifysourcecode'), 'the source is posted');
+  const base = explorer(() => ({ status: '1', result: [{ SourceCode: 'x' }] }));
+  await submit({ fetch: base.fetch, sleep, chainId: 8453, apiKey: KEY, job });
+  assert.match(base.calls[0].url, /^https:\/\/api\.etherscan\.io\/v2\/api\?chainid=8453&/, 'Etherscan chains unchanged');
+});
