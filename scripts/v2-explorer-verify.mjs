@@ -33,7 +33,15 @@ export const CONTRACTS = {
   router: 'contracts/evm/v4/ElpidaV4Router.sol:ElpidaV4Router',
 };
 const ART_KEY = { create2: 'create2', factory: 'factory', airdrop: 'distributor', holder: 'distributor', flywheel: 'flywheel', hook: 'hook', router: 'router' };
-export const EXPLORERS = { 8453: 'https://basescan.org', 84532: 'https://sepolia.basescan.org', 1: 'https://etherscan.io', 11155111: 'https://sepolia.etherscan.io', 56: 'https://bscscan.com', 97: 'https://testnet.bscscan.com' };
+export const EXPLORERS = { 8453: 'https://basescan.org', 84532: 'https://sepolia.basescan.org', 1: 'https://etherscan.io', 11155111: 'https://sepolia.etherscan.io', 56: 'https://bscscan.com', 97: 'https://testnet.bscscan.com', 4663: 'https://robinhoodchain.blockscout.com' };
+/**
+ * Chains whose explorer is a Blockscout (Robinhood Chain, 23 November 2026): Etherscan API V2 does not cover them, so
+ * the same calls go to the explorer's own Etherscan-compatible API, which needs no key.
+ */
+export const BLOCKSCOUT = { 4663: 'https://robinhoodchain.blockscout.com/api' };
+export const needsApiKey = chainId => !BLOCKSCOUT[Number(chainId)];
+const endpoint = chainId => BLOCKSCOUT[Number(chainId)] ? `${BLOCKSCOUT[Number(chainId)]}?` : `${API}?chainid=${chainId}&`;
+const codeLink = (site, chainId, address) => BLOCKSCOUT[Number(chainId)] ? `${site}/address/${address}?tab=contract` : `${site}/address/${address}#code`;
 export const compilerVersion = () => 'v' + solc.version().replace(/\.Emscripten.*$/, '');
 const API = 'https://api.etherscan.io/v2/api';
 const CREATE2 = new Interface(['function deploy(bytes,bytes32) returns(address)']);
@@ -124,7 +132,8 @@ const wait = ms => new Promise(r => setTimeout(r, ms));
  */
 async function call(fetchImpl, chainId, params, post, sleep = wait) {
   for (let attempt = 0; ; attempt++) {
-    const res = await fetchImpl(`${API}?chainid=${chainId}${post ? '' : '&' + form(params)}`, post ? { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form(params) } : {});
+    const url = endpoint(chainId), query = post ? url.slice(0, -1) : url + form(params);
+    const res = await fetchImpl(query, post ? { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body: form(params) } : {});
     if (!res.ok) throw new Error(`explorer answered HTTP ${res.status}`);
     const body = await res.json();
     if (attempt < 8 && /rate limit/i.test(String(body.result ?? body.message))) { await sleep(1_500 * (attempt + 1)); continue; }
@@ -163,7 +172,7 @@ export async function verifyOnExplorer({ provider, plan, record, apiKey, fetch: 
   log('comparing the deployed bytecode with this checkout\'s build…');
   const jobs = await explorerJobs({ provider, record, build }), out = [];
   for (const job of jobs) {
-    const link = `${site}/address/${job.address}#code`;
+    const link = codeLink(site, chainId, job.address);
     if (!job.ok) { out.push({ check: job.key, ok: false, detail: job.detail }); continue; }
     log(`submitting ${job.key} (${job.contractName.split(':')[1]}${job.eol === 'disk' ? '' : `, ${job.eol.toUpperCase()} sources`})…`);
     const r = await submit({ fetch: fetchImpl, sleep, chainId, apiKey, job });
@@ -178,10 +187,10 @@ async function main() {
   const planPath = arg('plan'); if (!planPath) { console.log('usage: node scripts/v2-explorer-verify.mjs --plan deployments/plans/<key>.json'); process.exit(2); }
   const envFile = join(root, '.env');
   if ((!process.env.ETHERSCAN_API_KEY || !process.env.ELPIDA_MAINNET_RPC_URL) && existsSync(envFile)) { try { process.loadEnvFile(envFile); } catch { /* unreadable .env: the checks below say what is missing */ } }
-  const apiKey = (process.env.ETHERSCAN_API_KEY ?? '').trim(), rpc = process.env.ELPIDA_MAINNET_RPC_URL;
-  if (!apiKey) throw new Error('Set ETHERSCAN_API_KEY (a free key from etherscan.io/myapikey) in .env or the shell. Nothing was submitted.');
-  if (!rpc) throw new Error('Set ELPIDA_MAINNET_RPC_URL to the plan\'s chain. Nothing was submitted.');
   const { plan } = readPlan(planPath), recordPath = join(root, 'deployments', `${plan.key}.json`);
+  const apiKey = (process.env.ETHERSCAN_API_KEY ?? '').trim(), rpc = process.env.ELPIDA_MAINNET_RPC_URL;
+  if (!apiKey && needsApiKey(plan.chainId)) throw new Error('Set ETHERSCAN_API_KEY (a free key from etherscan.io/myapikey) in .env or the shell. Nothing was submitted.');
+  if (!rpc) throw new Error('Set ELPIDA_MAINNET_RPC_URL to the plan\'s chain. Nothing was submitted.');
   if (!existsSync(recordPath)) throw new Error(`No deployment record at deployments/${plan.key}.json.`);
   const provider = new JsonRpcProvider(rpc, undefined, { staticNetwork: true });
   console.log(`plan ${plan.key} (${plan.name}), compiler ${compilerVersion()}`);
