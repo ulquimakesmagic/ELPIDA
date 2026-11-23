@@ -2,7 +2,7 @@
 // Publishes one launched token's source on its explorer now, without waiting for the keeper's hourly job
 // (apps/api/token-verifier.mjs). Needs ELPIDA_MAINNET_RPC_URL (that chain) and ETHERSCAN_API_KEY (or ELPIDA_EXPLORER_API_KEY).
 //   node scripts/verify-token.mjs --plan deployments/plans/bnb-mainnet.json --token 0xEEcA39F2aF81296De89685e6dDdA58acD5BA1053
-//   Add --debug to compare the explorer's copy of the creation code with this checkout's build instead of submitting.
+//   Add --debug [--tx <launch tx>] to compare the explorer's copy of the creation code with this checkout's build instead of submitting.
 import { readFileSync } from 'node:fs';
 import { join, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -26,7 +26,18 @@ if (rest.includes('--debug')) {
   for (const raw of tokens) {
     const address = getAddress(raw.toLowerCase()), code = (await provider.getCode(address)).toLowerCase();
     const r = await (await fetch(`https://api.etherscan.io/v2/api?chainid=${plan.chainId}&module=contract&action=getcontractcreation&contractaddresses=${address}&apikey=${encodeURIComponent(apiKey)}`)).json();
-    const created = r.result?.[0] ?? {}, onchainInit = String(created.creationBytecode ?? '').toLowerCase();
+    const created = r.result?.[0] ?? {};
+    let onchainInit = String(created.creationBytecode ?? '').toLowerCase();
+    // --tx <launch tx>: the token's real creation code from the node's call trace (when the explorer API will not say).
+    const txArg = rest.includes('--tx') ? rest[rest.indexOf('--tx') + 1] : null;
+    if (!onchainInit && txArg) {
+      try {
+        const trace = await provider.send('debug_traceTransaction', [txArg, { tracer: 'callTracer' }]);
+        const find = c => (['CREATE', 'CREATE2'].includes(c.type) && String(c.to).toLowerCase() === address.toLowerCase() ? c : (c.calls ?? []).map(find).find(Boolean));
+        const hit = find(trace); onchainInit = String(hit?.input ?? '').toLowerCase();
+        console.log(`  node trace: ${hit ? `${hit.type} by ${hit.from}, ${onchainInit.length / 2 - 1} bytes of creation code` : 'the token creation was not found in that transaction'}`);
+      } catch (e) { console.log(`  node trace refused: ${String(e?.shortMessage ?? e?.message ?? e).slice(0, 160)}`); }
+    }
     const c = new Contract(address, ['function name() view returns(string)', 'function symbol() view returns(string)'], provider), [name, symbol] = await Promise.all([c.name(), c.symbol()]);
     console.log(`${address}: name "${name}", symbol "${symbol}", created by ${created.contractCreator ?? '?'} in ${created.txHash ?? '?'}`);
     console.log(`  explorer creation code: ${onchainInit ? onchainInit.length / 2 - 1 + ' bytes' : 'none returned (' + JSON.stringify(r).slice(0, 160) + ')'}`);
