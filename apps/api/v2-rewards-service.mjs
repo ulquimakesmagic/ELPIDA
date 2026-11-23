@@ -8,6 +8,7 @@ import { V2RewardsIndexer, toJson } from '../../packages/indexer/v2-rewards.mjs'
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { payoutStable } from '../../packages/core/payout-stable.mjs';
 import { testPairReference } from '../../packages/core/pairs.mjs';
+import { serverRpcUrl } from '../../packages/core/mainnets.mjs';
 
 const hostOf = u => { try { return new URL(u).host; } catch { return 'rpc'; } };
 const TICK_MS = 60_000, FEED_MAX_AGE = 4 * 86_400, PRICE_TTL_MS = 5 * 60_000;
@@ -33,22 +34,26 @@ export async function stockUsd(provider, factory, asset) {
 
 export class V2RewardsService {
   /** `dataDir`: where each network's index snapshot is kept, so a deploy resumes instead of re-reading from deployment. */
-  constructor({ networks, providerFactory = rpc => new JsonRpcProvider(rpc, undefined, { cacheTimeout: -1, batchMaxCount: 1 }), log = console.log, oracles = usdOracles(), dataDir = null }) {
+  constructor({ networks, providerFactory = rpc => new JsonRpcProvider(rpc, undefined, { cacheTimeout: -1, batchMaxCount: 1 }), log = console.log, oracles = usdOracles(), dataDir = null, env = {} }) {
     this.log = log; this.entries = []; this.oracles = oracles; this.dataDir = dataDir;
-    for (const net of networks.filter(n => !n.mainnet && n.v2?.shared?.hook)) {
-      const d = net.v2.shared;
+    // Mainnets too (22 November 2026: the analytics page hid the rewards section on the mainnet site), read through the
+    // server's private RPC (ELPIDA_RPC_<chainId>) first, as the keeper does, then the public one.
+    // One entry per launchpad (23 November 2026): the current one and any earlier one (`v2.previous`) of the network.
+    // The V2.0 entry keeps the network's key (its saved snapshot resumes); a V2.3 entry is "<network>-v23".
+    for (const net of networks.filter(n => n.v2?.shared?.hook)) for (const d of [net.v2.shared, ...(net.v2.previous ?? [])].filter(x => x?.hook)) {
+      const entryKey = d.model === 'v2.3-hook' ? `${net.key}-v23` : net.key, older = d !== net.v2.shared;
       // Every configured RPC, in order: a node that keeps failing (pruned history after a restart re-sync, rate limits)
       // is swapped for the next one, as the trading indexer does (Malik, 11 Nov: Sepolia's vaults read $0 after a deploy).
-      const rpcs = [...new Set([net.rpcUrl, ...(net.rpcFallbacks ?? [])].filter(Boolean))], provider = providerFactory(rpcs[0]);
+      const rpcs = [...new Set([net.mainnet ? serverRpcUrl(net, env) : null, net.rpcUrl, ...(net.rpcFallbacks ?? [])].filter(Boolean))], provider = providerFactory(rpcs[0]);
       this.providerFactory = providerFactory;
-      this.entries.push({ net, provider, rpcs, rpc: 0, failures: 0, prices: new Map(), index: new V2RewardsIndexer({ provider, contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel, usdcAirdrop: d.usdcAirdrop, usdcHolder: d.usdcHolder }, keeper: d.keeper, fromBlock: d.block, batchSize: 100, maxBatch: 5000, parallel: 4, onProgress: ix => this.save(net.key, ix) }), busy: false });
-      this.load(net.key, this.entries.at(-1).index);
+      this.entries.push({ net, key: entryKey, label: older ? `${net.name} · earlier launchpad` : net.name, deployment: d, provider, rpcs, rpc: 0, failures: 0, prices: new Map(), index: new V2RewardsIndexer({ provider, contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel, usdcAirdrop: d.usdcAirdrop, usdcHolder: d.usdcHolder }, keeper: d.keeper, fromBlock: d.block, batchSize: 100, maxBatch: 5000, parallel: 4, onProgress: ix => this.save(entryKey, ix) }), busy: false });
+      this.load(entryKey, this.entries.at(-1).index);
     }
   }
   get deployed() { return this.entries.length > 0; }
   start() {
     if (!this.deployed) return this;
-    const run = () => { for (const e of this.entries) if (!e.busy) { e.busy = true; e.index.sync().then(() => { e.failures = 0; this.save(e.net.key, e.index); return this.refreshPrices(e); }).catch(err => { this.log(`[v2-rewards] ${e.net.key}: ${err.message}`); this.failover(e); }).finally(() => { e.busy = false; }); } };
+    const run = () => { for (const e of this.entries) if (!e.busy) { e.busy = true; e.index.sync().then(() => { e.failures = 0; this.save(e.key, e.index); return this.refreshPrices(e); }).catch(err => { this.log(`[v2-rewards] ${e.net.key}: ${err.message}`); this.failover(e); }).finally(() => { e.busy = false; }); } };
     run(); this.timer = setInterval(run, TICK_MS); this.timer.unref?.();
     return this;
   }
@@ -85,7 +90,7 @@ export class V2RewardsService {
       if (BigInt(q) === 0n || q === stable || q === usdc) continue;
       const cached = e.prices.get(q);
       if (cached && nowMs - cached.at < PRICE_TTL_MS) continue;
-      e.prices.set(q, { usd: await stockUsd(e.provider, e.net.v2.shared.factory, q), at: nowMs });
+      e.prices.set(q, { usd: await stockUsd(e.provider, e.deployment.factory, q), at: nowMs });
     }
   }
 
@@ -95,27 +100,27 @@ export class V2RewardsService {
    */
   summary(prices = {}, now = Math.floor(Date.now() / 1000), quotes = () => []) {
     if (!this.deployed) return { deployed: false, chains: [] };
-    return { deployed: true, updatedAt: now, chains: this.entries.map(({ net, index }) => {
+    return { deployed: true, updatedAt: now, chains: this.entries.map(({ net, index, key, label, deployment }) => {
       const p = prices[net.key], fresh = p?.status === 'fresh' && Number.isFinite(p.usd) && p.usd > 0;
       const assets = { [ZeroAddress]: { symbol: net.nativeCurrency.symbol, decimals: 18, usd: fresh ? p.usd : null } };
       // The payout stablecoin (USDC, USDG or a labelled test dollar) is always known, at $1.
       const stable = payoutStable(net, this.oracles);
       if (stable) assets[stable.address.toLowerCase()] = { symbol: stable.symbol, decimals: stable.decimals, usd: 1 };
-      const priced = a => this.entries.find(x => x.net === net)?.prices.get(a)?.usd ?? null;
+      const priced = a => this.entries.find(x => x.key === key)?.prices.get(a)?.usd ?? null;
       // A stock's live feed first; a labelled test stock whose feed is unset falls back to its round test price, as the
       // token page does (testPairReference: test networks only).
       for (const t of quotes(net.key) ?? []) if (t?.quoteAddress && t.pair !== 'native' && !assets[t.quoteAddress.toLowerCase()]) { const a = t.quoteAddress.toLowerCase(); assets[a] = { symbol: t.quoteSymbol ?? 'token', decimals: Number(t.quoteDecimals ?? 18), usd: t.pair === 'usdc' ? 1 : priced(a) ?? testPairReference({ ...t, network: net.key })?.usd ?? null }; }
       // Pair assets the index saw that the public listings have not (yet): still priced when their feed answers.
-      for (const [a, p] of this.entries.find(x => x.net === net)?.prices ?? []) if (!assets[a] && p.usd) assets[a] = { symbol: 'stock', decimals: 18, usd: p.usd };
-      return { key: net.key, name: net.name, explorer: net.explorer ?? null, testnet: true, assets, ...toJson(index.summary(now)) };
+      for (const [a, p] of this.entries.find(x => x.key === key)?.prices ?? []) if (!assets[a] && p.usd) assets[a] = { symbol: 'stock', decimals: 18, usd: p.usd };
+      return { key, network: net.key, name: label, launchpad: deployment.model ?? 'v2-hook', split: deployment.split ?? null, explorer: net.explorer ?? null, testnet: !net.mainnet, mainnet: !!net.mainnet, assets, ...toJson(index.summary(now)) };
     }) };
   }
 
   /** The V2 flywheel's burns on one network (lowercase token → base units); empty where V2 is not deployed. */
-  burnedByToken(key) { return this.entries.find(e => e.net.key === key)?.index.burnedByToken() ?? new Map(); }
+  burnedByToken(key) { const out = new Map(); for (const e of this.entries.filter(x => x.net.key === key)) for (const [t, v] of e.index.burnedByToken()) out.set(t, v); return out; }
 
   payouts(wallet) {
     if (!/^0x[0-9a-fA-F]{40}$/.test(String(wallet ?? ''))) throw new Error('Enter a wallet address.');
-    return { wallet: wallet.toLowerCase(), chains: this.entries.map(({ net, index }) => ({ key: net.key, name: net.name, payouts: toJson(index.payoutsOf(wallet)) })) };
+    return { wallet: wallet.toLowerCase(), chains: this.entries.map(({ net, index, key, label }) => ({ key, network: net.key, name: label, payouts: toJson(index.payoutsOf(wallet)) })) };
   }
 }

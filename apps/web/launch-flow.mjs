@@ -14,7 +14,7 @@ import { stockPicker, loadStockCatalog, stockCatalog } from './stock-picker.mjs'
 import { curveShape, DEX_MODEL, BETA_MODEL, BASE_FEE_BPS, LOCAL_START_FDV_USD } from '/curve-model.mjs';
 import { v2Deployment } from './v4-launchpad.mjs';
 import { splitPreview } from './v2-launchpad.mjs';
-import { V2, V2_MODEL } from '/v2-economics.mjs';
+import { V2, V2_MODEL, feeSplitOf } from '/v2-economics.mjs';
 import { V4_MODEL } from '/v4-model.mjs';
 // Token-to-token launches were removed from the launch flow (20 November 2026): a new token pairs with the native
 // coin, USDC or a tokenized stock. Existing token-paired tokens keep trading.
@@ -309,7 +309,7 @@ export function renderLaunch(ctx) {
     const presets = [...new Set([minFeeBps(), 125, 200, 300, 400])].filter(b => b >= minFeeBps() && b <= V2.maxFeeBps).sort((a, b) => a - b);
     const input = h('input.input', { type: 'number', min: (minFeeBps() / 100).toFixed(2), max: '4.00', step: '0.01', value: (bps / 100).toFixed(2), inputmode: 'decimal', 'aria-label': 'Trading fee, percent',
       on: { change: e => { const v = Math.round(Number(e.target.value) * 100); set(Number.isFinite(v) ? Math.min(V2.maxFeeBps, Math.max(minFeeBps(), v)) : V2.defaultFeeBps); } } });
-    const preview = splitPreview('1000', bps, 6), labels = { creator: 'You (creator)', traderAirdrop: 'Traders · monthly airdrop', flywheel: 'Flywheel · buy and burn', holderRewards: 'Holders', treasury: 'Elpida treasury' };
+    const preview = splitPreview('1000', bps, 6, feeSplitOf(solana() ? null : v2Deployment(net())?.model)), labels = { creator: 'You (creator)', traderAirdrop: 'Traders · monthly airdrop in USDC', flywheel: 'Flywheel · buy and burn', holderRewards: 'Holders', treasury: 'Elpida treasury' };
     return h('div.stack.fee-picker', h('h3', 'Trading fee'), h('p.small.muted', `Charged on every buy and sell, before and after graduation. You choose it once: it can never be changed. ${(minFeeBps() / 100).toFixed(2)}% to 4.00%; 1.25% is the default. A higher fee earns more per trade but may slow trading.`),
       h('div.fee-row', h('div.fee-presets', { role: 'group', 'aria-label': 'Common fees' }, ...presets.map(b => h('button.btn.btn-secondary.btn-sm', { type: 'button', 'aria-pressed': String(b === bps), on: { click: () => set(b) } }, `${(b / 100).toFixed(2)}%${b === 125 ? ' · default' : ''}`))),
         h('label.fee-input', input, h('span', '%'))),

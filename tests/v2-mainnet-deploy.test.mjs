@@ -208,3 +208,20 @@ test('rehearsal: the guardian stop runs as the plan\'s own guardian when it is n
   await guardianStop({ provider, signers: [{ sendTransaction: async tx => { sent = tx; return { wait: async () => ({}) }; } }], addrs: [guardian], guardian, factory });
   assert.equal(sent.to, factory, 'a test wallet that is the guardian sends it itself');
 });
+
+test('V2.3 rehearsal: no flywheel or holder vault, the hook splits 50 / 30 / 20, the same $20,000 launch and guardian stop', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'elpida-v23-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const { plan } = readPlan(new URL('../deployments/plans/base-mainnet-v23.json', import.meta.url), { local: true });
+  assert.equal(plan.model, 'v2.3-hook'); assert.equal(plan.key, 'base-mainnet-v23');
+  const recordPath = join(dir, 'base-mainnet-v23.rehearsal.json'), r = await rehearse({ plan, recordPath });
+  assert.equal(r.checks.failed.length, 0, JSON.stringify(r.checks.failed));
+  assert.ok(r.record.constructorChecks.every(c => c.ok), JSON.stringify(r.record.constructorChecks.filter(c => !c.ok)));
+  assert.ok(r.record.constructorChecks.some(c => /hook is V2\.3/.test(c.check)) && r.record.constructorChecks.some(c => /50% traders/.test(c.check)));
+  assert.ok(r.verified.every(c => c.ok)); assert.equal(r.record.status, 'ready'); assert.equal(r.record.model, 'v2.3-hook');
+  const saved = JSON.parse(readFileSync(recordPath, 'utf8'));
+  assert.equal(saved.contracts.flywheel, undefined); assert.equal(saved.contracts.holder, undefined);
+  for (const k of ['create2', 'factory', 'airdrop', 'hook', 'router']) assert.match(saved.contracts[k], /^0x[0-9a-fA-F]{40}$/, k);
+  assert.ok(r.launch.startMcapUsd >= 20_000 * 0.999 && r.launch.startMcapUsd <= 20_000 * 1.002, `starts at $${r.launch.startMcapUsd}`);
+  assert.equal(r.guardianPaused, true);
+  assert.match(JSON.parse(readFileSync(recordPath.replace(/\.json$/, '-safe-batch.json'), 'utf8')).meta.name, /^ELPIDA V2\.3 /);
+});

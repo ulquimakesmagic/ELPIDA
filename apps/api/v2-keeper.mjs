@@ -649,6 +649,7 @@ export class V2Keeper {
 
   /** Weekly: holders of tokens whose holder share has reached the threshold; USDC pairs converted to native first. */
   async holder(w) {
+    if (!w.deployment.holder) return; // V2.3 launchpads have no holder share
     const index = w.index(); if (!index) return;
     if (this.usdcDistributor(w, 'holder')) return this.holderUsdc(w, index);
     const dist = new Contract(w.deployment.holder, DISTRIBUTOR, w.signer), current = Number(await dist.currentRound()), hook = new Contract(w.deployment.hook, HOOK, w.provider);
@@ -696,6 +697,7 @@ export class V2Keeper {
 
   /** Daily: buy and burn the top tokens by independent net buying, within the vault's limits. */
   async flywheel(w) {
+    if (!w.deployment.flywheel) return; // V2.3 launchpads have no flywheel
     if (!this.due(w, 'flywheel', DAY)) return;
     const index = w.index(); if (!index) return;
     const fw = new Contract(w.deployment.flywheel, FLYWHEEL, w.signer), now = this.now();
@@ -759,14 +761,17 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
   const address = new Wallet(key).address, oracles = usdOracles(env, nets);
   // Extra exchange or service wallets that must never link the wallets they fund (comma-separated addresses).
   const ignoredFunders = new Set(String(env.ELPIDA_FUNDER_IGNORE ?? '').split(',').map(x => x.trim().toLowerCase()).filter(x => /^0x[0-9a-f]{40}$/.test(x)));
-  const workers = nets.map(net => {
-    const provider = new JsonRpcProvider(serverRpcUrl(net, env), undefined, { cacheTimeout: -1, batchMaxCount: 1 }), d = net.v2.shared;
-    return { chain: net.key, net, provider, signer: Object.assign(new NonceManager(new Wallet(key, provider)), { address }), deployment: { ...d, poolManager: net.v4?.poolManager },
+  // One worker per launchpad (23 November 2026: V2.3 takes new launches, the V2.0 launchpad keeps its tokens). The V2.0
+  // worker keeps the network's key, so its saved rounds and cursors carry on; a V2.3 worker is "<network>-v23". Workers of
+  // one network share one provider and one nonce manager, since they sign with the same key.
+  const workers = nets.flatMap(net => {
+    const provider = new JsonRpcProvider(serverRpcUrl(net, env), undefined, { cacheTimeout: -1, batchMaxCount: 1 }), signer = Object.assign(new NonceManager(new Wallet(key, provider)), { address });
+    return [net.v2.shared, ...(net.v2.previous ?? [])].filter(d => d?.hook && d.airdrop).map(d => ({ chain: d.model === 'v2.3-hook' ? `${net.key}-v23` : net.key, net, provider, signer, deployment: { ...d, poolManager: net.v4?.poolManager },
       dex: testnetDexes[net.key]?.enabled ? testnetDexes[net.key] : net.payoutDex ?? null, usdc: payoutStable(net, oracles)?.address ?? null, usdcDecimals: payoutStable(net, oracles)?.decimals ?? 6,
-      index: () => indexFor(net.key), funderOf: env.ELPIDA_EXPLORER_API_KEY ? etherscanFunder(net.chainId, env.ELPIDA_EXPLORER_API_KEY) : null, ignoredFunders,
+      index: () => indexFor(net.key, d.factory), funderOf: env.ELPIDA_EXPLORER_API_KEY ? etherscanFunder(net.chainId, env.ELPIDA_EXPLORER_API_KEY) : null, ignoredFunders,
       usdPerUnit: asset => { if (lower(asset) === lower(ZeroAddress)) { const p = prices()[net.key]; return p?.status === 'fresh' ? p.usd : null; } const usdc = oracles[net.key]?.usdc; if (usdc && lower(asset) === lower(usdc)) return 1;
         // A real tokenized stock (SPIDERMAN/AAPLon): its approved feed, fresh only (apps/api/stock-prices.mjs, #347).
-        const stock = stockUsd(net.key, asset); return Number.isFinite(stock) && stock > 0 ? stock : null; } };
+        const stock = stockUsd(net.key, asset); return Number.isFinite(stock) && stock > 0 ? stock : null; } }));
   });
   const gasTarget = /^\d+(\.\d{1,18})?$/.test(String(env.ELPIDA_V2_KEEPER_GAS_TARGET ?? '')) ? parseEther(env.ELPIDA_V2_KEEPER_GAS_TARGET) : undefined;
   const share = Number(env.ELPIDA_V2_KEEPER_GAS_SHARE_BPS), gasShareBps = Number.isInteger(share) && share >= 0 && share <= 5000 ? share : undefined;

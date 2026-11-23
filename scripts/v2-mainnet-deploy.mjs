@@ -128,7 +128,7 @@ export async function preflight({ provider, plan, deployer = null }) {
 export function artifacts() {
   const out = compileV4(), find = n => Object.values(out).find(e => e[n]?.evm?.bytecode?.object)?.[n];
   const pick = n => { const a = find(n); return { abi: a.abi, bytecode: '0x' + a.evm.bytecode.object.replace(/^0x/, '') }; };
-  return { create2: pick('ElpidaCreate2Deployer'), factory: pick('ElpidaV2Factory'), hook: pick('ElpidaV2Hook'), distributor: pick('ElpidaV2Distributor'), flywheel: pick('ElpidaV2FlywheelVault'), router: pick('ElpidaV4Router'), compiler: 'solc 0.8.26 (cancun, via IR, 200 runs)' };
+  return { create2: pick('ElpidaCreate2Deployer'), factory: pick('ElpidaV2Factory'), hook: pick('ElpidaV2Hook'), hookV23: pick('ElpidaV23Hook'), distributor: pick('ElpidaV2Distributor'), flywheel: pick('ElpidaV2FlywheelVault'), router: pick('ElpidaV4Router'), compiler: 'solc 0.8.26 (cancun, via IR, 200 runs)' };
 }
 
 const saveJson = (path, value) => { writeFileSync(path + '.tmp', JSON.stringify(value, null, 2) + '\n'); renameSync(path + '.tmp', path); };
@@ -138,8 +138,12 @@ const gitCommit = () => { try { return execSync('git rev-parse HEAD', { cwd: roo
  * Deploys the plan with `signer` (the deployer). Resumable: every finished step is written to `recordPath` and reused
  * if its contract is on chain. Returns the record (status 'awaiting_safe') and writes the Safe batch beside it.
  */
+/** V2.3 (Malik, 23 November 2026): the plan says `"model": "v2.3-hook"`; 50% traders / 30% creator / 20% treasury. */
+export const isV23 = plan => plan?.model === 'v2.3-hook';
+
 export async function deployPlan({ provider, signer, plan, hash, approval, recordPath, art = artifacts(), log = () => {} }) {
-  const record = existsSync(recordPath) ? JSON.parse(readFileSync(recordPath, 'utf8')) : { network: plan.key, name: plan.name, chainId: plan.chainId, planSha256: hash, approval: approval ? basename(approval.file) : null, model: 'v2-hook', compiler: art.compiler, gitCommit: gitCommit(), startMcapUsd: MAINNET_START_MCAP_USD, contracts: {}, txs: {} };
+  const v23 = isV23(plan);
+  const record = existsSync(recordPath) ? JSON.parse(readFileSync(recordPath, 'utf8')) : { network: plan.key, name: plan.name, chainId: plan.chainId, planSha256: hash, approval: approval ? basename(approval.file) : null, model: v23 ? 'v2.3-hook' : 'v2-hook', compiler: art.compiler, gitCommit: gitCommit(), startMcapUsd: MAINNET_START_MCAP_USD, contracts: {}, txs: {} };
   if (record.planSha256 !== hash) throw new Error(`${recordPath} belongs to another plan. Nothing was deployed.`);
   const save = () => saveJson(recordPath, record);
   const have = async k => record.contracts[k] && (await provider.getCode(record.contracts[k])) !== '0x';
@@ -158,11 +162,14 @@ export async function deployPlan({ provider, signer, plan, hash, approval, recor
   // The airdrop (monthly) and holder (weekly) distributors and the flywheel vault, operated by the keeper. In the first
   // release the keeper does not run their jobs: the shares accrue (docs/AUDIT_TRIAGE_2026-11-11.md).
   await deploy('airdrop', art.distributor, [plan.keeper, 0, record.airdropGenesis ??= month, 'trader-airdrop', Z, Z, Z]);
-  await deploy('holder', art.distributor, [plan.keeper, 7 * DAY, record.holderGenesis ??= today, 'holder-rewards', Z, Z, Z]);
-  await deploy('flywheel', art.flywheel, [plan.keeper, record.contracts.factory]);
+  // V2.3 has no holder-reward distributor and no flywheel vault: the hook pays 50% to the trader airdrop instead.
+  if (!v23) {
+    await deploy('holder', art.distributor, [plan.keeper, 7 * DAY, record.holderGenesis ??= today, 'holder-rewards', Z, Z, Z]);
+    await deploy('flywheel', art.flywheel, [plan.keeper, record.contracts.factory]);
+  }
   if (!await have('hook')) {
-    const args = AbiCoder.defaultAbiCoder().encode(['address', 'address', 'address', 'address', 'address', 'address', 'uint256'], [plan.poolManager, record.contracts.factory, plan.treasury, record.contracts.airdrop, record.contracts.flywheel, record.contracts.holder, plan.minFeeBps]);
-    const initCode = concat([art.hook.bytecode, args]);
+    const args = AbiCoder.defaultAbiCoder().encode(['address', 'address', 'address', 'address', 'address', 'address', 'uint256'], [plan.poolManager, record.contracts.factory, plan.treasury, record.contracts.airdrop, v23 ? Z : record.contracts.flywheel, v23 ? Z : record.contracts.holder, plan.minFeeBps]);
+    const initCode = concat([(v23 ? art.hookV23 : art.hook).bytecode, args]);
     log('mining the hook address…');
     const { salt, address } = await mineHookSalt(record.contracts.create2, initCode);
     if ((await provider.getCode(address)) === '0x') {
@@ -175,7 +182,7 @@ export async function deployPlan({ provider, signer, plan, hash, approval, recor
   // Read every constructor argument back before handing over to the Safe: this script's checks, then #234's gate
   // comparison of the deployed factory and hook against a gate plan built from what was deployed.
   const checks = await constructorChecks({ provider, plan, record });
-  const gatePlan = buildPlan({ chainId: Number(plan.chainId), chainName: plan.name, mainnet: true, treasury: plan.treasury, recipients: [record.contracts.airdrop, record.contracts.flywheel, record.contracts.holder], minFeeBps: plan.minFeeBps, metadataRequired: true, approver: approval?.approvedBy ?? null, approvedAt: approval ? Date.parse(`${approval.date}T00:00:00Z`) : null });
+  const gatePlan = buildPlan({ chainId: Number(plan.chainId), chainName: plan.name, mainnet: true, treasury: plan.treasury, recipients: [record.contracts.airdrop, v23 ? Z : record.contracts.flywheel, v23 ? Z : record.contracts.holder], minFeeBps: plan.minFeeBps, metadataRequired: true, approver: approval?.approvedBy ?? null, approvedAt: approval ? Date.parse(`${approval.date}T00:00:00Z`) : null });
   const f = new Contract(record.contracts.factory, FACTORY_READ, provider), h = new Contract(record.contracts.hook, HOOK_READ, provider);
   const mismatches = gateVerify(gatePlan, { treasury: await f.treasury(), startMcapUsd: await f.startMcapUsd(), metadataRequired: await f.requiresMetadata(), recipients: [await h.traderAirdropVault(), await h.flywheelVault(), await h.holderRewardVault()], minFeeBps: await h.minFeeBps() });
   checks.push({ check: 'gate (#234) verifyDeployment: no mismatches', ok: mismatches.length === 0, detail: mismatches.map(m => m.field).join(', ') });
@@ -183,7 +190,7 @@ export async function deployPlan({ provider, signer, plan, hash, approval, recor
   record.constructorChecks = checks; save();
   if (checks.some(c => !c.ok)) throw new Error(`Deployed, but a constructor check failed: ${checks.filter(c => !c.ok).map(c => c.check).join('; ')}. Do not execute the Safe batch.`);
   record.safeBatch = basename(safeBatchPath(recordPath)); record.status = 'awaiting_safe';
-  record.pending = { safe: 'Execute the Safe batch (setHook, configureUsdPricing, approveQuote USDC, setGuardian, setDailyLaunchCap), then run verify.', keeper: 'flywheel.setRouter(router) from the keeper, before the flywheel is switched on (it stays off in the first release).' };
+  record.pending = { safe: 'Execute the Safe batch (setHook, configureUsdPricing, approveQuote USDC, setGuardian, setDailyLaunchCap), then run verify.', ...(v23 ? {} : { keeper: 'flywheel.setRouter(router) from the keeper, before the flywheel is switched on (it stays off in the first release).' }) };
   save(); saveJson(safeBatchPath(recordPath), safeBatch(plan, record));
   return record;
 }
@@ -200,13 +207,15 @@ export const safeBatchPath = recordPath => recordPath.replace(/\.json$/, '-safe-
 /** Reads every constructor argument back from the chain. */
 export async function constructorChecks({ provider, plan, record }) {
   const c = record.contracts, out = [], eq = (check, a, b) => out.push({ check, ok: String(a).toLowerCase() === String(b).toLowerCase(), detail: `${a}` });
-  const f = new Contract(c.factory, FACTORY_READ, provider), h = new Contract(c.hook, HOOK_READ, provider), r = new Contract(c.router, ROUTER_READ, provider), fw = new Contract(c.flywheel, FLYWHEEL_READ, provider);
+  const v23 = isV23(plan), f = new Contract(c.factory, FACTORY_READ, provider), h = new Contract(c.hook, HOOK_READ, provider), r = new Contract(c.router, ROUTER_READ, provider);
   eq('factory treasury', await f.treasury(), plan.treasury); eq('factory start $20,000', await f.startMcapUsd(), MAINNET_START_MCAP_USD); eq('factory requires metadata', await f.requiresMetadata(), true);
   eq('factory has launch controls', await f.LAUNCH_CONTROLS_VERSION(), 1);
   eq('hook factory', await h.factory(), c.factory); eq('hook treasury', await h.protocolTreasury(), plan.treasury); eq('hook PoolManager', await h.poolManager(), plan.poolManager);
-  eq('hook airdrop vault', await h.traderAirdropVault(), c.airdrop); eq('hook flywheel vault', await h.flywheelVault(), c.flywheel); eq('hook holder vault', await h.holderRewardVault(), c.holder); eq('hook minimum fee', await h.minFeeBps(), plan.minFeeBps);
-  for (const [k, period] of [['airdrop', 0], ['holder', 7 * DAY]]) { const d = new Contract(c[k], DIST_READ, provider); eq(`${k} operator is the keeper`, await d.operator(), plan.keeper); eq(`${k} period`, await d.period(), period); }
-  eq('flywheel operator is the keeper', await fw.operator(), plan.keeper); eq('flywheel factory', await fw.factory(), c.factory);
+  eq('hook airdrop vault', await h.traderAirdropVault(), c.airdrop); eq('hook flywheel vault', await h.flywheelVault(), v23 ? Z : c.flywheel); eq('hook holder vault', await h.holderRewardVault(), v23 ? Z : c.holder);
+  if (v23) { const split = new Contract(c.hook, ['function MODEL_VERSION() view returns(uint256)', 'function AIRDROP_BPS() view returns(uint256)', 'function CREATOR_BPS() view returns(uint256)', 'function TREASURY_BPS() view returns(uint256)', 'function FLYWHEEL_BPS() view returns(uint256)', 'function HOLDER_BPS() view returns(uint256)'], provider);
+    eq('hook is V2.3', await split.MODEL_VERSION(), 23); eq('hook split 50% traders / 30% creator / 20% treasury / 0 / 0', [await split.AIRDROP_BPS(), await split.CREATOR_BPS(), await split.TREASURY_BPS(), await split.FLYWHEEL_BPS(), await split.HOLDER_BPS()].join('/'), '5000/3000/2000/0/0'); } eq('hook minimum fee', await h.minFeeBps(), plan.minFeeBps);
+  for (const [k, period] of v23 ? [['airdrop', 0]] : [['airdrop', 0], ['holder', 7 * DAY]]) { const d = new Contract(c[k], DIST_READ, provider); eq(`${k} operator is the keeper`, await d.operator(), plan.keeper); eq(`${k} period`, await d.period(), period); }
+  if (!v23) { const fw = new Contract(c.flywheel, FLYWHEEL_READ, provider); eq('flywheel operator is the keeper', await fw.operator(), plan.keeper); eq('flywheel factory', await fw.factory(), c.factory); }
   eq('router hook', await r.hook(), c.hook); eq('router PoolManager', await r.poolManager(), plan.poolManager);
   return out;
 }
@@ -216,7 +225,7 @@ export function safeBatch(plan, record) {
   const i = new Interface(FACTORY_WRITE), f = record.contracts.factory;
   const usdcVirtual = usdcVirtualQuote(plan);
   const calls = [['setHook', [record.contracts.hook]], ['configureUsdPricing', [plan.usdFeed, plan.feedMaxAge, plan.usdc]], ['approveQuote', [plan.usdc, usdcVirtual]], ['setGuardian', [plan.guardian]], ['setDailyLaunchCap', [plan.dailyLaunchCap]]];
-  return withSafeChecksum({ version: '1.0', chainId: String(plan.chainId), createdAt: Date.now(), meta: { name: `ELPIDA V2 ${plan.name} wiring`, description: `Plan ${record.planSha256.slice(0, 16)}: connect the hook, set USD pricing, approve USDC ($25,000 virtual quote), name the guardian, cap launches at ${plan.dailyLaunchCap} a day.`, txBuilderVersion: '1.16.5', createdFromSafeAddress: plan.treasury },
+  return withSafeChecksum({ version: '1.0', chainId: String(plan.chainId), createdAt: Date.now(), meta: { name: `ELPIDA ${isV23(plan) ? 'V2.3' : 'V2'} ${plan.name} wiring`, description: `Plan ${record.planSha256.slice(0, 16)}: connect the hook, set USD pricing, approve USDC ($25,000 virtual quote), name the guardian, cap launches at ${plan.dailyLaunchCap} a day.`, txBuilderVersion: '1.16.5', createdFromSafeAddress: plan.treasury },
     transactions: calls.map(([name, args]) => ({ to: f, value: '0', data: i.encodeFunctionData(name, args), contractMethod: null, contractInputsValues: null, description: `${name}(${args.join(', ')})` })) }, id);
 }
 
@@ -228,8 +237,8 @@ export async function verifyDeployment({ provider, plan, record, recordPath }) {
   eq('guardian', await f.guardian(), plan.guardian); eq('daily launch cap', await f.dailyLaunchCap(), plan.dailyLaunchCap); eq('launches paused', await f.launchesPaused(), false);
   let vq = 0n; try { vq = await f.nativeVirtualQuote(); } catch { /* feed */ }
   out.push({ check: 'native start price readable', ok: vq > 0n, detail: `${formatEther(vq)} native = $25,000 virtual` });
-  const flyRouter = await new Contract(c.flywheel, FLYWHEEL_READ, provider).router();
-  out.push({ check: 'flywheel router (keeper, before the flywheel is switched on)', ok: true, detail: flyRouter === Z ? 'not set yet (flywheel off in the first release)' : flyRouter });
+  if (!isV23(plan)) { const flyRouter = await new Contract(c.flywheel, FLYWHEEL_READ, provider).router();
+  out.push({ check: 'flywheel router (keeper, before the flywheel is switched on)', ok: true, detail: flyRouter === Z ? 'not set yet (flywheel off in the first release)' : flyRouter }); }
   record.verify = { at: new Date().toISOString(), checks: out };
   if (out.every(x => x.ok)) record.status = 'ready';
   if (recordPath) saveJson(recordPath, record);

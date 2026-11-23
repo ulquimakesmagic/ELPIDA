@@ -45,7 +45,7 @@ export class PublicIndexer {
       const override=process.env['ELPIDA_RPC_'+net.chainId],list=indexRpcs.length?indexRpcs:override?[override]:[net.rpcUrl,...(net.rpcFallbacks??[])];
       this.rpcs.set(net.key,{list,index:0,failures:0});
       const provider=providerFactory(list[0]);
-      if(!net.shared?.factory){this.entries.set(net.key,openV2Entry({net,provider,dataDir}));this.legacy.set(net.key,[]);continue;}
+      if(!net.shared?.factory){this.entries.set(net.key,openV2Entry({net,provider,dataDir}));this.legacy.set(net.key,(net.v2.previous??[]).filter(d=>d?.factory).map(deployment=>openV2Entry({net,provider,dataDir,deployment,legacy:true})));continue;}
       this.entries.set(net.key,openEntry({net,deployment:net.shared,provider,contracts,dataDir}));
       // Earlier team factories on the same network stay indexed, so their tokens remain listed and tradable.
       // ELPIDA_INDEX_LEGACY=false (Malik, 19 Nov: trim the testnet) skips these retired factories: their databases are
@@ -140,7 +140,8 @@ export class PublicIndexer {
   /** The V2 trading index of a network, for the V2 keeper (null until V2 is pinned and validated there). */
   /** The provider indexing a network (read-only), for the stock price reader. */
   providerFor(key){return this.entries.get(key)?.provider??null;}
-  v2Index(key){const e=this.all(key).find(x=>x.v2&&x.validated);return e?.index??null;}
+  /** `factory`: one launchpad's index (the keeper runs one worker per launchpad); without it, the first validated V2. */
+  v2Index(key,factory=null){const e=this.all(key).find(x=>x.v2&&x.validated&&(!factory||deploymentOf(x).factory.toLowerCase()===String(factory).toLowerCase()));return e?.index??null;}
   status(key){const e=this.entries.get(key);return e?{...e.index.status(),error:e.error,errorCode:e.errorCode??null,rpc:rpcHost(this.rpcs?.get(key)),lastSuccess:e.lastSuccess,enabled:true,
     // Earlier launchpads on the same network have their own index; a stuck one must be visible too.
     legacy:(this.legacy?.get(key)??[]).map(l=>{const s=l.index.status();return {factory:deploymentOf(l).factory,model:deploymentOf(l).model??null,indexedBlock:s.indexedBlock,lag:s.lag,error:l.error??null,errorCode:l.errorCode??null,lastSuccess:l.lastSuccess??null};})}: {enabled:false,network:key,reason:'No public factory is configured for this network.'};}
@@ -150,9 +151,9 @@ export class PublicIndexer {
   listing(key,address,extra){
     const e=this.entryFor(key,address),t=e?.index.tokenAt(address);if(!t)return null;
     const d=deploymentOf(e),s=e.index.snapshot(t.address)??{};
-    return this.decorate(key,{...t,...s,metadata:publicMetadata(e,t),metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})});
+    return this.decorate(key,{...t,...s,metadata:publicMetadata(e,t),metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,...(e.v2?{launchpad:d.launchpad,router:d.router,feeSplit:d.split??null}:{}),legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})});
   }
-  listings(key,extra){return this.all(key).flatMap(e=>{const d=deploymentOf(e);return e.index.listings().map(t=>this.decorate(key,{...t,metadata:publicMetadata(e,t),metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})}));});}
+  listings(key,extra){return this.all(key).flatMap(e=>{const d=deploymentOf(e);return e.index.listings().map(t=>this.decorate(key,{...t,metadata:publicMetadata(e,t),metadataStatus:t.metadataURI?'published':e.metadata.has(t.address)?'creator-signed':'browser-only',balance:'0',url:e.net.explorer+'/token/'+t.address,network:key,factory:d.factory,deploymentModel:d.model,...(e.v2?{launchpad:d.launchpad,router:d.router,feeSplit:d.split??null}:{}),legacyDeployment:!!e.legacy,...(extra?.(e,t)??{})}));});}
   // No post-launch metadata path: details are published only in the launch transaction. Details a creator signed
   // before this rule (22-23 Oct 2026 testnet) are still loaded from metadata.json and shown as before.
   /** Latest trades on every indexed network, each with the token's public name, symbol and image. */
@@ -195,12 +196,14 @@ function openV4Entry({net,provider,dataDir}){
   return {net,deployment,legacy:false,v4:true,index,provider,metadata,metadataPath,validated:false,error:null,lastSuccess:null};
 }
 /** An ELPIDA V2 launchpad: factory, hook and router from networks.mjs `v2.shared`, Uniswap's PoolManager from `v4`. */
-function openV2Entry({net,provider,dataDir}){
-  const deployment={...net.v2.shared,model:V2_MODEL},factory=deployment.factory.toLowerCase();
+// `deployment`: a V2 launchpad of this network; the current one (`v2.shared`) unless an earlier one (`v2.previous`, 23 Nov
+// 2026: the V2.0 launchpad once V2.3 takes new launches). `launchpad` keeps its own model ('v2-hook' or 'v2.3-hook').
+function openV2Entry({net,provider,dataDir,deployment:d=net.v2.shared,legacy=false}){
+  const deployment={...d,model:V2_MODEL,launchpad:d.model??'v2-hook'},factory=deployment.factory.toLowerCase();
   const index=new V2Indexer({provider,factory:deployment.factory,hook:deployment.hook,poolManager:net.v4.poolManager,router:deployment.router??null,path:join(dataDir,`public-v2-${net.chainId}-${factory}.sqlite`),chainId:net.chainId,fromBlock:deployment.block,confirmations:EVM_CONFIRMATIONS,nativeSymbol:net.nativeCurrency.symbol,batchSize:100,fullRefreshMs:60000});
   const metadataPath=join(dataDir,`public-metadata-${net.chainId}-${factory}.json`);
   const metadata=new Map(existsSync(metadataPath)?Object.entries(JSON.parse(readFileSync(metadataPath,'utf8'))):[]);
-  return {net,deployment,legacy:false,v4:true,v2:true,index,provider,metadata,metadataPath,validated:false,error:null,lastSuccess:null};
+  return {net,deployment,legacy,v4:true,v2:true,index,provider,metadata,metadataPath,validated:false,error:null,lastSuccess:null};
 }
 function openEntry({net,deployment,provider,contracts,dataDir,legacy=false}){
   const tax=deployment.model==='curve-tax-v10',dex=isDexModel(deployment.model)||tax,factory=deployment.factory.toLowerCase();

@@ -85,12 +85,15 @@ test('vault sizes by day, rounds, countdown and flywheel burns match the chain',
   assert.deepEqual(again, first);
 });
 
-test('the public service: hidden without a pinned V2 deployment, live with one, never on mainnet', async t => {
+test('the public service: hidden without a pinned V2 deployment, live with one, mainnets read through the private RPC', async t => {
   assert.deepEqual(new V2RewardsService({ networks: [{ key: 'base-sepolia', v4: {} }] }).summary(), { deployed: false, chains: [] });
   const f = await v2Fixture(t, { vaults: true }), { airdrop, holder, flywheel } = f.contracts;
   const shared = { hook: f.hook.target, airdrop: airdrop.target, holder: holder.target, flywheel: flywheel.target, block: 0 };
   const net = { key: 'base-sepolia', name: 'Base Sepolia', rpcUrl: 'local', explorer: 'https://sepolia.basescan.org', nativeCurrency: { symbol: 'ETH' }, v2: { shared } };
-  assert.equal(new V2RewardsService({ networks: [{ ...net, mainnet: true }], providerFactory: () => f.provider }).deployed, false, 'mainnet needs its own approval');
+  // Mainnets since 22 Nov 2026 (the mainnet analytics page hid its rewards section): the server's private RPC first.
+  const rpcs = [], main = new V2RewardsService({ networks: [{ ...net, key: 'base-mainnet', chainId: 8453, mainnet: true, rpcUrl: 'https://mainnet.base.org' }], env: { ELPIDA_RPC_8453: 'https://private.example/rpc' }, providerFactory: rpc => { rpcs.push(rpc); return f.provider; }, log: () => {} });
+  assert.equal(main.deployed, true); assert.deepEqual(rpcs, ['https://private.example/rpc']); assert.deepEqual(main.entries[0].rpcs, ['https://private.example/rpc', 'https://mainnet.base.org']);
+  assert.equal(main.summary().chains[0].mainnet, true); assert.equal(main.summary().chains[0].testnet, false);
   const service = new V2RewardsService({ networks: [net], providerFactory: () => f.provider, log: () => {} });
   const l = await launchV2(f);
   await f.advance(61);

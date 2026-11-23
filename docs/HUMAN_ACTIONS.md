@@ -11,6 +11,24 @@
 > `contracts, unit and full suite` and `solana program` checks on `main`; (2) create a Safe on Base for the treasury
 > and pick a guardian wallet for the launch stop; (3) a fresh, separate Base keeper key.
 
+## Mainnet: the V2.3 launchpad (50% traders / 30% creators / 20% Elpida), 23 November 2026
+
+**Decided (Malik, 23 Nov):** no flywheel and no holder rewards; every fee of a new launch is split 50% traders (the
+monthly EWPR airdrop in USDC), 30% creator, 20% Elpida. The deployed V2.0 hooks cannot change, so V2.3 is a new hook
+(contracts/evm/v2/ElpidaV23Hook.sol: the V2.0 hook with only the split changed) and a new factory, airdrop distributor
+and router on each chain. Once a chain's V2.3 record is ready, new launches go to V2.3; tokens of the V2.0 launchpad keep
+trading, charting and earning on it with their own split. Robinhood Chain starts on V2.3 directly.
+
+Per chain (Base, BNB Chain, Robinhood Chain), in your ELPIDA folder after `git pull`, with `$env:ELPIDA_MAINNET_RPC_URL` set:
+1. `node scripts/v2-mainnet-deploy.mjs check --plan deployments/plans/base-mainnet-v23.json`: all ok; note the plan sha256.
+2. Send Claude the sha256: the approval file (deployments/approvals/base-mainnet-v23-<sha>.json) is added in a PR.
+3. Rehearse on anvil (as for V2.0): `node scripts/v2-mainnet-deploy.mjs rehearse --plan deployments/plans/base-mainnet-v23.json --node http://127.0.0.1:8545`.
+4. `node scripts/v2-mainnet-deploy.mjs deploy --plan deployments/plans/base-mainnet-v23.json`, execute the Safe batch
+   (deployments/base-mainnet-v23-safe-batch.json), then `verify`. Commit deployments/base-mainnet-v23*.json in a PR.
+5. Its USDC airdrop distributor: `node scripts/v2-usdc-airdrop.mjs rehearse|check|deploy --plan deployments/plans/base-mainnet-v23.json`
+   (needs deployments/approvals/base-mainnet-v23-usdc-airdrop.json, added with the plan approval).
+6. Approve the chain's stock list from the Safe for the new factory, as for V2.0.
+
 ## Mainnet: EWPR trader airdrop in USDC, and per-token explorer verification, 22 November 2026
 
 **Decided (Malik, 22 Nov):** the monthly trader airdrop is scored by EWPR (packages/core/ewpr.mjs: S = F^0.8 × C,

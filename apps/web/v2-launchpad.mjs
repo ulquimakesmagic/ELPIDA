@@ -5,8 +5,8 @@
 import { Contract, ContractFactory, AbiCoder, Interface, concat, getAddress, parseUnits, formatUnits, isAddress, ZeroAddress, id as keccakText } from '/vendor/ethers.js';
 import { swapCalldata } from '/dex-router.mjs';
 import { quoteNativePairConversion } from './usdc-conversion.mjs';
-import { V2, V2_MODEL, V2_FEE_SPLIT, V2_PROPOSED_MIN_FEE_BPS, V2_TESTNET_START_FDV_USD_E6, maxFirstBuyGross, firstBuyCapTokens, virtualToken, splitFee, feeOn } from '/v2-economics.mjs';
-import { v4Available, v4PoolManager, v2Deployment, saveV2Deployment, mineHookSalt, hasCode, walletCaughtUp, V4_ROUTER_ABI } from './v4-launchpad.mjs';
+import { V2, V2_MODEL, V2_FEE_SPLIT, feeSplitOf, V2_PROPOSED_MIN_FEE_BPS, V2_TESTNET_START_FDV_USD_E6, maxFirstBuyGross, firstBuyCapTokens, virtualToken, splitFee, feeOn } from '/v2-economics.mjs';
+import { v4Available, v4PoolManager, v2Deployment, v2DeploymentFor, saveV2Deployment, mineHookSalt, hasCode, walletCaughtUp, V4_ROUTER_ABI } from './v4-launchpad.mjs';
 import { normalizeMetadata } from './metadata.mjs';
 import { checkStockList, stockApprovalGroups } from '/stock-list.mjs';
 import { safeBatch } from './safe-batch.mjs';
@@ -373,9 +373,10 @@ export function feeBpsFrom(percent) {
 }
 
 /** What one trade of `amount` (in the pair asset, as typed) pays, and where each part goes, at `feeBps`. */
-export function splitPreview(amount, feeBps, decimals = 18) {
-  const gross = parseUnits(String(amount || '0'), decimals), fee = feeOn(gross, feeBps), s = splitFee(fee);
-  return { fee: formatUnits(fee, decimals), parts: Object.keys(V2_FEE_SPLIT).map(k => ({ key: k, bps: V2_FEE_SPLIT[k], amount: formatUnits(s[k], decimals) })) };
+export function splitPreview(amount, feeBps, decimals = 18, split = V2_FEE_SPLIT) {
+  const gross = parseUnits(String(amount || '0'), decimals), fee = feeOn(gross, feeBps);
+  // Each share rounded down, as the hook computes it (V2.0: 30/30/10/10/20; V2.3: 30/50/20).
+  return { fee: formatUnits(fee, decimals), parts: Object.keys(split).map(k => ({ key: k, bps: split[k], amount: formatUnits(fee * BigInt(split[k]) / 10_000n, decimals) })) };
 }
 
 /** The launch form's numbers: the minimum fee, the largest first buy within 3% of supply, and the launch fee. */
@@ -628,7 +629,7 @@ export async function creatorLedger(provider, hook, token) {
 }
 /** A V2 token's lifetime creator fees, in the quote asset: { earned, paid, owed, asset }, or null for other tokens. */
 export async function creatorEarnings({ provider, net, token }) {
-  const d = v2Deployment(net); if (!d?.hook) return null;
+  const d = await v2DeploymentFor(provider, net, token); if (!d?.hook) return null;
   const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
   if (!l.creatorVault || l.creatorVault === ZeroAddress) return null;
   return { asset: l.quote, ...(await creatorLedger(provider, d.hook, token)) };
@@ -643,7 +644,7 @@ const vaultHeld = (provider, asset, vault) => (asset === ZeroAddress ? provider.
 const shareOut = (rows, amount) => { let assigned = 0n; return rows.map((r, i) => { const part = i + 1 === rows.length ? amount - assigned : amount * BigInt(r.bps) / 10000n; assigned += part; return part; }); };
 
 export async function creatorSplitState({ provider, net, token }) {
-  const d = v2Deployment(net); if (!d?.hook) return null;
+  const d = await v2DeploymentFor(provider, net, token); if (!d?.hook) return null;
   const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
   const rows = await readSplit(provider, l.creatorVault); if (!rows) return null;
   const c = new Contract(l.creatorVault, SPLIT_ABI, provider), asset = l.quote;
@@ -656,7 +657,7 @@ export async function creatorSplitState({ provider, net, token }) {
 
 /** A V2 token whose creator share goes straight to one wallet: that wallet, 100%, and what the hook owes it. */
 export async function creatorWalletState({ provider, net, token }) {
-  const d = v2Deployment(net); if (!d?.hook) return null;
+  const d = await v2DeploymentFor(provider, net, token); if (!d?.hook) return null;
   const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
   if (!l.creatorVault || l.creatorVault === ZeroAddress || (await provider.getCode(l.creatorVault)) !== '0x') return null;
   const ledger = await creatorLedger(provider, d.hook, token);
@@ -666,7 +667,7 @@ export async function creatorWalletState({ provider, net, token }) {
 /** Collects the token's fees from the pool (permissionless): the creator's share goes straight to its wallet. */
 export async function claimV2CreatorFees(w, { token } = {}) {
   await w.checkNetwork();
-  const d = v2Deployment(w.net); if (!d?.hook) throw new Error(`There is no V2 launchpad on ${w.net.name}.`);
+  const d = await v2DeploymentFor(w.provider, w.net, token); if (!d?.hook) throw new Error(`There is no V2 launchpad on ${w.net.name}.`);
   if (!isAddress(token)) throw new Error('Choose a token.');
   const hook = new Contract(d.hook, V2_HOOK_FEES_ABI, w.signer ?? w.provider);
   const r = await w.sendCalls([{ to: d.hook, data: hook.interface.encodeFunctionData('withdrawFees', [token]), label: 'Collect the token\'s fees from the pool…' }], 'Collect fees and pay the creator.');
@@ -681,7 +682,7 @@ const STRATEGY_ABI = ['function CREATOR_REWARDS_VERSION() view returns(uint256)'
  * gathered toward the threshold (in the vault, plus the creator share still in the pool) and the rounds paid so far.
  */
 export async function creatorStrategyState({ provider, net, token }) {
-  const d = v2Deployment(net); if (!d?.hook) return null;
+  const d = await v2DeploymentFor(provider, net, token); if (!d?.hook) return null;
   const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
   if (!l.creatorVault || l.creatorVault === ZeroAddress || (await provider.getCode(l.creatorVault)) === '0x') return null;
   const v = new Contract(l.creatorVault, STRATEGY_ABI, provider);
@@ -700,7 +701,7 @@ const IDENTITY_ABI = ['function IDENTITY_ALLOCATION_VERSION() view returns(uint2
   'function accounted(address) view returns(uint256)', 'function claimable(address,uint256) view returns(uint256)', 'function claim(address asset,uint256 i) returns(bool)'];
 /** A V2 token's wallet, X and website allocations, if its creator vault is one: each row and what it can claim now. */
 export async function identityAllocationState({ provider, net, token }) {
-  const d = v2Deployment(net); if (!d?.hook) return null;
+  const d = await v2DeploymentFor(provider, net, token); if (!d?.hook) return null;
   const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
   if (!l.creatorVault || l.creatorVault === ZeroAddress || (await provider.getCode(l.creatorVault)) === '0x') return null;
   const c = new Contract(l.creatorVault, IDENTITY_ABI, provider);
@@ -721,7 +722,7 @@ export async function identityAllocationState({ provider, net, token }) {
  * wallets) or null (the creator alone, or a reward strategy). The token page shows "Claim fees" for the first two.
  */
 export async function allocationKind({ provider, net, token }) {
-  const d = v2Deployment(net); if (!d?.hook) return null;
+  const d = await v2DeploymentFor(provider, net, token); if (!d?.hook) return null;
   const l = await new Contract(d.hook, V2_HOOK_FEES_ABI, provider).launchOf(token);
   if (!l.creatorVault || l.creatorVault === ZeroAddress || (await provider.getCode(l.creatorVault)) === '0x') return null;
   try { if ((await new Contract(l.creatorVault, IDENTITY_ABI, provider).IDENTITY_ALLOCATION_VERSION()) === 1n) return 'identity'; } catch {}
@@ -731,7 +732,7 @@ export async function allocationKind({ provider, net, token }) {
 /** Collects the token's fees from the pool and pays one allocation row (a wallet, or a verified X account or website). */
 export async function claimIdentityRow(w, { token, index } = {}) {
   await w.checkNetwork();
-  const d = v2Deployment(w.net); if (!d?.hook) throw new Error(`There is no V2 launchpad on ${w.net.name}.`);
+  const d = await v2DeploymentFor(w.provider, w.net, token); if (!d?.hook) throw new Error(`There is no V2 launchpad on ${w.net.name}.`);
   const hook = new Contract(d.hook, V2_HOOK_FEES_ABI, w.provider), l = await hook.launchOf(token), c = new Contract(l.creatorVault, IDENTITY_ABI, w.provider);
   const r = await c.row(Number(index));
   if (r.wallet === ZeroAddress) throw new Error('This share is held until its owner verifies. Nothing was sent.');
@@ -744,7 +745,7 @@ export async function claimIdentityRow(w, { token, index } = {}) {
 /** Collects the token's fees from the pool (permissionless) and pays one split wallet its share, in one go when the wallet batches. */
 export async function claimCreatorSplit(w, { token, wallet } = {}) {
   await w.checkNetwork();
-  const d = v2Deployment(w.net); if (!d?.hook) throw new Error(`There is no V2 launchpad on ${w.net.name}.`);
+  const d = await v2DeploymentFor(w.provider, w.net, token); if (!d?.hook) throw new Error(`There is no V2 launchpad on ${w.net.name}.`);
   if (!isAddress(token) || !isAddress(wallet)) throw new Error('Choose a token and a split wallet.');
   const hook = new Contract(d.hook, V2_HOOK_FEES_ABI, w.provider), l = await hook.launchOf(token);
   const rows = await readSplit(w.provider, l.creatorVault);

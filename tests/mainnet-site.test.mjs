@@ -25,7 +25,7 @@ const record = { network: 'base-mainnet', chainId: 8453, status: 'ready', block:
 test('Base mainnet appears only from a ready deployment record, with the V2 contracts, plan addresses and deploy block', () => {
   const { net } = mainnetNetwork(base, record, plan);
   assert.equal(net.key, 'base-mainnet'); assert.equal(net.chainId, 8453); assert.equal(net.mainnet, true); assert.equal(net.enabled, true);
-  assert.deepEqual(net.v2.shared, { factory: a(2), hook: a(6), router: a(7), airdrop: a(3), holder: a(4), flywheel: a(5), keeper: keeper.address, treasury: a(0xa1), block: 38_000_000, minFeeBps: 100, distributions: false });
+  assert.deepEqual(net.v2.shared, { factory: a(2), hook: a(6), router: a(7), airdrop: a(3), holder: a(4), flywheel: a(5), model: 'v2-hook', split: { creator: 30, traders: 30, flywheel: 10, holders: 10, treasury: 20 }, keeper: keeper.address, treasury: a(0xa1), block: 38_000_000, minFeeBps: 100, distributions: false });
   assert.equal(net.v4.poolManager, plan.poolManager);
   assert.deepEqual(net.usd, { feed: plan.usdFeed, usdc: plan.usdc, maxAge: 1500 });
   assert.equal(net.shared, undefined, 'no Model 10 launchpad on mainnet');
@@ -144,4 +144,16 @@ test('BNB Chain, Robinhood Chain and Ethereum: each plan names its chain, its ow
   }
   assert.equal(read('robinhood-mainnet').poolManager, '0x8366a39CC670B4001A1121B8F6A443A643e40951', 'Uniswap v4 on Robinhood Chain');
   assert.equal(read('robinhood-mainnet').usdc, '0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168', 'USDG on Robinhood Chain');
+});
+
+test('V2.3 (23 Nov): once its record is ready it takes new launches and the V2.0 launchpad stays as previous; V2.3 alone also works', () => {
+  const v23record = { chainId: 8453, status: 'ready', block: 39_000_000, model: 'v2.3-hook', planSha256: 'e'.repeat(64), contracts: { create2: a(11), factory: a(12), airdrop: a(13), hook: a(16), router: a(17) } };
+  const v23plan = { ...plan, key: 'base-mainnet-v23', model: 'v2.3-hook' };
+  const { net } = mainnetNetwork(base, record, plan, { record: v23record, plan: v23plan });
+  assert.equal(net.v2.shared.factory, a(12)); assert.equal(net.v2.shared.model, 'v2.3-hook'); assert.deepEqual(net.v2.shared.split, { creator: 30, traders: 50, treasury: 20 });
+  assert.equal(net.v2.shared.holder, undefined); assert.equal(net.v2.shared.flywheel, undefined);
+  assert.equal(net.v2.previous.length, 1); assert.equal(net.v2.previous[0].factory, a(2)); assert.equal(net.v2.previous[0].model, 'v2-hook');
+  assert.equal(mainnetNetwork(base, record, plan, { record: { ...v23record, status: 'awaiting_safe' }, plan: v23plan }).net.v2.shared.factory, a(2), 'not ready: V2.0 keeps launches');
+  const alone = mainnetNetwork(base, null, null, { record: v23record, plan: v23plan }).net;
+  assert.equal(alone.v2.shared.factory, a(12)); assert.equal(alone.v2.previous, undefined);
 });

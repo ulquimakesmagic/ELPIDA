@@ -70,6 +70,7 @@ import { evm, evmNetworks } from './evm-networks.mjs';
 import { siteHtml, seoText } from './site-copy.mjs';
 import { isDexModel } from '../../packages/core/curve-model.mjs';
 import { V2RewardsService } from './v2-rewards-service.mjs';
+import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { configuredV2Keeper } from './v2-keeper.mjs';
 import { configuredSolanaV2Keeper } from './v2-keeper-solana.mjs';
 import { V2Identities, xResultLink } from './v2-identities.mjs';
@@ -350,7 +351,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const swap=injectedSwap??createSwap({tokensFor:swapTokensFor,feeFor:swapFee,launchPairsFor:swapLaunchPairs});
   const ondoStatus=injectedOndoStatus??createOndoStatus({apiKey:port===0?'':process.env.ONDO_API_KEY,log:e=>console.log(JSON.stringify(e))}).start();
   // ELPIDA V2.0 rewards (vault sizes, rounds, countdowns, flywheel burns): only networks with a pinned V2 deployment.
-  const v2Rewards=new V2RewardsService({networks:port===0?[]:evmNetworks,dataDir:port===0?null:resolve(dataDir,dataPrefix+'v2-rewards')}).start();
+  const v2Rewards=new V2RewardsService({networks:port===0?[]:evmNetworks,env:process.env,oracles:usdOracles(process.env,evmNetworks),dataDir:port===0?null:resolve(dataDir,dataPrefix+'v2-rewards')}).start();
   // Tokens the flywheels bought and burned on a network (V2 vault burns on chain, plus the Model 10 keeper's burns),
   // keyed by lowercase token address, in base units. Explore cards and token pages show it as a share of supply.
   const flywheelBurns=key=>{const total=new Map();for(const m of [v2Rewards.burnedByToken(key),flywheelKeeper.burnedByToken?.(key)])for(const [token,amount] of m??[])total.set(token,(total.get(token)??0n)+amount);return total;};
@@ -376,7 +377,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // V2 X and website allocations: ownership checks, then the network's V2 keeper (the verifier) binds the payout wallet.
   const v2Identities=new V2Identities({signerFor:key=>{const w=v2Keeper.workers?.find(x=>x.chain===key);return w?{signer:w.signer,chainId:w.net.chainId}:null;},solanaKeeper:()=>solanaV2Keeper});
   let v2Keeper={enabled:false,status:()=>({enabled:false,state:'not_configured'}),manifest:()=>null,close:async()=>{}};
-  queueMicrotask(()=>{if(port===0)return;try{v2Keeper=configuredV2Keeper({env:process.env,networks:evmNetworks,indexFor:key=>publicIndex.v2Index(key),prices:()=>priceSnapshot(),stockUsd:(key,asset)=>{const r=stockPrices.reference(key,asset);return r?.status==='fresh'?r.usd:null;},path:dataFile('v2-keeper.sqlite'),publicUrl:process.env.ELPIDA_PUBLIC_URL||'https://elpida.fun',log:e=>console.log(JSON.stringify(e))});if(v2Keeper.enabled){v2Keeper.start();console.log(JSON.stringify({event:'v2_keeper_started',keeper:v2Keeper.address}));}}catch(error){console.log(JSON.stringify({event:'subsystem_unavailable',subsystem:'v2Keeper',degraded:true,message:String(error.message).slice(0,120)}));}});
+  queueMicrotask(()=>{if(port===0)return;try{v2Keeper=configuredV2Keeper({env:process.env,networks:evmNetworks,indexFor:(key,factory)=>publicIndex.v2Index(key,factory),prices:()=>priceSnapshot(),stockUsd:(key,asset)=>{const r=stockPrices.reference(key,asset);return r?.status==='fresh'?r.usd:null;},path:dataFile('v2-keeper.sqlite'),publicUrl:process.env.ELPIDA_PUBLIC_URL||'https://elpida.fun',log:e=>console.log(JSON.stringify(e))});if(v2Keeper.enabled){v2Keeper.start();console.log(JSON.stringify({event:'v2_keeper_started',keeper:v2Keeper.address}));}}catch(error){console.log(JSON.stringify({event:'subsystem_unavailable',subsystem:'v2Keeper',degraded:true,message:String(error.message).slice(0,120)}));}});
   const flywheelKeeper=port===0?{summary:()=>({enabled:false,state:'not_configured'}),close:async()=>{}}:soft('flywheelKeeper',()=>configuredFlywheelKeeper({env:process.env,publicIndex,dexes:testnetDexes,path:dataFile('flywheel-keeper.sqlite'),log:e=>console.log(JSON.stringify(e))}),()=>({summary:()=>({enabled:false,state:'unavailable'}),close:async()=>{}}));
   console.log(JSON.stringify({event:'storage_ready',durable:durableStorage(),dataDir,publicNetworks:[...publicIndex.entries.keys()],simulation:runtime.config.simulation?.durable?`journal replay: ${runtime.config.simulation.replayed} actions restored, ${runtime.config.simulation.skipped} skipped`:'resets on process restart'}));
   const priceKeeper=soft('priceKeeper',()=>new PriceKeeper({networks:evmNetworks}),()=>({refresh:async()=>{},snapshot:()=>({})}));
