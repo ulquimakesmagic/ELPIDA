@@ -172,7 +172,7 @@
     }
   ],
   "safeBatch": "base-mainnet-v23-safe-batch.json",
-  "status": "awaiting_safe",
+  "status": "ready",
   "pending": {
     "safe": "Execute the Safe batch (setHook, configureUsdPricing, approveQuote USDC, setGuardian, setDailyLaunchCap), then run verify."
   },
@@ -180,5 +180,45 @@
     "deployedAt": "2026-11-23T17:11:32.783Z",
     "deployer": "0x9c99387c63A5d893D3bDe9c71CF2fe2b1191F08E",
     "readBack": "ok"
+  },
+  "verify": {
+    "at": "2026-11-23T17:14:31.570Z",
+    "checks": [
+      {
+        "check": "factory hook",
+        "ok": true,
+        "detail": "0x31bdfd511F7284B7B5c24A13ddE07D2e241D28cc"
+      },
+      {
+        "check": "USD feed",
+        "ok": true,
+        "detail": "0x71041dddad3595F9CEd3DcCFBe3D1F4b0a16Bb70"
+      },
+      {
+        "check": "USDC approved at $25,000 virtual",
+        "ok": true,
+        "detail": "25000000000"
+      },
+      {
+        "check": "guardian",
+        "ok": true,
+        "detail": "0xfC08505EfEf934c3fF19d82D189f60f28a0255eB"
+      },
+      {
+        "check": "daily launch cap",
+        "ok": true,
+        "detail": "1000"
+      },
+      {
+        "check": "launches paused",
+        "ok": true,
+        "detail": "false"
+      },
+      {
+        "check": "native start price readable",
+        "ok": true,
+        "detail": "14.185320988729532804 native = $25,000 virtual"
+      }
+    ]
   }
 }
