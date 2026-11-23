@@ -1,0 +1,54 @@
+{
+  "version": "1.0",
+  "chainId": "4663",
+  "createdAt": 1795472274560,
+  "meta": {
+    "name": "ELPIDA V2.3 Robinhood Chain wiring",
+    "description": "Plan 4c7e10693ab13439: connect the hook, set USD pricing, approve USDC ($25,000 virtual quote), name the guardian, cap launches at 1000 a day.",
+    "txBuilderVersion": "1.16.5",
+    "createdFromSafeAddress": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01",
+    "checksum": "0x2886d7e9d4422ea1da0b3714d0c2443ff33fd5c29154cc57ba4cb4cb08daf4b0"
+  },
+  "transactions": [
+    {
+      "to": "0x29f0D2A8F2DD5B2dF872222f10bE35D6B27aFD71",
+      "value": "0",
+      "data": "0x3dfd387300000000000000000000000087e7c9477ffe0347d729c7d574964e72ea76a8cc",
+      "contractMethod": null,
+      "contractInputsValues": null,
+      "description": "setHook(0x87e7C9477ffe0347d729c7D574964e72Ea76A8cc)"
+    },
+    {
+      "to": "0x29f0D2A8F2DD5B2dF872222f10bE35D6B27aFD71",
+      "value": "0",
+      "data": "0x4d6e402e00000000000000000000000078f3556b67e17df817d51ef5a990cdaf09e8d3a900000000000000000000000000000000000000000000000000000000000151800000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d168",
+      "contractMethod": null,
+      "contractInputsValues": null,
+      "description": "configureUsdPricing(0x78F3556b67E17Df817D51Ef5a990cDaF09E8d3A9, 86400, 0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168)"
+    },
+    {
+      "to": "0x29f0D2A8F2DD5B2dF872222f10bE35D6B27aFD71",
+      "value": "0",
+      "data": "0x56fafe720000000000000000000000005fc5360d0400a0fd4f2af552add042d716f1d16800000000000000000000000000000000000000000000000000000005d21dba00",
+      "contractMethod": null,
+      "contractInputsValues": null,
+      "description": "approveQuote(0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168, 25000000000)"
+    },
+    {
+      "to": "0x29f0D2A8F2DD5B2dF872222f10bE35D6B27aFD71",
+      "value": "0",
+      "data": "0x8a0dac4a000000000000000000000000fc08505efef934c3ff19d82d189f60f28a0255eb",
+      "contractMethod": null,
+      "contractInputsValues": null,
+      "description": "setGuardian(0xfC08505EfEf934c3fF19d82D189f60f28a0255eB)"
+    },
+    {
+      "to": "0x29f0D2A8F2DD5B2dF872222f10bE35D6B27aFD71",
+      "value": "0",
+      "data": "0xda62122d00000000000000000000000000000000000000000000000000000000000003e8",
+      "contractMethod": null,
+      "contractInputsValues": null,
+      "description": "setDailyLaunchCap(1000)"
+    }
+  ]
+}
