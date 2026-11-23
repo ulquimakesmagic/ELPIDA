@@ -130,3 +130,12 @@ test('an HTTP 429 from the explorer is waited out and retried, not reported as a
   assert.deepEqual(await submit({ fetch, sleep: async ms => { waits.push(ms); }, chainId: 4663, apiKey: '', job }), { ok: true, detail: 'already verified' });
   assert.equal(n, 3); assert.deepEqual(waits, [3000, 6000]);
 });
+
+test('a Blockscout PRO key routes Robinhood Chain calls to api.blockscout.com with the chain id', async () => {
+  const e = explorer(() => ({ status: '1', result: [{ SourceCode: 'x' }] }));
+  await submit({ fetch: e.fetch, sleep, chainId: 4663, apiKey: 'proapi_test', job });
+  assert.match(e.calls[0].url, /^https:\/\/api\.blockscout\.com\/v2\/api\?chainid=4663&/);
+  const other = explorer(() => ({ status: '1', result: [{ SourceCode: 'x' }] }));
+  await submit({ fetch: other.fetch, sleep, chainId: 4663, apiKey: 'ETHERSCANKEY', job });
+  assert.match(other.calls[0].url, /^https:\/\/robinhoodchain\.blockscout\.com\/api\?/, 'an Etherscan key (the keeper\'s) keeps the keyless route');
+});
