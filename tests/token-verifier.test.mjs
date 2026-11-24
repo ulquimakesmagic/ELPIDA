@@ -75,3 +75,52 @@ test('an address typed with the wrong capitals is accepted (22 Nov: a bad checks
   assert.equal(r.submitted[0].ok, true);
   assert.equal(r.submitted[0].address.toLowerCase(), '0xeeca39f2af81296de89685e6ddda58acd5ba1053');
 });
+
+test('Robinhood Chain (Blockscout) tokens are verified keyless or with a Blockscout key, never with the Etherscan key', async t => {
+  const f = await v2Fixture(t);
+  const { token } = await launchV2(f, { name: 'Hood', symbol: 'HOOD' });
+  const address = token.target ?? token;
+  const urls = [], keys = [];
+  let verified = false;
+  const fetch = async (url, opts = {}) => {
+    urls.push(url); const p = Object.fromEntries(new URLSearchParams(opts.body ?? url.split('?')[1])); keys.push(p.apikey ?? '');
+    const body = p.action === 'getsourcecode' ? { status: '1', result: [{ SourceCode: verified ? 'x' : '' }] }
+      : p.action === 'verifysourcecode' ? { status: '1', result: 'guid' } : (verified = true, { status: '1', result: 'Pass - Verified' });
+    return { ok: true, status: 200, json: async () => body };
+  };
+  // Etherscan key only: Robinhood goes keyless to the explorer's own API, two tokens per run.
+  const v = new TokenVerifier({ apiKey: 'ETHERSCAN', fetch, sleep });
+  assert.equal(v.supports(4663), true);
+  const r = await v.run({ chainId: 4663, provider: f.provider, hook: f.hook.target, tokens: [{ address }], state: memory(), now: 1 });
+  assert.deepEqual(r.submitted.map(x => x.ok), [true]);
+  assert.ok(urls.every(u => u.startsWith('https://robinhoodchain.blockscout.com/api')), urls[0]);
+  assert.ok(keys.every(k => k !== 'ETHERSCAN'));
+  // A Blockscout PRO key goes to Blockscout's PRO API.
+  urls.length = 0; verified = false;
+  const pro = new TokenVerifier({ blockscoutKey: 'proapi_x', fetch, sleep });
+  await pro.run({ chainId: 4663, provider: f.provider, hook: f.hook.target, tokens: [{ address }], state: memory(), now: 1 });
+  assert.ok(urls.every(u => u.startsWith('https://api.blockscout.com/v2/api?chainid=4663')), urls[0]);
+  // Without an Etherscan key, Etherscan chains are skipped and nothing is sent.
+  assert.equal(pro.supports(8453), false);
+  urls.length = 0;
+  assert.deepEqual(await pro.run({ chainId: 8453, provider: f.provider, hook: f.hook.target, tokens: [{ address }], state: memory(), now: 1 }), { submitted: [], pending: 0 });
+  assert.equal(urls.length, 0);
+});
+
+test('a token the explorer has not indexed yet is retried after 2 minutes, then on the long interval', async t => {
+  const f = await v2Fixture(t);
+  const { token } = await launchV2(f, { name: 'Soon', symbol: 'SOON' });
+  const address = token.target ?? token;
+  let fail = true;
+  const e = explorer(p => p.action === 'getsourcecode' ? { status: '1', result: [{ SourceCode: '' }] }
+    : p.action === 'verifysourcecode' ? (fail ? { status: '0', result: 'Unable to locate ContractCode' } : { status: '1', result: 'guid' }) : { status: '1', result: 'Pass - Verified' });
+  const state = memory(), v = new TokenVerifier({ apiKey: 'K', fetch: e.fetch, sleep });
+  const go = now => v.run({ chainId: 8453, provider: f.provider, hook: f.hook.target, tokens: [{ address }], state, now });
+  assert.deepEqual((await go(1000)).submitted.map(x => x.ok), [false]);
+  assert.equal((await go(1100)).submitted.length, 0, 'not before 2 minutes');
+  assert.deepEqual((await go(1120)).submitted.map(x => x.ok), [false], 'second try at 2 minutes');
+  assert.deepEqual((await go(1240)).submitted.map(x => x.ok), [false], 'third try 2 minutes later');
+  assert.equal((await go(1400)).submitted.length, 0, 'after that, the long interval');
+  fail = false;
+  assert.deepEqual((await go(1240 + 6 * 3600)).submitted.map(x => x.ok), [true]);
+});
