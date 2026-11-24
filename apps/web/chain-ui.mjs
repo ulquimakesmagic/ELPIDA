@@ -5,8 +5,8 @@ const ASSET_ICONS={ETH:'/assets/chains/ethereum.png',WETH:'/assets/chains/ethere
  * A tokenized stock's tile: its ticker on a colour of its own (or an operator-supplied logo), with a small issuer mark
  * (Ondo "on", xStocks "x", a flask for a test stand-in). `size` is 'sm' (inline, 20px), 'md' (32px) or 'lg' (44px).
  */
-export function stockTile(symbol,{size='sm',provider=null,name=null,catalog=null}={}){
-  const id=stockIdentity(symbol,{provider,name,catalog});
+export function stockTile(symbol,{size='sm',provider=null,name=null,catalog=null,address=null}={}){
+  const id=stockIdentity(symbol,{provider,name,catalog,address});
   // Ondo's own icons already carry Ondo's mark, so only a test stand-in gets a corner badge (a flask); a ticker tile
   // keeps a small issuer mark so it still reads as a tokenized stock.
   const ticker=()=>h('span.stock-tile-ticker',id.ticker);

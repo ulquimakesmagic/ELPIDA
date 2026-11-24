@@ -105,7 +105,7 @@ export function renderPairs(ctx, { connect }) {
 
     const list = card('Approved pairs', approved.length ? h('div.table-scroll', h('table.market-table.tk-table.op-table',
       h('thead', h('tr', ...['Asset', 'Kind', 'Address', 'Issuer'].map(l => h('th', { scope: 'col' }, l)))),
-      h('tbody', approved.map(a => h('tr', h('td', h('span.op-net', assetIcon(a.symbol, a.kind === 'xstock', { provider: a.stock?.provider, name: a.name }), a.symbol, a.test ? h('span.chip.chip-xs.chip-test', 'Test') : null)),
+      h('tbody', approved.map(a => h('tr', h('td', h('span.op-net', assetIcon(a.symbol, a.kind === 'xstock', { provider: a.stock?.provider, name: a.name, address: a.address }), a.symbol, a.test ? h('span.chip.chip-xs.chip-test', 'Test') : null)),
         h('td', a.kind), h('td', h('a.mono', { href: `${net.explorer}/address/${a.address}`, target: '_blank', rel: 'noopener noreferrer' }, short(a.address))), h('td', a.stock?.provider ?? '—')))))) : h('p.small.muted', pairs ? 'No approved pairs yet besides the native coin.' : 'Loading the approved pairs…'));
 
     const recovery = h('input.input', { type: 'text', placeholder: '0x…', spellcheck: false, autocomplete: 'off', 'aria-label': 'Previous TEST-STOCK deployment hash' });

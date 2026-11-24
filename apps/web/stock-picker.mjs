@@ -26,12 +26,12 @@ const rowText = (a, id) => [
 export function stockPicker({ assets, selectedId, onSelect, label = 'Tokenized stock to pair with', noun = 'stock', emptyText = 'No approved stock matches. Only stocks approved on this launchpad can be paired.' }) {
   // Mixed lists (the reward asset picker, Swap): an asset with a `kind` other than xstock is a coin (native or USDC).
   const stockish = a => !a.kind || a.kind === 'xstock';
-  const items = assets.map(a => { const id = stockish(a) ? stockIdentity(a.symbol, { provider: a.stock?.provider, name: a.name, catalog }) : { ticker: a.symbol, company: a.name ?? a.symbol, type: a.kind === 'usdc' ? 'Stablecoin' : 'Coin' }; return { asset: a, id, symbol: a.symbol, ticker: id.ticker, company: id.company ?? a.name, stock: stockish(a) }; });
+  const items = assets.map(a => { const id = stockish(a) ? stockIdentity(a.symbol, { provider: a.stock?.provider, name: a.name, catalog, address: a.address }) : { ticker: a.symbol, company: a.name ?? a.symbol, type: a.kind === 'usdc' ? 'Stablecoin' : 'Coin' }; return { asset: a, id, symbol: a.symbol, ticker: id.ticker, company: id.company ?? a.name, stock: stockish(a) }; });
   const plural = n => `${n} ${noun}${n === 1 ? '' : 's'}`;
   const selected = items.find(it => it.asset.id === selectedId) ?? items[0];
   const listId = `stock-options-${Math.random().toString(36).slice(2, 8)}`;
   const trigger = h('button.stock-select-trigger', { type: 'button', 'aria-haspopup': 'listbox', 'aria-expanded': 'false', 'aria-controls': listId, 'aria-label': `${label}: ${selected.symbol}${selected.company ? ', ' + selected.company : ''}` },
-    assetIcon(selected.symbol, selected.stock, { size: 'md', provider: selected.asset.stock?.provider, name: selected.asset.name, catalog }),
+    assetIcon(selected.symbol, selected.stock, { size: 'md', provider: selected.asset.stock?.provider, name: selected.asset.name, catalog, address: selected.asset.address }),
     h('span.stock-select-text', ...rowText(selected.asset, selected.id)),
     h('span.stock-select-count', items.length > 1 ? plural(items.length) : null),
     icon('chevron-down', 'icon-sm stock-select-chevron'));
@@ -47,7 +47,7 @@ export function stockPicker({ assets, selectedId, onSelect, label = 'Tokenized s
     list.replaceChildren(...shown.map((it, i) => h('li.stock-option', {
       role: 'option', id: `${listId}-${i}`, 'aria-selected': String(it === selected), 'data-active': i === active ? 'true' : undefined,
       on: { click: () => choose(it), mousemove: () => { if (active !== i) { active = i; mark(); } } },
-    }, assetIcon(it.symbol, it.stock, { size: 'md', provider: it.asset.stock?.provider, name: it.asset.name, catalog }), h('span.stock-option-text', ...rowText(it.asset, it.id)), it === selected ? icon('check', 'icon-sm stock-option-check') : null)));
+    }, assetIcon(it.symbol, it.stock, { size: 'md', provider: it.asset.stock?.provider, name: it.asset.name, catalog, address: it.asset.address }), h('span.stock-option-text', ...rowText(it.asset, it.id)), it === selected ? icon('check', 'icon-sm stock-option-check') : null)));
     empty.hidden = shown.length > 0;
     mark();
   };
