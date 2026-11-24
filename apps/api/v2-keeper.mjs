@@ -144,7 +144,7 @@ export class V2Keeper {
    * Read-only: no transaction, no gas. Chains without an Etherscan-family explorer are skipped.
    */
   async verify(w) {
-    if (!this.verifier || !EXPLORERS[Number(w.net.chainId)] || !this.due(w, 'verify', 3600)) return;
+    if (!this.verifier || !EXPLORERS[Number(w.net.chainId)] || this.verifier.supports?.(Number(w.net.chainId)) === false || !this.due(w, 'verify', 3600)) return;
     const index = w.index(); if (!index) return;
     const tokens = index.listings().filter(t => t.address);
     const r = await this.verifier.run({ chainId: Number(w.net.chainId), provider: w.provider, hook: w.deployment.hook, tokens, state: { get: (k, f) => this.get(k, f), set: (k, v) => this.set(k, v) }, now: this.now() });
@@ -806,8 +806,10 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
   // 'airdrop' (22 November 2026): only the EWPR trader airdrop, in USDC; holder rewards and the flywheel keep accruing.
   const mode = env.ELPIDA_V2_DISTRIBUTIONS;
   const distributions = mode === 'airdrop' ? 'airdrop' : mainnet ? mode === 'on' : mode === 'off' ? false : mode === 'on' ? true : undefined;
-  // Explorer verification of launched tokens (22 November 2026): on with ELPIDA_EXPLORER_API_KEY, off with ELPIDA_TOKEN_VERIFY=off.
-  const verifier = env.ELPIDA_EXPLORER_API_KEY && env.ELPIDA_TOKEN_VERIFY !== 'off' ? new TokenVerifier({ apiKey: env.ELPIDA_EXPLORER_API_KEY }) : null;
+  // Explorer verification of launched tokens (22 November 2026): Etherscan chains with ELPIDA_EXPLORER_API_KEY; Blockscout
+  // chains (Robinhood Chain, 24 November) keyless, or with ELPIDA_BLOCKSCOUT_API_KEY. On when either key is set; off
+  // with ELPIDA_TOKEN_VERIFY=off.
+  const verifier = (env.ELPIDA_EXPLORER_API_KEY || env.ELPIDA_BLOCKSCOUT_API_KEY) && env.ELPIDA_TOKEN_VERIFY !== 'off' ? new TokenVerifier({ apiKey: env.ELPIDA_EXPLORER_API_KEY ?? '', blockscoutKey: env.ELPIDA_BLOCKSCOUT_API_KEY ?? '' }) : null;
   const keeper = new V2Keeper({ workers, path, publicUrl, log, gasTarget, gasShareBps, confirmations, dailyGas, verifier, network: mainnet ? 'mainnet' : 'testnet', ...(distributions === undefined ? {} : { distributions }) });
   keeper.enabled = true; keeper.address = getAddress(address);
   return keeper;
