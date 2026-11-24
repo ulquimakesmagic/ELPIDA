@@ -158,6 +158,7 @@ export function errorText(error) {
   if(/StaleOraclePrice|stale oracle/i.test(text))return 'The launch price feed is stale. Wait for its next update, then refresh and retry.';
   if(/FeeQuoteMoved/i.test(text))return 'The fee moved beyond your 1% cap. Refresh the quote and try again.';
   if(/InvalidOracleRound|OracleUnavailable/i.test(text))return 'A verified launch price is unavailable. Refresh later; no launch was submitted.';
+  if(/["'(\s]token address["')]/i.test(text)||/^token address$/i.test(text))return 'This launch could not pick a token address for that pair from your wallet right now. Nothing was submitted. Try again after the next launch on Elpida, or pair it with ETH or USDC.';
   if (/insufficient funds/i.test(text)) return 'Your wallet does not have enough funds for this transaction and its network fee.';
   return text;
 }

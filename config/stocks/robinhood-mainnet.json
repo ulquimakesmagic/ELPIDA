@@ -210,18 +210,6 @@
       "priceUpdatedAt": 1795500184
     },
     {
-      "symbol": "MU",
-      "name": "Micron (Robinhood)",
-      "address": "0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD",
-      "decimals": 18,
-      "feed": "0x425EEFdCf05ed6526C3cE61Af99429A228a6d596",
-      "feedDecimals": 8,
-      "feedDescription": "RHMU / USD",
-      "maxAge": 345600,
-      "priceUsd": 702.76865165,
-      "priceUpdatedAt": 1795500607
-    },
-    {
       "symbol": "NBIS",
       "name": "Nebius (Robinhood)",
       "address": "0x9D9c6684F596F66a64C030B93A886D51Fd4D7931",

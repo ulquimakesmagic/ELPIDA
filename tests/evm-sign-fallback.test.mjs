@@ -7,3 +7,8 @@ test('"could not coalesce error" shows the wallet\'s own words, or a plain next 
   assert.match(errorText({ message: 'could not coalesce error' }), /could not read\. Unlock it/);
   assert.match(errorText({ code: 'ACTION_REJECTED', message: 'user rejected' }), /cancelled/);
 });
+
+test('a "token address" revert explains itself', () => {
+  assert.match(errorText({ shortMessage: 'execution reverted: "token address"' }), /could not pick a token address/);
+  assert.equal(errorText({ message: 'execution reverted: "token deploy"' }), 'execution reverted: "token deploy"');
+});

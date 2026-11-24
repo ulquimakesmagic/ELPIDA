@@ -13,6 +13,15 @@ export const STOCK_FEED_MAX_AGE = 4 * 86_400;
 const TOKEN_ABI = ['function symbol() view returns(string)', 'function decimals() view returns(uint8)'];
 const FEED_ABI = ['function decimals() view returns(uint8)', 'function description() view returns(string)', 'function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)'];
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
+
+/**
+ * The V2 factory tries 256 CREATE2 salts for a token address above the quote's (so the quote is currency0) and reverts
+ * "token address" if none is. The salts depend on the launcher and the launch count, so a quote whose own address is
+ * near the top of the range fails that launcher until someone else launches: 0xfedc… (SPYon on Ethereum) about 32% of
+ * the time, 0xff08… (MU on Robinhood Chain) about 38%. Odds = (address / 2^160)^256. Above 2%, the stock is left out.
+ */
+export const MAX_LAUNCH_FAILURE = 0.02;
+export const launchFailureOdds = address => (Number(BigInt(address)) / 2 ** 160) ** 256;
 /**
  * "TSLAon" → "TSLA" (Ondo) and "NVDAc" → "NVDA" (Coinbase on Base): the underlying ticker, for matching the feed's
  * description ("TSLAon / USD", "NVDAc / USD" or "TSLA / USD"). Only a lower-case suffix is removed, so "BAC" stays "BAC".
@@ -40,6 +49,8 @@ export async function verifyStock({ Contract, provider, now }, c) {
   if (!/^[A-Za-z0-9.]{1,16}$/.test(symbol)) return fail('symbol missing or malformed');
   if (!ADDRESS.test(c.address ?? '')) return fail('token address malformed');
   if (!ADDRESS.test(c.feed ?? '')) return fail('feed address malformed');
+  const odds = launchFailureOdds(c.address);
+  if (odds > MAX_LAUNCH_FAILURE) return fail(`its address is so high that about ${Math.round(odds * 100)}% of launches against it would revert ("token address"); left out`);
   const maxAge = Number(c.maxAge ?? STOCK_FEED_MAX_AGE);
   if (!Number.isInteger(maxAge) || maxAge <= 0 || maxAge > STOCK_FEED_MAX_AGE) return fail('maxAge must be 1 second to 4 days');
   try {
@@ -77,7 +88,8 @@ export function checkStockList(list, chainId) {
   if (list?.schema !== STOCK_LIST_SCHEMA || !Array.isArray(list.stocks)) throw new Error('Not an Elpida stock list.');
   if (Number(list.chainId) !== Number(chainId)) throw new Error(`This stock list is for chain ${list.chainId}, not ${chainId}.`);
   for (const s of list.stocks) if (!ADDRESS.test(s.address ?? '') || !ADDRESS.test(s.feed ?? '') || !(s.maxAge > 0 && s.maxAge <= STOCK_FEED_MAX_AGE)) throw new Error(`Stock list entry ${s.symbol ?? '?'} is malformed.`);
-  return list;
+  // Older lists may still name a stock whose launches would often revert; it is not offered.
+  return { ...list, stocks: list.stocks.filter(s => launchFailureOdds(s.address) <= MAX_LAUNCH_FAILURE) };
 }
 
 /** The approvePricedQuote calls for the listed stocks not yet approved, in groups of STOCK_BATCH_SIZE. */
