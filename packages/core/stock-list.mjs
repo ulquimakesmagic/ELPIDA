@@ -26,6 +26,8 @@ export const underlying = symbol => String(symbol).replace(/(on|c)$/, '').toUppe
 export function feedNamesStock(symbol, description) {
   const t = underlying(symbol).replace('.', '\\.');
   if (new RegExp(`(^|[^A-Z])${t}(ON|C)?\\s*/\\s*USD`, 'i').test(description)) return true;
+  // Chainlink names some Robinhood Chain stock-token feeds with Robinhood's RH prefix ("RHTSLA / USD", 24 November 2026).
+  if (new RegExp(`(^|[^A-Z])RH${t}\\s*/\\s*USD`, 'i').test(description)) return true;
   return /c$/.test(String(symbol)) && new RegExp(`^\\s*Coinbase\\s+${t}\\s*$`).test(String(description));
 }
 
