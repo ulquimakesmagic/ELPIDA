@@ -209,23 +209,19 @@ USDC distributor and Safe batches: do it on a low-gas day (under 1 gwei is about
 4. rehearse → deploy → explorer verify → Safe batch → USDC distributor rehearse/deploy → `verify` → record PR, as for
    the other chains; then the Ondo stock list (`config/stocks/candidates/ethereum-ondo.json`) and its approval.
 
-## More Ethereum stocks: MSTRon, GOOGLon and NVDAon, 24 November 2026
+## More Ethereum stocks: MSTRon, 24 November 2026
 
 Malik, 24 Nov: more stocks on Ethereum, Chainlink only (no Pyth without a paid plan). Chainlink's Ethereum directory has
-a direct MSTRon feed ("MSTRon / USD (Calculated)") and the plain GOOGL and NVDA (24/5) feeds. MSTRon joins
-`ethereum-ondo.json`; GOOGLon and NVDAon get an `ElpidaOndoStockFeed` adapter each (Chainlink price × Ondo's sValue, the
-contract already live on BNB Chain), from `ethereum-ondo-underlying.json`. About 0.6M gas per adapter. No Chainlink feed
-exists on Ethereum for AAPL, MSFT, AMZN, META, COIN, NFLX, HOOD, MRK, AZN or MCD (checked 24 Nov).
+a direct MSTRon feed ("MSTRon / USD (Calculated)"); MSTRon is in `ethereum-ondo.json`. GOOGLon and NVDAon cannot be
+adapted on Ethereum: Ondo's SyntheticSharesOracle there (0x9BC39DB6…1bE6, the right address) answers `AssetNotFound`
+for NVDAon (checked 24 Nov), so it only carries the tokens Chainlink already prices. No Chainlink feed exists on
+Ethereum for AAPL, MSFT, AMZN, META, COIN, NFLX, HOOD, MRK, AZN or MCD (checked 24 Nov).
 
 ```
-$env:ELPIDA_MAINNET_RPC_URL = "https://ethereum-rpc.publicnode.com"
-node scripts/ondo-stock-feeds.mjs check  --network ethereum --list config/stocks/candidates/ethereum-ondo-underlying.json
-node scripts/ondo-stock-feeds.mjs deploy --network ethereum --list config/stocks/candidates/ethereum-ondo-underlying.json
-$env:STOCK_LIST_RPC_URL = $env:ELPIDA_MAINNET_RPC_URL
-node scripts/stock-list.mjs ethereum config/stocks/candidates/ethereum-ondo.json,config/stocks/candidates/ethereum-ondo-adapted.json
+$env:STOCK_LIST_RPC_URL = "https://ethereum-rpc.publicnode.com"
+node scripts/stock-list.mjs ethereum config/stocks/candidates/ethereum-ondo.json
 ```
-Expect 10 of 11 (SPYon stays out). Push the record, the adapted candidates and the list on a branch; then the operator
-panel approves the 3 new stocks (one Safe batch).
+Expect 8 of 9 (SPYon stays out). Push the list on a branch; then the operator panel approves MSTRon (one Safe batch).
 
 ## Robinhood stock tokens on Robinhood Chain, 24 November 2026
 

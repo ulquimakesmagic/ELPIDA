@@ -38,7 +38,9 @@ export async function checkOndoFeeds({ provider, sharesOracle, entries, now }) {
     try {
       getAddress(e.address); getAddress(e.underlyingFeed);
       const token = new Contract(e.address, TOKEN, provider), feed = new Contract(e.underlyingFeed, FEED, provider);
-      const [symbol, decimals, description, feedDecimals, round, [sValue, paused]] = await Promise.all([token.symbol(), token.decimals(), feed.description(), feed.decimals(), feed.latestRoundData(), shares.getSValue(e.address)]);
+      // Each read is labelled, so a revert names its source (24 November 2026: Ethereum reverted with no hint).
+      const read = (what, p) => p.catch(err => { throw new Error(`${what}: ${err.shortMessage ?? err.message}`); });
+      const [symbol, decimals, description, feedDecimals, round, [sValue, paused]] = await Promise.all([read('token symbol()', token.symbol()), read('token decimals()', token.decimals()), read('feed description()', feed.description()), read('feed decimals()', feed.decimals()), read('feed latestRoundData()', feed.latestRoundData()), read(`Ondo sharesOracle ${sharesOracle} getSValue()`, shares.getSValue(e.address))]);
       // Chainlink names them "TSLA / USD" or, for its 24/5 equity feeds, "TSLA-USD (24/5)".
       const want = `${underlyingTicker(e.symbol)} / USD`, wantRe = new RegExp(`^\\s*${underlyingTicker(e.symbol)}\\s*[-/]\\s*USD(\\s*\\(24/5\\))?\\s*$`, 'i');
       if (symbol !== e.symbol) throw new Error(`the token's symbol is ${symbol}`);

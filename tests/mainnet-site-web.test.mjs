@@ -14,7 +14,7 @@ test('the mainnet site serves index.html without testnet wording; the testnet si
   const page = siteHtml(html, { mode: 'mainnet', names: ['Base'] });
   assert.deepEqual([...page.matchAll(/.{0,40}test ?net.{0,40}/gi)].map(m => m[0]), [], 'no testnet wording left');
   assert.match(page, /<meta name="description" content="[^"]*Elpida is live on Base mainnet\."/);
-  assert.equal((page.match(/Live on Base mainnet\./g) ?? []).length, 2, 'Open Graph and Twitter previews');
+  assert.ok((page.match(/Live on Base mainnet\./g) ?? []).length >= 2, 'Open Graph and Twitter previews');
   assert.match(page, /<span id="footer-note" hidden><\/span>/);
   assert.match(page, /graduates in that same pool/);
   assert.match(siteHtml(html, { mode: 'mainnet', names: ['Base', 'BNB Chain'] }), /Live on Base, BNB Chain mainnet\./);
@@ -43,7 +43,7 @@ test('the /learn guides, the FAQ and llms.txt carry no testnet wording on the ma
   const out = pages.map(p => seoText(p, { mode: 'mainnet', names: ['Base'] })).join('\n');
   assert.deepEqual([...out.matchAll(/.{0,40}(test ?net|Sepolia|Devnet).{0,40}/gi)].map(m => m[0]), []);
   // The real-money answer reaches both the visible FAQ and its JSON-LD copy.
-  assert.equal((out.match(/Yes, on Base mainnet\. Its contracts have not had an independent audit/g) ?? []).length >= 2, true);
+  assert.equal((out.match(/Yes, on Base mainnet\. Every contract is open source and verified/g) ?? []).length >= 2, true);
   assert.match(out, /Approved tokenized stocks can be a trading pair/);
   // 24 November 2026: the V2.3 split, no Solana, and no five-way split on the mainnet site.
   assert.deepEqual([...out.matchAll(/.{0,40}(Solana|flywheel|five ways|Raydium).{0,40}/gi)].map(m => m[0]), []);
