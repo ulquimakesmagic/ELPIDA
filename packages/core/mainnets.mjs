@@ -48,6 +48,8 @@ export const EVM_MAINNETS = Object.freeze([
     nativeCurrency: Object.freeze({ name: 'Ether', symbol: 'ETH', decimals: 18 }), gasFaucet: null,
     // Chainlink ETH / USD on Ethereum updates at least hourly.
     usdMaxAge: 3900,
+    // Uniswap v3 on Ethereum (developers.uniswap.org, v3 Ethereum deployments): SwapRouter02 and QuoterV2, WETH9.
+    payoutDex: Object.freeze({ name: 'Uniswap v3', router: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45', quoter: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e', weth: '0xC02aaA39b223FE8D0A0e5C4F27eAD9083C756Cc2', routerVersion: 2 }),
   }),
 ]);
 
