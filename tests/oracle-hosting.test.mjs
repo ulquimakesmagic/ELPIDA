@@ -14,8 +14,8 @@ const dir = join(root, 'deploy', 'oracle');
 const scripts = readdirSync(dir).filter(f => f.endsWith('.sh'));
 
 test('every Oracle script parses and is LF-only (it runs on Linux even from a Windows checkout)', () => {
-  assert.deepEqual(scripts.sort(), ['doctor.sh', 'restore.sh', 'setup.sh', 'start.sh', 'update.sh']);
-  for (const f of [...scripts, 'elpida.service', 'elpida-update.service', 'elpida-update.timer']) {
+  assert.deepEqual(scripts.sort(), ['doctor.sh', 'restore.sh', 'setup-shared.sh', 'setup.sh', 'start.sh', 'update.sh']);
+  for (const f of [...scripts, 'elpida.service', 'elpida-update.service', 'elpida-update.timer', 'elpida-tunnel.service']) {
     if (f.endsWith('.sh')) assert.equal(spawnSync('bash', ['-n', join(dir, f)]).status, 0, `${f} parses`);
     assert.ok(!readFileSync(join(dir, f), 'utf8').includes('\r'), `${f} has no CR`);
   }
@@ -105,4 +105,23 @@ test('automatic deploys: every 5 minutes, only a new commit, a failed commit is 
   assert.match(u, /\nmain "\$@"\nexit\n$/, 'the whole script is parsed before git rewrites it');
   assert.match(u, /grep -qx "\$target" "\$FAILED"/);
   assert.match(readFileSync(join(dir, 'setup.sh'), 'utf8'), /systemctl enable --now elpida-update\.timer/);
+});
+
+// 24 November 2026: Elpida moves onto a friend's Oracle VM that already runs about ten other apps.
+test('setup-shared.sh changes nothing the other apps on the server depend on', () => {
+  const s = readFileSync(join(dir, 'setup-shared.sh'), 'utf8'), code = s.split('\n').filter(l => !l.trim().startsWith('#')).join('\n');
+  assert.doesNotMatch(code, /apt-get[^\n]* upgrade|unattended|Automatic-Reboot|swapfile|swapon|nodesource|cloudflared service install|ufw|iptables|\/etc\/caddy|systemctl (restart|stop) (caddy|postgres|redis|cloudflared\b)/);
+  assert.match(code, /apt-get install -y -q --no-upgrade/);
+  assert.match(code, /NODE_DIR=\/opt\/elpida\/node/);
+  assert.match(code, /sha256sum -c/);
+  assert.match(code, /ss -tlnH 'sport = :3000'/);
+  assert.match(code, /CPUQuota=200%\nMemoryHigh=3G\nMemoryMax=4G/);
+  assert.match(code, /install -o root -g root -m 0600 \/dev\/null "\$ETC\/tunnel.env"/);
+  assert.match(code, /read -rs TOKEN/);
+  const unit = readFileSync(join(dir, 'elpida-tunnel.service'), 'utf8');
+  assert.match(unit, /EnvironmentFile=\/etc\/elpida\/tunnel.env/);
+  assert.match(unit, /ExecStart=\/usr\/bin\/cloudflared --no-autoupdate tunnel run$/m);
+  // The private Node is used by every script that runs node or npm.
+  for (const f of ['start.sh', 'update.sh', 'restore.sh', 'doctor.sh']) assert.match(readFileSync(join(dir, f), 'utf8'), /export PATH="\/opt\/elpida\/node\/bin:\$PATH"/, f);
+  assert.match(readFileSync(join(dir, 'update.sh'), 'utf8'), /sudo -H -u elpida env PATH="\$PATH" npm ci/);
 });

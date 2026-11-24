@@ -5,6 +5,8 @@
 #   update.sh --auto                                              # elpida-update.timer, every 5 minutes: deploys a new
 #                                                                 # main like Railway did, skips a commit that failed
 set -euo pipefail
+# Node 24 lives in /opt/elpida/node on a shared server (setup-shared.sh); elsewhere the system Node is used.
+export PATH="/opt/elpida/node/bin:$PATH"
 APP=/opt/elpida/app ETC=/etc/elpida FAILED=/var/lib/elpida-work/update-failed
 
 # Everything runs inside main(), which bash reads whole before running: checking out a new commit rewrites this file.
@@ -44,11 +46,12 @@ deploy() {
   before="$(git_ rev-parse HEAD)"
   git_ checkout --quiet --detach "$commit"
   if [ ! -d node_modules ] || { [ "$commit" != "$before" ] && ! git_ diff --quiet "$before" "$commit" -- package-lock.json; }; then
-    sudo -H -u elpida npm ci --omit=dev --no-audit --no-fund
+    sudo -H -u elpida env PATH="$PATH" npm ci --omit=dev --no-audit --no-fund
   fi
   # The unit files may change with the code.
   local changed=0 f
-  for f in elpida.service elpida-update.service elpida-update.timer; do
+  for f in elpida.service elpida-update.service elpida-update.timer elpida-tunnel.service; do
+    [ -f "/etc/systemd/system/$f" ] || [ "$f" != elpida-tunnel.service ] || continue
     if ! cmp -s "deploy/oracle/$f" "/etc/systemd/system/$f"; then install -m 0644 "deploy/oracle/$f" "/etc/systemd/system/$f"; changed=1; fi
   done
   [ "$changed" = 1 ] && systemctl daemon-reload
