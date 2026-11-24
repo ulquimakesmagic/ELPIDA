@@ -76,7 +76,7 @@ export function activityOf(map, address) { return { ...(map.get(address) ?? map.
 export const EXPLORE_TABS = ['trending', 'marketcap', 'new', 'lastsale', 'koth'];
 /** King of the Hill (5 November 2026): tokens whose curve is at least 80% sold and that have not graduated yet. */
 export const KOTH_PROGRESS = 0.8;
-export const PAIR_FILTERS = ['all', 'native', 'usdc', 'xstock', 'token'];
+export const PAIR_FILTERS = ['all', 'native', 'usdc', 'xstock'];
 export const PER_PAGE = 8;
 /** With the Live feed hidden the list shows up to four compact cards per row: three full rows. */
 export const PER_PAGE_WIDE = 12;

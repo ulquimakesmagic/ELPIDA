@@ -21,7 +21,7 @@ export function disclaimerPoints({ mainnet = false } = {}) {
   return [
     { key: 'risk', icon: 'triangle-alert', title: 'Trading risk', text: `Tokens launched here are highly volatile and most lose all their value. ${mainnet ? 'On networks marked mainnet you trade with real funds: only use what you can afford to lose.' : 'Most networks here are test networks, where tokens have no monetary value.'}` },
     { key: 'advice', icon: 'circle-help', title: 'Not financial advice', text: 'Nothing on Elpida is investment, financial, legal or tax advice. Tokens are created by anyone and are not endorsed by Elpida. Do your own research.' },
-    { key: 'yours', icon: 'shield-check', title: 'Your responsibility', text: 'The contracts have not had an independent audit and bugs are possible. You control your wallet and approve every transaction yourself. Make sure using Elpida is legal where you are.' },
+    { key: 'yours', icon: 'shield-check', title: 'Your responsibility', text: 'Smart contracts can have bugs. You control your wallet and approve every transaction yourself. Make sure using Elpida is legal where you are.' },
   ];
 }
 

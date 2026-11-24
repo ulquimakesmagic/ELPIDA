@@ -50,7 +50,7 @@ test('Explore tabs, pair and chain filters, search and chip counts', () => {
   assert.deepEqual(ids(exploreModel(tokens, { tab: 'koth' }, now)), ['b', 'c']);
   const usdcOnly = exploreModel(tokens, { pair: 'usdc' }, now);
   assert.deepEqual(ids(usdcOnly), ['b']);
-  assert.deepEqual(usdcOnly.counts.pair, { all: 4, native: 3, usdc: 1, xstock: 0, token: 0 });
+  assert.deepEqual(usdcOnly.counts.pair, { all: 4, native: 3, usdc: 1, xstock: 0 });
   assert.deepEqual(usdcOnly.counts.chain, { all: 1, 'base-sepolia': 1 });
   const solana = exploreModel(tokens, { chain: 'solana-devnet' }, now);
   assert.deepEqual(ids(solana), ['c']);

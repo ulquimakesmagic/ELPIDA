@@ -64,10 +64,10 @@ const FAQ = mainnet => [
   ['Do I have to buy my own token?', `No. A creator purchase is optional. If you buy, it is part of the launch transaction, pays the token’s own fee and can receive at most ${pct(V2.firstBuyCapBps)} of the supply; the token page shows how much the creator bought and still holds. Launch fees and network costs apply either way.`],
   ['What is the launch fee?', 'A $10 fee, converted to the network’s native coin by a verified on-chain price feed at execution, or paid as 10 USDC where supported.'],
   ['Can a token’s fee change later?', 'No. The creator picks it once at launch and no one, including Elpida, can change it.'],
-  ['Are the contracts audited?', 'Not yet. They have not had an independent audit. Treat everything as experimental.'],
+  ['Are the contracts verified?', 'Yes. Every Elpida contract is open source and verified on each chain\u2019s explorer, so anyone can read exactly what it does. An independent audit has not been done yet.'],
   ...(mainnet ? [
     ['Do fees continue after graduation?', 'Yes. Graduation happens inside the same Uniswap v4 pool, so every trade keeps paying the token\u2019s fee, shared the same way, for good. There is no migration to another pool.'],
-    ['Is Elpida live with real money?', 'Yes, on the networks marked mainnet. The contracts have not had an independent audit, so only use funds you can afford to lose.'],
+    ['Is Elpida live with real money?', 'Yes, on the networks marked mainnet: Base, BNB Chain, Robinhood Chain and Ethereum. As with any token, only trade what you can afford to lose.'],
   ] : [['Can I trade on mainnet?', 'Not on this site. Elpida here runs on public test networks, where tokens have no monetary value.']]),
 ];
 
