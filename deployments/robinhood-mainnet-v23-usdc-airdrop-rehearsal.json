@@ -1,0 +1,124 @@
+{
+  "network": "robinhood-mainnet-v23",
+  "at": "2026-11-23T23:31:36.969Z",
+  "scope": "LOCAL FORK ONLY: nothing was sent to the public chain",
+  "ok": true,
+  "checks": [
+    {
+      "check": "chain id matches the plan",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "the launchpad has an airdrop distributor",
+      "ok": true,
+      "detail": "0x30c8C1f345f68C3b48efEe450FA916F6CE6340a7"
+    },
+    {
+      "check": "its operator is the plan keeper",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "it runs calendar months",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "its purpose is trader-airdrop",
+      "ok": true,
+      "detail": ""
+    },
+    {
+      "check": "USDC is a contract",
+      "ok": true,
+      "detail": "0x5fc5360D0400a0Fd4f2af552ADD042D716F1d168"
+    },
+    {
+      "check": "USDC decimals match the plan",
+      "ok": true,
+      "detail": "6"
+    },
+    {
+      "check": "Uniswap v3 router is a contract",
+      "ok": true,
+      "detail": "0xCaf681a66D020601342297493863E78C959E5cb2"
+    },
+    {
+      "check": "Uniswap v3 quoter is a contract",
+      "ok": true,
+      "detail": "0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7"
+    },
+    {
+      "check": "the quoter uses the same wrapped native coin",
+      "ok": true,
+      "detail": "0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73"
+    },
+    {
+      "check": "0.1 native coin quotes into USDC",
+      "ok": true,
+      "detail": "171.668448 USDC on the 0.01% pool"
+    },
+    {
+      "check": "no USDC airdrop distributor recorded yet",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "readBack": [
+    {
+      "check": "read back: operator",
+      "ok": true
+    },
+    {
+      "check": "read back: period",
+      "ok": true
+    },
+    {
+      "check": "read back: genesis",
+      "ok": true
+    },
+    {
+      "check": "read back: purpose",
+      "ok": true
+    },
+    {
+      "check": "read back: usdc",
+      "ok": true
+    },
+    {
+      "check": "read back: swapRouter",
+      "ok": true
+    },
+    {
+      "check": "read back: wrappedNative",
+      "ok": true
+    },
+    {
+      "check": "read back: source",
+      "ok": true
+    },
+    {
+      "check": "read back: routerDeadline",
+      "ok": true
+    }
+  ],
+  "flow": [
+    {
+      "check": "moved 0.05 native coin into the USDC distributor",
+      "ok": true
+    },
+    {
+      "check": "converted to 85.834403 USDC (quote 85.834403)",
+      "ok": true
+    },
+    {
+      "check": "a wallet was paid 85.834403 USDC",
+      "ok": true
+    },
+    {
+      "check": "nothing left reserved",
+      "ok": true
+    }
+  ]
+}
