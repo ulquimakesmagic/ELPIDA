@@ -201,7 +201,8 @@ USDC distributor and Safe batches: do it on a low-gas day (under 1 gwei is about
 `ELPIDA_RPC_1` (a private Ethereum RPC) and `ELPIDA_INDEX_RPC_1` (a public one, for the indexer's wide log scans).
 
 1. Add Ethereum to the Elpida Treasury Safe in the Safe app; send the deployer gas: about 0.005–0.01 ETH when the base fee is under 0.5 gwei. `check` prints the exact amount needed at that moment (15M gas × base fee + 25% + tip, never under 0.003 ETH).
-2. `node scripts/v2-mainnet-deploy.mjs check --plan deployments/plans/ethereum-mainnet-v23.json`, then send Claude the sha
+2. `node scripts/v2-mainnet-deploy.mjs check --plan deployments/plans/ethereum-mainnet-v23.json --deployer <deployer address>`
+   (the address only, never the key; the "deployer holds gas" row shows what is needed right now), then send Claude the sha
    for the launchpad approval file.
 3. The USDC distributor needs `deployments/approvals/ethereum-mainnet-v23-usdc-airdrop.json`, written from Malik's own
    approval (same shape as the Base one).

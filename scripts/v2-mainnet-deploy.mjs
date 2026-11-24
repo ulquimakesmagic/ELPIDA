@@ -566,7 +566,7 @@ export async function askHidden(prompt, { echo = false } = {}) {
 
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2), arg = n => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : null; };
-  const planPath = arg('plan'); if (!cmd || !planPath) { console.log('usage: node scripts/v2-mainnet-deploy.mjs check|rehearse|deploy|verify --plan deployments/plans/<key>.json [--fork <rpc> | --node <local dev node>]'); process.exit(2); }
+  const planPath = arg('plan'); if (!cmd || !planPath) { console.log('usage: node scripts/v2-mainnet-deploy.mjs check|rehearse|deploy|verify --plan deployments/plans/<key>.json [--deployer <address> (check)] [--fork <rpc> | --node <local dev node>]'); process.exit(2); }
   const live = arg('fork') ?? arg('node');
   const { plan, hash } = readPlan(planPath, { local: cmd === 'rehearse' && !live, forkRehearsal: cmd === 'rehearse' && !!live }), recordPath = join(root, 'deployments', `${plan.key}.json`);
   const print = list => { for (const c of list) console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.check}${c.detail ? `: ${c.detail}` : ''}`); };
@@ -593,7 +593,7 @@ async function main() {
   }
   const rpc = process.env.ELPIDA_MAINNET_RPC_URL; if (!rpc) throw new Error('Set ELPIDA_MAINNET_RPC_URL.');
   const provider = new JsonRpcProvider(rpc, undefined, { staticNetwork: true });
-  if (cmd === 'check') { const c = await preflight({ provider, plan }); print(c); process.exit(c.failed.length ? 1 : 0); }
+  if (cmd === 'check') { const d = arg('deployer'); if (d && !isAddress(d)) throw new Error('--deployer takes the deployer wallet address (never the key).'); const c = await preflight({ provider, plan, deployer: d ?? null }); print(c); process.exit(c.failed.length ? 1 : 0); }
   if (cmd === 'verify') { const out = await verifyDeployment({ provider, plan, record: JSON.parse(readFileSync(recordPath, 'utf8')), recordPath }); print(out); process.exit(out.every(c => c.ok) ? 0 : 1); }
   if (cmd === 'deploy') {
     const approval = approvalFor(plan.key, hash);
