@@ -8,7 +8,7 @@ import { V2_MODEL } from '/v2-economics.mjs';
 import { deployV2, deployV2UsdcDistributors, setupTestPayoutStable, approveV2StockList, launchV2, approveV2Stock, loadV2Pairs, claimCreatorSplit, claimIdentityRow, claimV2CreatorFees, kyberFirstBuyQuote, kyberPairQuote, kyberPairCall, KYBER_NATIVE, KYBER_ROUTER } from './v2-launchpad.mjs';
 import { PacedJsonRpcProvider } from '/paced-rpc.mjs';
 import { stockPairsBlocked } from '/pairs.mjs';
-import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress, id as keccakText } from '/vendor/ethers.js';
+import { BrowserProvider, JsonRpcProvider, FetchRequest, Contract, ContractFactory, Interface, parseUnits, formatUnits, isAddress, getAddress, getCreateAddress, ZeroAddress, id as keccakText, hexlify, toUtf8Bytes } from '/vendor/ethers.js';
 import { routerAbi, swapCalldata } from '/dex-router.mjs';
 
 import { normalizeMetadata, withSavedMetadata } from './metadata.mjs';
@@ -202,6 +202,21 @@ export class TestnetWallet {
     await this.checkNetwork();
     this.atomicLaunch=await supportsAtomicLaunch(args=>eth.request(args),this.address,net.chainId);
     return this.address;
+  }
+  /**
+   * Signs a text message (operator sign-in). Some wallets answer ethers' personal_sign in a shape it cannot read and
+   * ethers reports "could not coalesce error" (Malik, 24 Nov 2026); the same request is then sent to the wallet
+   * directly. A refusal is never retried.
+   */
+  async signText(message) {
+    await this.checkNetwork();
+    try { return await this.signer.signMessage(message); }
+    catch (error) {
+      const code = error?.code ?? error?.info?.error?.code;
+      if (code === 4001 || code === 'ACTION_REJECTED') throw error;
+      if (!/could not coalesce|UNKNOWN_ERROR/i.test(String(error?.message ?? '') + String(error?.code ?? ''))) throw error;
+      return await this.eth.request({ method: 'personal_sign', params: [hexlify(toUtf8Bytes(message)), this.address] });
+    }
   }
   async checkNetwork() {
     if (!this.provider) throw new Error('Connect your wallet first.');
