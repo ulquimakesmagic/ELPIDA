@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Builds config/stocks/<network>.json, the verified stock list the operator panel approves on a V2 launchpad.
-//   STOCK_LIST_RPC_URL=<rpc> node scripts/stock-list.mjs <network-key> <candidates.json> [--source "<where the list came from>"]
+//   STOCK_LIST_RPC_URL=<rpc> node scripts/stock-list.mjs <network-key> <candidates.json>[,<more.json>] [--source "<where the list came from>"]
 // candidates.json: [{ "symbol": "TSLAon", "name": "Tesla (Ondo)", "address": "0x…", "feed": "0x…", "maxAge": 345600 }]
 // taken from the issuer's and the oracle's published lists. Every entry is checked on chain (packages/core/stock-list.mjs);
 // rejects are printed with the reason and left out. Reads only: nothing is signed or sent.
@@ -25,8 +25,8 @@ const rpc = process.env.STOCK_LIST_RPC_URL ?? net.rpcUrl;
 if (!rpc) { console.error(`No RPC for ${key}: set STOCK_LIST_RPC_URL.`); process.exit(2); }
 const provider = new JsonRpcProvider(rpc, undefined, { staticNetwork: true });
 if (Number((await provider.getNetwork()).chainId) !== Number(net.chainId)) { console.error(`The RPC is not ${net.name} (chain ${net.chainId}).`); process.exit(2); }
-const candidates = JSON.parse(readFileSync(file, 'utf8'));
-if (!Array.isArray(candidates)) { console.error('candidates.json must be an array.'); process.exit(2); }
+// Several candidate files may be joined with commas (Ethereum: the Chainlink-priced Ondo tokens plus the adapters).
+const candidates = file.split(',').flatMap(f => { const c = JSON.parse(readFileSync(f.trim(), 'utf8')); if (!Array.isArray(c)) { console.error(`${f} must be an array.`); process.exit(2); } return c; });
 const { list, rejected } = await buildStockList({ Contract, provider, network: key, chainId: net.chainId, source, candidates, now: (await provider.getBlock('latest')).timestamp });
 mkdirSync(new URL('../config/stocks/', import.meta.url), { recursive: true });
 writeFileSync(new URL(`../config/stocks/${key}.json`, import.meta.url), JSON.stringify(list, null, 2) + '\n');
