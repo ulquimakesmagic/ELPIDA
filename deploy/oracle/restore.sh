@@ -6,6 +6,8 @@
 # ELPIDA_BACKUP_ENCRYPTION_KEY, or the ELPIDA_BACKUP_MIRROR_S3_* bucket with --from-mirror). The data that was there
 # before is kept in /var/lib/elpida-before-<time> until you delete it.
 set -euo pipefail
+# Node 24 lives in /opt/elpida/node on a shared server (setup-shared.sh); elsewhere the system Node is used.
+export PATH="/opt/elpida/node/bin:$PATH"
 APP=/opt/elpida/app DATA=/var/lib/elpida
 [ "$(id -u)" = 0 ] || { echo "Run it with sudo."; exit 1; }
 [ $# -ge 1 ] || { sed -n '2,7p' "$0"; exit 2; }
@@ -13,7 +15,7 @@ id="$1"; shift
 mirror=(); [ "${1:-}" = "--from-mirror" ] && mirror=(--from-mirror)
 
 # Node reads the variables file itself (same format as Railway's Raw Editor); nothing is echoed.
-backup() { sudo -u elpida bash -c 'cd /opt/elpida/app && exec node --env-file=/etc/elpida/elpida.env scripts/offsite-backup.mjs "$@"' _ "$@"; }
+backup() { sudo -u elpida env PATH="$PATH" bash -c 'cd /opt/elpida/app && exec node --env-file=/etc/elpida/elpida.env scripts/offsite-backup.mjs "$@"' _ "$@"; }
 
 if [ "$id" = list ]; then
   backup review "${mirror[@]}" | jq -r '[.candidates[], .retained[]] | map(select(.manifestPresent)) | sort_by(.createdAt)

@@ -7,6 +7,8 @@
 # anything or write backups, so the keeper, relay and Circle keys are removed and backups are off. staging.env holds
 # ELPIDA_PUBLIC_URL=https://staging.elpida.fun. Delete the file at cut-over (docs/ORACLE_HOSTING.md).
 set -euo pipefail
+# Node 24 lives in /opt/elpida/node on a shared server (setup-shared.sh); elsewhere the system Node is used.
+export PATH="/opt/elpida/node/bin:$PATH"
 cd "$(dirname "$0")/../.."
 staging="${ELPIDA_STAGING_FILE:-/etc/elpida/staging.env}"
 if [ -f "$staging" ]; then

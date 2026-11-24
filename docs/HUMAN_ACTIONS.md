@@ -126,6 +126,20 @@ Then on elpida.fun (Solana Devnet): Create → Tokenized stock → tTSLAon, pay 
 Test funds → Get 25 tTSLAon). Not yet for stock-pair tokens: the keeper's trader airdrop and holder rounds (their
 shares accrue in tTSLAon in the reward vaults) and the flywheel.
 
+## Move hosting to Micheal's Oracle server, 24 November 2026
+
+Railway billed $55 last cycle and is at $25.82 of a $30 cap (services stop at the cap). Micheal (a friend) gave SSH
+access to his Oracle VM, which already runs his own apps. Runbook: `docs/ORACLE_HOSTING.md` → "Shared server".
+
+1. **Now:** Railway → Usage → open each project; delete the ones not in use (all but Elpida's `proud-illumination`
+   cost about $10 this cycle). Keep the $30 cap.
+2. **Now:** Cloudflare Zero Trust → Tunnels → create `elpida-oracle`, hostname `staging.elpida.fun` → HTTP
+   `127.0.0.1:3000`. Keep the token for the server; never paste it into chat.
+3. **After this PR is merged:** on the server (`ssh -i $HOME\.ssh\ssh-key-2026-10-14.key ubuntu@145.241.223.113`):
+   `git clone https://github.com/ulquimakesmagic/ELPIDA.git ~/elpida-setup && sudo bash ~/elpida-setup/deploy/oracle/setup-shared.sh`,
+   paste the tunnel token when asked, then steps 4–5 of the runbook (variables, restore, `doctor.sh`, staging check).
+4. Ask Micheal to add Malik as an Oracle administrator before the cut-over (step 7).
+
 ## Move hosting from Railway to Oracle Cloud (free), 13 November 2026
 
 Full runbook: `docs/ORACLE_HOSTING.md`. Railway stays live until the cut-over, and can be brought back in minutes.

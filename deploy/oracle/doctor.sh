@@ -2,6 +2,7 @@
 # A health report for the Oracle VM that is safe to paste into chat: variable NAMES only, never their values.
 #   sudo bash /opt/elpida/app/deploy/oracle/doctor.sh
 set -uo pipefail
+export PATH="/opt/elpida/node/bin:$PATH"
 ENVF="${ELPIDA_ENV_FILE:-/etc/elpida/elpida.env}"
 # ELPIDA_DOCTOR_NO_ROOT=1 is for the test suite only (CI runs as a normal user); on the VM always use sudo.
 [ "$(id -u)" = 0 ] || [ "${ELPIDA_DOCTOR_NO_ROOT:-}" = 1 ] || { echo "Run it with sudo."; exit 1; }
@@ -13,7 +14,8 @@ say "node" "$(node --version 2>/dev/null || echo missing)"
 say "code" "$(sudo -n -u elpida git -C /opt/elpida/app log -1 --format='%h %cs %s' 2>/dev/null | cut -c1-80)"
 say "mode" "$([ -f /etc/elpida/staging.env ] && echo 'STAGING (keepers and backups off)' || echo 'PRODUCTION')"
 say "elpida service" "$(systemctl is-active elpida) since $(systemctl show elpida -p ActiveEnterTimestamp --value)"
-say "cloudflared" "$(systemctl is-active cloudflared 2>/dev/null)"
+say "cloudflared" "$(systemctl is-active cloudflared 2>/dev/null)$(systemctl cat elpida-tunnel >/dev/null 2>&1 && echo ", elpida-tunnel $(systemctl is-active elpida-tunnel)")"
+[ -f /etc/systemd/system/elpida.service.d/shared.conf ] && say "shared server" "yes: Elpida capped at 2 CPU / 4 GB, other apps untouched"
 say "health" "$(curl -fsS --max-time 5 http://127.0.0.1:3000/health 2>/dev/null || echo 'no answer on 127.0.0.1:3000')"
 status="$(curl -fsS --max-time 5 http://127.0.0.1:3000/api/public/status 2>/dev/null)"
 [ -n "$status" ] && say "storage" "$(printf '%s' "$status" | jq -c '.storage | {durable}' 2>/dev/null)"

@@ -47,6 +47,35 @@ From Oracle's Always Free page (last changed 12 June 2026):
   to most users that has A1 capacity. "Out of capacity" when creating the VM is common: try another availability
   domain, try again later, or upgrade to Pay As You Go, which gets capacity more easily.
 
+## Shared server (24 November 2026)
+
+Malik could not create an Oracle account, so Elpida goes onto a friend's Oracle VM (Micheal's; Ubuntu 24.04 arm64,
+4 OCPU / 23 GB, public IP 145.241.223.113, user `ubuntu`) that already runs about ten of his apps behind Caddy, with
+Postgres and Redis. Use **`setup-shared.sh`** there instead of `setup.sh` in step 3:
+
+```bash
+git clone https://github.com/ulquimakesmagic/ELPIDA.git ~/elpida-setup
+sudo bash ~/elpida-setup/deploy/oracle/setup-shared.sh
+```
+
+What it does differently, so the other apps are not touched:
+
+- No `apt upgrade`, no automatic updates or reboots, no swap; only missing tools are installed (`--no-upgrade`).
+- Node 24 is downloaded (checksum-checked) into `/opt/elpida/node` for Elpida alone; the system Node is untouched.
+- Its own tunnel service, `elpida-tunnel` (token in `/etc/elpida/tunnel.env`, root only), so an existing
+  `cloudflared` service is never replaced. Caddy and its ports 80/443 are not used.
+- Elpida listens on 127.0.0.1:3000 only (the script stops if 3000 is taken) and is capped at 2 CPUs / 4 GB.
+
+Everything after step 3 is the same. Risks Malik accepted (Railway cost $55/month): the server's owner has root and
+can read `/etc/elpida/elpida.env`, which holds the mainnet keeper key and the API keys; a compromise of any app on
+the server could reach it. Mitigations: keep only gas in the keeper wallet; the treasury is a 2-of-3 Safe the server
+cannot touch; ask the owner to add Malik as an Oracle administrator; move to a server of Malik's own when affordable.
+
+**Mainnet (since 23 November):** copy every variable, including `ELPIDA_RPC_<chainId>` and `ELPIDA_INDEX_RPC_<chainId>`
+for 8453, 56, 4663 and 1, `ELPIDA_EXPLORER_API_KEY`, `ELPIDA_BLOCKSCOUT_API_KEY`, `ONDO_API_KEY` and `PINATA_JWT`.
+Two keepers must never run at once: staging mode strips the keeper key, and at cut-over Railway is removed (step 7.2)
+**before** `staging.env` is deleted on the VM (step 7.3). Do not cut over during a launch or a pending Safe batch.
+
 ## Steps
 
 ### 1. Oracle account and VM (Malik; now)
