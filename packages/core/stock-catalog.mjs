@@ -43,7 +43,7 @@ export function stockTone(ticker) {
  * Identity of a stock token from its symbol. `provider` is the token's own declaration where it has one
  * (`ondo-test` for Elpida's Ondo-style stand-in). Unknown tickers still get a tile; they just have no company name.
  */
-export function stockIdentity(symbol, { provider = null, name = null, catalog = null } = {}) {
+export function stockIdentity(symbol, { provider = null, name = null, catalog = null, address = null } = {}) {
   const raw = String(symbol ?? '').trim();
   if (raw === 'TEST-STOCK') return { symbol: raw, ticker: 'TEST', company: 'Simulated stock', type: 'Stock', issuer: 'Test', test: true, tone: 'test', logo: null };
   let ticker = raw, issuer = null, test = provider === 'ondo-test';
@@ -52,7 +52,11 @@ export function stockIdentity(symbol, { provider = null, name = null, catalog = 
   // Coinbase Tokenized Stocks on Base (AAPLc): /api/public/coinbase-stock-icon serves Ondo's icon for the same company, else
   // Coinbase's (apps/api/server.mjs). `?v=2` replaces URLs that browsers and the CDN cached as 404 before #331.
   const coinbase = provider === 'coinbase' || /\(Coinbase\)/.test(String(name ?? '')) ? raw.match(/^([A-Z.]{1,8})c$/) : null;
+  // Robinhood's own stock tokens on Robinhood Chain (TSLA, named "Tesla (Robinhood)" in the verified list): Robinhood's
+  // logo, served through this site by token address (/api/public/robinhood-stock-icon, apps/api/robinhood-stock-icons.mjs).
+  const robinhood = provider === 'robinhood' || /\(Robinhood\)/.test(String(name ?? '')) ? raw.match(/^([A-Z.]{1,8})$/) : null;
   if (ondo) { ticker = ondo[2]; test = test || ondo[1] === 't'; issuer = 'Ondo'; }
+  else if (robinhood) { ticker = robinhood[1]; issuer = 'Robinhood'; }
   else if (coinbase) { ticker = coinbase[1]; issuer = 'Coinbase'; }
   else if (xstock) { ticker = xstock[1]; issuer = 'xStocks'; }
   const known = STOCK_UNDERLYINGS[ticker], listed = issuer === 'Ondo' ? catalog?.get?.(`${ticker}on`) : null;
@@ -60,7 +64,7 @@ export function stockIdentity(symbol, { provider = null, name = null, catalog = 
     symbol: raw, ticker, issuer: test ? `${issuer ?? 'Stock'} (test)` : issuer, test,
     company: listed?.name ?? known?.company ?? (name || null), type: listed?.type ?? known?.type ?? 'Stock',
     tone: known?.tone ?? stockTone(ticker),
-    logo: issuer === 'Ondo' ? stockIconUrl(raw) : issuer === 'Coinbase' ? `/api/public/coinbase-stock-icon/${ticker}c.png?v=2` : STOCK_LOGOS.has(ticker) ? `/assets/stocks/${ticker}.png` : null,
+    logo: issuer === 'Ondo' ? stockIconUrl(raw) : issuer === 'Robinhood' && /^0x[0-9a-fA-F]{40}$/.test(String(address ?? '')) ? `/api/public/robinhood-stock-icon/${String(address).toLowerCase()}.png` : issuer === 'Coinbase' ? `/api/public/coinbase-stock-icon/${ticker}c.png?v=2` : STOCK_LOGOS.has(ticker) ? `/assets/stocks/${ticker}.png` : null,
   };
 }
 

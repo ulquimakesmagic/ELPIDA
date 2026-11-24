@@ -12,6 +12,7 @@ import {configuredBuybackKeeper} from './buyback-keeper.mjs';
 import {configuredFlywheelKeeper} from './flywheel-keeper.mjs';
 import {createStockCatalog} from './stock-catalog.mjs';
 import {createCoinbaseStocks} from './coinbase-stocks.mjs';
+import {createRobinhoodStockIcons} from './robinhood-stock-icons.mjs';
 import {createOndoStatus} from './ondo-status.mjs';
 import {createDexscreener} from './dexscreener.mjs';
 import {gmgnChart} from './gmgn.mjs';
@@ -269,7 +270,7 @@ export function createRpcProxy(targets, { perSecond = 15, burst = 60 } = {}) {
   };
 }
 
-export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1', circleFunding = null, stockCatalog: injectedStockCatalog, coinbaseStocks: injectedCoinbaseStocks, ondoStatus: injectedOndoStatus, dexscreener: injectedDexscreener = null, swap: injectedSwap = null } = {}) {
+export async function startServer({ port = Number(process.env.PORT ?? 3000), seed = true, publicUrl = publicOrigin(), host = process.env.HOST ?? '127.0.0.1', circleFunding = null, stockCatalog: injectedStockCatalog, coinbaseStocks: injectedCoinbaseStocks, ondoStatus: injectedOndoStatus, dexscreener: injectedDexscreener = null, swap: injectedSwap = null, robinhoodFetch: injectedRobinhoodFetch = null } = {}) {
   const dataPrefix=port===3000||process.env.RAILWAY_ENVIRONMENT_NAME?'':`preview-${port}-`;
   const dataDir=resolve(process.env.ELPIDA_DATA_DIR??process.env.RAILWAY_VOLUME_MOUNT_PATH??fileURLToPath(new URL('../../local-data/',import.meta.url)));
   const dataFile=name=>resolve(dataDir,dataPrefix+name);
@@ -345,6 +346,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   if(port!==0)stockPrices.start();
   publicIndex.decorate=(key,t)=>stockPrices.decorate(key,t);
   const swapListFor=key=>{try{return JSON.parse(readFileSync(fileURLToPath(new URL(`../../config/swap/${key}.json`,import.meta.url)),'utf8'));}catch{return null;}};
+  const robinhoodIcons=createRobinhoodStockIcons({fetchImpl:injectedRobinhoodFetch??fetch,log:e=>console.log(JSON.stringify(e)),listed:a=>(stockListFor('robinhood-mainnet')?.stocks??[]).some(x=>String(x.address).toLowerCase()===a)});
   const swapTokensFor=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);return n?swapTokens(n,stockListFor(key),swapListFor(key)):[];};
   const swapFee=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);return n?swapFeeFor(n,process.env):null;};
   const swapLaunchPairs=key=>{const n=evmNetworks.find(x=>x.key===key&&x.mainnet);if(!n)return [];return [n.payoutStable?.address??n.usd?.usdc,...(stockListFor(key)?.stocks??[]).map(x=>x.address)].filter(a=>/^0x[0-9a-fA-F]{40}$/.test(String(a??'')));};
@@ -610,6 +612,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/public/stock-status'){const sym=url.searchParams.get('symbol');if(sym!=null&&!/^[A-Za-z0-9.]{1,16}on$/.test(sym))return send(400,{error:'Unknown stock symbol.'});res.setHeader('Cache-Control','public, max-age=300');return send(200,ondoStatus.summary(sym));}
         if(url.pathname==='/api/public/coinbase-stocks'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,coinbaseStocks.summary());}
         {const m=url.pathname.match(/^\/api\/public\/coinbase-stock-icon\/([A-Z.]{1,8}c)\.png$/);if(m){/* Ondo's icon for the same company first (Malik, 20 Nov), then Coinbase's own. */const ondo=await stockCatalog.icon(`${m[1].slice(0,-1)}on`);const img=ondo?{bytes:ondo,type:'image/png'}:await coinbaseStocks.icon(m[1]);if(!img){res.setHeader('Cache-Control','no-store');return send(404,{error:'No icon for this stock.'});}res.writeHead(200,{'Content-Type':img.type,'Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});return res.end(img.bytes);}}
+        {const m=url.pathname.match(/^\/api\/public\/robinhood-stock-icon\/(0x[0-9a-f]{40})\.png$/);if(m){/* Robinhood's own logo for a listed Robinhood Chain stock token (24 Nov). */const img=await robinhoodIcons.icon(m[1]);if(!img){res.setHeader('Cache-Control','no-store');return send(404,{error:'No icon for this stock.'});}res.writeHead(200,{'Content-Type':img.type,'Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});return res.end(img.bytes);}}
         if(url.pathname==='/api/public/stock-catalog'){res.setHeader('Cache-Control','public, max-age=3600');return send(200,stockCatalog.summary());}
         const stockIcon=url.pathname.match(/^\/api\/public\/stock-icon\/([A-Z0-9.]{1,12}on)\.png$/);
         if(stockIcon){const bytes=await stockCatalog.icon(stockIcon[1]);if(!bytes)return send(404,{error:'No icon for this stock.'});res.writeHead(200,{'Content-Type':'image/png','Cache-Control':'public, max-age=86400','X-Content-Type-Options':'nosniff'});return res.end(bytes);}

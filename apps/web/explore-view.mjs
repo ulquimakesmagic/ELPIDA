@@ -39,7 +39,7 @@ function pairIcon(token, nativeSymbol) {
   const pair = token.pair ?? 'native';
   if (pair === 'native') return assetIcon(token.quoteSymbol ?? nativeSymbol);
   if (pair === 'usdc') return assetIcon('USDC');
-  if (pair === 'xstock' && token.quoteSymbol) return assetIcon(token.quoteSymbol, true, { provider: token.stock?.provider ?? null });
+  if (pair === 'xstock' && token.quoteSymbol) return assetIcon(token.quoteSymbol, true, { provider: token.stock?.provider ?? null, name: token.quoteName ?? null, address: token.quoteAddress ?? null });
   return icon(pair === 'xstock' ? 'chart-candlestick' : 'layers', 'icon-sm');
 }
 function pairStack(token, nativeSymbol, networkName) {
