@@ -36,6 +36,8 @@ export const EVM_MAINNETS = Object.freeze([
     nativeCurrency: Object.freeze({ name: 'Ether', symbol: 'ETH', decimals: 18 }), gasFaucet: null,
     // Chainlink's Robinhood Chain ETH / USD heartbeat is not published with the address; allow a day, as the plan does.
     usdMaxAge: 86400,
+    // Robinhood Chain's dollar is USDG (Global Dollar), not USDC; the plan's usdc field holds its address.
+    stable: Object.freeze({ symbol: 'USDG', name: 'Global Dollar' }),
     // Uniswap v3 on Robinhood Chain (developers.uniswap.org, v3 Robinhood Chain deployments): SwapRouter02 and QuoterV2;
     // WETH read from SwapRouter02.WETH9() on chain by Malik (24 November 2026). The airdrop converts ETH into USDG here.
     payoutDex: Object.freeze({ name: 'Uniswap v3', router: '0xCaf681a66D020601342297493863E78C959E5cb2', quoter: '0x33e885eD0Ec9bF04EcfB19341582aADCb4c8A9E7', weth: '0x0Bd7D308f8E1639FAb988df18A8011f41EAcAD73', routerVersion: 2 }),
@@ -91,7 +93,7 @@ export function mainnetNetwork(template, record, plan, next = null) {
   const why = unusable(template, record, plan);
   if (why && !nextReady) return { net: null, reason: why };
   const main = nextReady ?? { record, plan }, previous = [];
-  const { planKey, usdMaxAge, payoutDex, ...facts } = template, p = main.plan, r = main.record;
+  const { planKey, usdMaxAge, payoutDex, stable, ...facts } = template, p = main.plan, r = main.record;
   return {
     net: {
       ...facts, enabled: true,
@@ -100,7 +102,7 @@ export function mainnetNetwork(template, record, plan, next = null) {
       usd: { feed: p.usdFeed, usdc: p.usdc, maxAge: usdMaxAge ?? 3600 },
       // The plan's dollar: USDC (18 decimals on BNB Chain), or USDG on Robinhood Chain. Pinned so payouts and amounts use
       // the plan's own symbol and decimals instead of assuming a 6-decimal USDC.
-      payoutStable: { address: p.usdc, symbol: p.usdcSymbol ?? 'USDC', decimals: Number(p.usdcDecimals ?? 6), test: false },
+      payoutStable: { address: p.usdc, symbol: p.usdcSymbol ?? stable?.symbol ?? 'USDC', name: stable?.name ?? 'USD Coin', decimals: Number(p.usdcDecimals ?? 6), test: false },
       ...(payoutDex ? { payoutDex } : {}),
       deployment: { planSha256: r.planSha256 ?? null, approval: r.approval ?? null, gitCommit: r.gitCommit ?? null },
     },

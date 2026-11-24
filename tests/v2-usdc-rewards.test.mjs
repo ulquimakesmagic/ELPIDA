@@ -72,6 +72,8 @@ test('with USDC distributors pinned, the keeper converts every vault asset and p
   const stockInHolder = await f.stock.balanceOf(holder.target);
   assert.ok(stockInHolder > 0n && await f.provider.getBalance(holder.target) > 0n && await f.usdc.balanceOf(holder.target) > 0n);
 
+  // The trades' airdrop round, read before the weekly jump (which can cross into the next month).
+  const ar = Number(await airdrop.currentRound());
   // Weekly holder rewards: the native and USDC shares move over, the native one is converted, holders are paid USDC.
   const hr = Number(await holder.currentRound()), nativeInHolder = await f.provider.getBalance(holder.target);
   await jump(Number(await holder.roundEnd(hr))); await tick();
@@ -96,8 +98,8 @@ test('with USDC distributors pinned, the keeper converts every vault asset and p
   assert.equal((await usdcHolder.rounds(hr, f.usdc.target)).claimed, BigInt(hm.total), 'every holder payout was pushed in USDC');
 
   // Monthly airdrop: native and USDC both end up as one USDC round; the stock stays for a later round.
-  const ar = Number(await airdrop.currentRound()), stockInDrop = await f.stock.balanceOf(airdrop.target);
-  await jump(Number(await airdrop.roundEnd(ar))); await tick();
+  const stockInDrop = await f.stock.balanceOf(airdrop.target);
+  await jump(Math.max(Number(await airdrop.roundEnd(ar)), (await f.provider.getBlock('latest')).timestamp + 1)); await tick();
   await keeper.airdrop(w);
   assert.equal((await airdrop.rounds(ar, ZeroAddress)).recipients, 2n, 'native: to the USDC distributor and the keeper\'s gas');
   assert.equal((await airdrop.rounds(ar, f.usdc.target)).recipients, 1n, 'USDC needs no gas share');

@@ -41,7 +41,7 @@ export function productionGuard({ env = {}, solana = null, evm = null } = {}) {
     else if (!keeper) error('keeper_invalid', 'ELPIDA_V2_KEEPER_KEY is not a 64-character hex private key.');
     else for (const n of nets) if (n.v2?.shared?.keeper && n.v2.shared.keeper.toLowerCase() !== keeper) error('keeper_mismatch', `ELPIDA_V2_KEEPER_KEY is not the keeper in the ${n.name} deployment plan.`);
     // Option B (11 Nov) kept these off; Malik turned them on for mainnet on 20 Nov. Still flagged so the log shows it.
-    if (env.ELPIDA_V2_DISTRIBUTIONS === 'airdrop') warn('distributions_airdrop', 'ELPIDA_V2_DISTRIBUTIONS=airdrop: the keeper pays the monthly EWPR trader airdrop in USDC with real funds (holder rewards and the flywheel keep accruing). Keep its gas budget (ELPIDA_V2_KEEPER_DAILY_GAS) small.');
+    if (env.ELPIDA_V2_DISTRIBUTIONS === 'airdrop') warn('distributions_airdrop', 'ELPIDA_V2_DISTRIBUTIONS=airdrop: the keeper pays the monthly EWPR trader airdrop in USDC (USDG on Robinhood Chain) with real funds; V2.3 has no holder rewards or flywheel. Keep its gas budget (ELPIDA_V2_KEEPER_DAILY_GAS) small.');
     if (env.ELPIDA_V2_DISTRIBUTIONS === 'on') warn('distributions_on', 'ELPIDA_V2_DISTRIBUTIONS=on: the keeper pays the trader airdrop, holder rewards and flywheel with real funds. Keep its gas budget (ELPIDA_V2_KEEPER_DAILY_GAS) small.');
     // Keys of test-network workers (Model 10 graduation, flywheel and buyback, the testnet price relay) never belong on it.
     const testKeys = ['ELPIDA_GRADUATION_KEY_FILE', 'ELPIDA_FLYWHEEL_EVM_KEY', 'ELPIDA_BUYBACK_EVM_KEY', 'ELPIDA_BUYBACK_SOLANA_KEY', 'ELPIDA_TESTNET_RELAY_KEY'].filter(k => env[k]);

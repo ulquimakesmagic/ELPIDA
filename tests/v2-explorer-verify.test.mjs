@@ -139,3 +139,12 @@ test('a Blockscout PRO key routes Robinhood Chain calls to api.blockscout.com wi
   await submit({ fetch: other.fetch, sleep, chainId: 4663, apiKey: 'ETHERSCANKEY', job });
   assert.match(other.calls[0].url, /^https:\/\/robinhoodchain\.blockscout\.com\/api\?/, 'an Etherscan key (the keeper\'s) keeps the keyless route');
 });
+
+test('a refused or rate-limited explorer is reported, with the manual route on Blockscout', async () => {
+  const status = code => async () => ({ ok: false, status: code, json: async () => ({}) });
+  const run = async (chainId, code) => { try { return await submit({ fetch: status(code), sleep: async () => {}, chainId, apiKey: chainId === 4663 ? '' : KEY, job }); } catch (e) { return { thrown: e.message }; } };
+  const rh = await run(4663, 403), base = await run(8453, 403), busy = await run(4663, 429);
+  assert.match(JSON.stringify(rh), /HTTP 403.*Verify & Publish/);
+  assert.match(JSON.stringify(base), /HTTP 403/); assert.doesNotMatch(JSON.stringify(base), /Verify & Publish/);
+  assert.match(JSON.stringify(busy), /HTTP 429/, 'after the retries run out, the 429 is reported');
+});

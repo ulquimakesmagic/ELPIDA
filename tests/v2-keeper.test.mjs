@@ -102,6 +102,9 @@ test('the keeper runs fees, flywheel, holder rewards (USDC → native) and the m
   assert.ok(await native.token.totalSupply() < supplies[0], 'native-paired token burned');
   assert.ok(await usdc.token.totalSupply() < supplies[1], 'USDC-paired token burned with the vault’s USDC');
   // Weekly holder rewards: USDC holder shares become native, then both tokens' holders are paid in one native round.
+  // The trades' airdrop round, read before the weekly jump: that jump can cross into the next month (24 Nov 2026:
+  // the week ended on 1 December), and the trades still belong to this month's round.
+  const ar = Number(await airdrop.currentRound());
   const hr = Number(await holder.currentRound()), usdcHeld = await f.usdc.balanceOf(holder.target);
   await jump(Number(await holder.roundEnd(hr))); await tick();
   await keeper.holder(w);
@@ -116,8 +119,7 @@ test('the keeper runs fees, flywheel, holder rewards (USDC → native) and the m
   const pushed = await f.provider.getLogs({ address: holder.target, fromBlock: 0 });
   assert.equal(pushed.map(l => { try { return holder.interface.parseLog(l); } catch { return null; } }).filter(e => e?.name === 'Claimed').length, hm.recipients, 'every holder payout was pushed');
   // Monthly airdrop: after the month ends, qualifying traders are paid in each pool asset.
-  const ar = Number(await airdrop.currentRound());
-  await jump(Number(await airdrop.roundEnd(ar))); await tick();
+  await jump(Math.max(Number(await airdrop.roundEnd(ar)), (await f.provider.getBlock('latest')).timestamp + 1)); await tick();
   await keeper.airdrop(w);
   for (const asset of [ZeroAddress, f.usdc.target]) {
     const m = keeper.manifest(31337, airdrop.target, ar, asset);
@@ -127,7 +129,7 @@ test('the keeper runs fees, flywheel, holder rewards (USDC → native) and the m
     assert.equal((await airdrop.rounds(ar, asset)).claimed, BigInt(m.total), 'all pushed');
   }
   const st = keeper.status().chains[0];
-  assert.equal(st.airdropNext, ar + 1); assert.equal(st.holderNext, hr + 1);
+  assert.ok(st.airdropNext >= ar + 1); assert.equal(st.holderNext, hr + 1);
   assert.ok(st.runs.every(r => r.status === 'ok'), JSON.stringify(st.runs));
   // Running again does nothing new.
   await keeper.airdrop(w); await keeper.holder(w);

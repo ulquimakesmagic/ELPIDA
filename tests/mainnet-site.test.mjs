@@ -137,7 +137,7 @@ test('BNB Chain, Robinhood Chain and Ethereum: each plan names its chain, its ow
     assert.equal(template.chainId, chainId); assert.equal(template.nativeCurrency.symbol, native); assert.equal(p.chainId, chainId);
     const { net } = mainnetNetwork(template, { ...record, network: key, chainId }, p);
     assert.equal(net.key, key);
-    assert.deepEqual(net.payoutStable, { address: p.usdc, symbol: dollar, decimals, test: false }, `${key} pays in ${dollar} with ${decimals} decimals`);
+    assert.deepEqual(net.payoutStable, { address: p.usdc, symbol: dollar, name: dollar === 'USDG' ? 'Global Dollar' : 'USD Coin', decimals, test: false }, `${key} pays in ${dollar} with ${decimals} decimals`);
     assert.equal(usdOracles({}, [net])[key].source, `Chainlink ${native} / USD`);
     assert.equal(serverRpcUrl(net, { [`ELPIDA_RPC_${chainId}`]: 'https://p.example' }), 'https://p.example');
     for (const role of ['treasury', 'keeper', 'guardian']) assert.match(String(p[role]), /^0x[0-9a-fA-F]{40}$/, `${key} ${role}`);
