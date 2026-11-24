@@ -980,6 +980,19 @@ side of a swap where there is one, so the treasury collects ETH/BNB/USDC. The pa
 refused if a route comes back without the fee. On the first stock → ETH swap, check the received amount matches the
 quote (the fee is taken from the output there).
 
+## Every Ondo stock and ETF in Swap on Ethereum (24 November 2026)
+
+Malik, 24 Nov: Ethereum Swap gets every Ondo token too. `config/stocks/candidates/ethereum-ondo-all.json` holds Ondo's
+474 stocks and ETFs from the GM token CSV (docs.ondo.finance/addresses, read 24 Nov; the USDon dollar and the portfolio
+baskets left out). Swap-only: launch pairs still need a price feed.
+
+```
+$env:STOCK_LIST_RPC_URL = "https://ethereum-rpc.publicnode.com"
+node scripts/swap-list.mjs ethereum config/stocks/candidates/ethereum-ondo-all.json --source "Ondo GM token CSV (docs.ondo.finance/addresses), 24 November 2026"
+```
+Push `config/swap/ethereum-mainnet.json` on a branch. Each entry is checked on chain (symbol, decimals); a mismatch is
+printed and left out.
+
 ## Every Ondo stock and ETF in Swap on BNB Chain (20 November 2026)
 
 Swap needs no price feed (Kyber prices each swap from DEX pools), so Swap can offer all of Ondo's BNB Chain tokens, not
