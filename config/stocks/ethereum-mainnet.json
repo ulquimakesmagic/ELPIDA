@@ -3,7 +3,7 @@
   "network": "ethereum-mainnet",
   "chainId": 1,
   "source": "config/stocks/candidates/ethereum-ondo.json",
-  "checkedAt": "2026-11-24T11:43:35.000Z",
+  "checkedAt": "2026-11-24T12:53:11.000Z",
   "stocks": [
     {
       "symbol": "BILon",
@@ -26,8 +26,20 @@
       "feedDecimals": 8,
       "feedDescription": "IAUon-USD (Calculated)",
       "maxAge": 345600,
-      "priceUsd": 68.13196846,
-      "priceUpdatedAt": 1795494767
+      "priceUsd": 68.479,
+      "priceUpdatedAt": 1795524359
+    },
+    {
+      "symbol": "MSTRon",
+      "name": "Strategy (Ondo)",
+      "address": "0xcabd955322dfbf94c084929ac5e9eca3feb5556f",
+      "decimals": 18,
+      "feed": "0xcf5F0fC9E1c089d6d556fC14e01Ef9aac09546F9",
+      "feedDecimals": 8,
+      "feedDescription": "MSTRon / USD (Calculated)",
+      "maxAge": 345600,
+      "priceUsd": 81.735,
+      "priceUpdatedAt": 1795524191
     },
     {
       "symbol": "QQQon",
@@ -38,8 +50,8 @@
       "feedDecimals": 8,
       "feedDescription": "QQQon-USD (Calculated)",
       "maxAge": 345600,
-      "priceUsd": 644.18916472,
-      "priceUpdatedAt": 1795520627
+      "priceUsd": 640.92961193,
+      "priceUpdatedAt": 1795522943
     },
     {
       "symbol": "SGOVon",
@@ -74,8 +86,8 @@
       "feedDecimals": 8,
       "feedDescription": "TSLAon-USD (Calculated)",
       "maxAge": 345600,
-      "priceUsd": 379.656,
-      "priceUpdatedAt": 1795517159
+      "priceUsd": 384.12,
+      "priceUpdatedAt": 1795522535
     },
     {
       "symbol": "USFRon",
