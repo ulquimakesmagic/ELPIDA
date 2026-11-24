@@ -116,3 +116,10 @@ test('token page native trades: purpose "pair" allows both directions between th
   assert.ok(urls.every(u => !/feeAmount/.test(u)));
   await assert.rejects(swap.quote({ network: 'base-mainnet', tokenIn: NATIVE, tokenOut: tokens[1].address === AAPL ? tokens[2].address : '0x' + '5'.repeat(40), amountIn: '5', purpose: 'pair' }), /launch conversion|Unknown|not offered|Choose/i);
 });
+
+test('the network dollar keeps its own name in Swap (USDG on Robinhood Chain), USD Coin otherwise', () => {
+  const usdg = swapTokens({ ...base, key: 'robinhood-mainnet', payoutStable: { address: base.payoutStable?.address ?? base.usd?.usdc, symbol: 'USDG', name: 'Global Dollar', decimals: 6 } }, list).find(t => t.kind === 'usdc');
+  if (usdg) { assert.equal(usdg.symbol, 'USDG'); assert.equal(usdg.name, 'Global Dollar'); }
+  const plain = swapTokens({ ...base, payoutStable: undefined }, list).find(t => t.kind === 'usdc');
+  if (plain) { assert.equal(plain.symbol, 'USDC'); assert.equal(plain.name, 'USD Coin'); }
+});
