@@ -87,6 +87,22 @@ export function approvalFor(key, hash, dir = join(root, 'deployments', 'approval
 }
 
 /**
+ * How much gas money the deployer needs. With `plan.deployGas`, the need follows the chain's fee right now:
+ * deployGas × (base fee + 25% + priority tip), never below `minDeployerBalance`. ethers reports maxFeePerGas as
+ * 2 × base fee + tip, so the base fee is recovered from it. Without deployGas, or if the fee can't be read, the fixed
+ * `minDeployerBalance` applies. The deploy is resumable, so a fee spike mid-way only means topping up and rerunning.
+ */
+export function deployerGas({ balance, plan, feeData = null }) {
+  const floor = parseEther(String(plan.minDeployerBalance ?? '0.01'));
+  const max = feeData?.maxFeePerGas != null ? BigInt(feeData.maxFeePerGas) : null, tip = BigInt(feeData?.maxPriorityFeePerGas ?? 0n);
+  const fee = max !== null && max >= tip ? (max - tip) / 2n * 5n / 4n + tip : feeData?.gasPrice != null ? BigInt(feeData.gasPrice) : null;
+  const byFee = plan.deployGas && fee ? BigInt(plan.deployGas) * BigInt(fee) : null;
+  const need = byFee !== null && byFee > floor ? byFee : floor;
+  const gwei = fee ? ` at ${(Number(fee) / 1e9).toFixed(3)} gwei` : '';
+  return { ok: balance >= need, need, detail: `${formatEther(balance)} held, ${formatEther(need)} needed${byFee !== null ? gwei : ' (fixed minimum)'}` };
+}
+
+/**
  * Every check that must pass before anything is sent. Returns [{ check, ok, detail }]; `failed` lists the failures.
  * `deployer` is optional (`check` runs without a key).
  */
@@ -120,7 +136,11 @@ export async function preflight({ provider, plan, deployer = null }) {
   // USDC: 6 decimals on Base and Ethereum, 18 on BNB Chain (13 November). The plan states which; the chain must agree.
   const wantDecimals = usdcDecimals(plan);
   try { const u = new Contract(plan.usdc, ERC20, provider); add(`USDC has ${wantDecimals} decimals`, Number(await u.decimals()) === wantDecimals, await u.symbol().catch(() => '')); } catch (e) { add(`USDC has ${wantDecimals} decimals`, false, e.shortMessage ?? e.message); }
-  if (deployer) { const bal = await provider.getBalance(deployer); add('deployer holds gas', bal >= parseEther(String(plan.minDeployerBalance ?? '0.01')), `${formatEther(bal)}`); }
+  if (deployer) {
+    const [bal, fee] = await Promise.all([provider.getBalance(deployer), plan.deployGas && provider.getFeeData ? provider.getFeeData().catch(() => null) : null]);
+    const g = deployerGas({ balance: bal, plan, feeData: fee });
+    add('deployer holds gas', g.ok, g.detail);
+  }
   return Object.assign(out, { failed: out.filter(c => !c.ok) });
 }
 

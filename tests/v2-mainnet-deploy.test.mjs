@@ -6,7 +6,8 @@ import assert from 'node:assert/strict';
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { readPlan, planHash, approvalFor, rehearse, preflight, rehearsalNetwork, devRpc, blockscoutHolder, minedOrExplained, APPROVAL_STATEMENT } from '../scripts/v2-mainnet-deploy.mjs';
+import { readPlan, planHash, approvalFor, rehearse, preflight, deployerGas, rehearsalNetwork, devRpc, blockscoutHolder, minedOrExplained, APPROVAL_STATEMENT } from '../scripts/v2-mainnet-deploy.mjs';
+import * as ethersForGas from 'ethers';
 
 const PLAN = new URL('../deployments/plans/base-mainnet.json', import.meta.url);
 
@@ -224,4 +225,26 @@ test('V2.3 rehearsal: no flywheel or holder vault, the hook splits 50 / 30 / 20,
   assert.ok(r.launch.startMcapUsd >= 20_000 * 0.999 && r.launch.startMcapUsd <= 20_000 * 1.002, `starts at $${r.launch.startMcapUsd}`);
   assert.equal(r.guardianPaused, true);
   assert.match(JSON.parse(readFileSync(recordPath.replace(/\.json$/, '-safe-batch.json'), 'utf8')).meta.name, /^ELPIDA V2\.3 /);
+});
+
+test('deployer gas follows the fee right now when the plan gives deployGas, never below the floor', () => {
+  const { parseEther: eth } = ethersForGas;
+  const plan = { minDeployerBalance: '0.003', deployGas: 15_000_000 };
+  const gwei = n => BigInt(Math.round(n * 1e9));
+  // base 0.3 gwei, tip 0.05: ethers reports max fee 0.65. Need 15M × (0.375 + 0.05) gwei = 0.006375 ETH.
+  const low = { maxFeePerGas: gwei(0.65), maxPriorityFeePerGas: gwei(0.05) };
+  assert.equal(deployerGas({ balance: eth('0.0064'), plan, feeData: low }).ok, true);
+  assert.equal(deployerGas({ balance: eth('0.0063'), plan, feeData: low }).ok, false);
+  assert.match(deployerGas({ balance: eth('0.0064'), plan, feeData: low }).detail, /0\.006375 needed at 0\.425 gwei/);
+  // Very low fee: the floor applies.
+  const tiny = { maxFeePerGas: gwei(0.05), maxPriorityFeePerGas: gwei(0.01) };
+  assert.equal(deployerGas({ balance: eth('0.0029'), plan, feeData: tiny }).ok, false);
+  assert.equal(deployerGas({ balance: eth('0.003'), plan, feeData: tiny }).ok, true);
+  // Legacy gasPrice only, and no fee data at all.
+  assert.equal(deployerGas({ balance: eth('0.015'), plan, feeData: { gasPrice: gwei(1) } }).ok, true);
+  assert.equal(deployerGas({ balance: eth('0.014'), plan, feeData: { gasPrice: gwei(1) } }).ok, false);
+  assert.match(deployerGas({ balance: eth('0.004'), plan }).detail, /fixed minimum/);
+  // Plans without deployGas keep the fixed minimum.
+  assert.equal(deployerGas({ balance: eth('0.0099'), plan: { minDeployerBalance: '0.01' }, feeData: low }).ok, false);
+  assert.equal(deployerGas({ balance: eth('0.01'), plan: {} }).ok, true);
 });
