@@ -131,3 +131,16 @@ test('Robinhood Chain feeds named with the RH prefix match their stock, and only
   assert.equal(feedNamesStock('MU', 'RHAMU / USD'), false, 'another ticker after RH does not match');
   assert.equal(feedNamesStock('TSLA', 'XRHTSLA / USD'), false);
 });
+
+test('stocks whose address would make launches often revert ("token address") are left out', async () => {
+  const { launchFailureOdds, MAX_LAUNCH_FAILURE } = await import('../packages/core/stock-list.mjs');
+  assert.ok(launchFailureOdds('0xfedc5f4a6c38211c1338aa411018dfaf26612c08') > 0.3);   // SPYon on Ethereum
+  assert.ok(launchFailureOdds('0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD') > 0.3);   // MU on Robinhood Chain
+  assert.ok(launchFailureOdds('0xfb82561a955bf59b9263301126af490d3799e231') < MAX_LAUNCH_FAILURE); // USFRon, about 1%
+  assert.ok(launchFailureOdds('0x0e397938c1aa0680954093495b70a9f5e2249aba') < 1e-12);
+  const high = '0xfF080c8ce2E5feadaCa0Da81314Ae59D232d4afD', low = '0x0e397938c1aa0680954093495b70a9f5e2249aba', feed = '0x' + '11'.repeat(20);
+  const r = await verifyStock({ Contract: null, provider: null, now: 0 }, { symbol: 'MU', address: high, feed });
+  assert.equal(r.ok, false); assert.match(r.reason, /token address/);
+  const list = { schema: STOCK_LIST_SCHEMA, chainId: 4663, stocks: [{ symbol: 'MU', address: high, feed, maxAge: 3600 }, { symbol: 'QQQon', address: low, feed, maxAge: 3600 }] };
+  assert.deepEqual(checkStockList(list, 4663).stocks.map(s => s.symbol), ['QQQon']);
+});
