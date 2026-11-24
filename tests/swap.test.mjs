@@ -12,7 +12,8 @@ const AAPL = list.stocks[0].address;
 test('tokens: native, USDC and the verified stocks; only Kyber chains', () => {
   const t = swapTokens(base, list);
   assert.equal(t[0].address, NATIVE); assert.equal(t[1].symbol, 'USDC'); assert.equal(t.filter(x => x.kind === 'xstock').length, list.stocks.length);
-  assert.deepEqual(swapTokens({ ...base, key: 'robinhood-mainnet' }, list), []);
+  assert.deepEqual(swapTokens({ ...base, key: 'solana-mainnet' }, list), []);
+  assert.equal(KYBER_CHAINS['robinhood-mainnet'], 'robinhood', 'Robinhood Chain swaps through Kyber too (24 November 2026)');
   assert.equal(KYBER_CHAINS['bnb-mainnet'], 'bsc');
 });
 

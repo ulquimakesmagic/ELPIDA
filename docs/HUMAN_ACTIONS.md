@@ -184,6 +184,7 @@ that once the tokens are on chain anyone can hold them. Evidence: `docs/sources/
 | Ethereum | 10 candidates, addresses match Ondo's list | 8 direct Chainlink feeds, 2 adapters | ready for the steps below after the Ethereum deploy |
 | BNB Chain | 13 candidates, addresses match Ondo's list | 13 adapters (Chainlink share price x Ondo sValue) | ready for the adapter steps below after the BNB deploy |
 | Robinhood Chain | 15 tokens (`config/stocks/candidates/robinhood-ondo-unpriced.json`) | none yet | no stock pairs; tiny supplies and no Ondo feed or sValue oracle on that chain |
+| Robinhood Chain (Robinhood's own stock tokens, 24 Nov) | 32 tokens (`config/stocks/candidates/robinhood-chainlink.json`): addresses from api.robinhood.com/rhj/assets, feeds from Chainlink's Robinhood Chain list | one Chainlink feed per token (price × Robinhood's multiplier) | ready: run stock-list, then approve in the operator panel |
 
 Robinhood Chain gets Ondo pairs once Chainlink lists an Ondo feed there or Ondo deploys its SyntheticSharesOracle
 there (then the BNB adapter path works unchanged). Every Ondo token has a `compliance` contract, so the fork rehearsal
@@ -191,6 +192,21 @@ there (then the BNB adapter path works unchanged). Every Ondo token has a `compl
 
 Mainnet stock pairs also stay behind the production guard (`tokenized_equity_on`) until you lift the beta rule, on
 every chain including Base.
+
+## Robinhood stock tokens on Robinhood Chain, 24 November 2026
+
+Robinhood issues its own stock tokens on Robinhood Chain, and Chainlink publishes one USD feed per token there (the
+token price, already multiplied by Robinhood's corporate-action multiplier), the same shape as the Coinbase stocks on
+Base. `config/stocks/candidates/robinhood-chainlink.json` pairs the 32 tokens that have a feed (the 24/5 feed where
+Chainlink also lists a 24/7 one). Swap on Robinhood Chain goes through KyberSwap like the other chains.
+
+```powershell
+git pull
+$env:STOCK_LIST_RPC_URL = "<your Robinhood Chain RPC>"
+node scripts/stock-list.mjs robinhood config/stocks/candidates/robinhood-chainlink.json
+```
+Commit `config/stocks/robinhood-mainnet.json` on a branch, then Operator panel → Robinhood Chain → Launchpads →
+Approve, and sign the batch in the Robinhood Chain Safe.
 
 ## Ondo stocks on Ethereum mainnet, 13 November 2026
 

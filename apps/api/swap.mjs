@@ -6,7 +6,7 @@
 // default 50 = 0.5%, capped at 1%) through Kyber's extraFee, paid to the network's treasury Safe. It is taken in the native
 // coin or USDC side of the swap where there is one, so the treasury collects ETH/BNB/USDC rather than stock tokens.
 export const KYBER_API = 'https://aggregator-api.kyberswap.com';
-export const KYBER_CHAINS = Object.freeze({ 'base-mainnet': 'base', 'bnb-mainnet': 'bsc', 'ethereum-mainnet': 'ethereum' });
+export const KYBER_CHAINS = Object.freeze({ 'base-mainnet': 'base', 'bnb-mainnet': 'bsc', 'ethereum-mainnet': 'ethereum', 'robinhood-mainnet': 'robinhood' });
 /** KyberSwap's MetaAggregationRouterV2 (the same address on these chains). */
 export const KYBER_ROUTER = '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5';
 export const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';
@@ -17,7 +17,7 @@ export function swapTokens(net, stockList, swapList = null) {
   if (!net || !KYBER_CHAINS[net.key]) return [];
   const out = [{ address: NATIVE, symbol: net.nativeCurrency?.symbol ?? 'ETH', name: net.nativeCurrency?.name ?? 'Native coin', decimals: 18, kind: 'native' }];
   const usdc = net.payoutStable?.address ?? net.usd?.usdc;
-  if (ADDRESS.test(String(usdc ?? ''))) out.push({ address: usdc, symbol: net.payoutStable?.symbol ?? 'USDC', name: 'USD Coin', decimals: Number(net.payoutStable?.decimals ?? 6), kind: 'usdc' });
+  if (ADDRESS.test(String(usdc ?? ''))) out.push({ address: usdc, symbol: net.payoutStable?.symbol ?? 'USDC', name: net.payoutStable?.name ?? 'USD Coin', decimals: Number(net.payoutStable?.decimals ?? 6), kind: 'usdc' });
   for (const s of stockList?.stocks ?? []) if (ADDRESS.test(String(s.address ?? ''))) out.push({ address: s.address, symbol: s.symbol, name: s.name, decimals: Number(s.decimals), kind: 'xstock' });
   // Swap-only tokens (config/swap/<network>.json, e.g. every Ondo stock and ETF on BNB Chain): no price feed needed here.
   const have = new Set(out.map(t => t.address.toLowerCase()));
