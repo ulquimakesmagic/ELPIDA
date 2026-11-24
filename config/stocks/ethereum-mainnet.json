@@ -1,0 +1,21 @@
+{
+  "schema": "elpida-stock-list-v1",
+  "network": "ethereum-mainnet",
+  "chainId": 1,
+  "source": "config/stocks/candidates/ethereum-ondo.json",
+  "checkedAt": "2026-11-24T11:40:35.000Z",
+  "stocks": [
+    {
+      "symbol": "SGOVon",
+      "name": "iShares 0-3 Month Treasury Bond ETF (Ondo)",
+      "address": "0x8de5d49725550f7b318b2fa0f1b1f118e98e8d0f",
+      "decimals": 18,
+      "feed": "0xfE45662E9fA552464289B0568D4A846c6F284Db9",
+      "feedDecimals": 8,
+      "feedDescription": "SGOVon / USD (Calculated)",
+      "maxAge": 345600,
+      "priceUsd": 103.13536176,
+      "priceUpdatedAt": 1795482059
+    }
+  ]
+}
