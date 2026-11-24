@@ -64,7 +64,7 @@ export function stockIdentity(symbol, { provider = null, name = null, catalog = 
     symbol: raw, ticker, issuer: test ? `${issuer ?? 'Stock'} (test)` : issuer, test,
     company: listed?.name ?? known?.company ?? (name || null), type: listed?.type ?? known?.type ?? 'Stock',
     tone: known?.tone ?? stockTone(ticker),
-    logo: issuer === 'Ondo' ? stockIconUrl(raw) : issuer === 'Robinhood' && /^0x[0-9a-fA-F]{40}$/.test(String(address ?? '')) ? `/api/public/robinhood-stock-icon/${String(address).toLowerCase()}.png` : issuer === 'Coinbase' ? `/api/public/coinbase-stock-icon/${ticker}c.png?v=2` : STOCK_LOGOS.has(ticker) ? `/assets/stocks/${ticker}.png` : null,
+    logo: issuer === 'Ondo' ? stockIconUrl(raw) : issuer === 'Robinhood' && /^0x[0-9a-fA-F]{40}$/.test(String(address ?? '')) ? `/api/public/robinhood-stock-icon/${String(address).toLowerCase()}.png?v=2` : issuer === 'Coinbase' ? `/api/public/coinbase-stock-icon/${ticker}c.png?v=2` : STOCK_LOGOS.has(ticker) ? `/assets/stocks/${ticker}.png` : null,
   };
 }
 

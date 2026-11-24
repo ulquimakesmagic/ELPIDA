@@ -1,4 +1,6 @@
-// Robinhood stock tokens on Robinhood Chain: their icons (display only). Robinhood publishes each token's logo at
+// Robinhood stock tokens on Robinhood Chain: the fallback icon (display only). The route in server.mjs shows Ondo's icon
+// for the same company first (Robinhood's own logo is its feather for every token); this serves Robinhood's otherwise.
+// Robinhood publishes each token's logo at
 // cdn.robinhood.com/ncw_assets/logos/<lowercase token address>.png (the logoUrl field of api.robinhood.com/rhj/assets,
 // checked 24 November 2026). The server fetches it once, checks it is a small PNG, JPEG or WebP and serves it from this
 // origin (/api/public/robinhood-stock-icon/<address>.png), only for tokens on the verified Robinhood Chain stock list, so

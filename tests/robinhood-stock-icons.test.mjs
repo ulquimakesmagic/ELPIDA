@@ -9,7 +9,7 @@ const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, ...n
 test('Robinhood stock tokens show Robinhood\'s logo, by token address, through this site', () => {
   const id = stockIdentity('TSLA', { name: 'Tesla (Robinhood)', address: TSLA });
   assert.equal(id.issuer, 'Robinhood'); assert.equal(id.ticker, 'TSLA');
-  assert.equal(id.logo, `/api/public/robinhood-stock-icon/${TSLA.toLowerCase()}.png`);
+  assert.equal(id.logo, `/api/public/robinhood-stock-icon/${TSLA.toLowerCase()}.png?v=2`);
   assert.equal(stockIdentity('TSLA', { name: 'Tesla (Robinhood)' }).logo, null, 'no address, no logo: the ticker tile');
   assert.equal(stockIdentity('TSLA', { name: 'Tesla' }).issuer, null, 'only Robinhood-named tokens');
   assert.equal(robinhoodLogoUrl(TSLA), `https://cdn.robinhood.com/ncw_assets/logos/${TSLA.toLowerCase()}.png`);
