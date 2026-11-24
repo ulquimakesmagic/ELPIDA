@@ -193,6 +193,21 @@ there (then the BNB adapter path works unchanged). Every Ondo token has a `compl
 Mainnet stock pairs also stay behind the production guard (`tokenized_equity_on`) until you lift the beta rule, on
 every chain including Base.
 
+## Ethereum mainnet on V2.3 (prepared 24 November 2026)
+
+`deployments/plans/ethereum-mainnet-v23.json` (50/30/20, same Safe, keeper and guardian) and the USDC payout route
+(Uniswap v3 SwapRouter02 and QuoterV2 on Ethereum) are in place. The deploy is about 12.5M gas plus about 3.5M for the
+USDC distributor and Safe batches: do it on a low-gas day (under 1 gwei is about $15–20 in total). Railway needs
+`ELPIDA_RPC_1` (a private Ethereum RPC) and `ELPIDA_INDEX_RPC_1` (a public one, for the indexer's wide log scans).
+
+1. Add Ethereum to the Elpida Treasury Safe in the Safe app; send the deployer at least 0.015 ETH.
+2. `node scripts/v2-mainnet-deploy.mjs check --plan deployments/plans/ethereum-mainnet-v23.json`, then send Claude the sha
+   for the launchpad approval file.
+3. The USDC distributor needs `deployments/approvals/ethereum-mainnet-v23-usdc-airdrop.json`, written from Malik's own
+   approval (same shape as the Base one).
+4. rehearse → deploy → explorer verify → Safe batch → USDC distributor rehearse/deploy → `verify` → record PR, as for
+   the other chains; then the Ondo stock list (`config/stocks/candidates/ethereum-ondo.json`) and its approval.
+
 ## Robinhood stock tokens on Robinhood Chain, 24 November 2026
 
 Robinhood issues its own stock tokens on Robinhood Chain, and Chainlink publishes one USD feed per token there (the
