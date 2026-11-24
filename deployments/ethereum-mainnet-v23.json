@@ -1,0 +1,224 @@
+{
+  "network": "ethereum-mainnet-v23",
+  "name": "Ethereum",
+  "chainId": 1,
+  "planSha256": "142d7fdd62cc7ec6e967d3ecb2538b9080a72323467f21d11f882e4f83ce73a7",
+  "approval": "ethereum-mainnet-v23-142d7fdd62cc7ec6.json",
+  "model": "v2.3-hook",
+  "compiler": "solc 0.8.26 (cancun, via IR, 200 runs)",
+  "gitCommit": "5e0f5a70c728163f68de8fedfa4e684b5b59e966",
+  "startMcapUsd": 20000,
+  "contracts": {
+    "create2": "0x9a69566fCDE488F7913fc03fB26F8142Dd21e62D",
+    "factory": "0x29f0D2A8F2DD5B2dF872222f10bE35D6B27aFD71",
+    "airdrop": "0x30c8C1f345f68C3b48efEe450FA916F6CE6340a7",
+    "hook": "0x90962CD29484CC34434ACb1E8f396F7a064f68cC",
+    "router": "0xC3C730EFade65F72B677E877d2ACcb8C5a697960",
+    "usdcAirdrop": "0x63Cb3BCbDB6F00302EaD64Bd8D17A614FfBBD4B9"
+  },
+  "txs": {
+    "create2": {
+      "hash": "0xdda0d4549d8a2df05a4b73803a086c95c44e1604a9476e0bb1cd80bc9481b0e2",
+      "block": 26484621
+    },
+    "factory": {
+      "hash": "0xf21fd21306cbcb61bbf15cac1055f7bb93879cb2716eaf27203d0913b4925a54",
+      "block": 26484623
+    },
+    "airdrop": {
+      "hash": "0x12f3468b9abd35fc571f7a0242227b0c98f0f636ecb6ac3b5ac8a8866369fb96",
+      "block": 26484625
+    },
+    "hook": {
+      "hash": "0xcb7617d58745004e4238091924e1d6e23297d06242ee5ecc29f1a73cd5ff7f54",
+      "block": 26484627
+    },
+    "router": {
+      "hash": "0x67a5d1aedb54ff04b4a6b96b82c4c91963ded61e476ce53ea22f0f4f09f6c75b",
+      "block": 26484629
+    },
+    "usdcAirdrop": {
+      "hash": "0x744baae00cdd880b69d3213bd4e80f291ecc87f054fac7f77ab4cd77464954d0",
+      "block": 26484700
+    }
+  },
+  "deployer": "0x9c99387c63A5d893D3bDe9c71CF2fe2b1191F08E",
+  "block": 26484623,
+  "airdropGenesis": 1793491200,
+  "hookSalt": "0x00000000000000000000000000000000000000000000000000000000000035d4",
+  "gate": {
+    "recordedAt": "2026-11-24T11:10:43.956Z",
+    "plan": {
+      "chainId": 1,
+      "network": "Ethereum",
+      "mainnet": true,
+      "startMcapUsd": 20000,
+      "treasury": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01",
+      "recipients": [
+        "0x30c8C1f345f68C3b48efEe450FA916F6CE6340a7",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000"
+      ],
+      "minFeeBps": 100,
+      "metadataRequired": true,
+      "approver": "Malik",
+      "approvedAt": 1795478400000,
+      "planHash": "0xb27703549bdd07f2be803f42664a39baef7fc8496777e4918d56283c4b87540e"
+    },
+    "deployment": {
+      "factory": "0x29f0D2A8F2DD5B2dF872222f10bE35D6B27aFD71",
+      "hook": "0x90962CD29484CC34434ACb1E8f396F7a064f68cC",
+      "router": "0xC3C730EFade65F72B677E877d2ACcb8C5a697960",
+      "blockNumber": 26484623,
+      "transactions": [
+        "0xdda0d4549d8a2df05a4b73803a086c95c44e1604a9476e0bb1cd80bc9481b0e2",
+        "0xf21fd21306cbcb61bbf15cac1055f7bb93879cb2716eaf27203d0913b4925a54",
+        "0x12f3468b9abd35fc571f7a0242227b0c98f0f636ecb6ac3b5ac8a8866369fb96",
+        "0xcb7617d58745004e4238091924e1d6e23297d06242ee5ecc29f1a73cd5ff7f54",
+        "0x67a5d1aedb54ff04b4a6b96b82c4c91963ded61e476ce53ea22f0f4f09f6c75b"
+      ]
+    }
+  },
+  "constructorChecks": [
+    {
+      "check": "factory treasury",
+      "ok": true,
+      "detail": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01"
+    },
+    {
+      "check": "factory start $20,000",
+      "ok": true,
+      "detail": "20000"
+    },
+    {
+      "check": "factory requires metadata",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "check": "factory has launch controls",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "check": "hook factory",
+      "ok": true,
+      "detail": "0x29f0D2A8F2DD5B2dF872222f10bE35D6B27aFD71"
+    },
+    {
+      "check": "hook treasury",
+      "ok": true,
+      "detail": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01"
+    },
+    {
+      "check": "hook PoolManager",
+      "ok": true,
+      "detail": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+    },
+    {
+      "check": "hook airdrop vault",
+      "ok": true,
+      "detail": "0x30c8C1f345f68C3b48efEe450FA916F6CE6340a7"
+    },
+    {
+      "check": "hook flywheel vault",
+      "ok": true,
+      "detail": "0x0000000000000000000000000000000000000000"
+    },
+    {
+      "check": "hook holder vault",
+      "ok": true,
+      "detail": "0x0000000000000000000000000000000000000000"
+    },
+    {
+      "check": "hook is V2.3",
+      "ok": true,
+      "detail": "23"
+    },
+    {
+      "check": "hook split 50% traders / 30% creator / 20% treasury / 0 / 0",
+      "ok": true,
+      "detail": "5000/3000/2000/0/0"
+    },
+    {
+      "check": "hook minimum fee",
+      "ok": true,
+      "detail": "100"
+    },
+    {
+      "check": "airdrop operator is the keeper",
+      "ok": true,
+      "detail": "0x10299c3Cff25C3e775e91463c5D9c8670483d39F"
+    },
+    {
+      "check": "airdrop period",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "check": "router hook",
+      "ok": true,
+      "detail": "0x90962CD29484CC34434ACb1E8f396F7a064f68cC"
+    },
+    {
+      "check": "router PoolManager",
+      "ok": true,
+      "detail": "0x000000000004444c5dc75cB358380D2e3dE08A90"
+    },
+    {
+      "check": "gate (#234) verifyDeployment: no mismatches",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "safeBatch": "ethereum-mainnet-v23-safe-batch.json",
+  "status": "ready",
+  "pending": {
+    "safe": "Execute the Safe batch (setHook, configureUsdPricing, approveQuote USDC, setGuardian, setDailyLaunchCap), then run verify."
+  },
+  "usdcAirdrop": {
+    "deployedAt": "2026-11-24T11:24:53.066Z",
+    "deployer": "0x9c99387c63A5d893D3bDe9c71CF2fe2b1191F08E",
+    "readBack": "ok"
+  },
+  "verify": {
+    "at": "2026-11-24T11:25:38.136Z",
+    "checks": [
+      {
+        "check": "factory hook",
+        "ok": true,
+        "detail": "0x90962CD29484CC34434ACb1E8f396F7a064f68cC"
+      },
+      {
+        "check": "USD feed",
+        "ok": true,
+        "detail": "0x5f4eC3Df9cbd43714FE2740f5E3616155c5b8419"
+      },
+      {
+        "check": "USDC approved at $25,000 virtual",
+        "ok": true,
+        "detail": "25000000000"
+      },
+      {
+        "check": "guardian",
+        "ok": true,
+        "detail": "0xfC08505EfEf934c3fF19d82D189f60f28a0255eB"
+      },
+      {
+        "check": "daily launch cap",
+        "ok": true,
+        "detail": "1000"
+      },
+      {
+        "check": "launches paused",
+        "ok": true,
+        "detail": "false"
+      },
+      {
+        "check": "native start price readable",
+        "ok": true,
+        "detail": "14.866616714834504824 native = $25,000 virtual"
+      }
+    ]
+  }
+}

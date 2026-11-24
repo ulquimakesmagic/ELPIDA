@@ -1,0 +1,126 @@
+{
+  "network": "ethereum-mainnet-v23",
+  "chainId": 1,
+  "at": "2026-11-24T09:57:42.999Z",
+  "scope": "LOCAL FORK ONLY: nothing was sent to the public chain",
+  "via": "a dev node forking the chain (--node)",
+  "forkBlock": 26484235,
+  "gitCommit": "ddaee0dbc709cdab6688a5a2145ff3ee3c763344",
+  "stocks": [
+    {
+      "symbol": "TSLAon",
+      "address": "0xf6b1117ec07684d3958cad8beb1b302bfd21103f",
+      "feed": "0x89904B6fcF8dAD1e5DA47dFdF69fC38Ad6be0bd5",
+      "ok": true,
+      "startMcapUsd": 20004.97075928493,
+      "bought": "7360807648689366677878029",
+      "returned": "380924798359375000",
+      "detail": "starts at $20005, a TSLAon buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": true,
+        "raisedUsd": 30919,
+        "chunks": 1,
+        "detail": "graduated at the ×5 milestone, raising $30,919 of TSLAon into the locked pool; a sell and a buy then traded in the graduated pool"
+      }
+    },
+    {
+      "symbol": "SPYon",
+      "address": "0xfedc5f4a6c38211c1338aa411018dfaf26612c08",
+      "feed": "0x6EcC1b902dB35eAFE95332443802774Fd1D72576",
+      "ok": false,
+      "error": "execution reverted: \"token address\""
+    },
+    {
+      "symbol": "QQQon",
+      "address": "0x0e397938c1aa0680954093495b70a9f5e2249aba",
+      "feed": "0x2098C245Fe4C80cdA93cF85Cff0718328D4eEa85",
+      "ok": true,
+      "startMcapUsd": 20019.107672874747,
+      "bought": "7355645075164008148764293",
+      "returned": "226087538671875000",
+      "detail": "starts at $20019, a QQQon buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": true,
+        "raisedUsd": 30941,
+        "chunks": 1,
+        "detail": "graduated at the ×5 milestone, raising $30,941 of QQQon into the locked pool; a sell and a buy then traded in the graduated pool"
+      }
+    },
+    {
+      "symbol": "IAUon",
+      "address": "0x4f0ca3df1c2e6b943cf82e649d576ffe7b2fabcf",
+      "feed": "0x1f09475Fe4D212fC24611bAE180201869956c238",
+      "ok": true,
+      "startMcapUsd": 20019.5459719541,
+      "bought": "7355476194084955893401779",
+      "returned": "2146913751562500000",
+      "detail": "starts at $20020, a IAUon buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": true,
+        "raisedUsd": 30942,
+        "chunks": 1,
+        "detail": "graduated at the ×5 milestone, raising $30,942 of IAUon into the locked pool; a sell and a buy then traded in the graduated pool"
+      }
+    },
+    {
+      "symbol": "STRCon",
+      "address": "0xecabe1ff8a9e1dc55899cf58dac8497ece5ae84c",
+      "feed": "0xC353ac4b425f818Ad87E228bf816E15c2173AC07",
+      "ok": true,
+      "startMcapUsd": 20006.628709970995,
+      "bought": "7360198565730138261353434",
+      "returned": "1389159323515625000",
+      "detail": "starts at $20007, a STRCon buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": true,
+        "raisedUsd": 30922,
+        "chunks": 1,
+        "detail": "graduated at the ×5 milestone, raising $30,922 of STRCon into the locked pool; a sell and a buy then traded in the graduated pool"
+      }
+    },
+    {
+      "symbol": "SGOVon",
+      "address": "0x8de5d49725550f7b318b2fa0f1b1f118e98e8d0f",
+      "feed": "0xfE45662E9fA552464289B0568D4A846c6F284Db9",
+      "ok": true,
+      "startMcapUsd": 20011.8705248583,
+      "bought": "7358280519302248529043659",
+      "returned": "1418266762421875000",
+      "detail": "starts at $20012, a SGOVon buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": true,
+        "raisedUsd": 30930,
+        "chunks": 1,
+        "detail": "graduated at the ×5 milestone, raising $30,930 of SGOVon into the locked pool; a sell and a buy then traded in the graduated pool"
+      }
+    },
+    {
+      "symbol": "BILon",
+      "address": "0x2710e30d84b376c34a3b3036aa196b26a83a321b",
+      "feed": "0x254599afD7f9F3f18775fC24693Ba0d1cE8A4Ac6",
+      "ok": true,
+      "startMcapUsd": 20001.55145992376,
+      "bought": "7362054241518310632719192",
+      "returned": "1574513122890625000",
+      "detail": "starts at $20002, a BILon buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": false,
+        "error": "the lender ran out after $1136: it holds $126 of BILon; set ELPIDA_STOCK_HOLDER_BILON to a larger holder"
+      }
+    },
+    {
+      "symbol": "USFRon",
+      "address": "0xfb82561a955bf59b9263301126af490d3799e231",
+      "feed": "0xC5D98E16Bcb6Cf753BA27A24Df2A04c2F0267E57",
+      "ok": true,
+      "startMcapUsd": 20006.24608074142,
+      "bought": "7360336419037004237255424",
+      "returned": "2825490855468750000",
+      "detail": "starts at $20006, a USFRon buy and full sell returned 97.51% after both fees",
+      "graduation": {
+        "ok": false,
+        "error": "the lender ran out after $0: it holds $218 of USFRon; set ELPIDA_STOCK_HOLDER_USFRON to a larger holder"
+      }
+    }
+  ]
+}
