@@ -127,6 +127,8 @@ test('Coinbase stocks on Base: Chainlink names their feeds "Coinbase NVDA", and 
 test('Robinhood Chain feeds named with the RH prefix match their stock, and only it', async () => {
   const { feedNamesStock } = await import('../packages/core/stock-list.mjs');
   assert.equal(feedNamesStock('TSLA', 'RHTSLA / USD'), true);
+  for (const s of ['TSLAon','QQQon','IAUon','STRCon','BILon','USFRon']) assert.equal(feedNamesStock(s, s + '-USD (Calculated)'), true);
+  assert.equal(feedNamesStock('TSLAon', 'QQQon-USD (Calculated)'), false);
   assert.equal(feedNamesStock('MU', 'RHMU / USD'), true);
   assert.equal(feedNamesStock('MU', 'RHAMU / USD'), false, 'another ticker after RH does not match');
   assert.equal(feedNamesStock('TSLA', 'XRHTSLA / USD'), false);
