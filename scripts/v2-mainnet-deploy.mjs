@@ -87,6 +87,22 @@ export function approvalFor(key, hash, dir = join(root, 'deployments', 'approval
 }
 
 /**
+ * How much gas money the deployer needs. With `plan.deployGas`, the need follows the chain's fee right now:
+ * deployGas × (base fee + 25% + priority tip), never below `minDeployerBalance`. ethers reports maxFeePerGas as
+ * 2 × base fee + tip, so the base fee is recovered from it. Without deployGas, or if the fee can't be read, the fixed
+ * `minDeployerBalance` applies. The deploy is resumable, so a fee spike mid-way only means topping up and rerunning.
+ */
+export function deployerGas({ balance, plan, feeData = null }) {
+  const floor = parseEther(String(plan.minDeployerBalance ?? '0.01'));
+  const max = feeData?.maxFeePerGas != null ? BigInt(feeData.maxFeePerGas) : null, tip = BigInt(feeData?.maxPriorityFeePerGas ?? 0n);
+  const fee = max !== null && max >= tip ? (max - tip) / 2n * 5n / 4n + tip : feeData?.gasPrice != null ? BigInt(feeData.gasPrice) : null;
+  const byFee = plan.deployGas && fee ? BigInt(plan.deployGas) * BigInt(fee) : null;
+  const need = byFee !== null && byFee > floor ? byFee : floor;
+  const gwei = fee ? ` at ${(Number(fee) / 1e9).toFixed(3)} gwei` : '';
+  return { ok: balance >= need, need, detail: `${formatEther(balance)} held, ${formatEther(need)} needed${byFee !== null ? gwei : ' (fixed minimum)'}` };
+}
+
+/**
  * Every check that must pass before anything is sent. Returns [{ check, ok, detail }]; `failed` lists the failures.
  * `deployer` is optional (`check` runs without a key).
  */
@@ -120,7 +136,11 @@ export async function preflight({ provider, plan, deployer = null }) {
   // USDC: 6 decimals on Base and Ethereum, 18 on BNB Chain (13 November). The plan states which; the chain must agree.
   const wantDecimals = usdcDecimals(plan);
   try { const u = new Contract(plan.usdc, ERC20, provider); add(`USDC has ${wantDecimals} decimals`, Number(await u.decimals()) === wantDecimals, await u.symbol().catch(() => '')); } catch (e) { add(`USDC has ${wantDecimals} decimals`, false, e.shortMessage ?? e.message); }
-  if (deployer) { const bal = await provider.getBalance(deployer); add('deployer holds gas', bal >= parseEther(String(plan.minDeployerBalance ?? '0.01')), `${formatEther(bal)}`); }
+  if (deployer) {
+    const [bal, fee] = await Promise.all([provider.getBalance(deployer), plan.deployGas && provider.getFeeData ? provider.getFeeData().catch(() => null) : null]);
+    const g = deployerGas({ balance: bal, plan, feeData: fee });
+    add('deployer holds gas', g.ok, g.detail);
+  }
   return Object.assign(out, { failed: out.filter(c => !c.ok) });
 }
 
@@ -546,7 +566,7 @@ export async function askHidden(prompt, { echo = false } = {}) {
 
 async function main() {
   const [cmd, ...rest] = process.argv.slice(2), arg = n => { const i = rest.indexOf(`--${n}`); return i >= 0 ? rest[i + 1] : null; };
-  const planPath = arg('plan'); if (!cmd || !planPath) { console.log('usage: node scripts/v2-mainnet-deploy.mjs check|rehearse|deploy|verify --plan deployments/plans/<key>.json [--fork <rpc> | --node <local dev node>]'); process.exit(2); }
+  const planPath = arg('plan'); if (!cmd || !planPath) { console.log('usage: node scripts/v2-mainnet-deploy.mjs check|rehearse|deploy|verify --plan deployments/plans/<key>.json [--deployer <address> (check)] [--fork <rpc> | --node <local dev node>]'); process.exit(2); }
   const live = arg('fork') ?? arg('node');
   const { plan, hash } = readPlan(planPath, { local: cmd === 'rehearse' && !live, forkRehearsal: cmd === 'rehearse' && !!live }), recordPath = join(root, 'deployments', `${plan.key}.json`);
   const print = list => { for (const c of list) console.log(`${c.ok ? 'ok  ' : 'FAIL'} ${c.check}${c.detail ? `: ${c.detail}` : ''}`); };
@@ -573,7 +593,7 @@ async function main() {
   }
   const rpc = process.env.ELPIDA_MAINNET_RPC_URL; if (!rpc) throw new Error('Set ELPIDA_MAINNET_RPC_URL.');
   const provider = new JsonRpcProvider(rpc, undefined, { staticNetwork: true });
-  if (cmd === 'check') { const c = await preflight({ provider, plan }); print(c); process.exit(c.failed.length ? 1 : 0); }
+  if (cmd === 'check') { const d = arg('deployer'); if (d && !isAddress(d)) throw new Error('--deployer takes the deployer wallet address (never the key).'); const c = await preflight({ provider, plan, deployer: d ?? null }); print(c); process.exit(c.failed.length ? 1 : 0); }
   if (cmd === 'verify') { const out = await verifyDeployment({ provider, plan, record: JSON.parse(readFileSync(recordPath, 'utf8')), recordPath }); print(out); process.exit(out.every(c => c.ok) ? 0 : 1); }
   if (cmd === 'deploy') {
     const approval = approvalFor(plan.key, hash);
