@@ -44,7 +44,10 @@ test('the /learn guides, the FAQ and llms.txt carry no testnet wording on the ma
   assert.deepEqual([...out.matchAll(/.{0,40}(test ?net|Sepolia|Devnet).{0,40}/gi)].map(m => m[0]), []);
   // The real-money answer reaches both the visible FAQ and its JSON-LD copy.
   assert.equal((out.match(/Yes, on Base mainnet\. Its contracts have not had an independent audit/g) ?? []).length >= 2, true);
-  assert.match(out, /Not yet: tokenized stocks are switched off for the first mainnet release\./);
+  assert.match(out, /Approved tokenized stocks can be a trading pair/);
+  // 24 November 2026: the V2.3 split, no Solana, and no five-way split on the mainnet site.
+  assert.deepEqual([...out.matchAll(/.{0,40}(Solana|flywheel|five ways|Raydium).{0,40}/gi)].map(m => m[0]), []);
+  assert.match(out, /50% to a monthly USDC airdrop for traders, 30% to the creator and 20% to the Elpida treasury/);
 });
 
 // 20 November 2026: the first Base mainnet launch was blocked ("Base is not set up for launches yet") because the
@@ -68,4 +71,14 @@ test('holder strategies on mainnet: Base pins Uniswap v3 for reward swaps; the v
   const v2 = read('apps/web/v2-launchpad.mjs');
   assert.match(v2, /const dex = w\.dex \?\? w\.net\.rewardDex \?\? null;/);
   assert.match(v2, /deploy\(keeper\.address, d\.hook, d\.router, dex\?\.router \?\? ZeroAddress, dex\?\.weth \?\? ZeroAddress/);
+});
+
+// 24 November 2026: the docs page listed no mainnet contracts, offered Elpida tokens as a pair and showed the V2.0 split.
+test('the docs page lists each mainnet launchpad contract and no token-to-token pairs', () => {
+  const docs = readFileSync(new URL('../apps/web/docs-view.mjs', import.meta.url), 'utf8');
+  for (const role of ['Factory', 'Hook', 'Router', 'Trader airdrop', 'Treasury']) assert.match(docs, new RegExp(`contractCard\\(net, '${role}'`));
+  assert.match(docs, /const v2 = net\.v2\?\.shared/);
+  assert.doesNotMatch(docs, /Elpida tokens|graduated Elpida token can be the pair|five ways/);
+  const page = readFileSync(new URL('../apps/web/token-page.mjs', import.meta.url), 'utf8');
+  assert.match(page, /model === 'v2\.3-hook' \? "50% traders' monthly airdrop, 30% creator, 20% Elpida"/);
 });

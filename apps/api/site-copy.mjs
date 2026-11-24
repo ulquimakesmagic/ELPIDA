@@ -2,6 +2,10 @@
 // site; the mainnet site (ELPIDA_MODE=mainnet) serves the same file with these sentences replaced before any script
 // runs, so search engines, link previews and visitors without JavaScript never read "testnet" on the mainnet site.
 // app.mjs sets the same notes again once the page loads.
+import { SPLIT } from '../../packages/core/seo.mjs';
+
+/** V2.3, the only launchpad on every mainnet (23 November 2026): 50% traders / 30% creator / 20% Elpida. */
+export const MAINNET_SPLIT = '50% to a monthly USDC airdrop for traders, 30% to the creator and 20% to the Elpida treasury';
 
 /** index.html with the network wording for `mode`. `names`: the mainnet chain names, for example ['Base']. */
 export function siteHtml(html, { mode, names = [] } = {}) {
@@ -33,7 +37,21 @@ export function seoText(text, { mode, names = [] } = {}) {
     ['No. Elpida is in testnet. Its contracts have not had an independent audit. Do not treat any testnet token as having value, and do not send funds you cannot afford to lose to any contract that has not been audited.', `Yes, on ${where} mainnet. Its contracts have not had an independent audit, so do not send funds you cannot afford to lose. New launches have a daily cap and a launch stop.`],
     [' On testnets the amounts use test funds.', ''],
     [' On testnets the sizes are scaled down with the same shape.', ''],
-    ['Only as test assets on testnets.', 'Not yet: tokenized stocks are switched off for the first mainnet release.'],
+    ['Only as test assets on testnets.', 'Yes. Approved tokenized stocks can be a trading pair: stocks issued by Coinbase on Base, Ondo Global Markets stocks on BNB Chain and Ethereum, and Robinhood stock tokens on Robinhood Chain. Each is priced by a Chainlink feed. Stock pairs are not available to US persons.'],
+    // 24 November 2026: the V2.3 split, no Solana on the mainnet site, stocks live.
+    [SPLIT, MAINNET_SPLIT],
+    ['every trading fee is shared between the creator, traders, holders, a buy-and-burn flywheel and the protocol', 'every trading fee is shared between traders, the creator and the protocol'],
+    ['every fee shared with creators, traders and holders', 'every fee shared with traders and creators'],
+    ['how every fee is shared five ways', 'how every fee is shared three ways'],
+    ['Tokenized stocks are test assets only. Their issuers', 'Tokenized stocks are issued by third parties. Their issuers'],
+    [' On Solana, SOL pairs move to a Raydium CPMM pool and other pairs to PumpSwap, with the liquidity locked in a program-controlled account.', ''],
+    [' On Solana the graduated position is locked in a program account.', ''],
+    ['On EVM networks the pool', 'The pool'],
+    [', and on Solana graduated tokens move to Raydium or PumpSwap', ''],
+    ['<tr><th scope="row">Solana after graduation</th><td>SOL pairs trade in a Raydium CPMM pool (its own 1% fee tier); other pairs in PumpSwap. Fees earned by the locked position are harvested and shared the same way.</td></tr>', ''],
+    ['What about test tokens launched before V2?', 'Do fees continue after graduation?'],
+    ['They keep the rules they launched with: an earlier curve that graduates into a locked pool and a fee split between the protocol and the creator. Each token page says which model the token uses.',
+      'Yes. Graduation happens inside the same Uniswap v4 pool, so every trade keeps paying the fee the creator chose, shared the same way, for good. There is no migration to another pool.'],
     ['Elpida currently runs on public testnets.', `Elpida runs on ${where} mainnet.`],
     ['Elpida currently runs on testnets.', `Elpida runs on ${where} mainnet.`],
     ['Launch a token on testnet', 'Launch a token'],

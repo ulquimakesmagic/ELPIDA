@@ -9,7 +9,7 @@ export const DEFAULT_ORIGIN = 'https://elpida.fun';
 export const SITE_TAGLINE = 'Launch tokens with hope on every chain';
 export const SITE_DESCRIPTION = 'Elpida is a multichain token launchpad: liquidity locked from launch, a fee the creator picks once, and every fee shared with creators, traders and holders. Currently running on public testnets.';
 export const OG_IMAGE_PATH = '/assets/brand/og-image.png?v=mark-20261019';
-export const PAGES_UPDATED = '2026-11-12';
+export const PAGES_UPDATED = '2026-11-24';
 
 /** The canonical origin: ELPIDA_CANONICAL_ORIGIN when it is a valid https origin, otherwise elpida.fun. */
 export function canonicalOrigin(env = process.env) {
@@ -31,7 +31,8 @@ const pct = bps => `${(bps / 100).toFixed(bps % 100 ? 2 : 0)}%`;
 const START = usd(V2.startFdvUsdE6), GRAD = usd(V2.graduationFdvUsdE6), MULTIPLE = `${V2.graduationFdvUsdE6 / V2.startFdvUsdE6}`;
 const MIN_FEE = pct(V2_PROPOSED_MIN_FEE_BPS), DEFAULT_FEE = pct(V2.defaultFeeBps), MAX_FEE = pct(V2.maxFeeBps);
 const S = V2_FEE_SPLIT;
-const SPLIT = `${pct(S.creator)} to the creator, ${pct(S.traderAirdrop)} to a monthly airdrop for traders, ${pct(S.flywheel)} to a flywheel that buys and burns tokens, ${pct(S.holderRewards)} to holder rewards and ${pct(S.treasury)} to the Elpida treasury`;
+/** The testnet sentence for the V2.0 five-way split; the mainnet site swaps it for V2.3's (apps/api/site-copy.mjs). */
+export const SPLIT = `${pct(S.creator)} to the creator, ${pct(S.traderAirdrop)} to a monthly airdrop for traders, ${pct(S.flywheel)} to a flywheel that buys and burns tokens, ${pct(S.holderRewards)} to holder rewards and ${pct(S.treasury)} to the Elpida treasury`;
 const FIRST_BUY = pct(V2.firstBuyCapBps);
 
 export const FAQ = [
