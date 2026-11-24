@@ -106,3 +106,21 @@ test('Robinhood Chain (Blockscout) tokens are verified keyless or with a Blocksc
   assert.deepEqual(await pro.run({ chainId: 8453, provider: f.provider, hook: f.hook.target, tokens: [{ address }], state: memory(), now: 1 }), { submitted: [], pending: 0 });
   assert.equal(urls.length, 0);
 });
+
+test('a token the explorer has not indexed yet is retried after 2 minutes, then on the long interval', async t => {
+  const f = await v2Fixture(t);
+  const { token } = await launchV2(f, { name: 'Soon', symbol: 'SOON' });
+  const address = token.target ?? token;
+  let fail = true;
+  const e = explorer(p => p.action === 'getsourcecode' ? { status: '1', result: [{ SourceCode: '' }] }
+    : p.action === 'verifysourcecode' ? (fail ? { status: '0', result: 'Unable to locate ContractCode' } : { status: '1', result: 'guid' }) : { status: '1', result: 'Pass - Verified' });
+  const state = memory(), v = new TokenVerifier({ apiKey: 'K', fetch: e.fetch, sleep });
+  const go = now => v.run({ chainId: 8453, provider: f.provider, hook: f.hook.target, tokens: [{ address }], state, now });
+  assert.deepEqual((await go(1000)).submitted.map(x => x.ok), [false]);
+  assert.equal((await go(1100)).submitted.length, 0, 'not before 2 minutes');
+  assert.deepEqual((await go(1120)).submitted.map(x => x.ok), [false], 'second try at 2 minutes');
+  assert.deepEqual((await go(1240)).submitted.map(x => x.ok), [false], 'third try 2 minutes later');
+  assert.equal((await go(1400)).submitted.length, 0, 'after that, the long interval');
+  fail = false;
+  assert.deepEqual((await go(1240 + 6 * 3600)).submitted.map(x => x.ok), [true]);
+});

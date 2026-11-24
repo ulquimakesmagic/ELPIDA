@@ -25,6 +25,8 @@ const DAY = 86_400, BATCH = 80;
 // signing lease (BE-01), stays inside a rolling 24-hour gas budget per chain (BE-07), waits for CONFIRMATIONS blocks and
 // checks the receipt's block is still canonical (BE-02). At most MAX_ROUNDS_PER_TICK rounds per job are worked through
 // per tick, so a fresh cursor never replays a whole history in one go (BE-07).
+/** Seconds between token-verification passes (24 November 2026: was hourly; now a minute or two after launch). */
+export const VERIFY_EVERY = 30;
 const CONFIRMATIONS = 2, MAX_ROUNDS_PER_TICK = 3, DAILY_GAS = 25n * 10n ** 16n;
 const HOOK = ['function ledgers(address) view returns(uint256[5] owed,uint128[5] paid)', 'function withdrawFees(address)', 'function claim(address,uint8) returns(bool)', 'function launchOf(address) view returns(address quote,address creatorVault,uint64 launchedAt,uint16 feeBps,bool graduated,int24 upperTick,int24 lowerTick,uint128 liquidityBonus,uint128 accrued)'];
 const DISTRIBUTOR = ['function currentRound() view returns(uint256)', 'function roundStart(uint256) view returns(uint256)', 'function roundEnd(uint256) view returns(uint256)', 'function available(address) view returns(uint256)',
@@ -112,9 +114,22 @@ export class V2Keeper {
     return receipt;
   }
 
-  start() { if (!this.timer) { this.timer = setInterval(() => this.tick().catch(() => {}), this.tickMs); this.timer.unref?.(); setTimeout(() => this.tick().catch(() => {}), 10_000).unref?.(); } return this; }
+  start() {
+    if (!this.timer) {
+      this.timer = setInterval(() => this.tick().catch(() => {}), this.tickMs); this.timer.unref?.(); setTimeout(() => this.tick().catch(() => {}), 10_000).unref?.();
+      // Token verification runs on its own short loop, so a new token is on the explorer a minute or two after launch.
+      if (this.verifier) { this.verifyTimer = setInterval(() => this.verifyTick().catch(() => {}), VERIFY_EVERY * 1000); this.verifyTimer.unref?.(); }
+    }
+    return this;
+  }
+  /** Every VERIFY_EVERY seconds: submits newly launched tokens on every chain (read-only, no gas). */
+  async verifyTick() {
+    if (!this.verifier || this.busy || this.verifying) return;
+    if (!this.lease.acquire()) return;
+    for (const w of this.workers) { try { await this.verify(w); } catch (e) { this.record(w.chain, 'verify', 'failed', { error: e }); } }
+  }
   /** Stops the timer, gives the lease back and closes the database (from #232), unless a tick is still running. */
-  async close() { clearInterval(this.timer); this.timer = null; if (!this.busy) { this.lease.release(); try { this.db.close(); } catch { /* already closed */ } } }
+  async close() { clearInterval(this.timer); clearInterval(this.verifyTimer); this.timer = null; this.verifyTimer = null; if (!this.busy) { this.lease.release(); try { this.db.close(); } catch { /* already closed */ } } }
 
   /** The jobs this keeper runs: creator rewards and fee collection always; the rest only with distributions on. */
   jobs() {
@@ -140,14 +155,17 @@ export class V2Keeper {
   }
 
   /**
-   * Hourly: publishes the source of this chain's launched tokens on its explorer (token-verifier.mjs), a few per run.
+   * Every VERIFY_EVERY seconds: publishes the source of this chain's launched tokens on its explorer (token-verifier.mjs), a few per run.
    * Read-only: no transaction, no gas. Chains without an Etherscan-family explorer are skipped.
    */
   async verify(w) {
-    if (!this.verifier || !EXPLORERS[Number(w.net.chainId)] || this.verifier.supports?.(Number(w.net.chainId)) === false || !this.due(w, 'verify', 3600)) return;
+    if (!this.verifier || this.verifying || !EXPLORERS[Number(w.net.chainId)] || this.verifier.supports?.(Number(w.net.chainId)) === false || !this.due(w, 'verify', VERIFY_EVERY - 5)) return;
     const index = w.index(); if (!index) return;
     const tokens = index.listings().filter(t => t.address);
-    const r = await this.verifier.run({ chainId: Number(w.net.chainId), provider: w.provider, hook: w.deployment.hook, tokens, state: { get: (k, f) => this.get(k, f), set: (k, v) => this.set(k, v) }, now: this.now() });
+    this.verifying = true;
+    let r;
+    try { r = await this.verifier.run({ chainId: Number(w.net.chainId), provider: w.provider, hook: w.deployment.hook, tokens, state: { get: (k, f) => this.get(k, f), set: (k, v) => this.set(k, v) }, now: this.now() }); }
+    finally { this.verifying = false; }
     this.done(w, 'verify');
     if (r.submitted.length) this.record(w.chain, 'verify', r.submitted.every(x => x.ok) ? 'ok' : 'partial', r);
   }

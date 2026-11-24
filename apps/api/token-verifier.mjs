@@ -67,7 +67,8 @@ export class TokenVerifier {
     const key = a => `verify:${chainId}:${String(a).toLowerCase()}`;
     const due = tokens.filter(t => {
       const s = state.get(key(t.address), null);
-      return !s || (!s.ok && !s.gaveUp && now - (s.at ?? 0) >= this.retryAfter);
+      // Right after launch the explorer may not have the contract yet: the first two retries come after 2 minutes.
+      return !s || (!s.ok && !s.gaveUp && now - (s.at ?? 0) >= ((s.attempts ?? 1) < 3 ? Math.min(120, this.retryAfter) : this.retryAfter));
     });
     const submitted = [];
     for (const t of due.slice(0, perTick)) {
