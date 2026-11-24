@@ -38,8 +38,7 @@ export function renderAdmin(ctx, { connect }) {
       error.textContent = ''; button.disabled = true; status.textContent = 'Waiting for your wallet…';
       try {
         const challenge = await getJson('admin/challenge');
-        await ctx.wallet.checkNetwork?.();
-        const signature = await withWalletTimeout(ctx.wallet.signer.signMessage(challenge.message), ctx.wallet.walletName);
+        const signature = await withWalletTimeout(ctx.wallet.signText ? ctx.wallet.signText(challenge.message) : ctx.wallet.signer.signMessage(challenge.message), ctx.wallet.walletName);
         status.textContent = 'Checking…';
         await getJson('admin/session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': ctx.config.csrf }, body: JSON.stringify({ nonce: challenge.nonce, address, signature }) });
         status.textContent = ''; load();
