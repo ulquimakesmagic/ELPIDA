@@ -3,8 +3,44 @@
   "network": "ethereum-mainnet",
   "chainId": 1,
   "source": "config/stocks/candidates/ethereum-ondo.json",
-  "checkedAt": "2026-11-24T11:40:35.000Z",
+  "checkedAt": "2026-11-24T11:43:35.000Z",
   "stocks": [
+    {
+      "symbol": "BILon",
+      "name": "SPDR Bloomberg 1-3 Month T-Bill ETF (Ondo)",
+      "address": "0x2710e30d84b376c34a3b3036aa196b26a83a321b",
+      "decimals": 18,
+      "feed": "0x254599afD7f9F3f18775fC24693Ba0d1cE8A4Ac6",
+      "feedDecimals": 8,
+      "feedDescription": "BILon-USD (Calculated)",
+      "maxAge": 345600,
+      "priceUsd": 92.90075165,
+      "priceUpdatedAt": 1795482059
+    },
+    {
+      "symbol": "IAUon",
+      "name": "iShares Gold Trust (Ondo)",
+      "address": "0x4f0ca3df1c2e6b943cf82e649d576ffe7b2fabcf",
+      "decimals": 18,
+      "feed": "0x1f09475Fe4D212fC24611bAE180201869956c238",
+      "feedDecimals": 8,
+      "feedDescription": "IAUon-USD (Calculated)",
+      "maxAge": 345600,
+      "priceUsd": 68.13196846,
+      "priceUpdatedAt": 1795494767
+    },
+    {
+      "symbol": "QQQon",
+      "name": "Invesco QQQ (Ondo)",
+      "address": "0x0e397938c1aa0680954093495b70a9f5e2249aba",
+      "decimals": 18,
+      "feed": "0x2098C245Fe4C80cdA93cF85Cff0718328D4eEa85",
+      "feedDecimals": 8,
+      "feedDescription": "QQQon-USD (Calculated)",
+      "maxAge": 345600,
+      "priceUsd": 644.18916472,
+      "priceUpdatedAt": 1795520627
+    },
     {
       "symbol": "SGOVon",
       "name": "iShares 0-3 Month Treasury Bond ETF (Ondo)",
@@ -16,6 +52,42 @@
       "maxAge": 345600,
       "priceUsd": 103.13536176,
       "priceUpdatedAt": 1795482059
+    },
+    {
+      "symbol": "STRCon",
+      "name": "Strategy Preferred (Ondo)",
+      "address": "0xecabe1ff8a9e1dc55899cf58dac8497ece5ae84c",
+      "decimals": 18,
+      "feed": "0xC353ac4b425f818Ad87E228bf816E15c2173AC07",
+      "feedDecimals": 8,
+      "feedDescription": "STRCon-USD (Calculated)",
+      "maxAge": 345600,
+      "priceUsd": 105.29640708,
+      "priceUpdatedAt": 1795467623
+    },
+    {
+      "symbol": "TSLAon",
+      "name": "Tesla, Inc. Common Stock (Ondo)",
+      "address": "0xf6b1117ec07684d3958cad8beb1b302bfd21103f",
+      "decimals": 18,
+      "feed": "0x89904B6fcF8dAD1e5DA47dFdF69fC38Ad6be0bd5",
+      "feedDecimals": 8,
+      "feedDescription": "TSLAon-USD (Calculated)",
+      "maxAge": 345600,
+      "priceUsd": 379.656,
+      "priceUpdatedAt": 1795517159
+    },
+    {
+      "symbol": "USFRon",
+      "name": "WisdomTree Floating Rate Treasury Fund (Ondo)",
+      "address": "0xfb82561a955bf59b9263301126af490d3799e231",
+      "decimals": 18,
+      "feed": "0xC5D98E16Bcb6Cf753BA27A24Df2A04c2F0267E57",
+      "feedDecimals": 8,
+      "feedDescription": "USFRon-USD (Calculated)",
+      "maxAge": 345600,
+      "priceUsd": 51.76921513,
+      "priceUpdatedAt": 1795444307
     }
   ]
 }
