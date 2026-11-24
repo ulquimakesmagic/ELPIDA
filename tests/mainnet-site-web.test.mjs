@@ -82,3 +82,12 @@ test('the docs page lists each mainnet launchpad contract and no token-to-token 
   const page = readFileSync(new URL('../apps/web/token-page.mjs', import.meta.url), 'utf8');
   assert.match(page, /model === 'v2\.3-hook' \? "50% traders' monthly airdrop, 30% creator, 20% Elpida"/);
 });
+
+// 24 November 2026: the chain menu offered "Simulation · Test funds" on the mainnet site.
+test('the mainnet site offers no simulation in the chain menu, the first-visit chooser or a saved choice', () => {
+  const app = read('apps/web/app.mjs'), ui = read('apps/web/chain-ui.mjs');
+  assert.match(app, /simulation:\(\)=>!mainnetSite\(\)/);
+  assert.match(ui, /\.\.\.\(simulation\(\)\?\[\{key:'local',name:'Simulation'\}\]:\[\]\)/);
+  assert.match(app, /\.\.\.\(mainnetSite\(\) \? \[\] : \[\{ key: 'local', name: 'Local simulation'/);
+  assert.match(app, /if \(mainnetSite\(\) && saved === 'local'\) saved = null;/);
+});

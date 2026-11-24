@@ -471,7 +471,7 @@ async function openTools() {
   if(!local&&wallet.address&&wallet.deployment){try{await wallet.checkFeeAccounting?.();await wallet.checkLaunchFeatures?.();}catch(e){fail(e);}}
   const envSection = h('section.tools-section', h('h4', 'Environment'),
     h('p.small.muted', mainnetSite() ? 'Mainnet networks use your own wallet and real funds. The local simulation uses simulated balances on a private test chain.' : 'Local simulation uses simulated balances on a private test chain. Public testnets use your own wallet and free test funds.'),
-    h('div.choice-grid', [{ key: 'local', name: 'Local simulation', note: 'Demo accounts, instant test funds', env: 'sim' }, ...networks().map(net => ({ key: net.key, name: net.name, note: net.kind === 'solana' ? 'Phantom, Solflare or Backpack' : 'Browser wallet such as MetaMask', env: 'testnet', mainnet: !!net.mainnet }))].map(item =>
+    h('div.choice-grid', [...(mainnetSite() ? [] : [{ key: 'local', name: 'Local simulation', note: 'Demo accounts, instant test funds', env: 'sim' }]), ...networks().map(net => ({ key: net.key, name: net.name, note: net.kind === 'solana' ? 'Phantom, Solflare or Backpack' : 'Browser wallet such as MetaMask', env: 'testnet', mainnet: !!net.mainnet }))].map(item =>
       h('button.choice', { type: 'button', 'data-busy-disable': '', 'aria-pressed': String(currentChain() === item.key), on: { click: async () => { error.textContent = ''; try { if (item.key === 'local') await useLocal(); else await connect(item.key); $('#tools-dialog').close(); toast(`Switched to ${item.key === 'local' ? 'the local simulation' : item.name}.`, { kind: 'success' }); } catch (e) { fail(e); } } } },
         h('span.choice-title', item.name, currentChain() === item.key ? h('span.chip.chip-positive', 'Current') : null), h('p', item.note), h(`span.chip.chip-${item.env}`, item.env === 'sim' ? 'Simulated funds' : item.mainnet ? 'Mainnet beta · real funds' : 'Public testnet')))));
   // Only the account and the wallet connection here (Malik, 6 November 2026). The faucets, test assets and the launchpad
@@ -527,6 +527,8 @@ async function init() {
   solWallet = new SolanaWallet(config, onWalletProgress);
   wallet = evmWallet;
   let saved = null; try { saved = localStorage.getItem('elpida:network'); } catch {}
+  // The mainnet site has no simulation (24 Nov 2026): a visitor saved on it opens on a mainnet instead.
+  if (mainnetSite() && saved === 'local') saved = null;
   // A visitor who left on Solana gets the Solana library before the first read; everyone else never downloads it.
   if (saved === config.solana.key && !config.solana.disabled) { try { await ensureSolanaWeb3(); wallet = solWallet; } catch { wallet = evmWallet; } } else if (saved && saved !== 'local') { try { evmWallet.select(saved); } catch {} }
   // Public markets can be browsed without granting wallet access.
@@ -535,7 +537,7 @@ async function init() {
   if (location.pathname === '/launch') history.replaceState({}, '', '/#/launch');
   $$('dialog').forEach(d => { closeOnBackdrop(d); d.querySelectorAll('[data-close]').forEach(b => b.addEventListener('click', () => d.close())); });
   const selectChain=key=>chooseChain(key).catch(e=>{toast(errorText(e),{kind:'error'});updateChrome();});
-  chainControls=[['#env-button','chain-options'],['#env-button-mobile','chain-options-mobile']].filter(([id])=>$(id)).map(([id,listId])=>chainSelector({button:$(id),listId,networks,current:()=>mode==='local'?'local':currentChain(),onSelect:selectChain}));
+  chainControls=[['#env-button','chain-options'],['#env-button-mobile','chain-options-mobile']].filter(([id])=>$(id)).map(([id,listId])=>chainSelector({button:$(id),listId,networks,simulation:()=>!mainnetSite(),current:()=>mode==='local'?'local':currentChain(),onSelect:selectChain}));
   $('#account-button').addEventListener('click', () => (mode === 'testnet' && !wallet.address ? connectCurrent() : openTools()));
   startResilience();
   initShell({ onHow: () => { location.hash = '#/docs'; }, onSearch: (query,{submit=false}={}) => { if(currentRoute.name==='explore'&&exploreView)exploreView.setQuery(query,{reveal:submit});else if(query||submit||currentRoute.name==='explore'){pendingSearchReveal=submit;location.hash=exploreHash({query});} } });
