@@ -11,11 +11,13 @@ set -euo pipefail
 export PATH="/opt/elpida/node/bin:$PATH"
 cd "$(dirname "$0")/../.."
 staging="${ELPIDA_STAGING_FILE:-/etc/elpida/staging.env}"
+# ELPIDA_STAGING relaxes the production guard, so only the staging file below may turn it on.
+unset ELPIDA_STAGING
 if [ -f "$staging" ]; then
   unset ELPIDA_GRADUATION_KEY_FILE ELPIDA_TESTNET_RELAY_KEY ELPIDA_V2_KEEPER_KEY ELPIDA_V2_KEEPER_SOLANA_KEY \
         CIRCLE_API_KEY CIRCLE_ENTITY_SECRET CIRCLE_WALLET_SET_ID ELPIDA_CANONICAL_ORIGIN
   set -a; . "$staging"; set +a
-  export ELPIDA_BACKUP_ENABLED=false
+  export ELPIDA_BACKUP_ENABLED=false ELPIDA_STAGING=1
   echo '{"event":"staging_mode","keepers":"off","backups":"off"}'
 fi
 export NODE_ENV=production HOST=127.0.0.1 PORT=3000 ELPIDA_DATA_DIR=/var/lib/elpida \
