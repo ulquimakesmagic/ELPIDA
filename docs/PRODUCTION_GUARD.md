@@ -38,3 +38,8 @@ mainnet (Malik, 18 November 2026); a stock is offered only when `ELPIDA_TOKENIZE
 
 What it does not cover: the multisig and treasury setup (C3; the deploy script checks the Safe) and the restore drill
 (C5). Tests: `tests/production-guard.test.mjs`, `tests/mainnet-site.test.mjs`.
+
+**Staging copy (Oracle, before cut-over).** `deploy/oracle/start.sh` sets `ELPIDA_STAGING=1` only while
+`/etc/elpida/staging.env` exists (it clears any other value first). The guard then reports `keeper_missing` and
+`backup_disabled` as the warnings `staging_no_keeper` and `staging_no_backups`, because start.sh removes the keeper key
+and turns backups off on purpose. Every other check still applies. Deleting `staging.env` at cut-over restores both errors.

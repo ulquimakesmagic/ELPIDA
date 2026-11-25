@@ -22,6 +22,10 @@ export function productionGuard({ env = {}, solana = null, evm = null } = {}) {
   const error = (code, message) => errors.push({ code, message });
   const warn = (code, message) => warnings.push({ code, message });
   if (!mainnet) return { mainnet, ok: true, errors, warnings };
+  // A staging copy (deploy/oracle/start.sh while /etc/elpida/staging.env exists) runs next to the live site with the
+  // keeper key removed and backups off. Only those two checks relax; every other mainnet check still applies.
+  const staging = env.ELPIDA_STAGING === '1';
+  if (staging) warn('staging_mode', 'Staging copy: no keeper and no backups. Remove /etc/elpida/staging.env at cut-over.');
 
   // The mainnet site (ELPIDA_MODE=mainnet, 17 Nov 2026): only EVM mainnets whose V2 record is ready, each with a private
   // RPC, and the keeper named in its plan (fee collection and creator rewards from day one; distributions stay off).
@@ -37,7 +41,8 @@ export function productionGuard({ env = {}, solana = null, evm = null } = {}) {
     }
     const key = env.ELPIDA_V2_KEEPER_KEY;
     let keeper = null; try { keeper = /^(0x)?[0-9a-fA-F]{64}$/.test(String(key ?? '')) ? new Wallet(key).address.toLowerCase() : null; } catch {}
-    if (!key) error('keeper_missing', 'Set ELPIDA_V2_KEEPER_KEY to the keeper wallet named in the deployment plan: it collects fees and pays creator rewards.');
+    if (!key && staging) warn('staging_no_keeper', 'Staging copy: the keeper key is removed on purpose, so this copy collects no fees and pays no rewards.');
+    else if (!key) error('keeper_missing', 'Set ELPIDA_V2_KEEPER_KEY to the keeper wallet named in the deployment plan: it collects fees and pays creator rewards.');
     else if (!keeper) error('keeper_invalid', 'ELPIDA_V2_KEEPER_KEY is not a 64-character hex private key.');
     else for (const n of nets) if (n.v2?.shared?.keeper && n.v2.shared.keeper.toLowerCase() !== keeper) error('keeper_mismatch', `ELPIDA_V2_KEEPER_KEY is not the keeper in the ${n.name} deployment plan.`);
     // Option B (11 Nov) kept these off; Malik turned them on for mainnet on 20 Nov. Still flagged so the log shows it.
@@ -67,7 +72,8 @@ export function productionGuard({ env = {}, solana = null, evm = null } = {}) {
   catch { error('public_url_invalid', 'ELPIDA_PUBLIC_URL must be an HTTPS origin without a path, query or credentials.'); }
   if (!env.PINATA_JWT) error('pinning_missing', 'Set PINATA_JWT: mainnet token details must be pinned to public IPFS before a launch.');
   if (!durableStorage(env)) error('storage_ephemeral', 'Attach a persistent volume: indexes, journals and holder data must survive restarts.');
-  if (env.ELPIDA_BACKUP_ENABLED !== 'true') error('backup_disabled', 'Enable verified off-site backups (ELPIDA_BACKUP_ENABLED=true with the ELPIDA_BACKUP_S3_* settings) before mainnet.');
+  if (env.ELPIDA_BACKUP_ENABLED !== 'true' && staging) warn('staging_no_backups', 'Staging copy: backups are off on purpose so it never writes over the live site\'s snapshots.');
+  else if (env.ELPIDA_BACKUP_ENABLED !== 'true') error('backup_disabled', 'Enable verified off-site backups (ELPIDA_BACKUP_ENABLED=true with the ELPIDA_BACKUP_S3_* settings) before mainnet.');
   else if (!env.ELPIDA_BACKUP_MIRROR_S3_ENDPOINT) warn('backup_single_provider', 'Backups are stored at one provider only. Add ELPIDA_BACKUP_MIRROR_S3_* (for example Cloudflare R2) so a hosting outage cannot also take the backups.');
 
   // Test-only features that must be off.

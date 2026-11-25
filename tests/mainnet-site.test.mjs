@@ -92,6 +92,17 @@ test('the production guard passes a ready mainnet site and names what is missing
   assert.match(productionGuard({ env: {}, evm: { mode: 'mainnet', networks: [], skipped: [{ reason: 'Base: the deployment record is "awaiting_safe", not "ready".' }] } }).errors.find(e => e.code === 'evm_mainnet_none').message, /awaiting_safe/);
 });
 
+test('a staging copy (Oracle, before cut-over) starts without the keeper key and backups, and nothing else relaxes', () => {
+  const env = Object.fromEntries(Object.entries({ ...goodEnv(), ELPIDA_V2_KEEPER_KEY: undefined, ELPIDA_BACKUP_ENABLED: 'false' }).filter(([, v]) => v !== undefined));
+  assert.deepEqual(codes(productionGuard({ env, solana: disabledSolana, evm: evm() })), ['backup_disabled', 'keeper_missing'], 'without the staging flag both are errors');
+  const staged = productionGuard({ env: { ...env, ELPIDA_STAGING: '1' }, solana: disabledSolana, evm: evm() });
+  assert.deepEqual(codes(staged), []); assert.equal(staged.ok, true);
+  for (const w of ['staging_mode', 'staging_no_keeper', 'staging_no_backups']) assert.ok(staged.warnings.some(x => x.code === w), w);
+  const noPin = { ...env, ELPIDA_STAGING: '1' }; delete noPin.PINATA_JWT;
+  assert.deepEqual(codes(productionGuard({ env: noPin, solana: disabledSolana, evm: evm() })), ['pinning_missing'], 'other checks still apply');
+  assert.deepEqual(codes(productionGuard({ env: { ...env, ELPIDA_STAGING: 'yes' }, solana: disabledSolana, evm: evm() })), ['backup_disabled', 'keeper_missing'], 'only the exact flag counts');
+});
+
 test('on mainnet the keeper collects fees and pays creator rewards, and distributes only when switched on, on the private RPC, as the plan\'s keeper', () => {
   const logs = [], net = mainnetNetwork(base, record, plan).net;
   const make = env => configuredV2Keeper({ env, networks: [net], indexFor: () => null, prices: () => ({}), path: ':memory:', publicUrl: 'https://elpida.fun', log: e => logs.push(e) });
