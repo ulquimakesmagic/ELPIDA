@@ -8,7 +8,7 @@ import { V2RewardsIndexer, toJson } from '../../packages/indexer/v2-rewards.mjs'
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { payoutStable } from '../../packages/core/payout-stable.mjs';
 import { testPairReference } from '../../packages/core/pairs.mjs';
-import { serverRpcUrl } from '../../packages/core/mainnets.mjs';
+import { serverRpcUrls } from '../../packages/core/mainnets.mjs';
 
 const hostOf = u => { try { return new URL(u).host; } catch { return 'rpc'; } };
 const TICK_MS = 60_000, FEED_MAX_AGE = 4 * 86_400, PRICE_TTL_MS = 5 * 60_000;
@@ -44,7 +44,7 @@ export class V2RewardsService {
       const entryKey = d.model === 'v2.3-hook' ? `${net.key}-v23` : net.key, older = d !== net.v2.shared;
       // Every configured RPC, in order: a node that keeps failing (pruned history after a restart re-sync, rate limits)
       // is swapped for the next one, as the trading indexer does (Malik, 11 Nov: Sepolia's vaults read $0 after a deploy).
-      const rpcs = [...new Set([net.mainnet ? serverRpcUrl(net, env) : null, net.rpcUrl, ...(net.rpcFallbacks ?? [])].filter(Boolean))], provider = providerFactory(rpcs[0]);
+      const rpcs = [...new Set([...(net.mainnet ? serverRpcUrls(net, env) : []), net.rpcUrl, ...(net.rpcFallbacks ?? [])].filter(Boolean))], provider = providerFactory(rpcs[0]);
       this.providerFactory = providerFactory;
       this.entries.push({ net, key: entryKey, label: older ? `${net.name} · earlier launchpad` : net.name, deployment: d, provider, rpcs, rpc: 0, failures: 0, prices: new Map(), index: new V2RewardsIndexer({ provider, contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel, usdcAirdrop: d.usdcAirdrop, usdcHolder: d.usdcHolder }, keeper: d.keeper, fromBlock: d.block, batchSize: 100, maxBatch: 5000, parallel: 4, onProgress: ix => this.save(entryKey, ix) }), busy: false });
       this.load(entryKey, this.entries.at(-1).index);

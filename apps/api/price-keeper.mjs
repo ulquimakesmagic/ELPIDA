@@ -1,7 +1,7 @@
 // Display prices never authorize a payment. EVM factories independently validate their USD oracle.
 import { Interface } from 'ethers';
 import { evmTestnets } from '../../packages/core/networks.mjs';
-import { serverRpcUrl } from '../../packages/core/mainnets.mjs';
+import { serverRpcUrl, serverRpcUrls, rotateServerRpc } from '../../packages/core/mainnets.mjs';
 import {parsePriceUpdate,PYTH_RECEIVER} from '../../packages/solana/client.mjs';
 import { usdOracles,SOLANA_ORACLES } from '../../packages/core/usd-oracles.mjs';
 const oracleAbi=new Interface(['function decimals() view returns(uint8)','function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)']);
@@ -18,7 +18,8 @@ export class PriceKeeper {
   async json(url){const headers=url.startsWith('https://pyth.dourolabs.app/')?{Authorization:'Bearer '+this.pythApiKey}:undefined;const r=await this.fetcher(url,{headers,signal:AbortSignal.timeout(8000)});if(!r.ok)throw new Error('Price source unavailable');return r.json();}
   async readOracle(net){
     const oracle=this.oracles[net.key];if(!oracle?.available)return;
-    const r=await this.fetcher(serverRpcUrl(net,this.env),{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(['latestRoundData','decimals'].map((name,i)=>({id:i,jsonrpc:'2.0',method:'eth_call',params:[{to:oracle.feed,data:oracleAbi.encodeFunctionData(name)},'latest']}))),signal:AbortSignal.timeout(8000)});
+    // The network's current private RPC; an exhausted one (HTTP 401/402/403/429) moves the network to its next URL or key.
+    let r,url;for(let i=0,n=serverRpcUrls(net,this.env).length;i<n;i++){url=serverRpcUrl(net,this.env);r=await this.fetcher(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(['latestRoundData','decimals'].map((name,i)=>({id:i,jsonrpc:'2.0',method:'eth_call',params:[{to:oracle.feed,data:oracleAbi.encodeFunctionData(name)},'latest']}))),signal:AbortSignal.timeout(8000)});if(![401,402,403,429].includes(r.status)||!rotateServerRpc(net,this.env,url))break;}
     if(!r.ok)throw new Error('RPC unavailable');const data=await r.json();
     const round=oracleAbi.decodeFunctionResult('latestRoundData',data.find(x=>x.id===0)?.result),d=Number(oracleAbi.decodeFunctionResult('decimals',data.find(x=>x.id===1)?.result)[0]);
     if(round[0]<=0n||round[1]<=0n||round[4]<round[0]||d>18)throw new Error('Invalid oracle');

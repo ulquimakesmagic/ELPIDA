@@ -34,8 +34,9 @@ export function productionGuard({ env = {}, solana = null, evm = null } = {}) {
     if (!nets.length) error('evm_mainnet_none', `No EVM mainnet is ready for the mainnet site. ${(evm.skipped ?? []).map(s => s.reason).join(' ') || 'Deploy one with scripts/v2-mainnet-deploy.mjs first.'}`);
     if (nets.some(n => !n.mainnet)) error('evm_testnet_on_mainnet_site', 'A test network is configured on the mainnet site.');
     for (const n of nets) {
-      const rpc = env[`ELPIDA_RPC_${n.chainId}`];
-      let host = null; try { const u = new URL(String(rpc)); host = u.protocol === 'https:' ? u.hostname : null; } catch {}
+      // ELPIDA_RPC_<chainId> may list several URLs (comma-separated) to rotate through; every one must be hosted HTTPS.
+      const rpc = env[`ELPIDA_RPC_${n.chainId}`], hosts = String(rpc ?? '').split(',').map(x => x.trim()).filter(Boolean).map(x => { try { const u = new URL(x); return u.protocol === 'https:' ? u.hostname : null; } catch { return null; } });
+      const host = hosts.length && hosts.every(h => h && !['127.0.0.1', 'localhost'].includes(h)) ? hosts[0] : null;
       if (!rpc) error('evm_rpc_missing', `Set ELPIDA_RPC_${n.chainId} to a private HTTPS ${n.name} RPC (for example Alchemy): the server's indexer, prices and keeper use it; browsers never see it.`);
       else if (!host || ['127.0.0.1', 'localhost'].includes(host)) error('evm_rpc_invalid', `ELPIDA_RPC_${n.chainId} must be a hosted HTTPS ${n.name} RPC.`);
     }

@@ -11,6 +11,17 @@
 > `contracts, unit and full suite` and `solana program` checks on `main`; (2) create a Safe on Base for the treasury
 > and pick a guardian wallet for the launch stop; (3) a fresh, separate Base keeper key.
 
+## Alchemy keys that rotate (25 November 2026)
+
+Alchemy's free plan stops every request once the month's compute is used up (it happened on 25 Nov). The server now
+rotates: when a URL or key answers "used up" (HTTP 401/402/403/429, "capacity", "rate limit"), the keeper, prices and
+rewards all move to the next one. **Malik:** make free Alchemy accounts (up to 6), then on the mainnet service set
+`ALCHEMY_API_KEYS=key1,key2,key3,...` (comma-separated, no spaces needed). Each `ELPIDA_RPC_<chainId>` that is an
+Alchemy URL is then also tried with every listed key, so the four `ELPIDA_RPC_*` lines stay as they are. Non-Alchemy
+backups can be added to a line too: `ELPIDA_RPC_8453=https://base-mainnet.g.alchemy.com/v2/<key>,https://<other>`.
+The logs say `server_rpc_rotated` with a position (2 of 6), never a key. After a restart the server starts from the
+first key again and moves on at the first refusal.
+
 ## Mainnet: the V2.3 launchpad (50% traders / 30% creators / 20% Elpida), 23 November 2026
 
 **Decided (Malik, 23 Nov):** no flywheel and no holder rewards; every fee of a new launch is split 50% traders (the
