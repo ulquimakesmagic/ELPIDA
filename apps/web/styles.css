@@ -313,6 +313,8 @@ details.small summary { cursor: pointer; color: var(--primary); margin-block: va
 .alloc { display: grid; gap: var(--space-2); }
 .alloc-row { display: grid; grid-template-columns: 150px minmax(0, 1fr) 110px 36px; gap: var(--space-2); align-items: center; }
 .alloc-row .input-affix .input { padding-right: 32px; }
+.alloc-kind { align-self: stretch; justify-content: space-between; }
+.alloc-kind button { padding: 6px 8px; display: inline-flex; align-items: center; justify-content: center; flex: 1; }
 .alloc-total { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-2) var(--space-3); border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--text-sm); font-weight: 600; }
 .alloc-total[data-ok="true"] { color: var(--positive); }
 .alloc-total[data-ok="false"] { color: var(--negative); }
