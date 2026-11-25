@@ -15,3 +15,12 @@ test('holder epochs conserve funds, exclude pools and minimums, and weight eligi
  assert.equal(holderDistribution(100n,[{address:'a',balance:1n}],2n).length,0);
  assert.equal(holderDistribution(2n,[{address:'a',balance:1n},{address:'a',balance:1n},{address:'b',balance:1n}],0n).reduce((n,r)=>n+r.amount,0n),2n);
 });
+
+test('GitHub allocations: an account or a repository, on EVM public networks only (25 Nov 2026)', () => {
+  const policy = (target, chain = 'base-mainnet') => normalizeRewardPolicy({ mode: 'exclusive', threshold: '1', minimumHolding: '0', vestingDays: 30, recipients: [{ kind: 'wallet', target: '', percent: 50 }, { kind: 'github', target, percent: 50 }] }, chain);
+  assert.equal(policy('https://github.com/Elpida-Labs/Launchpad.git/').recipients[1].target, 'elpida-labs/launchpad');
+  assert.equal(policy('Elpida-Dev').recipients[1].target, 'elpida-dev');
+  for (const bad of ['-bad', 'a/b/c', 'owner/..', 'bad_owner', '']) assert.throws(() => policy(bad), /GitHub account/, bad);
+  assert.throws(() => policy('elpida', 'local'), /Base, BNB Chain, Robinhood Chain and Ethereum/);
+  assert.throws(() => policy('elpida', 'solana-mainnet'), /Base, BNB Chain, Robinhood Chain and Ethereum/);
+});

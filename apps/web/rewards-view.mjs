@@ -9,7 +9,7 @@ export const STRATEGIES = {
   creator: { name: 'Creator wallets', glyph: 'wallet' },
   holders: { name: 'Share fees with holders', glyph: 'users' },
   paired: { name: 'Buy a reward token for holders', glyph: 'coins' },
-  exclusive: { name: 'Wallet, X and website allocations', glyph: 'badge-check' },
+  exclusive: { name: 'Wallet, X, website and GitHub allocations', glyph: 'badge-check' },
 };
 const amount = (value, symbol) => `${number(value, 6)} ${symbol}`;
 const fromUnits = (raw, decimals) => { try { const v = BigInt(raw), s = 10n ** BigInt(decimals); return Number(v / s) + Number(v % s) / Number(s); } catch { return Number(raw) || 0; } };

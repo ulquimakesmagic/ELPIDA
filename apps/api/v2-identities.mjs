@@ -2,7 +2,10 @@
 // give part of their 30% to an X account or a website. That share is held until its owner proves control and signs for
 // a payout wallet; then the V2 keeper, the allocation's verifier, binds that wallet (once). Websites prove control with a
 // DNS TXT record at _elpida.<domain>; X accounts with X sign-in (when the server has an X app: ELPIDA_X_CLIENT_ID and
-// ELPIDA_X_REDIRECT_URI). The same rules as the local simulation (apps/api/reward-engine.mjs).
+// ELPIDA_X_REDIRECT_URI); GitHub (EVM networks; Malik, 25 Nov 2026) with a public file: a repository ("github:owner/repo")
+// with elpida-claim.txt on its default branch, an account ("github:owner") with a public gist. Only someone who can push
+// to the repository, or sign in as the account, can publish either. The same rules as the local simulation
+// (apps/api/reward-engine.mjs) for X and websites; GitHub rows are public-network only.
 import { randomBytes, createPublicKey, verify as verifySignature } from 'node:crypto';
 import * as web3 from '@solana/web3.js';
 const { PublicKey } = web3;
@@ -14,6 +17,11 @@ import { XVerification } from './x-verification.mjs';
 const ALLOCATION = ['function IDENTITY_ALLOCATION_VERSION() view returns(uint256)', 'function verifier() view returns(address)', 'function rowCount() view returns(uint256)',
   'function row(uint256) view returns(string label,address wallet,uint16 share)', 'function bind(uint256,address)'];
 const TEN_MINUTES = 600_000;
+/** The file a repository owner adds to the repository's default branch to verify a GitHub repository allocation. */
+export const GITHUB_CLAIM_FILE = 'elpida-claim.txt';
+const GITHUB_OWNER = /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/, GITHUB_REPO = /^[a-z0-9._-]{1,100}$/;
+/** A GitHub allocation target: "owner" or "owner/repo", lowercase. */
+export const githubTarget = t => { const [o, r, ...more] = String(t ?? '').split('/'); return !more.length && GITHUB_OWNER.test(o) && (r === undefined || (GITHUB_REPO.test(r) && !/^\.+$/.test(r))); };
 const BASE58 = /^[1-9A-HJ-NP-Za-km-z]{32,44}$/;
 const solanaNetwork = n => String(n ?? '').startsWith('solana-');
 /** An ed25519 signature (base64 or hex) of `message` by a Solana wallet (base58). */
@@ -39,8 +47,9 @@ export const claimLink = c => (c?.token && /^[a-z0-9-]{1,40}$/.test(String(c.net
 export class V2Identities {
   /** `signerFor(networkKey)`: the V2 keeper on that network as { signer, chainId }, or null. */
   /** `solanaKeeper()`: the Solana V2 keeper (operator of creator vaults; `bindCreatorRow`), or null. */
-  constructor({ signerFor, solanaKeeper = () => null, x = new XVerification(), dnsResolver = resolveTxt, now = () => Date.now() }) {
-    Object.assign(this, { signerFor, solanaKeeper, x, dnsResolver, now });
+  /** `fetcher`: fetch for the GitHub checks; `githubToken` (optional, ELPIDA_GITHUB_TOKEN) lifts GitHub's 60-an-hour limit. */
+  constructor({ signerFor, solanaKeeper = () => null, x = new XVerification(), dnsResolver = resolveTxt, now = () => Date.now(), fetcher = (...a) => fetch(...a), githubToken = process.env.ELPIDA_GITHUB_TOKEN }) {
+    Object.assign(this, { signerFor, solanaKeeper, x, dnsResolver, now, fetcher, githubToken });
     this.challenges = new Map();
   }
 
@@ -57,7 +66,8 @@ export class V2Identities {
     if ((await c.verifier()).toLowerCase() !== (await keeper.signer.getAddress()).toLowerCase()) throw new Error('This allocation is verified by another server.');
     if (index >= Number(await c.rowCount())) throw new Error('Allocation not found.');
     const r = await c.row(index), [kind, ...rest] = String(r.label).split(':'), target = rest.join(':');
-    if (!['x', 'domain'].includes(kind) || !target) throw new Error('Wallet allocations need no verification.');
+    if (!['x', 'domain', 'github'].includes(kind) || !target) throw new Error('Wallet allocations need no verification.');
+    if (kind === 'github' && !githubTarget(target)) throw new Error('That GitHub allocation is not a valid account or repository.');
     return { contract: c, chainId: keeper.chainId, kind, target, wallet: r.wallet };
   }
 
@@ -92,13 +102,14 @@ export class V2Identities {
     const message = `Elpida ${row.kind} reward claim\nChain: ${sol ? network : row.chainId}\nVault: ${sol ? vault : getAddress(vault)}\nIdentity: ${row.target}\nWallet: ${w}\nNonce: ${nonce}\nExpires: ${expires}`;
     // The token (optional) only shapes the link back to its claim page after X sign-in.
     this.challenges.set(nonce, { network: String(network), vault: sol ? String(vault) : getAddress(vault), index, wallet: w, kind: row.kind, target: row.target, expires, txt, message, token: sol ? (BASE58.test(String(token ?? '')) ? String(token) : null) : isAddress(token) ? getAddress(token) : null });
-    return { nonce, expires, message, kind: row.kind, target: row.target, ...(row.kind === 'domain' ? { name: `_elpida.${row.target}`, txt } : {}) };
+    return { nonce, expires, message, kind: row.kind, target: row.target, ...(row.kind === 'domain' ? { name: `_elpida.${row.target}`, txt } : {}),
+      ...(row.kind === 'github' ? (row.target.includes('/') ? { file: GITHUB_CLAIM_FILE, url: `https://github.com/${row.target}`, txt } : { gist: true, url: 'https://gist.github.com', txt }) : {}) };
   }
 
   claim(nonce, signature, kind) {
     const c = this.challenges.get(String(nonce ?? ''));
     if (!c || c.expires < this.now()) throw new Error('This verification expired. Start again.');
-    if (c.kind !== kind) throw new Error(kind === 'domain' ? 'Use X sign-in for an X account.' : 'Use the DNS check for a website.');
+    if (c.kind !== kind) throw new Error(c.kind === 'x' ? 'Use X sign-in for an X account.' : c.kind === 'github' ? 'Use the GitHub check for a GitHub account or repository.' : 'Use the DNS check for a website.');
     if (solanaNetwork(c.network)) { if (!solanaSigned(c.message, signature, c.wallet)) throw new Error('The signature does not match the payout wallet.'); return c; }
     let signer = ''; try { signer = verifyMessage(c.message, String(signature ?? '')).toLowerCase(); } catch { signer = ''; }
     if (signer !== c.wallet) throw new Error('The signature does not match the payout wallet.');
@@ -113,6 +124,50 @@ export class V2Identities {
     if (!records.some(r => r.join('') === c.txt)) throw new Error(`The TXT record at _elpida.${c.target} is not visible yet. DNS changes can take a few minutes.`);
     await this.bind(c); this.challenges.delete(String(nonce));
     return { message: `${c.target} verified. Its share now pays ${c.wallet}.` };
+  }
+
+  /**
+   * GitHub: the signed claim's line must be public. A repository: elpida-claim.txt on its default branch (only people who
+   * can push to it can add it). An account: one of its newest public gists (only the account can create those).
+   */
+  async verifyGithub({ nonce, signature }) {
+    const c = this.claim(nonce, signature, 'github');
+    const found = c.target.includes('/') ? await this.githubRepoHas(c.target, c.txt) : await this.githubGistHas(c.target, c.txt);
+    if (!found) throw new Error(c.target.includes('/')
+      ? `${GITHUB_CLAIM_FILE} with the claim line is not visible on ${c.target}'s default branch yet. GitHub can take a few minutes to show a new commit.`
+      : `No public gist of ${c.target} shows the claim line yet. Create the gist while signed in as ${c.target}, then check again.`);
+    await this.bind(c); this.challenges.delete(String(nonce));
+    return { message: `GitHub ${c.target} verified. Its share now pays ${c.wallet}.` };
+  }
+
+  async githubText(url) {
+    const headers = { 'User-Agent': 'elpida-verifier', Accept: url.startsWith('https://api.github.com/') ? 'application/vnd.github+json' : 'text/plain' };
+    if (this.githubToken && url.startsWith('https://api.github.com/')) headers.Authorization = `Bearer ${this.githubToken}`;
+    let res; try { res = await this.fetcher(url, { headers, redirect: 'manual', signal: AbortSignal.timeout(10_000) }); } catch { throw new Error('GitHub could not be reached. Try again in a minute.'); }
+    if (res.status === 403 || res.status === 429) throw new Error('GitHub is limiting requests right now. Try again in a few minutes.');
+    if (!res.ok) return null;
+    const text = await res.text();
+    return text.length > 200_000 ? null : text;
+  }
+
+  async githubRepoHas(target, txt) {
+    const text = await this.githubText(`https://raw.githubusercontent.com/${target}/HEAD/${GITHUB_CLAIM_FILE}`);
+    return !!text && text.split(/\r?\n/).some(l => l.trim() === txt);
+  }
+
+  async githubGistHas(owner, txt) {
+    const list = await this.githubText(`https://api.github.com/users/${owner}/gists?per_page=30`);
+    let gists = []; try { gists = JSON.parse(list ?? '[]'); } catch { gists = []; }
+    for (const g of Array.isArray(gists) ? gists : []) {
+      if (String(g?.owner?.login ?? '').toLowerCase() !== owner || g?.public !== true) continue;
+      for (const f of Object.values(g.files ?? {})) {
+        const raw = String(f?.raw_url ?? '');
+        if (!raw.startsWith('https://gist.githubusercontent.com/') || Number(f?.size ?? 0) > 20_000) continue;
+        const text = await this.githubText(raw);
+        if (text && text.split(/\r?\n/).some(l => l.trim() === txt)) return true;
+      }
+    }
+    return false;
   }
 
   /** X: after the signature, the owner signs in to X; the callback finishes it. Returns { url, cookie }. */

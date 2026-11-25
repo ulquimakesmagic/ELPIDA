@@ -169,7 +169,8 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   const verifierSigner = f.signers[3], idOwner = f.signers[1], ownerAddr = await idOwner.getAddress();
   await assert.rejects(launchV2(cw, { name: 'Ids', symbol: 'IDS', feeBps: 300, rewardIdentities: [{ kind: 'wallet', target: '', bps: 5000 }, { kind: 'domain', target: 'not a domain', bps: 5000 }] }), /website domain/);
   const ids = await launchV2(cw, { name: 'Ids', symbol: 'IDS', feeBps: 300, description: '', image: '',
-    rewardIdentities: [{ kind: 'wallet', target: '', bps: 5000 }, { kind: 'domain', target: 'Community.org', bps: 3000 }, { kind: 'x', target: '@Elpida_Fun', bps: 2000 }] });
+    rewardIdentities: [{ kind: 'wallet', target: '', bps: 5000 }, { kind: 'domain', target: 'Community.org', bps: 3000 }, { kind: 'x', target: '@Elpida_Fun', bps: 1000 },
+      { kind: 'github', target: 'https://github.com/Elpida-Labs/Launchpad.git', bps: 500 }, { kind: 'github', target: 'Elpida-Dev', bps: 500 }] });
   await index.sync();
   const idsItem = { ...index.listings().find(x => x.address.toLowerCase() === ids.token.toLowerCase()), deploymentModel: V2_MODEL, factory: record.factory };
   await f.advance(120);
@@ -178,7 +179,7 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   // Fees still in the hook count straight away: nobody has collected yet, and each row already shows its share.
   assert.ok(st.rows.every(r => r.claimable > 0n), 'every row shows its share of fees still in the pool');
   assert.ok(st.rows[0].claimable * 3000n / 5000n - st.rows[1].claimable <= 1n, 'in proportion to the shares');
-  assert.deepEqual(st.rows.map(r => [r.kind, r.target, r.bps, r.wallet]), [['wallet', null, 5000, cw.address], ['domain', 'community.org', 3000, null], ['x', 'elpida_fun', 2000, null]]);
+  assert.deepEqual(st.rows.map(r => [r.kind, r.target, r.bps, r.wallet]), [['wallet', null, 5000, cw.address], ['domain', 'community.org', 3000, null], ['x', 'elpida_fun', 1000, null], ['github', 'elpida-labs/launchpad', 500, null], ['github', 'elpida-dev', 500, null]]);
   await assert.rejects(claimIdentityRow(bw, { token: ids.token, index: 1 }), /held until its owner verifies/);
   await claimIdentityRow(bw, { token: ids.token, index: 0 });
   // The website owner: a signed claim plus the TXT record.
@@ -186,7 +187,10 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   const xSessions = new Map();
   const x = { enabled: true, sessions: xSessions, begin: claim => { xSessions.set('state-1', claim); return { url: 'https://x.com/i/oauth2/authorize?state=state-1', cookie: 'c' }; },
     complete: async ({ state }) => { const c = xSessions.get(state); xSessions.delete(state); return c; } };
-  const service = new V2Identities({ signerFor: key => (key === net.key ? { signer: verifierSigner, chainId: 31337 } : null), x, dnsResolver: async () => dns });
+  // GitHub, stubbed: a repository file on the default branch, and an account's public gists.
+  const gh = new Map(), asked = [];
+  const fetcher = async url => { asked.push(url); const body = gh.get(url); return { ok: body !== undefined, status: body === undefined ? 404 : 200, text: async () => body ?? '' }; };
+  const service = new V2Identities({ signerFor: key => (key === net.key ? { signer: verifierSigner, chainId: 31337 } : null), x, dnsResolver: async () => dns, fetcher, githubToken: null });
   const vaultAddr = st.vault;
   await assert.rejects(service.challenge({ network: net.key, vault: vaultAddr, index: 0, wallet: ownerAddr }), /need no verification/);
   const c1 = await service.challenge({ network: net.key, vault: vaultAddr, index: 1, wallet: ownerAddr });
@@ -207,8 +211,28 @@ test('operator deploys V2 with its reward contracts from the browser; a creator 
   const { xResultLink } = await import('../apps/api/v2-identities.mjs');
   assert.equal(xResultLink(done.back, { ok: true, handle: done.handle, wallet: done.wallet }), `${done.back}&x=verified&handle=elpida_fun&wallet=${done.wallet}`);
   assert.equal(xResultLink('/#/rewards', { ok: false, reason: 'Sign in to the X profile named <here> & retry' }), '/#/rewards?x=failed&reason=Sign+in+to+the+X+profile+named+%3Chere%3E+%26+retry', 'the reason is encoded, never markup');
+  // GitHub repository: elpida-claim.txt with the line, on the default branch (HEAD).
+  const c3 = await service.challenge({ network: net.key, vault: vaultAddr, index: 3, wallet: ownerAddr });
+  assert.equal(c3.kind, 'github'); assert.equal(c3.file, 'elpida-claim.txt'); assert.equal(c3.url, 'https://github.com/elpida-labs/launchpad');
+  await assert.rejects(service.verifyDomain({ nonce: c3.nonce, signature: await idOwner.signMessage(c3.message) }), /GitHub check/);
+  const repoFile = 'https://raw.githubusercontent.com/elpida-labs/launchpad/HEAD/elpida-claim.txt';
+  await assert.rejects(service.verifyGithub({ nonce: c3.nonce, signature: await idOwner.signMessage(c3.message) }), /not visible on elpida-labs\/launchpad/);
+  gh.set(repoFile, 'something else'); await assert.rejects(service.verifyGithub({ nonce: c3.nonce, signature: await idOwner.signMessage(c3.message) }), /not visible/);
+  gh.set(repoFile, `# Elpida\n  ${c3.txt}  \n`);
+  assert.match((await service.verifyGithub({ nonce: c3.nonce, signature: await idOwner.signMessage(c3.message) })).message, /GitHub elpida-labs\/launchpad verified/);
+  // GitHub account: a public gist of that account; a gist of someone else, or a secret gist, does not count.
+  const c4 = await service.challenge({ network: net.key, vault: vaultAddr, index: 4, wallet: ownerAddr });
+  assert.equal(c4.gist, true); assert.equal(c4.file, undefined);
+  const list = 'https://api.github.com/users/elpida-dev/gists?per_page=30', raw = n => `https://gist.githubusercontent.com/elpida-dev/${n}/raw/claim.txt`;
+  gh.set(list, JSON.stringify([{ public: true, owner: { login: 'someone-else' }, files: { 'a.txt': { raw_url: raw(1), size: 10 } } }, { public: false, owner: { login: 'Elpida-Dev' }, files: { 'b.txt': { raw_url: raw(2), size: 10 } } }]));
+  gh.set(raw(1), c4.txt); gh.set(raw(2), c4.txt);
+  await assert.rejects(service.verifyGithub({ nonce: c4.nonce, signature: await idOwner.signMessage(c4.message) }), /No public gist of elpida-dev/);
+  gh.set(list, JSON.stringify([{ public: true, owner: { login: 'Elpida-Dev' }, files: { 'c.txt': { raw_url: raw(3), size: 80 }, 'evil.txt': { raw_url: 'https://evil.example/x', size: 1 } } }]));
+  gh.set(raw(3), `hello\n${c4.txt}`); gh.set('https://evil.example/x', c4.txt);
+  await service.verifyGithub({ nonce: c4.nonce, signature: await idOwner.signMessage(c4.message) });
+  assert.ok(!asked.includes('https://evil.example/x'), 'only gist.githubusercontent.com files are read');
   st = await identityAllocationState({ provider: f.provider, net, token: ids.token });
-  assert.deepEqual(st.rows.map(r => r.wallet), [cw.address, ownerAddr, ownerAddr]);
+  assert.deepEqual(st.rows.map(r => r.wallet), [cw.address, ownerAddr, ownerAddr, ownerAddr, ownerAddr]);
   assert.equal(await allocationKind({ provider: f.provider, net, token: ids.token }), 'identity');
   const beforeOwner = await f.provider.getBalance(ownerAddr);
   await claimIdentityRow(cw, { token: ids.token, index: 1 });

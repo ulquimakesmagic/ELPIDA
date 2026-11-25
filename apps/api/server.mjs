@@ -809,6 +809,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
       if(action==='solana/vanity-sign')return send(200,vanity.sign({id:String(body.id??''),wallet:String(body.wallet??''),message:body.message}));
       if(action==='v2-identity/challenge')return send(200,await v2Identities.challenge(body));
       if(action==='v2-identity/verify-domain')return send(200,await v2Identities.verifyDomain(body));
+      if(action==='v2-identity/verify-github')return send(200,await v2Identities.verifyGithub(body));
       if(action==='v2-identity/x-start'){const result=v2Identities.startX(body);res.setHeader('Set-Cookie',`elpida_x=${result.cookie}; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=600${cookieSecurity}`);return send(200,{url:result.url});}
       if(action==='reward-x-start'){const result=await runtime.transact(action,body);res.setHeader('Set-Cookie',`elpida_x=${result.cookie}; HttpOnly; SameSite=Lax; Path=/api/rewards/x/callback; Max-Age=600${cookieSecurity}`);return send(200,{url:result.url});}
       if (action === 'quote') return send(200, await runtime.getQuote(body));
