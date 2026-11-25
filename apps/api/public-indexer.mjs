@@ -9,6 +9,7 @@ import { V2_MODEL } from '../../packages/core/v2-economics.mjs';
 import { normalizeMetadata } from '../web/metadata.mjs';
 import { isDexModel, MODEL_VERSIONS } from '../../packages/core/curve-model.mjs';
 import { testnetDexes } from '../../packages/core/uniswap.mjs';
+import { serverRpcUrls } from '../../packages/core/mainnets.mjs';
 
 // A read-only worker per configured deployment. Never accepts user RPCs or private keys.
 // How often the public indexes poll, and how many networks sync at once. A trade is visible to the API once the
@@ -42,7 +43,7 @@ export class PublicIndexer {
       // which free plans such as Alchemy's (10 blocks per eth_getLogs) refuse, while the keeper and prices keep
       // ELPIDA_RPC_<chainId>. Otherwise an operator override is used alone, else the network's RPC and its fallbacks.
       const indexRpcs=String(process.env['ELPIDA_INDEX_RPC_'+net.chainId]??'').split(',').map(u=>u.trim()).filter(u=>/^https:\/\//.test(u));
-      const override=process.env['ELPIDA_RPC_'+net.chainId],list=indexRpcs.length?indexRpcs:override?[override]:[net.rpcUrl,...(net.rpcFallbacks??[])];
+      const override=process.env['ELPIDA_RPC_'+net.chainId],list=indexRpcs.length?indexRpcs:override?serverRpcUrls(net,process.env):[net.rpcUrl,...(net.rpcFallbacks??[])];
       this.rpcs.set(net.key,{list,index:0,failures:0});
       const provider=providerFactory(list[0]);
       if(!net.shared?.factory){this.entries.set(net.key,openV2Entry({net,provider,dataDir}));this.legacy.set(net.key,(net.v2.previous??[]).filter(d=>d?.factory).map(deployment=>openV2Entry({net,provider,dataDir,deployment,legacy:true})));continue;}

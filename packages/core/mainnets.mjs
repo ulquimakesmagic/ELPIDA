@@ -112,5 +112,41 @@ export function mainnetNetwork(template, record, plan, next = null) {
   };
 }
 
-/** The server-side RPC for a network: ELPIDA_RPC_<chainId> (a private endpoint) or the public one. Never sent to browsers. */
-export const serverRpcUrl = (net, env = {}) => env[`ELPIDA_RPC_${net.chainId}`] || net.rpcUrl;
+/**
+ * Every server-side RPC for a network, in the order they are tried (Malik, 25 Nov 2026: rotate Alchemy keys when one
+ * runs out of its monthly compute). ELPIDA_RPC_<chainId> may list several URLs separated by commas; each Alchemy URL
+ * among them is also tried with every key in ALCHEMY_API_KEYS (comma-separated, for example 6 keys from 6 accounts),
+ * so one setting covers all four chains. Without either, the network's public RPC. Never sent to browsers.
+ */
+export function serverRpcUrls(net, env = {}) {
+  const own = String(env[`ELPIDA_RPC_${net.chainId}`] ?? '').split(',').map(u => u.trim()).filter(Boolean);
+  const keys = String(env.ALCHEMY_API_KEYS ?? '').split(',').map(k => k.trim()).filter(k => /^[A-Za-z0-9_-]{8,128}$/.test(k));
+  const out = [];
+  for (const u of own) {
+    out.push(u);
+    const m = /^(https:\/\/[a-z0-9-]+\.g\.alchemy\.com\/v2\/)[^/?#]+$/.exec(u);
+    if (m) for (const k of keys) out.push(m[1] + k);
+  }
+  const list = [...new Set(out)];
+  return list.length ? list : [net.rpcUrl];
+}
+// The RPC each chain uses now: shared by the keeper, prices and rewards, so when one of them finds a key exhausted all
+// of them move to the next. In memory only: a restart starts again from the first URL.
+const current = new Map();
+/** The server-side RPC a network uses now (the first of serverRpcUrls until one runs out). */
+export const serverRpcUrl = (net, env = {}) => { const list = serverRpcUrls(net, env); return list[(current.get(net.chainId) ?? 0) % list.length]; };
+/**
+ * Moves the network to its next RPC after `failed` ran out (rate limit, monthly capacity, revoked key). Returns false
+ * when there is no other RPC. If another caller already moved on from `failed`, nothing changes.
+ */
+export function rotateServerRpc(net, env = {}, failed) {
+  const list = serverRpcUrls(net, env);
+  if (list.length < 2) return false;
+  const i = current.get(net.chainId) ?? 0;
+  if (failed !== undefined && list[i % list.length] !== failed) return true;
+  current.set(net.chainId, (i + 1) % list.length);
+  return true;
+}
+/** An RPC answer that means "this endpoint or key is used up or refused", not a real chain error. */
+export const rpcExhausted = e => /\b(401|402|403|429)\b|capacity|exceeded your|limit exceeded|quota|rate.?limit|too many requests|unauthori[sz]ed|invalid api key|must be authenticated/i
+  .test([e?.info?.responseStatus, e?.code, e?.status, e?.shortMessage, e?.message, e?.error?.message].filter(x => x !== undefined && x !== null).join(' '));

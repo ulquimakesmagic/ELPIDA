@@ -13,7 +13,7 @@ import { airdropPlanFor, holderRound, flywheelOrders, personalFunder, boundedFun
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { testnetDexes } from '../../packages/core/uniswap.mjs';
 import { payoutStable } from '../../packages/core/payout-stable.mjs';
-import { serverRpcUrl } from '../../packages/core/mainnets.mjs';
+import { RotatingRpcProvider } from './rotating-provider.mjs';
 import { holderDistribution } from '../web/reward-policy.mjs';
 import { KeeperLease, safeError } from '../../packages/core/keeper-lease.mjs';
 import { TokenVerifier } from './token-verifier.mjs';
@@ -805,7 +805,7 @@ export function configuredV2Keeper({ env, networks, indexFor, prices, path, publ
   // worker keeps the network's key, so its saved rounds and cursors carry on; a V2.3 worker is "<network>-v23". Workers of
   // one network share one provider and one nonce manager, since they sign with the same key.
   const workers = nets.flatMap(net => {
-    const provider = new JsonRpcProvider(serverRpcUrl(net, env), undefined, { cacheTimeout: -1, batchMaxCount: 1 }), signer = Object.assign(new NonceManager(new Wallet(key, provider)), { address });
+    const provider = new RotatingRpcProvider(net, env, undefined, { cacheTimeout: -1, batchMaxCount: 1, log }), signer = Object.assign(new NonceManager(new Wallet(key, provider)), { address });
     return [net.v2.shared, ...(net.v2.previous ?? [])].filter(d => d?.hook && d.airdrop).map(d => ({ chain: d.model === 'v2.3-hook' ? `${net.key}-v23` : net.key, net, provider, signer, deployment: { ...d, poolManager: net.v4?.poolManager },
       dex: testnetDexes[net.key]?.enabled ? testnetDexes[net.key] : net.payoutDex ?? null, usdc: payoutStable(net, oracles)?.address ?? null, usdcDecimals: payoutStable(net, oracles)?.decimals ?? 6,
       index: () => indexFor(net.key, d.factory), funderOf: funderFor(net.chainId, env), ignoredFunders,
