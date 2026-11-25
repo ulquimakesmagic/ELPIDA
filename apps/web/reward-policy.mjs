@@ -27,10 +27,13 @@ export function normalizeRewardPolicy(input = {}, chain = 'local', { allowRetire
   const normalized = recipients.map(row => {
     const kind = String(row.kind ?? 'wallet');
     let target = String(row.target ?? '').trim();
-    if (!['wallet','x','domain'].includes(kind)) throw new Error('Supported recipients are wallets, X accounts and website domains.');
+    if (!['wallet','x','domain','github'].includes(kind)) throw new Error('Supported recipients are wallets, X accounts, website domains and GitHub accounts or repositories.');
+    // GitHub (25 Nov 2026): verified by the V2 keeper on EVM networks only, so not in the local simulation or on Solana.
+    if (kind === 'github' && (chain === 'local' || solanaChain)) throw new Error('GitHub allocations are available on Base, BNB Chain, Robinhood Chain and Ethereum.');
     if (kind === 'wallet' && target && !(chain.startsWith('solana') ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(target) : /^0x[0-9a-fA-F]{40}$/.test(target)) ) throw new Error('Enter a wallet address for the selected chain.');
     if (kind === 'wallet' && /^0x0{40}$/i.test(target)) throw new Error('The zero wallet cannot receive rewards.');
     if (kind === 'x') { target = target.replace(/^https:\/\/(?:www\.)?(?:x|twitter)\.com\//i,'').replace(/^@/,'').replace(/\/$/,'').toLowerCase(); if (!/^[a-z0-9_]{1,15}$/.test(target)) throw new Error('Enter a valid X handle.'); }
+    if (kind === 'github') { target = target.replace(/^https:\/\/(?:www\.)?github\.com\//i,'').replace(/\/+$/,'').replace(/\.git$/i,'').toLowerCase(); const [o,r,...more]=target.split('/'); if (more.length || !/^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/.test(o) || (r!==undefined && (!/^[a-z0-9._-]{1,100}$/.test(r) || /^\.+$/.test(r))) || target.length > 73) throw new Error('Enter a GitHub account (owner) or repository (owner/repo).'); }
     if (kind === 'domain') { target = target.replace(/^https:\/\//i,'').replace(/\/$/,'').toLowerCase(); if (!/^(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,63}$/.test(target)) throw new Error('Enter a website domain, such as community.org.'); }
     const percent = row.percent ?? Number(row.bps)/100;
     const bps = Math.round(Number(percent) * 100);

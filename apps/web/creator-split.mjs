@@ -103,7 +103,7 @@ export function identityAllocationCard(ctx, token) {
   const connected = () => ctx.mode === 'testnet' && ctx.wallet?.net?.key === net.key && !!ctx.wallet?.address;
   let busy = false, vault = null;
   const act = async fn => { if (busy) return; busy = true; error.textContent = ''; try { await fn(); } catch (e) { error.textContent = errorText(e); } finally { busy = false; } };
-  const name = r => (r.kind === 'x' ? `@${r.target}` : r.kind === 'domain' ? r.target : short(r.wallet));
+  const name = r => (r.kind === 'x' ? `@${r.target}` : r.kind === 'domain' ? r.target : r.kind === 'github' ? `GitHub ${r.target}` : short(r.wallet));
   function verify(r) {
     flow.replaceChildren(h('p.small.muted', 'Getting a verification request…'));
     act(async () => {
@@ -114,6 +114,13 @@ export function identityAllocationCard(ctx, token) {
         flow.replaceChildren(h('p.small', `Add this TXT record to ${c.target}'s DNS, then check it. It proves you control the website; the share will pay ${short(ctx.wallet.address)}.`),
           h('dl.kv', h('dt', 'Name'), h('dd', h('span.mono', c.name), ' ', copyButton(c.name, 'Copy')), h('dt', 'Value'), h('dd', h('span.mono', c.txt), ' ', copyButton(c.txt, 'Copy'))),
           h('button.btn.btn-primary.btn-sm', { type: 'button', on: { click: () => act(async () => { const r2 = await ctx.api('v2-identity/verify-domain', { nonce: c.nonce, signature: await sign() }); flow.replaceChildren(h('p.small', r2.message)); await load(); }) } }, 'Sign and check DNS'));
+      } else if (c.kind === 'github') {
+        // A repository: a file on its default branch. An account: a public gist. Either proves control of the GitHub target.
+        flow.replaceChildren(h('p.small', c.file
+            ? [`Add a file named `, h('span.mono', c.file), ` to the default branch of `, h('a.text-link', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, c.target), ` with this line, then check it. It proves you can push to the repository; the share will pay ${short(ctx.wallet.address)}.`]
+            : [`Signed in to GitHub as ${c.target}, create a public gist at `, h('a.text-link', { href: c.url, target: '_blank', rel: 'noopener noreferrer' }, 'gist.github.com'), ` containing this line, then check it. It proves you own the account; the share will pay ${short(ctx.wallet.address)}.`]),
+          h('dl.kv', h('dt', 'Line'), h('dd', h('span.mono', c.txt), ' ', copyButton(c.txt, 'Copy'))),
+          h('button.btn.btn-primary.btn-sm', { type: 'button', on: { click: () => act(async () => { const r2 = await ctx.api('v2-identity/verify-github', { nonce: c.nonce, signature: await sign() }); flow.replaceChildren(h('p.small', r2.message)); await load(); }) } }, 'Sign and check GitHub'));
       } else {
         flow.replaceChildren(h('p.small', `Sign for ${short(ctx.wallet.address)} as the payout wallet, then sign in to X as @${c.target}.`),
           h('button.btn.btn-primary.btn-sm', { type: 'button', on: { click: () => act(async () => { const r2 = await ctx.api('v2-identity/x-start', { nonce: c.nonce, signature: await sign() }); location.assign(r2.url); }) } }, 'Sign and continue to X'));
@@ -128,7 +135,7 @@ export function identityAllocationCard(ctx, token) {
     if (!state) { card.hidden = true; return; }
     card.hidden = false; vault = state.vault;
     body.replaceChildren(
-      h('p.small.muted', 'The creator\'s 30% share is split between these recipients, fixed for good by contract ', h('span.mono', short(state.vault)), '. X and website shares are held until their owners verify.'),
+      h('p.small.muted', 'The creator\'s 30% share is split between these recipients, fixed for good by contract ', h('span.mono', short(state.vault)), '. X, website and GitHub shares are held until their owners verify.'),
       h('ul.split-list', state.rows.map(r => h('li',
         // A blue tick once the recipient is settled: a wallet row (fixed at launch), or an X account or website whose owner
         // proved control and bound a payout wallet.

@@ -27,7 +27,7 @@ test('the site hides a switched-off Solana, labels mainnet networks and offers h
   assert.match(app, /if \(mainnetSite\(\)\) \{\s*const names/);
   assert.match(app, /item\.mainnet \? 'Mainnet beta · real funds'/);
   assert.match(flow, /const v2Strategies = \(\) => v2Splits\(\) && \(solana\(\)/);
-  assert.match(flow, /net\(\)\?\.mainnet \? 'Mainnet beta; not audited\.'/);
+  assert.match(flow, /\(net\(\)\?\.mainnet \? '' : ' Test networks only; not audited\.'\)/, 'mainnet: no audit warning (Malik, 25 Nov); test networks keep it');
   assert.match(app, /50% to traders \(a monthly airdrop in USDC\), 30% to the token's creator and 20% to Elpida/);
   assert.match(read('apps/web/analytics-view.mjs'), /mainnetSite \? '' : ' Testnet tokens have no monetary value\.'/);
 });

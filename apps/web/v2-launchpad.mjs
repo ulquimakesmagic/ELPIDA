@@ -476,30 +476,34 @@ export async function launchV2(w, body) {
 }
 
 /**
- * Checks wallet, X and website allocations: 1 to 8 rows, at least one X or website, shares adding up to 100%. Labels:
- * "wallet", "x:<handle>" (lowercase, no @) or "domain:<name>" (lowercase).
+ * Checks wallet, X, website and GitHub allocations: 1 to 8 rows, at least one that is not a wallet, shares adding up to
+ * 100%. Labels: "wallet", "x:<handle>" (lowercase, no @), "domain:<name>" (lowercase) or "github:<owner>[/<repo>]"
+ * (lowercase; the contract keeps labels up to 80 bytes).
  */
+/** A GitHub allocation target: "owner" or "owner/repo", lowercase (the same rule as apps/api/v2-identities.mjs). */
+const githubTarget = t => { const [o, r, ...more] = String(t ?? '').split('/'); return !more.length && /^[a-z0-9](?:[a-z0-9]|-(?=[a-z0-9])){0,38}$/.test(o) && (r === undefined || (/^[a-z0-9._-]{1,100}$/.test(r) && !/^\.+$/.test(r))); };
 export function identityTerms(rows, me) {
   if (!Array.isArray(rows) || !rows.length || rows.length > 8) throw new Error('Allocations have 1 to 8 recipients. Nothing was submitted.');
   const out = rows.map((r, i) => {
     const bps = Number(r.bps);
     if (!Number.isInteger(bps) || bps <= 0) throw new Error('Every allocation share must be above zero. Nothing was submitted.');
     if (r.kind === 'wallet') { const wallet = r.target || (i === 0 ? me : ''); if (!isAddress(wallet) || wallet === ZeroAddress) throw new Error('Enter a wallet address for every wallet allocation. Nothing was submitted.'); return { label: 'wallet', wallet: getAddress(wallet), bps }; }
-    const target = String(r.target ?? '').trim().toLowerCase().replace(/^@/, '');
+    const target = String(r.target ?? '').trim().toLowerCase().replace(/^@/, '').replace(r.kind === 'github' ? /^https:\/\/(?:www\.)?github\.com\// : /$^/, '').replace(r.kind === 'github' ? /\/+$/ : /$^/, '').replace(r.kind === 'github' ? /\.git$/ : /$^/, '');
     if (r.kind === 'x' && !/^[a-z0-9_]{1,15}$/.test(target)) throw new Error('Enter an X handle (letters, digits or _, up to 15). Nothing was submitted.');
     if (r.kind === 'domain' && !/^(?=.{3,70}$)([a-z0-9-]+\.)+[a-z]{2,}$/.test(target)) throw new Error('Enter a website domain like community.org. Nothing was submitted.');
-    if (!['x', 'domain'].includes(r.kind)) throw new Error('Recipients are wallets, X accounts or websites. Nothing was submitted.');
+    if (r.kind === 'github' && !(githubTarget(target) && target.length <= 73)) throw new Error('Enter a GitHub account (owner) or repository (owner/repo). Nothing was submitted.');
+    if (!['x', 'domain', 'github'].includes(r.kind)) throw new Error('Recipients are wallets, X accounts, websites or GitHub. Nothing was submitted.');
     return { label: `${r.kind}:${target}`, wallet: ZeroAddress, bps };
   });
   if (out.reduce((a, r) => a + r.bps, 0) !== 10000) throw new Error('Allocation shares must add up to exactly 100%. Nothing was submitted.');
   if (!out.some(r => r.label !== 'wallet')) return null;
-  if (new Set(out.filter(r => r.label !== 'wallet').map(r => r.label)).size !== out.filter(r => r.label !== 'wallet').length) throw new Error('Each X account or website can appear once. Nothing was submitted.');
+  if (new Set(out.filter(r => r.label !== 'wallet').map(r => r.label)).size !== out.filter(r => r.label !== 'wallet').length) throw new Error('Each X account, website or GitHub account or repository can appear once. Nothing was submitted.');
   return out;
 }
 /** Deploys the allocation (ElpidaV2IdentityAllocation) with the server's V2 keeper as the verifier of X and website rows. */
 async function identityAllocation(w, rows) {
   const keeper = w.config.v2Keeper;
-  if (!keeper?.address || !keeper.active) throw new Error('X and website allocations need the Elpida V2 keeper, which is not running on this server. Nothing was submitted.');
+  if (!keeper?.address || !keeper.active) throw new Error('X, website and GitHub allocations need the Elpida V2 keeper, which is not running on this server. Nothing was submitted.');
   const response = await fetch('/api/v4-artifacts');
   const art = response.ok ? (await response.json()).v2?.identityAllocation : null;
   if (!art?.bytecode) throw new Error('The allocation contract is unavailable on this server. Nothing was submitted.');
