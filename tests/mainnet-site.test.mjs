@@ -45,6 +45,7 @@ test('the server runs the testnets unless ELPIDA_MODE=mainnet, and then only rea
   const root = mkdtempSync(join(tmpdir(), 'elpida-mainnet-')); t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, 'deployments', 'plans'), { recursive: true });
   writeFileSync(join(root, 'deployments', 'plans', 'base-mainnet.json'), JSON.stringify(plan));
+  writeFileSync(join(root, 'deployments', 'plans', 'arbitrum-mainnet-v23.json'), readFileSync(new URL('../deployments/plans/arbitrum-mainnet-v23.json', import.meta.url)));
   assert.equal(siteMode({}), 'testnet'); assert.equal(siteMode({ ELPIDA_MODE: ' Mainnet ' }), 'mainnet');
   assert.equal(loadEvmNetworks({ env: {}, root }).networks, evmTestnets);
   const none = loadEvmNetworks({ env: { ELPIDA_MODE: 'mainnet' }, root });
@@ -52,7 +53,7 @@ test('the server runs the testnets unless ELPIDA_MODE=mainnet, and then only rea
   writeFileSync(join(root, 'deployments', 'base-mainnet.json'), JSON.stringify(record));
   const ready = loadEvmNetworks({ env: { ELPIDA_MODE: 'mainnet' }, root });
   assert.deepEqual(ready.networks.map(n => n.key), ['base-mainnet']);
-  assert.deepEqual(ready.skipped.map(s => s.key), ['bnb-mainnet', 'robinhood-mainnet', 'ethereum-mainnet'], 'the other mainnets wait for their own records');
+  assert.deepEqual(ready.skipped.map(s => s.key), ['bnb-mainnet', 'robinhood-mainnet', 'ethereum-mainnet', 'arbitrum-mainnet'], 'the other mainnets wait for their own records');
   assert.ok(ready.skipped.every(s => /no mainnet deployment record yet/.test(s.reason)));
   assert.ok(ready.networks.every(n => n.mainnet), 'no testnet on the mainnet site');
   writeFileSync(join(root, 'deployments', 'base-mainnet.json'), '{ not json');
