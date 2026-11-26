@@ -469,7 +469,7 @@ export async function launchV2(w, body) {
   if (!response.ok) throw new Error(published.error ?? 'Metadata publishing failed.');
   if (!/^ipfs:\/\//.test(published.uri) || !['public-ipfs', 'elpida-hosted'].includes(published.storage)) throw new Error('Token details were not staged safely. No launch was submitted.');
   await w.checkNetwork();
-  const result = await w.wait(factory.launch(name, symbol, asset, feeBps, firstBuy, minOut, reward, published.uri, false, { value }), `Confirm the V2 launch at a ${(feeBps / 100).toFixed(2)}% fee (${LABEL})…`);
+  const result = await w.wait(factory.launch(name, symbol, asset, feeBps, firstBuy, minOut, reward, published.uri, false, { value }), w.net.mainnet ? `Confirm the launch on ${w.net.name} at a ${(feeBps / 100).toFixed(2)}% fee…` : `Confirm the V2 launch at a ${(feeBps / 100).toFixed(2)}% fee (${LABEL})…`);
   const event = result.receipt.logs.map(l => { try { return factory.interface.parseLog(l); } catch { return null; } }).find(e => e?.name === 'Launched');
   return { hash: result.tx.hash, token: event?.args.token, feeBps, metadataSaved: true, metadataPublished: true, metadataStorage: published.storage,
     message: `Your token is live on ${w.net.name} (ELPIDA V2, liquidity locked from launch, ${(feeBps / 100).toFixed(2)}% fee for good). ${d.pinned ? '' : 'This launchpad is not pinned yet, so the site lists the token once it is.'}`.trim() };

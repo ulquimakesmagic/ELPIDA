@@ -206,7 +206,7 @@ const ctx = {
   envLabel, isCreatorOf: token => !!state?.wallet && [token.creator, token.reward].some(a => a?.toLowerCase() === state.wallet.toLowerCase()),
 };
 
-function envLabel() { return mode === 'local' ? (config?.hostedSimulation ? 'Shared simulation' : 'Local simulation') : `${wallet.net.name} · ${wallet.net.mainnet ? 'mainnet beta' : 'testnet'}`; }
+function envLabel() { return mode === 'local' ? (config?.hostedSimulation ? 'Shared simulation' : 'Local simulation') : `${wallet.net.name} · ${wallet.net.mainnet ? 'mainnet' : 'testnet'}`; }
 function updateChrome() {
   for (const button of [$('#env-button'), $('#env-button-mobile')]) if (button) button.dataset.env = mode;
   for (const control of chainControls) control.update(busy||connecting);
