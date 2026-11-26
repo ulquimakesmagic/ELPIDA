@@ -29,6 +29,15 @@ const DAY = 86_400;
 /** RPC refusals that mean "ask for fewer blocks": range caps, oversized responses, too many results. */
 export const RANGE_LIMIT = /range|too large|413|too many|limit exceeded|query returned more than|block range|exceed/i;
 const rpcMessage = e => [e?.message, e?.info?.responseBody, e?.error?.message, e?.shortMessage].filter(Boolean).join(' ');
+
+/** Rewards status and logs use fixed messages because provider errors can contain private RPC credentials. */
+export function rewardsSyncError(error) {
+  if (/\b429\b|monthly capacity|too many requests|rate.?limit/i.test(rpcMessage(error))) {
+    return 'Rewards RPC rate limited or out of quota; retrying.';
+  }
+  return 'Rewards indexing unavailable; retrying.';
+}
+
 const SHARE = { airdrop: 'traderAirdrop', holder: 'holderRewards', flywheel: 'flywheel' };
 const USDC_PARENT = { usdcAirdrop: 'airdrop', usdcHolder: 'holder' }, USDC_OF = { airdrop: 'usdcAirdrop', holder: 'usdcHolder' };
 const lower = a => String(a).toLowerCase();
@@ -93,7 +102,7 @@ export class V2RewardsIndexer {
         if (this.onProgress && batches >= 50) { batches = 0; await this.onProgress(this); }
       }
       this.lastSync = Date.now(); this.lastError = null;
-    } catch (e) { this.lastError = e.message; throw e; }
+    } catch (e) { this.lastError = rewardsSyncError(e); throw e; }
     return this.status();
   }
 

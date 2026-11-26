@@ -219,10 +219,12 @@ export function flywheelOrders({ trades, now, balances, links = [], creatorLinke
 }
 
 /** Each job's latest run, with the error text when it failed (for the admin page). */
-export function latestJobs(rows, checked = {}) {
+export function latestJobs(rows, checked = {}, { includeDetails = true } = {}) {
   return rows.map(r => {
     // A job that failed and has since run cleanly (with nothing to record, e.g. no round due) is shown as ok again.
     if (r.status === 'failed' && checked[r.job] > r.at) return { job: r.job, at: checked[r.job], status: 'ok', error: null };
+    // Historical operator notes can contain private RPC error details.
+    if (!includeDetails) return { job: r.job, at: r.at, status: r.status, error: null, note: null };
     let error = null, note = null;
     try {
       const d = r.detail ? JSON.parse(r.detail) : {}; error = d.error ?? null;
