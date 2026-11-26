@@ -1,0 +1,11 @@
+# Elysium xStocks candidates
+
+[Enso announced xStocks support on Elysium](https://blog.enso.build/enso-is-live-on-elysium/). The candidate file records 326 bridged ERC-20 contracts found in the [Elysium explorer](https://elysiumexplore.com/tokens?pad=bridged) and matched to [Backed's public asset registry](https://api.xstocks.fi/api/v2/public/assets). Each Elysium token pointed to Backed's published HyperEVM `wrapperAddressV2`, and that wrapper's `asset()` matched the registry's underlying HyperEVM xStock. Both canonical gateway contracts agreed on the Elysium address. The gateway, name, symbol, decimals and supply checks used Elysium block `11248020` and HyperEVM block `52333139` on 26 November 2026.
+
+Five candidates had nonzero supply at that block (`wMUx`, `wNVDAx`, `wQQQx`, `wSKHYx`, `wSPYx`). The supply snapshot measures tokens minted and does not establish swap depth. The explorer also showed a funded `wSPCXx`, which was excluded because Backed's registry did not publish a HyperEVM `wrapperAddressV2` for it.
+
+Prices remain unset. A USD feed for each bridged wrapper needs a verified USD reference and the correct [wrapped xStocks conversion](https://docs.xstocks.fi/developers/wrapped-xstocks), with freshness checks for both inputs. The standard priced list build rejects the null feeds in this file.
+
+For the native rollout, Elysium USDC at `0xb47c4c8f73f009cc0c0d3f92b388d13e293f0b65` reports six decimals and points to Circle USDC on HyperEVM through the canonical bridge. Elpida's existing converter quoted 0.002264 USDC for 0.1 HYPE in the 1% [Uniswap v3](https://developers.uniswap.org/docs/protocols/v3/deployments/v3-elysium-deployments) pool `0x5bbF2D96a995FA3E97372Ca4F611BAD86C670fD6`. That sample is insufficient for launch payouts. Native staging still needs a funded conversion route, a verified HYPE/USD feed and a treasury Safe.
+
+Complete the native public launch, buy, and sell first. After the HyperEVM stock rollout, rehearse Elysium's factory, hook, PoolManager and router transfers on a fork. Confirm first-buy conversion depth, [Backed eligibility](https://docs.xstocks.fi/docs/product-legal-overview) and the stock region block before proposing an active list. Run the full suite and route any quote approvals through Malik's treasury Safe.
