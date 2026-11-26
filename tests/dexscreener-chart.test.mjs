@@ -37,6 +37,10 @@ test('the server serves GMGN\'s chart widget for mainnet tokens and lets pages f
   const { gmgnChart } = await import('../apps/api/gmgn.mjs');
   assert.deepEqual(gmgnChart('bnb-mainnet', EBD.toUpperCase().replace('0X', '0x')), { embed: `https://www.gmgn.cc/kline/bsc/${EBD}?theme=dark&interval=15`, page: `https://gmgn.ai/bsc/token/${EBD}`, source: 'GMGN' });
   assert.equal(gmgnChart('base-sepolia', EBD).embed, null);
+  assert.equal(gmgnChart('robinhood-mainnet', EBD).embed, `https://www.gmgn.cc/kline/robinhood/${EBD}?theme=dark&interval=15`);
+  const mint = 'So11111111111111111111111111111111111111112';
+  assert.equal(gmgnChart('solana-mainnet', mint).page, `https://gmgn.ai/sol/token/${mint}`, 'Solana mints keep their case');
+  assert.equal(gmgnChart('solana-mainnet', EBD).embed, null);
   assert.equal(gmgnChart('base-mainnet', 'javascript:x').embed, null);
   const server = readFileSync(new URL('../apps/api/server.mjs', import.meta.url), 'utf8');
   assert.match(server, /frame-src https:\/\/www\.gmgn\.cc; frame-ancestors 'none'/);

@@ -9,7 +9,7 @@
 // running fee total (splitAccrued, as the hook computes it), whether or not the hook has paid it over yet. Nothing is
 // estimated: a chain without a pinned V2 deployment has no Rewards section at all.
 import { Contract, Interface, getAddress } from 'ethers';
-import { splitAccrued } from '../core/v2-economics.mjs';
+import { splitAccrued, V2_FEE_SPLIT } from '../core/v2-economics.mjs';
 import { schedule, countdown, roundStats } from '../core/v2-rounds.mjs';
 
 export const V2_REWARD_ABIS = Object.freeze({
@@ -38,8 +38,9 @@ export class V2RewardsIndexer {
   /** `keeper`: the V2 keeper's address; its gas top-ups from the reward vaults are shown apart from payouts. */
   /** `maxBatch` and `parallel`: how far the block range per eth_getLogs may grow, and how many ranges are fetched at once. */
   /** `onProgress(indexer)`: called every few batches during a long catch-up (the service saves a snapshot there). */
-  constructor({ provider, contracts, keeper = null, fromBlock = 0, confirmations = 0, batchSize = 2000, maxBatch = 10_000, parallel = 4, onProgress = null }) {
+  constructor({ provider, contracts, split = V2_FEE_SPLIT, keeper = null, fromBlock = 0, confirmations = 0, batchSize = 2000, maxBatch = 10_000, parallel = 4, onProgress = null }) {
     this.keeper = keeper ? lower(getAddress(keeper)) : null;
+    this.split = split; // V2.3 hooks pay 50% traders / 30% creator / 20% Elpida; the V2.0 hook uses V2_FEE_SPLIT
     this.provider = provider; this.fromBlock = fromBlock; this.confirmations = confirmations; this.batchSize = batchSize;
     this.maxBatch = this.ceiling = Math.max(batchSize, maxBatch); this.parallel = Math.max(1, parallel); this.onProgress = onProgress; this.streak = 0;
     this.addresses = Object.fromEntries(Object.entries(contracts).filter(([, v]) => v).map(([k, v]) => [k, lower(getAddress(v))]));
@@ -103,7 +104,7 @@ export class V2RewardsIndexer {
    * instead of re-reading every block since deployment. `restore` refuses a snapshot of other contracts.
    */
   snapshot() {
-    return JSON.stringify({ version: 1, addresses: this.addresses, fromBlock: this.fromBlock, next: this.next, batchSize: this.batchSize,
+    return JSON.stringify({ version: 2, split: this.split, addresses: this.addresses, fromBlock: this.fromBlock, next: this.next, batchSize: this.batchSize,
       tokens: [...this.tokens], events: this.events, rounds: { airdrop: [...this.rounds.airdrop], holder: [...this.rounds.holder] },
       burns: this.burns, claims: this.claims, gas: this.gas, schedules: this.schedules, usdcAsset: this.usdcAsset ?? null },
     (_, v) => (typeof v === 'bigint' ? `n:${v}` : v));
@@ -111,7 +112,7 @@ export class V2RewardsIndexer {
 
   restore(text) {
     const s = JSON.parse(text, (_, v) => (typeof v === 'string' && /^n:-?\d+$/.test(v) ? BigInt(v.slice(2)) : v));
-    if (s?.version !== 1 || s.fromBlock !== this.fromBlock || JSON.stringify(s.addresses) !== JSON.stringify(this.addresses)) return false;
+    if (s?.version !== 2 || JSON.stringify(s.split) !== JSON.stringify(this.split) || s.fromBlock !== this.fromBlock || JSON.stringify(s.addresses) !== JSON.stringify(this.addresses)) return false;
     this.next = Math.max(this.fromBlock, Number(s.next)); this.batchSize = Math.max(1, Number(s.batchSize) || this.batchSize);
     this.tokens = new Map(s.tokens); this.events = s.events; this.rounds = { airdrop: new Map(s.rounds.airdrop), holder: new Map(s.rounds.holder) };
     this.burns = s.burns; this.claims = s.claims; this.gas = s.gas; this.schedules = s.schedules ?? {};
@@ -134,7 +135,7 @@ export class V2RewardsIndexer {
     if (kind === 'hook' && ev.name === 'Launched') this.tokens.set(lower(a.token), { quote: lower(a.quote), accrued: 0n, feeBps: Number(a.feeBps) });
     if (kind === 'hook' && ev.name === 'Fee') {
       const t = this.tokens.get(lower(a.token)); if (!t) return;
-      const before = splitAccrued(t.accrued); t.accrued += a.fee - a.lockedBonus; const after = splitAccrued(t.accrued);
+      const before = splitAccrued(t.accrued, 0n, this.split); t.accrued += a.fee - a.lockedBonus; const after = splitAccrued(t.accrued, 0n, this.split);
       for (const [vault, key] of Object.entries(SHARE)) if (after[key] > before[key]) this.events.push({ time, kind: vault, asset: t.quote, delta: after[key] - before[key] });
     }
     if ((kind === 'airdrop' || kind === 'holder') && ev.name === 'RootPosted')
@@ -204,7 +205,7 @@ export class V2RewardsIndexer {
     for (const b of this.burns) { burned.set(b.token, (burned.get(b.token) ?? 0n) + b.burned); spent.set(b.asset, (spent.get(b.asset) ?? 0n) + b.spent); }
     // Every V2 fee so far, per pair asset, and the creators' 30% of it (splitAccrued, as the hook computes it).
     const fees = new Map();
-    for (const t of this.tokens.values()) { const f = fees.get(t.quote) ?? { asset: t.quote, total: 0n, creator: 0n, tokens: 0 }; f.total += t.accrued; f.creator += splitAccrued(t.accrued).creator; f.tokens++; fees.set(t.quote, f); }
+    for (const t of this.tokens.values()) { const f = fees.get(t.quote) ?? { asset: t.quote, total: 0n, creator: 0n, tokens: 0 }; f.total += t.accrued; f.creator += splitAccrued(t.accrued, 0n, this.split).creator; f.tokens++; fees.set(t.quote, f); }
     return {
       fees: [...fees.values()],
       airdrop: this.addresses.airdrop ? distributor('airdrop') : null,
