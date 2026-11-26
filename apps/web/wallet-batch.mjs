@@ -35,6 +35,11 @@ export async function waitAtomicBatch(request,id,chainId,{sleep=ms=>new Promise(
  throw new Error('The batch is still pending. Open your wallet to check it before trying again.');
 }
 
+/**
+ * A batch id for wallet_sendCalls: 0x + 32 random bytes. MetaMask refuses any other shape ("Expected a string matching
+ * /^0x[0-9a-f]+$/"; a UUID failed a mainnet sell on 26 Nov 2026), and EIP-5792 lets the caller choose it.
+ */
+export const batchId=()=>'0x'+[...crypto.getRandomValues(new Uint8Array(32))].map(b=>b.toString(16).padStart(2,'0')).join('');
 /** Encodes calls for wallet_sendCalls v2 with atomicity required. `calls` are {to, data, value?}. */
 export function atomicBatchRequest({from,chainId,calls,id}){
  if(!calls.length)throw new Error('Nothing to send.');
