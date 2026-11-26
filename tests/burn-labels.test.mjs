@@ -27,3 +27,26 @@ test('the token page safety list has no flywheel line (no flywheel since 23 Nov 
   const lines = token => safetyChecks(token).map(c => c.text);
   assert.ok(!lines({ symbol: 'X', flywheelBurned: '10' }).some(t => /flywheel/i.test(t)));
 });
+
+test('V2 launch protection never shows the first-minute fee as the token fee', async () => {
+  const { ownFeeBps } = await import('../apps/web/token-insights.mjs');
+  const live = { model: 'v2-hook', feeBps: 3527, tokenFeeBps: 125, antiSnipeActive: true, feeSchedule: { base: 125 } };
+  assert.equal(ownFeeBps(live), 125);
+  assert.equal(ownFeeBps({ feeBps: 200 }), 200);
+  assert.equal(ownFeeBps({}), 125);
+  assert.ok(!safetyChecks(live).some(c => /35\.27/.test(c.text)), 'safety copy uses the own fee');
+  assert.ok(!safetyChecks({ ...live, model: 'v4' }).some(c => /35\.27/.test(c.text)), 'other models too');
+});
+
+test('V2.3 fees split 50% traders / 30% creator / 20% Elpida in the rewards index', async () => {
+  const { splitAccrued, V23_FEE_SPLIT, feeSplitOf } = await import('../packages/core/v2-economics.mjs');
+  const s = splitAccrued(10_000n, 0n, feeSplitOf('v2.3-hook'));
+  assert.deepEqual([s.traderAirdrop, s.creator, s.treasury, s.reserve], [5_000n, 3_000n, 2_000n, 0n]);
+  assert.equal(feeSplitOf('v2.3-hook'), V23_FEE_SPLIT);
+  assert.equal(splitAccrued(10_000n).traderAirdrop, 3_000n, 'the V2.0 hook keeps its split');
+  const { V2RewardsIndexer } = await import('../packages/indexer/v2-rewards.mjs');
+  const a = new V2RewardsIndexer({ provider: null, contracts: { hook: '0x0000000000000000000000000000000000000001' }, split: V23_FEE_SPLIT });
+  const b = new V2RewardsIndexer({ provider: null, contracts: { hook: '0x0000000000000000000000000000000000000001' } });
+  assert.equal(b.restore(a.snapshot()), false, 'a snapshot built with another split is re-read, not reused');
+  assert.equal(a.restore(a.snapshot()), true);
+});

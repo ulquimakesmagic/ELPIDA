@@ -5,6 +5,7 @@ import { JsonRpcProvider, ZeroAddress, Contract } from 'ethers';
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { V2RewardsIndexer, toJson } from '../../packages/indexer/v2-rewards.mjs';
+import { feeSplitOf } from '../../packages/core/v2-economics.mjs';
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { payoutStable } from '../../packages/core/payout-stable.mjs';
 import { testPairReference } from '../../packages/core/pairs.mjs';
@@ -46,7 +47,7 @@ export class V2RewardsService {
       // is swapped for the next one, as the trading indexer does (Malik, 11 Nov: Sepolia's vaults read $0 after a deploy).
       const rpcs = [...new Set([...(net.mainnet ? serverRpcUrls(net, env) : []), net.rpcUrl, ...(net.rpcFallbacks ?? [])].filter(Boolean))], provider = providerFactory(rpcs[0]);
       this.providerFactory = providerFactory;
-      this.entries.push({ net, key: entryKey, label: older ? `${net.name} · earlier launchpad` : net.name, deployment: d, provider, rpcs, rpc: 0, failures: 0, prices: new Map(), index: new V2RewardsIndexer({ provider, contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel, usdcAirdrop: d.usdcAirdrop, usdcHolder: d.usdcHolder }, keeper: d.keeper, fromBlock: d.block, batchSize: 100, maxBatch: 5000, parallel: 4, onProgress: ix => this.save(entryKey, ix) }), busy: false });
+      this.entries.push({ net, key: entryKey, label: older ? `${net.name} · earlier launchpad` : net.name, deployment: d, provider, rpcs, rpc: 0, failures: 0, prices: new Map(), index: new V2RewardsIndexer({ provider, split: feeSplitOf(d.model), contracts: { hook: d.hook, airdrop: d.airdrop, holder: d.holder, flywheel: d.flywheel, usdcAirdrop: d.usdcAirdrop, usdcHolder: d.usdcHolder }, keeper: d.keeper, fromBlock: d.block, batchSize: 100, maxBatch: 5000, parallel: 4, onProgress: ix => this.save(entryKey, ix) }), busy: false });
       this.load(entryKey, this.entries.at(-1).index);
     }
   }

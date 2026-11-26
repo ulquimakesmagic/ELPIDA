@@ -107,11 +107,15 @@ export function stockCheck(token, now) {
 }
 const isV2 = t => t?.deploymentModel === 'v2-hook' || t?.model === 'v2-hook';
 const isV4 = t => /^v4|model-11/.test(String(t?.deploymentModel ?? t?.model ?? ''));
+/** The token's own trading fee in bps. During launch protection the indexer's `feeBps` is the live, higher
+ * first-minute fee; `tokenFeeBps` (or the schedule's base) is the fee the token keeps for good. */
+export const ownFeeBps = token => Number(token?.tokenFeeBps ?? token?.feeSchedule?.base ?? token?.feeBps ?? 125);
+
 export function safetyChecks(token, { holders, dex } = {}) {
   const checks = [{ ok: true, text: 'Fixed supply of 1B. No mint and no owner after launch.' }];
   const venue = dex && dex !== 'test' ? dex : 'the DEX pool', v2 = isV2(token);
   // The token's own fee, never a fixed 1.25% (audit WEB-03): V2 tokens pick 1–4% at launch.
-  const fee = `${pct((token.feeBps ?? 125) / 100)}`; // V2 tokens always carry feeBps; 1.25% is V2's default
+  const fee = `${pct(ownFeeBps(token) / 100)}`; // V2 tokens always carry feeBps; 1.25% is V2's default
   checks.push(v2 || isV4(token)
     ? { ok: true, text: 'Liquidity is locked from launch in its Uniswap v4 pool; nobody can add or remove it.' }
     : token.graduated
@@ -121,7 +125,7 @@ export function safetyChecks(token, { holders, dex } = {}) {
   else if (v2) checks.push({ ok: true, text: `No buy or sell tax. Every trade pays this token's ${fee} fee, before and after graduation; it can never change.` });
   else {
     // Other models: state a fee only when the token declares one (from #231: never invent a fee for a token).
-    const own = Number(token.feeBps ?? token.feeSchedule?.base) > 0 ? `${pct(Number(token.feeBps ?? token.feeSchedule.base) / 100)}` : null;
+    const ownBps = Number(token.tokenFeeBps ?? token.feeSchedule?.base ?? token.feeBps), own = ownBps > 0 ? `${pct(ownBps / 100)}` : null;
     checks.push({ ok: true, text: token.graduated || !own ? 'No buy or sell tax.' : `No buy or sell tax. The curve fee is ${own} per trade.` });
   }
   const stock = stockCheck(token);
