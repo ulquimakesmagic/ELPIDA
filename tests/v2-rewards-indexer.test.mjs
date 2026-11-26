@@ -1,15 +1,61 @@
 // The Rewards figures on the analytics page, read back from chain events and checked against the contracts.
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { setImmediate } from 'node:timers/promises';
 import { parseEther, ZeroAddress } from 'ethers';
 import { v2Fixture, launchV2, trade, mined } from './helpers/v2-fixture.mjs';
 import { buildRound } from '../packages/core/v2-rounds.mjs';
 import { V2RewardsIndexer, toJson } from '../packages/indexer/v2-rewards.mjs';
 import { V2RewardsService, stockUsd } from '../apps/api/v2-rewards-service.mjs';
+import { SolanaV2Rewards } from '../apps/api/v2-rewards-solana.mjs';
 import { v4Art } from './helpers/v2-fixture.mjs';
 
 const DAY = 86_400;
 const chainNow = async f => (await f.provider.getBlock('latest')).timestamp;
+
+test('rewards responses and logs keep RPC credentials private when a sync fails', async t => {
+  const privateUrl = 'https://rpc.example/v2/synthetic-test-credential';
+  const quotaError = new Error(`Request to ${privateUrl} failed: HTTP 429. Authorization: synthetic-bearer-value`);
+  const safeMessage = 'Rewards RPC rate limited or out of quota; retrying.';
+  const logs = [];
+  const net = {
+    key: 'base-mainnet', name: 'Base', mainnet: true, rpcUrl: privateUrl, nativeCurrency: { symbol: 'ETH' },
+    v2: { shared: { hook: '0x' + '1'.repeat(40), block: 1 } },
+  };
+  const provider = { send: async () => { throw quotaError; } };
+  const evm = new V2RewardsService({ networks: [net], providerFactory: () => provider, log: message => logs.push(message), oracles: {} }).start();
+  t.after(() => evm.stop());
+
+  const publicKey = '11111111111111111111111111111111';
+  const connection = { getProgramAccounts: async () => [], getMultipleAccountsInfo: async () => [null, null] };
+  const solana = new SolanaV2Rewards({
+    connection,
+    net: { key: 'solana-devnet', name: 'Solana Devnet', deployment: { programId: publicKey, v2: { config: publicKey } } },
+    log: message => logs.push(message),
+  });
+  t.after(() => { solana.stop(); solana.db.close(); });
+  await solana.sync();
+  connection.getProgramAccounts = async () => { throw quotaError; };
+  solana.start();
+
+  await setImmediate();
+  const evmStatus = evm.summary().chains[0].status;
+  const solanaStatus = solana.summary().status;
+  assert.equal(evmStatus.error, safeMessage);
+  assert.equal(solanaStatus.error, safeMessage);
+  assert.equal(evmStatus.lastSync, null);
+  assert.ok(solanaStatus.lastSync, 'a failed refresh preserves the last successful sync');
+  assert.deepEqual(logs, [
+    `[v2-rewards] base-mainnet: ${safeMessage}`,
+    { event: 'solana_v2_rewards_error', message: safeMessage },
+  ]);
+  assert.doesNotMatch(JSON.stringify({ evmStatus, solanaStatus, logs }), /rpc\.example|synthetic-test-credential|synthetic-bearer-value/);
+
+  provider.send = async () => '0x0';
+  const recovered = await evm.entries[0].index.sync();
+  assert.equal(recovered.error, null);
+  assert.ok(recovered.lastSync);
+});
 
 test('vault sizes by day, rounds, countdown and flywheel burns match the chain', async t => {
   const f = await v2Fixture(t, { vaults: true }), { airdrop, holder, flywheel } = f.contracts, keeper = f.signers[4];

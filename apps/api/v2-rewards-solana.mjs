@@ -10,6 +10,7 @@ import { DatabaseSync } from 'node:sqlite';
 import * as web3 from '@solana/web3.js';
 import { createElpidaSolana, DISCRIMINATORS, POOL_SIZE_V2, WSOL_MINT, V2, V2_DIST, v2Owed } from '../../packages/solana/client.mjs';
 import { schedule, countdown, roundStats } from '../../packages/core/v2-rounds.mjs';
+import { rewardsSyncError } from '../../packages/indexer/v2-rewards.mjs';
 
 const { PublicKey } = web3;
 const DAY = 86_400, TICK_MS = 60_000;
@@ -44,7 +45,16 @@ export class SolanaV2Rewards {
     this.db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS sr_series(day INTEGER NOT NULL, kind TEXT NOT NULL, size TEXT NOT NULL, PRIMARY KEY(day, kind));`);
     this.state = null; this.error = null; this.lastSync = null;
   }
-  start() { const run = () => this.sync().catch(e => { this.error = e.message; this.log({ event: 'solana_v2_rewards_error', message: String(e.message).slice(0, 200) }); }); run(); this.timer = setInterval(run, TICK_MS); this.timer.unref?.(); return this; }
+  start() {
+    const run = () => this.sync().catch(error => {
+      this.error = rewardsSyncError(error);
+      this.log({ event: 'solana_v2_rewards_error', message: this.error });
+    });
+    run();
+    this.timer = setInterval(run, TICK_MS);
+    this.timer.unref?.();
+    return this;
+  }
   stop() { clearInterval(this.timer); }
 
   async sync() {

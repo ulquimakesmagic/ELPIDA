@@ -4,7 +4,7 @@
 import { JsonRpcProvider, ZeroAddress, Contract } from 'ethers';
 import { readFileSync, writeFileSync, renameSync, mkdirSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { V2RewardsIndexer, toJson } from '../../packages/indexer/v2-rewards.mjs';
+import { V2RewardsIndexer, rewardsSyncError, toJson } from '../../packages/indexer/v2-rewards.mjs';
 import { feeSplitOf } from '../../packages/core/v2-economics.mjs';
 import { usdOracles } from '../../packages/core/usd-oracles.mjs';
 import { payoutStable } from '../../packages/core/payout-stable.mjs';
@@ -54,7 +54,20 @@ export class V2RewardsService {
   get deployed() { return this.entries.length > 0; }
   start() {
     if (!this.deployed) return this;
-    const run = () => { for (const e of this.entries) if (!e.busy) { e.busy = true; e.index.sync().then(() => { e.failures = 0; this.save(e.key, e.index); return this.refreshPrices(e); }).catch(err => { this.log(`[v2-rewards] ${e.net.key}: ${err.message}`); this.failover(e); }).finally(() => { e.busy = false; }); } };
+    const run = () => {
+      for (const entry of this.entries) {
+        if (entry.busy) continue;
+        entry.busy = true;
+        entry.index.sync().then(() => {
+          entry.failures = 0;
+          this.save(entry.key, entry.index);
+          return this.refreshPrices(entry);
+        }).catch(error => {
+          this.log(`[v2-rewards] ${entry.net.key}: ${rewardsSyncError(error)}`);
+          this.failover(entry);
+        }).finally(() => { entry.busy = false; });
+      }
+    };
     run(); this.timer = setInterval(run, TICK_MS); this.timer.unref?.();
     return this;
   }
@@ -65,13 +78,13 @@ export class V2RewardsService {
   load(key, index) {
     const path = this.snapshotPath(key); if (!path) return;
     try { if (index.restore(readFileSync(path, 'utf8'))) this.log(JSON.stringify({ event: 'v2_rewards_resumed', network: key, nextBlock: index.next })); }
-    catch (e) { if (e.code !== 'ENOENT') this.log(`[v2-rewards] ${key}: snapshot not used (${e.message})`); }
+    catch (e) { if (e.code !== 'ENOENT') this.log(`[v2-rewards] ${key}: snapshot not used`); }
   }
   /** Written atomically (temporary file, then rename) after each sync and every few batches of a catch-up. */
   save(key, index) {
     const path = this.snapshotPath(key); if (!path) return;
     try { mkdirSync(this.dataDir, { recursive: true }); writeFileSync(`${path}.tmp`, index.snapshot()); renameSync(`${path}.tmp`, path); }
-    catch (e) { this.log(`[v2-rewards] ${key}: snapshot not saved (${e.message})`); }
+    catch { this.log(`[v2-rewards] ${key}: snapshot not saved`); }
   }
 
   /** After three failed syncs in a row, read from the network's next RPC (reads only; the index keeps its progress). */
