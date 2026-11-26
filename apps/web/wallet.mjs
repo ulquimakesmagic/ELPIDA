@@ -58,6 +58,8 @@ export function walletErrorText(error, name = 'your wallet') {
   if (code === -32002) return `A request is already waiting in ${name}. Open the wallet extension and approve or reject it, then try again.`;
   if (code === 4001 || code === 'ACTION_REJECTED') return 'You cancelled the wallet request. Nothing was submitted.';
   if (code === 4100) return `${name} has not authorised Elpida yet. Connect again and approve the request.`;
+  // MetaMask's KeyringController refuses to sign while the extension is locked.
+  if (/controller is locked|wallet is locked|keyring.*locked/i.test(String(error?.message ?? error?.info?.error?.message ?? error?.data?.originalError?.message ?? ''))) return `${name} is locked. Open the wallet extension, unlock it, then press the button again. Nothing was submitted.`;
   // The wallet's RPC lagged a block and reused a confirmed nonce: nothing was sent, and a moment later it is fine.
   if (/replacement (transaction )?underpriced|nonce too low/i.test(String(error?.message ?? error?.info?.error?.message ?? ''))) return `${name} tried to reuse the last transaction's number because its network connection is a block behind. Nothing was sent. Wait a minute, then press the button again: finished steps are kept.`;
   return null;

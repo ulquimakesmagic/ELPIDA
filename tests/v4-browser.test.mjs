@@ -152,6 +152,7 @@ test('between signatures the deploy waits until the wallet\'s own RPC has counte
   calls = 0; await walletCaughtUp({ ...w, signer: { provider: { getTransactionCount: async () => { calls++; return 7; } } } }, 7, { tries: 4, delay: 1 });
   assert.equal(calls, 4, 'gives up after its tries instead of hanging');
   assert.match(walletErrorText({ message: 'could not coalesce error (error={ "code": -32000, "message": "replacement transaction underpriced" })' }, 'Trust Wallet'), /a block behind\. Nothing was sent/);
+  assert.match(walletErrorText({ message: "KeyringController - The operation cannot be completed while the controller is locked." }, "MetaMask"), /MetaMask is locked\. Open the wallet extension, unlock it/);
 });
 
 test('BNB Chain testnet: the operator deploys a test copy of Uniswap\'s PoolManager, then Model 11 on it, and it trades', async t => {
