@@ -15,6 +15,7 @@ const SECTIONS = [
   ['trade-and-graduate', 'Trade and graduate', 'trending-up'],
   ['fees-and-rewards', 'Fees and rewards', 'coins'],
   ['contracts', 'Contracts', 'file-text'],
+  ['developers', 'Developers', 'code'],
   ['faq', 'FAQ', 'circle-help'],
   ['privacy', 'Privacy and cookies', 'lock'],
 ];
@@ -58,6 +59,53 @@ function contracts(ctx) {
     for (const old of net.legacy ?? []) cards.push(contractCard(net, 'Legacy factory', `Earlier launchpad (${old.model}). Its tokens stay listed and tradable; no new launches.`, old.factory));
   }
   return cards.length ? h('div.dc-contracts', cards) : h('p.muted', 'No shared contract addresses are published for the networks you can see. Each browser sets up its own launchpad on those networks.');
+}
+// Developers (26 November 2026): for bots, terminals, trackers and scanners building on Elpida. The API answers at
+// /api/v1 on this site (apps/api/public-api-v1.mjs); the ABIs come from the same list the API serves.
+const API = [
+  ['/api/v1/chains', 'Every chain with its contract addresses and fee split.'],
+  ['/api/v1/tokens', 'Launches, newest first: identity, creator, image and links, pool. ?chain= &since= &limit= (≤ 500).'],
+  ['/api/v1/tokens/{chain}/{address}', 'One launch.'],
+  ['/api/v1/tokens/{chain}/{address}/trades', 'Latest trades. ?limit='],
+  ['/api/v1/tokens/{chain}/{address}/candles', 'Price candles. ?interval= 60, 300, 900, 3600, 14400 or 86400 seconds.'],
+  ['/api/v1/tokens/{chain}/{address}/holders', 'Largest holders.'],
+  ['/api/v1/rewards', 'The monthly trader airdrop. ?wallet= for one wallet\u2019s standing.'],
+  ['/api/v1/abi', 'Factory, router, hook and token ABIs as JSON. /api/v1/abi/{name} for one.'],
+];
+const EVENTS = [
+  ['Factory · Launched', 'A new token: creator, token, quote asset, fee, first buy.'],
+  ['Factory · MetadataPublished', 'The token\u2019s metadata link (ipfs://…): name, image, description and socials. Also readable with tokenMetadataURI(token).'],
+  ['Router · Swapped', 'Every buy and sell through the Elpida router, with the real trader and both amounts.'],
+  ['Hook · Fee', 'The fee each trade paid into the pool. Liquidity is held by the hook from the first trade: there are no LP tokens.'],
+];
+const BUY_EXAMPLE = `import { Contract, parseEther } from 'ethers';
+const router = new Contract(ROUTER, [
+  'function quote(address token,bool isBuy,uint256 amountIn) returns(uint256 paid,uint256 out)',
+  'function buy(address token,uint256 quoteIn,uint256 minTokensOut,address recipient,uint256 deadline) payable returns(uint256)',
+], signer);
+const amount = parseEther('0.01');                      // a native-coin pair: ETH or BNB
+const [, out] = await router.quote.staticCall(TOKEN, true, amount);
+const deadline = Math.floor(Date.now() / 1000) + 300;
+await router.buy(TOKEN, amount, out * 98n / 100n, await signer.getAddress(), deadline, { value: amount });
+// Selling: approve the router for the tokens, then router.sell(TOKEN, tokensIn, minQuoteOut, recipient, deadline).
+// USDC and stock pairs: approve the router for the quote asset and send no value.`;
+function developers(origin) {
+  const api = `${origin}/api/v1`;
+  return [
+    h('p', 'Build bots, terminals, trackers and scanners on Elpida. Every token trades in its own Uniswap v4 pool, so any wallet or router can trade it; the Elpida router below is the simplest way. All contracts are verified on each chain\u2019s explorer.'),
+    h('div.dc-options',
+      tile('Contracts', 'Addresses for every chain are in Contracts above, and in /api/v1/chains.'),
+      tile('Public API', `Read-only JSON at ${api}, open to any site, ${'up to 120 requests a minute per client'}.`),
+      tile('ABIs', 'Factory, router, hook and token interfaces at /api/v1/abi.')),
+    h('h3', 'API endpoints'),
+    h('dl.dc-api', ...API.flatMap(([route, text]) => [h('dt', h('code', 'GET ' + route)), h('dd', text)])),
+    h('p', h('a', { href: api, target: '_blank', rel: 'noopener noreferrer' }, 'Open the API index'), ' · ', h('a', { href: `${api}/abi`, target: '_blank', rel: 'noopener noreferrer' }, 'Download the ABIs')),
+    h('h3', 'Trade through the router'),
+    h('pre.dc-code', h('code', BUY_EXAMPLE)),
+    h('h3', 'Events to index'),
+    h('dl.dc-api', ...EVENTS.flatMap(([name, text]) => [h('dt', h('code', name)), h('dd', text)])),
+    note('info', 'info', 'The /api/v1 endpoints stay stable: new fields and endpoints may be added, nothing is renamed or removed. Other /api paths on this site are internal and can change without notice.'),
+  ];
 }
 const FAQ = mainnet => [
   ['Can I change a token’s name, symbol or image after launch?', 'No. Name, symbol, image and links are recorded in the launch transaction and cannot be edited.'],
@@ -104,12 +152,13 @@ export function renderDocs(ctx, section) {
       h('p', `The creator picks the token’s fee at launch, from ${pct(V2_PROPOSED_MIN_FEE_BPS)} to ${pct(V2.maxFeeBps)} (${pct(V2.defaultFeeBps)} by default). It never changes, before or after graduation. Every fee is shared three ways:`),
       h('div.dc-options',
         tile(`${pct(V23_FEE_SPLIT.traderAirdrop)} traders`, 'A monthly airdrop in USDC to every qualifying trader, by score: fees paid count with diminishing returns (fees^0.8), and trading on more days counts more, up to 12.'),
-        tile(`${pct(V23_FEE_SPLIT.creator)} creator`, 'To the creator’s rewards: their wallet, other verified wallets, X accounts or websites, as chosen at launch.'),
+        tile(`${pct(V23_FEE_SPLIT.creator)} creator`, 'To the creator’s rewards: their wallet, other verified wallets, X accounts, websites or GitHub accounts and repositories, as chosen at launch.'),
         tile(`${pct(V23_FEE_SPLIT.treasury)} Elpida`, 'Platform revenue, to the Elpida treasury.')),
       h('p.small.muted', mainnet ? 'The traders’ airdrop is paid in USDC (USDG on Robinhood Chain).' : 'Where a reward is paid out, it is paid in USDC (a labelled test dollar on some test networks). Older test tokens launched before V2 keep the rules they launched with.')),
     card(5, SECTIONS[5], h('p.muted', 'Generated from the network registry. Always compare an address with the explorer before interacting.'), contracts(ctx)),
-    card(6, SECTIONS[6], h('div.dc-faq', ...FAQ(mainnet).map(([q, a]) => h('details.dc-q', h('summary', q, icon('chevron-down', 'icon-sm')), h('p', a))))),
-    card(7, SECTIONS[7],
+    card(6, SECTIONS[6], ...developers(location.origin)),
+    card(7, SECTIONS[7], h('div.dc-faq', ...FAQ(mainnet).map(([q, a]) => h('details.dc-q', h('summary', q, icon('chevron-down', 'icon-sm')), h('p', a))))),
+    card(8, SECTIONS[8],
       h('p', 'Elpida keeps as little about you as it can. It has no accounts, no advertising and no third-party trackers.'),
       h('div.dc-options',
         tile('Essential storage', 'Your browser remembers your network, theme, wallet choice, the disclaimer and your cookie choice. A short-lived cookie protects token uploads, and operators get a sign-in cookie. Always on.'),

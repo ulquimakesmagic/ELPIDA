@@ -32,6 +32,7 @@ import { validateSolanaRpc, solanaRpcList, rpcHost, rpcRotation } from '../../pa
 import * as solanaWeb3 from '@solana/web3.js';
 import { createCircleFunding } from './circle-test-wallets.mjs';
 import { VanityMintPool, vanityKey, clientAddress } from './vanity-mints.mjs';
+import { publicApiV1 } from './public-api-v1.mjs';
 import { createServer } from 'node:http';
 import { randomBytes } from 'node:crypto';
 import { brotliCompressSync, gzipSync, constants as zlibConstants } from 'node:zlib';
@@ -463,6 +464,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const memoryNow=()=>memoryReport({heapLimit:getHeapStatistics().heap_size_limit,extra:{uptimeMinutes:Math.round(process.uptime()/60),streams:tradeFeed.status().clients,vanityWorkers:vanity.status().grinding}});
   const memoryTimer=port===0?null:setInterval(()=>console.log(JSON.stringify({event:'memory',...memoryNow()})),15*60000);memoryTimer?.unref();
   if(port!==0){backupRunner.start();monitor.tick();}
+  // The public read API for builders (/api/v1; docs/PUBLIC_API.md): stable, documented, rate limited per client.
+  const apiV1=publicApiV1({networks:()=>evmNetworks,index:publicIndex,origin:()=>canonicalOrigin(),ewpr:w=>v2Keeper.ewprStatus?.(w)??null,clientIp:req=>clientAddress(req)});
   const server = createServer(async (req, res) => {
     const actualPort = server.address().port;
     const requestId=randomBytes(8).toString('hex');res.setHeader('X-Request-Id',requestId);
@@ -483,6 +486,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
     if(walletRead)res.setHeader('Access-Control-Allow-Origin','*');
     // Readiness, apart from liveness (audit OPS-01): /health answers as soon as the process serves requests and is what
     // the platform's healthcheck uses; /ready says whether the indexes are fresh and how the keepers stand. Codes only.
+    if (/^\/api\/v1(\/|\?|$)/.test(String(req.url))) { try { if (await apiV1(req, res, new URL(req.url, 'http://local'), send)) return; } catch (error) { return send(500, { error: 'Internal error.' }); } }
     if (req.method === 'GET' && req.url === '/ready') {
       const networks = evmNetworks.map(n => { const st = publicIndex.status(n.key), at = st?.lastSuccess ? Date.parse(st.lastSuccess) : NaN; return { network: n.key, enabled: !!st?.enabled, lastSuccess: st?.lastSuccess ?? null, fresh: !st?.enabled || (Number.isFinite(at) && Date.now() - at < 300_000), errorCode: st?.errorCode ?? null }; });
       const keeper = v2Keeper.status?.() ?? {}, ready = networks.every(n => n.fresh);

@@ -321,3 +321,12 @@
   .analytics-fees .analytics-table th, .analytics-fees .analytics-table td { padding-left: 8px; padding-right: 8px; font-size: 13px; }
 }
 .analytics-fees .share-basis { display: block; font-weight: 400; font-size: 12px; }
+
+/* Developers (26 Nov 2026): API routes, events and a code sample. */
+.dc-card h3 { margin: 18px 0 8px; font-size: var(--text-md, 16px); }
+.dc-api { display: grid; grid-template-columns: minmax(0, max-content) minmax(0, 1fr); gap: 8px 16px; margin: 0; }
+.dc-api dt { min-width: 0; overflow-wrap: anywhere; }
+.dc-api dd { margin: 0; color: var(--text-2, inherit); }
+.dc-api code, .dc-code code { font-family: var(--font-mono, ui-monospace, monospace); font-size: 13px; }
+.dc-code { margin: 0; padding: 14px 16px; border: .67px solid var(--line-soft); border-radius: var(--r-tile); background: var(--panel-2); overflow-x: auto; white-space: pre; user-select: text; }
+@media (max-width: 720px) { .dc-api { grid-template-columns: 1fr; } .dc-api dd { margin-bottom: 6px; } }
