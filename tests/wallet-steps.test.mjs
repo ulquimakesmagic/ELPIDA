@@ -89,3 +89,11 @@ test('on-chain: every fee-claim step succeeds with nothing owed, so a claim batc
     }
   }
 });
+
+test('batch ids are 0x hex, the only shape MetaMask accepts for wallet_sendCalls (26 Nov 2026)', async () => {
+  const { batchId } = await import('../apps/web/wallet-batch.mjs');
+  const a = batchId(), b = batchId();
+  assert.match(a, /^0x[0-9a-f]{64}$/); assert.notEqual(a, b);
+  const { readFileSync } = await import('node:fs');
+  assert.doesNotMatch(readFileSync(new URL('../apps/web/wallet.mjs', import.meta.url), 'utf8'), /randomUUID/, 'no UUID batch ids left');
+});

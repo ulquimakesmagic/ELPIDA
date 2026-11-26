@@ -20,7 +20,7 @@ import { DEX_MODEL, LEGACY_DEX_MODEL, BETA_MODEL, MODEL_VERSIONS, isDexModel, cu
 import { quoteUsdcConversion, quoteNativePairConversion, conversionCalls, CONVERSION_ROUTER_ABI } from './usdc-conversion.mjs';
 import { conversionKey, convertForLaunch, pendingConversion } from './launch-conversion.mjs';
 import {nativeFundingError} from './payment-errors.mjs';
-import {supportsAtomicLaunch,waitAtomicLaunch,waitAtomicBatch,atomicBatchRequest} from './wallet-batch.mjs';
+import {supportsAtomicLaunch,waitAtomicLaunch,waitAtomicBatch,atomicBatchRequest,batchId} from './wallet-batch.mjs';
 import { PublicRpcSigner, resumeSetupDeployment } from './public-rpc-signer.mjs';
 import { MULTICALL3, multicallData, approvalFor, launchApproval, waitForAllowance } from './one-confirmation.mjs';
 import { readSafe, treasuryError, safeBatch } from './safe-batch.mjs';
@@ -841,7 +841,7 @@ export class TestnetWallet {
     if (batchAvailable) {
       await this.checkNetwork();
       this.onProgress(`${message} One confirmation covers all ${calls.length} steps.`);
-      const sent = await withWalletTimeout(request(atomicBatchRequest({ from: this.address, chainId: this.net.chainId, calls, id: crypto.randomUUID() })), this.walletName);
+      const sent = await withWalletTimeout(request(atomicBatchRequest({ from: this.address, chainId: this.net.chainId, calls, id: batchId() })), this.walletName);
       if (typeof sent?.id !== 'string' || !sent.id) throw new Error('Wallet did not return a batch ID. Check it before retrying.');
       this.onProgress('Batch submitted. Waiting for confirmation…');
       const receipts = await waitAtomicBatch(request, sent.id, this.net.chainId);
@@ -1286,7 +1286,7 @@ export class TestnetWallet {
       if(launchGasError)throw new Error(launchGasError);
       const confirmation='Confirm the '+(inUsdc?'10 USDC':'$10 equivalent native')+' launch fee, first purchase '+formatUnits(firstBuy,nativePair?18:asset.decimals)+' '+this.qsym({pair:kind,quoteSymbol:asset?.symbol})+(gas===null?' and wallet-estimated gas.':' and estimated gas '+formatUnits(gas*gasPrice,18)+' '+native+'.')+' '+(inUsdc?'USDC covers the launch fee; native currency covers gas.':'Native fee cap includes 1%; unused fee is refunded.');
       if(approvalCalls.length){
-        const id=crypto.randomUUID(),calls=[...approvalCalls,{to:factory.target,data:factory.interface.encodeFunctionData('launchWithPayment',args),value:'0x'+value.toString(16)}];
+        const id=batchId(),calls=[...approvalCalls,{to:factory.target,data:factory.interface.encodeFunctionData('launchWithPayment',args),value:'0x'+value.toString(16)}];
         const record={id,chain:this.net.chainId,created:Date.now(),metadata:published?.metadata??details,uri:published?.uri,storage:metadataStorage};
         localStorage.setItem(batchKey,JSON.stringify(record));
         this.onProgress('Confirm one atomic launch in your wallet: payment approval, token details, creation and first purchase. '+confirmation);
