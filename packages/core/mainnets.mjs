@@ -58,6 +58,13 @@ export const EVM_MAINNETS = Object.freeze([
     usdMaxAge: 3600,
     payoutDex: Object.freeze({ name: 'Uniswap v3', router: '0x68b3465833fb72A70ecDF485E0e4C7bD8665Fc45', quoter: '0x61fFE014bA17989E743c5F6cB21bF9697530B21e', weth: '0x82aF49447D8a07e3bd95BD0d56f35241523fBab1', routerVersion: 2 }),
   }),
+  Object.freeze({
+    key: 'hyperevm-mainnet', planKey: 'hyperevm-mainnet', name: 'HyperEVM', short: 'HYPE', kind: 'evm', mainnet: true,
+    chainId: 999, rpcUrl: 'https://rpc.hyperliquid.xyz/evm', explorer: 'https://hyperevmscan.io',
+    nativeCurrency: Object.freeze({ name: 'Hyperliquid', symbol: 'HYPE', decimals: 18 }), gasFaucet: null,
+    usdMaxAge: 86400,
+    payoutDex: Object.freeze({ name: 'HyperSwap v3', router: '0x6D99e7f6747AF2cDbB5164b6DD50e40D4fDe1e77', quoter: '0x03A918028f22D9E1473B7959C927AD7425A45C7C', weth: '0x5555555555555555555555555555555555555555', routerVersion: 2 }),
+  }),
 ]);
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
