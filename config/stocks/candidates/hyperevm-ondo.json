@@ -1,0 +1,317 @@
+[
+  {
+    "symbol": "AAPLon",
+    "name": "Apple (Ondo Tokenized)",
+    "address": "0x81db0DF77669b3BE563e7a0591685a2C8C3EE1c5",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x81db0DF77669b3BE563e7a0591685a2C8C3EE1c5",
+    "feed": null
+  },
+  {
+    "symbol": "AMDon",
+    "name": "AMD (Ondo Tokenized)",
+    "address": "0x33706203A7a7c82B6F6c09dd9Ae4E6e881d36386",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x33706203A7a7c82B6F6c09dd9Ae4E6e881d36386",
+    "feed": null
+  },
+  {
+    "symbol": "AMZNon",
+    "name": "Amazon (Ondo Tokenized)",
+    "address": "0xeD68F063264a01fd7f93087DC19CC1E0D614e8De",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0xeD68F063264a01fd7f93087DC19CC1E0D614e8De",
+    "feed": null
+  },
+  {
+    "symbol": "BABAon",
+    "name": "Alibaba (Ondo Tokenized)",
+    "address": "0x799Bf997B733CAb2e1377D0411b63E35133991eb",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x799Bf997B733CAb2e1377D0411b63E35133991eb",
+    "feed": null
+  },
+  {
+    "symbol": "COINon",
+    "name": "Coinbase (Ondo Tokenized)",
+    "address": "0x639Bcd00422facAcA534063e3d860e8fcf78B46F",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x639Bcd00422facAcA534063e3d860e8fcf78B46F",
+    "feed": null
+  },
+  {
+    "symbol": "COPXon",
+    "name": "Global X Copper Miners ETF (Ondo Tokenized)",
+    "address": "0x86E33197369a3560CeE2Ab6Bb12376AC7b29f3dD",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x86E33197369a3560CeE2Ab6Bb12376AC7b29f3dD",
+    "feed": null
+  },
+  {
+    "symbol": "CRCLon",
+    "name": "Circle Internet Group (Ondo Tokenized)",
+    "address": "0x13a81c5e8b4AB05Fc721DfF7bA95e250b29458F8",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x13a81c5e8b4AB05Fc721DfF7bA95e250b29458F8",
+    "feed": null
+  },
+  {
+    "symbol": "CRWVon",
+    "name": "CoreWeave (Ondo Tokenized)",
+    "address": "0xd616dDC3a9e13e12533d7124d5BD94B53Fb60A3f",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0xd616dDC3a9e13e12533d7124d5BD94B53Fb60A3f",
+    "feed": null
+  },
+  {
+    "symbol": "EWYon",
+    "name": "iShares MSCI South Korea ETF (Ondo Tokenized)",
+    "address": "0xed871e0D99369AB869Fc38255a284361A137746B",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0xed871e0D99369AB869Fc38255a284361A137746B",
+    "feed": null
+  },
+  {
+    "symbol": "FCXon",
+    "name": "Freeport-McMoRan (Ondo Tokenized)",
+    "address": "0xA019295D44677dd2f5B066245453938B1b1C483B",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0xA019295D44677dd2f5B066245453938B1b1C483B",
+    "feed": null
+  },
+  {
+    "symbol": "GLDon",
+    "name": "SPDR Gold Shares (Ondo Tokenized)",
+    "address": "0x95FebDd6f447B5278c9b98743B4254eB02c6EA1d",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x95FebDd6f447B5278c9b98743B4254eB02c6EA1d",
+    "feed": null
+  },
+  {
+    "symbol": "GOOGLon",
+    "name": "Alphabet Class A (Ondo Tokenized)",
+    "address": "0x4D34798f18Eb747F7225663F0553eA2D880cf75D",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x4D34798f18Eb747F7225663F0553eA2D880cf75D",
+    "feed": null
+  },
+  {
+    "symbol": "HOODon",
+    "name": "Robinhood Markets (Ondo Tokenized)",
+    "address": "0xF1Df92AC8E22763A16bf4Bd9a966EEBcD70fA5a3",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0xF1Df92AC8E22763A16bf4Bd9a966EEBcD70fA5a3",
+    "feed": null
+  },
+  {
+    "symbol": "IAUon",
+    "name": "iShares Gold Trust (Ondo Tokenized)",
+    "address": "0x83b01AC9e2D1632A70Dd1C813c5B8eDF29cd707f",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x83b01AC9e2D1632A70Dd1C813c5B8eDF29cd707f",
+    "feed": null
+  },
+  {
+    "symbol": "INTCon",
+    "name": "Intel (Ondo Tokenized)",
+    "address": "0x7bf529bb5Db370D679F33f4fe5420F48eE234bB7",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x7bf529bb5Db370D679F33f4fe5420F48eE234bB7",
+    "feed": null
+  },
+  {
+    "symbol": "IVVon",
+    "name": "iShares Core S&P 500 ETF (Ondo Tokenized)",
+    "address": "0xAd26B6048cc3682f67Fe4C829b7Ac99dbF95920e",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0xAd26B6048cc3682f67Fe4C829b7Ac99dbF95920e",
+    "feed": null
+  },
+  {
+    "symbol": "METAon",
+    "name": "Meta Platforms (Ondo Tokenized)",
+    "address": "0x46FA18Ffe2707bbecc46D457D40EFBE6B932f711",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x46FA18Ffe2707bbecc46D457D40EFBE6B932f711",
+    "feed": null
+  },
+  {
+    "symbol": "MSFTon",
+    "name": "Microsoft (Ondo Tokenized)",
+    "address": "0xD53471f6D493f7eD766181D88Ba9c2Bfc371399A",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0xD53471f6D493f7eD766181D88Ba9c2Bfc371399A",
+    "feed": null
+  },
+  {
+    "symbol": "MSTRon",
+    "name": "MicroStrategy (Ondo Tokenized)",
+    "address": "0x8a64FDf0857c1C734A594cd1DB20B3f8E3f133f6",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x8a64FDf0857c1C734A594cd1DB20B3f8E3f133f6",
+    "feed": null
+  },
+  {
+    "symbol": "MUon",
+    "name": "Micron Technology (Ondo Tokenized)",
+    "address": "0x0f8E33F5CdefAE9C2E59de8fB61feD347046D046",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x0f8E33F5CdefAE9C2E59de8fB61feD347046D046",
+    "feed": null
+  },
+  {
+    "symbol": "NFLXon",
+    "name": "Netflix (Ondo Tokenized)",
+    "address": "0x81Ebb420a81855f1Bf1B0fF95eCa9d3Bd736ea89",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x81Ebb420a81855f1Bf1B0fF95eCa9d3Bd736ea89",
+    "feed": null
+  },
+  {
+    "symbol": "NVDAon",
+    "name": "NVIDIA (Ondo Tokenized)",
+    "address": "0xB989ad9b91886b1Aaed8DaADb26F028b29b40945",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0xB989ad9b91886b1Aaed8DaADb26F028b29b40945",
+    "feed": null
+  },
+  {
+    "symbol": "ORCLon",
+    "name": "Oracle (Ondo Tokenized)",
+    "address": "0x4775e99a13651B1D077c2fa04Eb9BF007f684af5",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x4775e99a13651B1D077c2fa04Eb9BF007f684af5",
+    "feed": null
+  },
+  {
+    "symbol": "PALLon",
+    "name": "abrdn Physical Palladium Shares ETF (Ondo Tokenized)",
+    "address": "0x5Ff6E08A0Bdbc1ff11004FfB62B7aC7CdCf101Bd",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x5Ff6E08A0Bdbc1ff11004FfB62B7aC7CdCf101Bd",
+    "feed": null
+  },
+  {
+    "symbol": "PLTRon",
+    "name": "Palantir Technologies (Ondo Tokenized)",
+    "address": "0x039358AB6919159f6026Ea4428595a5AaF12A35C",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x039358AB6919159f6026Ea4428595a5AaF12A35C",
+    "feed": null
+  },
+  {
+    "symbol": "PPLTon",
+    "name": "abrdn Physical Platinum Shares ETF (Ondo Tokenized)",
+    "address": "0xB4C0eaf28Ae7f667D9dabAA995F7A6E75e094770",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0xB4C0eaf28Ae7f667D9dabAA995F7A6E75e094770",
+    "feed": null
+  },
+  {
+    "symbol": "QQQon",
+    "name": "Invesco QQQ (Ondo Tokenized)",
+    "address": "0x911e2dCD2b70F44231F3F0f1C6ec9aF75068FD85",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x911e2dCD2b70F44231F3F0f1C6ec9aF75068FD85",
+    "feed": null
+  },
+  {
+    "symbol": "RIVNon",
+    "name": "Rivian Automotive (Ondo Tokenized)",
+    "address": "0x353D347bb7bc1C812E3a131d9b5193b3618029e5",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x353D347bb7bc1C812E3a131d9b5193b3618029e5",
+    "feed": null
+  },
+  {
+    "symbol": "SLVon",
+    "name": "iShares Silver Trust (Ondo Tokenized)",
+    "address": "0xd53d98d13D93C817011645442c2e4d46E499B460",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0xd53d98d13D93C817011645442c2e4d46E499B460",
+    "feed": null
+  },
+  {
+    "symbol": "SNDKon",
+    "name": "SanDisk (Ondo Tokenized)",
+    "address": "0xB8927cfF399E23328eEC0e457e75c709DCfcF382",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0xB8927cfF399E23328eEC0e457e75c709DCfcF382",
+    "feed": null
+  },
+  {
+    "symbol": "SPYon",
+    "name": "SPDR S&P 500 ETF (Ondo Tokenized)",
+    "address": "0x32eC2792aeC02122eDD9f28866B720db1e1c1B54",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x32eC2792aeC02122eDD9f28866B720db1e1c1B54",
+    "feed": null
+  },
+  {
+    "symbol": "TSLAon",
+    "name": "Tesla (Ondo Tokenized)",
+    "address": "0x417883b1709545f1211A25b00ad13455fC7F1bc5",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x417883b1709545f1211A25b00ad13455fC7F1bc5",
+    "feed": null
+  },
+  {
+    "symbol": "TSMon",
+    "name": "Taiwan Semiconductor Manufacturing (Ondo Tokenized)",
+    "address": "0x3254cdffDDEDdb1F61B9eF6f67e178615CCb0E85",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x3254cdffDDEDdb1F61B9eF6f67e178615CCb0E85",
+    "feed": null
+  },
+  {
+    "symbol": "UNGon",
+    "name": "US Natural Gas Fund (Ondo Tokenized)",
+    "address": "0x2c81466C9B144E3B6e9D6e8858Bc0973a953Fb0A",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0x2c81466C9B144E3B6e9D6e8858Bc0973a953Fb0A",
+    "feed": null
+  },
+  {
+    "symbol": "USOon",
+    "name": "United States Oil Fund (Ondo Tokenized)",
+    "address": "0xA4dB50bB345151f3649539300523e83a8b8A6BC7",
+    "decimals": 18,
+    "compliance": "0xAe79085Ad94ac040f712a63aAEae707ec5edE4F6",
+    "explorer": "https://hyperevmscan.io/address/0xA4dB50bB345151f3649539300523e83a8b8A6BC7",
+    "feed": null
+  }
+]
