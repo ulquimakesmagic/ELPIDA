@@ -453,8 +453,8 @@ export class SolanaV2Keeper {
     return this.db.prepare('SELECT day, holders FROM sv2_snapshots WHERE mint=? AND day>=? AND day<? ORDER BY day').all(mint, Math.floor(start / DAY), Math.floor(end / DAY)).map(r => ({ day: r.day, holders: new Map(JSON.parse(r.holders).map(([a, v]) => [a, BigInt(v)])) }));
   }
 
-  status() {
-    return { chain: this.deployment.cluster ?? 'solana', keeper: this.payer.publicKey.toBase58(), distributions: this.distributions, idle: this.idle ?? null, airdropNext: this.get('airdrop:next', 0), holderNext: this.get('holder:next', 0), runs: this.db.prepare('SELECT job,at,status FROM sv2_runs ORDER BY id DESC LIMIT 8').all(), jobs: latestJobs(this.db.prepare('SELECT job,at,status,detail FROM sv2_runs WHERE id IN (SELECT MAX(id) FROM sv2_runs GROUP BY job) ORDER BY job').all(), this.checked ?? {}) };
+  status({ includeDetails = true } = {}) {
+    return { chain: this.deployment.cluster ?? 'solana', keeper: this.payer.publicKey.toBase58(), distributions: this.distributions, idle: this.idle ?? null, airdropNext: this.get('airdrop:next', 0), holderNext: this.get('holder:next', 0), runs: this.db.prepare('SELECT job,at,status FROM sv2_runs ORDER BY id DESC LIMIT 8').all(), jobs: latestJobs(this.db.prepare('SELECT job,at,status,detail FROM sv2_runs WHERE id IN (SELECT MAX(id) FROM sv2_runs GROUP BY job) ORDER BY job').all(), this.checked ?? {}, { includeDetails }) };
   }
 }
 

@@ -46,6 +46,19 @@ test('a recorded USDC airdrop distributor reaches the keeper; without one mainne
   assert.equal(run.status, 'waiting');
 });
 
+test('public keeper status hides detailed error and conversion notes from stored runs', async t => {
+  const keeper = make([net('base-mainnet')]);
+  t.after(() => keeper.close());
+  const rpcError = 'Provider refused https://rpc.example/v2/synthetic-test-credential';
+  keeper.db.prepare('INSERT INTO v2k_runs(chain,job,at,status,detail) VALUES(?,?,?,?,?)').run(
+    'base-mainnet', 'airdrop', 100, 'failed', JSON.stringify({ error: rpcError, skipped: { [a(1)]: rpcError } }),
+  );
+  const [operatorJob] = keeper.status().chains[0].jobs;
+  assert.match(operatorJob.note, /synthetic-test-credential/);
+  const [publicJob] = keeper.status({ includeDetails: false }).chains[0].jobs;
+  assert.deepEqual(publicJob, { job: 'airdrop', at: 100, status: 'failed', error: null, note: null });
+});
+
 test('the dashboard: this month\'s progress for a wallet, from indexed trades, as an estimate', () => {
   const k = make([net('base-mainnet', { usdcAirdrop: a(9) })], { ELPIDA_V2_DISTRIBUTIONS: 'airdrop' }), w = k.workers[0];
   const now = Date.UTC(2026, 10, 22, 12) / 1000; k.now = () => now;

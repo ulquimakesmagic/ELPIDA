@@ -595,7 +595,15 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         if(url.pathname==='/api/graduation/status')return send(200,graduationKeeper.status());
         if(url.pathname==='/api/buyback/status')return send(200,buybackKeeper.status());
         if(url.pathname==='/api/public/flywheel')return send(200,flywheelKeeper.summary());
-        if(url.pathname==='/api/public/v2-rewards'){const evm=v2Rewards.summary(priceSnapshot(),undefined,key=>publicIndex.listings(key).filter(t=>t.deploymentModel==='v2-hook')),sol=toJson(solanaRewards?.summary(priceSnapshot())??null);const chains=[...(evm.chains??[]),...(sol?[sol]:[])];return send(200,{...evm,deployed:chains.length>0,chains,keeper:{...v2Keeper.status(),solana:solanaV2Keeper.status()}});}
+        if (url.pathname === '/api/public/v2-rewards') {
+          const prices = priceSnapshot();
+          const evm = v2Rewards.summary(prices, undefined, key => publicIndex.listings(key).filter(t => t.deploymentModel === 'v2-hook'));
+          const sol = toJson(solanaRewards?.summary(prices) ?? null);
+          const chains = [...(evm.chains ?? []), ...(sol ? [sol] : [])];
+          const publicStatus = { includeDetails: false };
+          return send(200, { ...evm, deployed: chains.length > 0, chains,
+            keeper: { ...v2Keeper.status(publicStatus), solana: solanaV2Keeper.status(publicStatus) } });
+        }
         {const m=url.pathname.match(/^\/api\/public\/v2-rewards\/solana-creator-manifest\/([1-9A-HJ-NP-Za-km-z]{32,44})\/(\d{1,6})$/);if(m){const manifest=solanaV2Keeper.creatorManifest?.(m[1],m[2]);return manifest?send(200,manifest):send(404,{error:'No such creator round list.'});}}
         {const m=url.pathname.match(/^\/api\/public\/v2-rewards\/solana-manifest\/([01])\/(\d{1,6})$/);if(m){const manifest=solanaV2Keeper.manifest?.(m[1],m[2]);return manifest?send(200,manifest):send(404,{error:'No such Solana round list.'});}}
         {const m=url.pathname.match(/^\/api\/public\/v2-rewards\/manifest\/(\d+)\/(0x[0-9a-fA-F]{40})\/(\d+)\/(0x[0-9a-fA-F]{40})$/);if(m){const manifest=v2Keeper.manifest(m[1],m[2],m[3],m[4]);return manifest?send(200,manifest):send(404,{error:'No published payout list for that round.'});}}
