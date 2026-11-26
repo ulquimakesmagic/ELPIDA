@@ -91,3 +91,13 @@ test('the mainnet site offers no simulation in the chain menu, the first-visit c
   assert.match(app, /\.\.\.\(mainnetSite\(\) \? \[\] : \[\{ key: 'local', name: 'Local simulation'/);
   assert.match(app, /if \(mainnetSite\(\) && saved === 'local'\) saved = null;/);
 });
+
+test('the review step and the wallet prompt show the V2.3 split and no test-launchpad label on mainnet (26 Nov 2026)', () => {
+  const flow = readFileSync(new URL('../apps/web/launch-flow.mjs', import.meta.url), 'utf8');
+  const v2 = readFileSync(new URL('../apps/web/v2-launchpad.mjs', import.meta.url), 'utf8');
+  const app = readFileSync(new URL('../apps/web/app.mjs', import.meta.url), 'utf8');
+  assert.match(flow, /row\('Fee split', v2Deployment\(net\(\)\)\?\.model === 'v2\.3-hook' \? '50% traders · 30% you · 20% Elpida'/);
+  assert.match(flow, /'v2\.3-hook' \? 'three-way' : 'five-way'/);
+  assert.match(v2, /w\.net\.mainnet \? `Confirm the launch on \$\{w\.net\.name\}/);
+  assert.doesNotMatch(app, /'mainnet beta' : 'testnet'/);
+});
