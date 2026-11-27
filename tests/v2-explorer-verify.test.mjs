@@ -20,16 +20,19 @@ test('the Standard JSON input is self-contained, uses the build settings and reb
   assert.match(compilerVersion(), /^v0\.8\.26\+commit\.[0-9a-f]{8}$/);
 });
 
-test('jobs: constructor arguments from the creation transactions, the hook through CREATE2, a CRLF build recognised, a foreign build refused', async () => {
+test('jobs: constructor arguments from the creation transactions, the hook through CREATE2, an alternate line ending recognised, a foreign build refused', async () => {
   const factoryArgs = enc(['address', 'uint256', 'bool'], [addr(), 20_000, true]);
   const hookArgs = enc(['address', 'address', 'address', 'address', 'address', 'address', 'uint256'], [addr(), addr(), addr(), addr(), addr(), addr(), 100]);
   const dropArgs = enc(['address', 'uint256', 'uint256', 'string', 'address', 'address', 'address'], [addr(), 0, 1_793_491_200, 'trader-airdrop', addr(), addr(), addr()]);
-  const crlfDrop = buildBytecode(CONTRACTS.airdrop, 'crlf');
-  assert.notEqual(crlfDrop, art.distributor.bytecode.replace(/^0x/, '').toLowerCase(), 'line endings change the metadata hash');
+  const sourcePath = CONTRACTS.airdrop.split(':')[0];
+  const diskSource = standardInput(CONTRACTS.airdrop).sources[sourcePath].content;
+  const alternateEol = diskSource.includes('\r\n') ? 'lf' : 'crlf';
+  const alternateDrop = buildBytecode(CONTRACTS.airdrop, alternateEol);
+  assert.notEqual(alternateDrop, art.distributor.bytecode.replace(/^0x/, '').toLowerCase(), 'line endings change the metadata hash');
   const txs = {
     '0xf': art.factory.bytecode + factoryArgs,
     '0xh': new Interface(['function deploy(bytes,bytes32) returns(address)']).encodeFunctionData('deploy', [art.hook.bytecode + hookArgs, '0x' + '00'.repeat(31) + '12']),
-    '0xa': '0x' + crlfDrop + dropArgs,
+    '0xa': '0x' + alternateDrop + dropArgs,
     '0xr': '0x6080' + 'ab'.repeat(40),
   };
   const provider = { getTransaction: async h => (txs[h] ? { data: txs[h] } : null) };
@@ -38,7 +41,7 @@ test('jobs: constructor arguments from the creation transactions, the hook throu
   const jobs = Object.fromEntries((await explorerJobs({ provider, record, art })).map(j => [j.key, j]));
   assert.deepEqual([jobs.factory.ok, jobs.factory.eol, jobs.factory.args], [true, 'disk', factoryArgs]);
   assert.deepEqual([jobs.hook.ok, jobs.hook.args], [true, hookArgs], 'the hook\'s arguments come out of the CREATE2 call');
-  assert.deepEqual([jobs.airdrop.ok, jobs.airdrop.eol, jobs.airdrop.args], [true, 'crlf', dropArgs], 'a Windows build is matched and its sources submitted with CRLF');
+  assert.deepEqual([jobs.airdrop.ok, jobs.airdrop.eol, jobs.airdrop.args], [true, alternateEol, dropArgs], 'the matched source line endings are used for verification');
   assert.equal(jobs.router.ok, false); assert.match(jobs.router.detail, /gitCommit/);
   assert.match(jobs.holder.detail, /not found/); assert.match(jobs.flywheel.detail, /no creation transaction/);
   assert.equal(jobs.create2, undefined, 'no address, no job');
@@ -101,6 +104,10 @@ test('verifyOnExplorer refuses the wrong chain or an unknown explorer, and repor
   const e = explorer(p => (p.action === 'getsourcecode' ? { status: '1', result: [{ SourceCode: 'x' }] } : assert.fail()));
   const out = await verifyOnExplorer({ provider, plan: { chainId: 8453 }, record, apiKey: KEY, fetch: e.fetch, sleep });
   assert.deepEqual(out, [{ check: 'factory', ok: true, detail: 'already verified: https://basescan.org/address/0x167bff77A4Ed0054784186B89Cf8A33D83e2213D#code' }]);
+  const arbitrum = { ...provider, getNetwork: async () => ({ chainId: 42161n }) };
+  const arbOut = await verifyOnExplorer({ provider: arbitrum, plan: { chainId: 42161 }, record, apiKey: KEY, fetch: e.fetch, sleep });
+  assert.deepEqual(arbOut, [{ check: 'factory', ok: true, detail: 'already verified: https://arbiscan.io/address/0x167bff77A4Ed0054784186B89Cf8A33D83e2213D#code' }]);
+  assert.match(e.calls.at(-1).url, /^https:\/\/api\.etherscan\.io\/v2\/api\?chainid=42161&/);
 });
 
 test('creation tx is read raw where ethers refuses an empty "to" (BNB Chain, 20 Nov)', async () => {
