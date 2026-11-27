@@ -118,23 +118,8 @@ export function avatar(token, cls = '', { priority = false } = {}) {
     const thumb = avatarThumbnailUrl(image, cls);
     const img = h('img', { alt: '', src: thumb, referrerPolicy: 'no-referrer', loading: priority ? 'eager' : 'lazy', decoding: 'async' });
     if (priority) img.setAttribute('fetchpriority', 'high');
-    const backdrop = cls === 'tc-image' ? img.cloneNode(false) : null;
-    if (backdrop) {
-      backdrop.className = 'tc-backdrop';
-      backdrop.setAttribute('aria-hidden', 'true');
-      backdrop.removeAttribute('fetchpriority');
-      box.append(backdrop);
-    }
     // A thumbnail that fails falls back to the original once; an original that fails shows the initials.
-    img.addEventListener('error', () => {
-      if (img.getAttribute('src') !== image) {
-        img.src = image;
-        if (backdrop) backdrop.src = image;
-      } else {
-        backdrop?.remove();
-        img.replaceWith(initials);
-      }
-    });
+    img.addEventListener('error', () => { if (img.getAttribute('src') !== image) img.src = image; else img.replaceWith(initials); });
     box.append(img);
   } else box.append(initials);
   return box;
