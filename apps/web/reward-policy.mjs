@@ -29,7 +29,7 @@ export function normalizeRewardPolicy(input = {}, chain = 'local', { allowRetire
     let target = String(row.target ?? '').trim();
     if (!['wallet','x','domain','github'].includes(kind)) throw new Error('Supported recipients are wallets, X accounts, website domains and GitHub accounts or repositories.');
     // GitHub (25 Nov 2026): verified by the V2 keeper on EVM networks only, so not in the local simulation or on Solana.
-    if (kind === 'github' && (chain === 'local' || solanaChain)) throw new Error('GitHub allocations are available on Base, BNB Chain, Robinhood Chain and Ethereum.');
+    if (kind === 'github' && (chain === 'local' || solanaChain)) throw new Error('GitHub allocations are available on EVM launchpads.');
     if (kind === 'wallet' && target && !(chain.startsWith('solana') ? /^[1-9A-HJ-NP-Za-km-z]{32,44}$/.test(target) : /^0x[0-9a-fA-F]{40}$/.test(target)) ) throw new Error('Enter a wallet address for the selected chain.');
     if (kind === 'wallet' && /^0x0{40}$/i.test(target)) throw new Error('The zero wallet cannot receive rewards.');
     if (kind === 'x') { target = target.replace(/^https:\/\/(?:www\.)?(?:x|twitter)\.com\//i,'').replace(/^@/,'').replace(/\/$/,'').toLowerCase(); if (!/^[a-z0-9_]{1,15}$/.test(target)) throw new Error('Enter a valid X handle.'); }

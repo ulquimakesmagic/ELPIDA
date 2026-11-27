@@ -34,7 +34,7 @@ export function toUnits(text, decimals) {
 export function renderSwap(ctx) {
   const root = h('section.swap-page', { 'aria-label': 'Swap' });
   const net = ctx.wallet?.net, key = net?.key;
-  const head = h('div.page-head', h('div', h('h1', 'Swap'), h('p.muted', 'Convert between the native coin, USDC and tokenized stocks on this network.')));
+  const head = h('div.page-head', h('div', h('h1', 'Swap'), h('p.muted', 'Convert between assets available on the selected network.')));
   if (ctx.mode === 'local' || !net?.mainnet || net.kind === 'solana') {
     root.append(head, callout('', 'info', 'Swap works on mainnet networks. Choose one with the network menu.'));
     return { root };

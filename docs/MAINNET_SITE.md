@@ -25,6 +25,7 @@ prices, analytics and token pages work from the record alone. No Model 10 or Mod
 | `ELPIDA_MODE=mainnet` | Serve mainnets only |
 | `ELPIDA_RPC_8453` | Private Base RPC (Alchemy). The server's indexer, prices and keeper use it; browsers use `https://mainnet.base.org` |
 | `ELPIDA_RPC_56`, `ELPIDA_RPC_4663`, `ELPIDA_RPC_1` | The same for BNB Chain, Robinhood Chain and Ethereum, once each has a ready record (Alchemy covers all three: `bnb-mainnet`, `robinhood-mainnet`, `eth-mainnet`). Browsers use the public RPC in `packages/core/mainnets.mjs` |
+| `ELPIDA_RPC_42161` | Private HTTPS Arbitrum One RPC. Set it in `/etc/elpida/elpida.env` on Oracle before merging the Arbitrum ready record. |
 | `ELPIDA_V2_KEEPER_KEY` | The keeper wallet named in the plan: collects fees and pays creator rewards. Fund it with about 0.002 ETH on Base |
 | `ELPIDA_PUBLIC_URL`, `PINATA_JWT`, a volume, `ELPIDA_BACKUP_*` | As for any mainnet (`PRODUCTION_GUARD.md`) |
 
@@ -47,3 +48,5 @@ HTTPS URLs, comma-separated; the indexer fails over between them) to an endpoint
 `ELPIDA_INDEX_RPC_8453=https://base-rpc.publicnode.com,https://mainnet.base.org`. It is used by the public indexer
 only; the keeper, prices and the production guard keep `ELPIDA_RPC_<chainId>`. Indexer errors now log a short `reason`
 with URLs and keys removed.
+
+For Arbitrum One, set `ELPIDA_INDEX_RPC_42161=https://arb1.arbitrum.io/rpc,https://arbitrum-one-rpc.publicnode.com` alongside the private server RPC. Once `/api/public/status` shows Arbitrum caught up, review its public launch, buy and sell in Analytics. The Contracts section of Docs reads the factory, hook, router, USDC distributor and treasury from the same ready record.

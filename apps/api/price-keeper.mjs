@@ -6,7 +6,7 @@ import {parsePriceUpdate,PYTH_RECEIVER} from '../../packages/solana/client.mjs';
 import { usdOracles,SOLANA_ORACLES } from '../../packages/core/usd-oracles.mjs';
 const oracleAbi=new Interface(['function decimals() view returns(uint8)','function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)']);
 export const PRICE_MAX_AGE = 180;
-export const CHAIN_ASSET = Object.freeze({local:'ETH','base-sepolia':'ETH','ethereum-sepolia':'ETH','bnb-testnet':'BNB','robinhood-testnet':'ETH','solana-devnet':'SOL','solana-localnet':'SOL','solana-mainnet':'SOL','base-mainnet':'ETH','bnb-mainnet':'BNB','robinhood-mainnet':'ETH','ethereum-mainnet':'ETH'});
+export const CHAIN_ASSET = Object.freeze({local:'ETH','base-sepolia':'ETH','ethereum-sepolia':'ETH','bnb-testnet':'BNB','robinhood-testnet':'ETH','solana-devnet':'SOL','solana-localnet':'SOL','solana-mainnet':'SOL','base-mainnet':'ETH','bnb-mainnet':'BNB','robinhood-mainnet':'ETH','ethereum-mainnet':'ETH','arbitrum-mainnet':'ETH'});
 export function validatePrice(value, now = Date.now()/1000) {
   const usd=Number(value?.usd), updatedAt=Number(value?.updatedAt);
   if(!Number.isFinite(usd)||usd<=0||!Number.isSafeInteger(updatedAt)||updatedAt<=0||updatedAt>now+5||now-updatedAt>(value.maxAge??PRICE_MAX_AGE))throw new Error('Price is unavailable or stale.');

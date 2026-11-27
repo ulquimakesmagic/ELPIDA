@@ -6,7 +6,7 @@
 // default 50 = 0.5%, capped at 1%) through Kyber's extraFee, paid to the network's treasury Safe. It is taken in the native
 // coin or USDC side of the swap where there is one, so the treasury collects ETH/BNB/USDC rather than stock tokens.
 export const KYBER_API = 'https://aggregator-api.kyberswap.com';
-export const KYBER_CHAINS = Object.freeze({ 'base-mainnet': 'base', 'bnb-mainnet': 'bsc', 'ethereum-mainnet': 'ethereum', 'robinhood-mainnet': 'robinhood' });
+export const KYBER_CHAINS = Object.freeze({ 'base-mainnet': 'base', 'bnb-mainnet': 'bsc', 'ethereum-mainnet': 'ethereum', 'robinhood-mainnet': 'robinhood', 'arbitrum-mainnet': 'arbitrum' });
 /** KyberSwap's MetaAggregationRouterV2 (the same address on these chains). */
 export const KYBER_ROUTER = '0x6131B5fae19EA4f9D964eAc0408E4408b66337b5';
 export const NATIVE = '0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE';

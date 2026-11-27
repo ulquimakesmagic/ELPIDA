@@ -21,6 +21,6 @@ test('GitHub allocations: an account or a repository, on EVM public networks onl
   assert.equal(policy('https://github.com/Elpida-Labs/Launchpad.git/').recipients[1].target, 'elpida-labs/launchpad');
   assert.equal(policy('Elpida-Dev').recipients[1].target, 'elpida-dev');
   for (const bad of ['-bad', 'a/b/c', 'owner/..', 'bad_owner', '']) assert.throws(() => policy(bad), /GitHub account/, bad);
-  assert.throws(() => policy('elpida', 'local'), /Base, BNB Chain, Robinhood Chain and Ethereum/);
-  assert.throws(() => policy('elpida', 'solana-mainnet'), /Base, BNB Chain, Robinhood Chain and Ethereum/);
+  assert.throws(() => policy('elpida', 'local'), /EVM launchpads/);
+  assert.throws(() => policy('elpida', 'solana-mainnet'), /EVM launchpads/);
 });

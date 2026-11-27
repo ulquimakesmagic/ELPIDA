@@ -34,7 +34,7 @@ export function seoText(text, { mode, names = [] } = {}) {
   const where = names.length ? names.join(', ') : 'mainnet';
   const swaps = [
     ['Elpida currently runs on public testnets: Base Sepolia, Ethereum Sepolia, BNB Chain Testnet, Robinhood Chain Testnet and Solana Devnet. Mainnet is not open to the public.', `Elpida runs on ${where} mainnet. More chains follow as each gets its own deployment and checks.`],
-    ['No. Elpida is in testnet. Its contracts have not had an independent audit. Do not treat any testnet token as having value, and do not send funds you cannot afford to lose to any contract that has not been audited.', `Yes, on ${where} mainnet. Every contract is open source and verified on its chain explorer. As with any token, only trade what you can afford to lose.`],
+    ['No. Elpida is in testnet. Its contracts have not had an independent audit. Do not treat any testnet token as having value, and do not send funds you cannot afford to lose to any contract that has not been audited.', `Yes, on ${where} mainnet. The contracts are open source. The Docs page links to each chain explorer. Only trade what you can afford to lose.`],
     [' On testnets the amounts use test funds.', ''],
     [' On testnets the sizes are scaled down with the same shape.', ''],
     ['Only as test assets on testnets.', 'Yes. Approved tokenized stocks can be a trading pair: stocks issued by Coinbase on Base, Ondo Global Markets stocks on BNB Chain and Ethereum, and Robinhood stock tokens on Robinhood Chain. Each is priced by a Chainlink feed. Stock pairs are not available to US persons.'],
@@ -58,7 +58,7 @@ export function seoText(text, { mode, names = [] } = {}) {
     ['Elpida runs on a local simulation and public testnets, its contracts are not audited, and nothing here is financial advice.', `Elpida runs on ${where} mainnet, and nothing here is financial advice.`],
     ['Choose where the token lives (Base Sepolia, Ethereum Sepolia, BNB Chain Testnet, Robinhood Chain Testnet and Solana Devnet)', `Choose where the token lives (${where})`],
     ['Elpida runs on Base Sepolia, Ethereum Sepolia, BNB Chain Testnet, Robinhood Chain Testnet and Solana Devnet.', `Elpida runs on ${where} mainnet.`],
-    ['Elpida is in testnet and its contracts have not had an independent audit.', 'The contracts are open source and verified on every chain, but have not yet had an independent audit.'],
+    ['Elpida is in testnet and its contracts have not had an independent audit.', 'The contracts are open source. The Docs page lists the deployed addresses and their explorer links.'],
     ['Currently running on public testnets.', `Live on ${where} mainnet.`],
     ['It is in testnet; its contracts are not audited', 'It runs on mainnet with real funds'],
   ];
