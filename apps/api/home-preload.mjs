@@ -4,11 +4,10 @@
 // and names the first logos in the page head as preloads, so the download starts with the HTML. A logo that no longer
 // leads by the time the page ranks costs one small thumbnail and nothing else.
 import { trendingTokens, pairTokenReferences } from '../web/discovery.mjs';
-import { safeImage, thumbnailUrl } from '../web/ui.mjs';
+import { safeImage, avatarThumbnailUrl } from '../web/ui.mjs';
 import { usdReferenceFor } from '../../packages/core/pairs.mjs';
 
-/** The trending cards' thumbnail size in CSS pixels (ui.mjs AVATAR_SIZES['tc-image']). */
-const TREND_IMAGE = 256;
+const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
 
 /**
  * Thumbnail URLs of the first `limit` trending tokens, as the browser will request them, for this server's own stored
@@ -26,18 +25,18 @@ export function trendingCards({ sources, prices = {}, now = Math.floor(Date.now(
   const tokens = pairTokenReferences(sources.flatMap(({ network, tokens, solana }) => (tokens ?? []).map(t => ({ ...t, network,
     usdReference: usdReferenceFor(solana ? { ...t, network, usdReference: t.pair === 'xstock' ? t.usdReference ?? null : null } : { ...t, network }, prices?.[network] ?? null, now) }))));
   return trendingTokens(tokens, limit, now).map(t => {
-    const src = thumbnailUrl(safeImage(t.metadata?.image || t.image || imageOf(t) || ''), TREND_IMAGE);
-    return { src: /^\/api\/content\/[A-Za-z0-9]+\?w=\d+$/.test(src) ? src : null, name: String(t.metadata?.name || t.name || '').slice(0, 40), symbol: String(t.metadata?.symbol || t.symbol || '').slice(0, 12) };
+    const src = avatarThumbnailUrl(safeImage(t.metadata?.image || t.image || imageOf(t) || ''), 'tc-image');
+    return { src: /^\/api\/content\/[A-Za-z0-9]+\?w=\d+&fit=inside$/.test(src) ? src : null, name: String(t.metadata?.name || t.name || '').slice(0, 40), symbol: String(t.metadata?.symbol || t.symbol || '').slice(0, 12) };
   });
 }
 
 /** The first `limit` trending cards' logos in rank order: this site's own thumbnail URL, or null for any other image. */
 export function trendingLogos(options) { return trendingCards(options).map(c => c.src); }
 
-/** The page head with a high-priority image preload for each URL (attribute-safe: the URLs match a fixed pattern). */
+/** The page head with a high-priority image preload for each URL. */
 export function withPreloads(html, urls) {
   if (!urls.length || !html.includes('</head>')) return html;
-  return html.replace('</head>', urls.map(u => `  <link rel="preload" as="image" href="${u}" fetchpriority="high">\n`).join('') + '</head>');
+  return html.replace('</head>', urls.map(u => `  <link rel="preload" as="image" href="${esc(u)}" fetchpriority="high">\n`).join('') + '</head>');
 }
 
 /**
@@ -47,15 +46,14 @@ export function withPreloads(html, urls) {
  * loading skeleton in place until the lists are read, then draws the real cards over the same space, so nothing moves.
  */
 export function homeFirstScreen(items) {
-  // Each card: its logo, rank and name over the logo, as the real card shows them, so a slow load reads as loading cards,
-  // not as bare pictures. Names come from token metadata: escaped, never trusted as markup.
-  const esc = v => String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]);
+  // Match the artwork and details layout of the interactive cards while the token lists load.
   const card = i => {
     const item = typeof items[i] === 'string' ? { src: items[i] } : items[i] ?? {}, src = item.src;
-    const band = item.name ? `<span class="rank-chip">#${i + 1}</span><div class="tc-band"><h3 class="tc-name">${esc(item.name)}</h3>${item.symbol ? `<span class="tc-ticker">$${esc(item.symbol)}</span>` : ''}</div>` : '';
-    return src
-      ? `<li class="trend-card trend-skeleton"><div class="tc-media"><div class="avatar tc-image"><img alt="" src="${src}" decoding="async"${i < 2 ? ' fetchpriority="high"' : ''}></div>${band}</div><div class="skeleton trend-skeleton-line"></div></li>`
-      : '<li class="trend-card trend-skeleton"><div class="tc-media skeleton"></div><div class="skeleton trend-skeleton-line"></div></li>';
+    const media = src
+      ? `<div class="tc-media"><div class="avatar tc-image"><img alt="" src="${esc(src)}" decoding="async"${i < 2 ? ' fetchpriority="high"' : ''}></div></div>`
+      : '<div class="tc-media skeleton"></div>';
+    const details = src && item.name ? `<div class="tc-heading"><span class="rank-chip">#${i + 1}</span><h3 class="tc-name">${esc(item.name)}</h3></div>${item.symbol ? `<span class="tc-ticker">$${esc(item.symbol)}</span>` : ''}` : '';
+    return `<li class="trend-card trend-skeleton">${media}<div class="tc-band">${details}</div><div class="skeleton trend-skeleton-line"></div></li>`;
   };
   return '<div class="explore" aria-busy="true"><h1 class="visually-hidden">Explore tokens</h1>'
     + '<section class="home-section trending" aria-hidden="true"><div class="section-head"><div class="section-title"><h2>Trending</h2><span class="section-sub">By 24h volume</span></div></div>'

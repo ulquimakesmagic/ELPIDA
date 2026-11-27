@@ -102,17 +102,20 @@ export function ownImagePath(src) {
   } catch { /* relative or invalid: unchanged */ }
   return src;
 }
-export function thumbnailUrl(src, cssPixels = 64) {
+export function thumbnailUrl(src, cssPixels = 64, fit = 'cover') {
   src = ownImagePath(src);
   if (!/^\/api\/content\/[A-Za-z0-9]+$/.test(String(src))) return src;
-  return `${src}?w=${Math.min(512, Math.ceil(cssPixels * 2))}`;
+  return `${src}?w=${Math.min(512, Math.ceil(cssPixels * 2))}${fit === 'inside' ? '&fit=inside' : ''}`;
+}
+export function avatarThumbnailUrl(src, cls = '') {
+  return thumbnailUrl(src, AVATAR_SIZES[cls] ?? 64, cls === 'tc-image' ? 'inside' : 'cover');
 }
 export function avatar(token, cls = '', { priority = false } = {}) {
   const box = h(`div.avatar${cls ? '.' + cls : ''}`);
   const image = safeImage(token?.metadata?.image ?? token?.image ?? '');
   const initials = h('span.initials', { text: (token?.symbol || token?.name || '?').slice(0, 2).toUpperCase() });
   if (image) {
-    const thumb = thumbnailUrl(image, AVATAR_SIZES[cls] ?? 64);
+    const thumb = avatarThumbnailUrl(image, cls);
     const img = h('img', { alt: '', src: thumb, referrerPolicy: 'no-referrer', loading: priority ? 'eager' : 'lazy', decoding: 'async' });
     if (priority) img.setAttribute('fetchpriority', 'high');
     // A thumbnail that fails falls back to the original once; an original that fails shows the initials.

@@ -142,8 +142,11 @@ function trendCard(token, rank, ctx) {
     // The whole card opens the token; the name link is the one keyboard and screen reader users get.
     h('a.card-cover', { href, tabIndex: -1, 'aria-hidden': 'true' }),
     // The first trending logos are the home page's largest image on most screens: fetch them first, not lazily.
-    h('div.tc-media', avatar(token, 'tc-image', { priority: rank <= 2 }), rankChip, pill, kothBadge(token, ctx.king?.()),
-      h('div.tc-band', h('h3.tc-name', h('a.tc-link', { href }, name)), h('span.tc-ticker', `$${symbol}`, pairStack(token, ctx.nativeSymbol(token), ctx.networkName(token))), curveLine(token))),
+    h('div.tc-media', avatar(token, 'tc-image', { priority: rank <= 2 })),
+    h('div.tc-band',
+      h('div.tc-heading', rankChip, h('h3.tc-name', h('a.tc-link', { href }, name)), pill),
+      h('span.tc-ticker', `$${symbol}`, pairStack(token, ctx.nativeSymbol(token), ctx.networkName(token)), kothBadge(token, ctx.king?.())),
+      curveLine(token)),
     h('div.tc-stats', h('div', h('span.label-xs', 'Market cap'), cap), h('div', h('span.label-xs', '24h volume'), volume)),
     h('div.tc-foot', h('span.mono.tc-address', short(token.address)), token.created ? timeNode('time.mono.tc-age', Math.floor(token.created / 1000), 'age-long') : null)));
   card._sig = staticSignature(token);
@@ -422,7 +425,7 @@ export function createExplore(source) {
 export function exploreSkeleton() {
   return h('div.explore', { 'aria-busy': 'true' }, h('h1.visually-hidden', 'Explore tokens'),
     h('section.home-section.trending', { 'aria-hidden': 'true' }, h('div.section-head', h('div.section-title', h('h2', 'Trending'), h('span.section-sub', 'By 24h volume'))),
-      h('div.scroll-fade', h('ul.trend-track', Array.from({ length: 5 }, () => h('li.trend-card.trend-skeleton', h('div.tc-media.skeleton'), h('div.skeleton.trend-skeleton-line')))))),
+      h('div.scroll-fade', h('ul.trend-track', Array.from({ length: 5 }, () => h('li.trend-card.trend-skeleton', h('div.tc-media.skeleton'), h('div.tc-band'), h('div.skeleton.trend-skeleton-line')))))),
     h('section.home-section.explore-section', h('div.explore-head', h('h2', 'Explore'), h('span.launched', 'Loading…')),
       h('div.skeleton.explore-controls-skeleton', { 'aria-hidden': 'true' }),
       h('div.list-grid', Array.from({ length: 6 }, () => h('div.skeleton.list-skeleton', { 'aria-hidden': 'true' })))));

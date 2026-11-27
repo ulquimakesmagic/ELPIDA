@@ -46,6 +46,19 @@ test('no thumbnail (so the original is served) for SVG, non-images, undecodable 
   assert.equal(await thumbs.get(rawCid(tiny), { type: 'image/webp', data: tiny.toString('base64') }, 512), null, 'not smaller than the original');
 });
 
+test('Trending thumbnails preserve the full aspect ratio and cache independently of square thumbnails', async t => {
+  const dir = mkdtempSync(join(tmpdir(), 'elpida-thumbs-')); t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const png = await sharp({ create: { width: 640, height: 320, channels: 3, background: '#359' } }).png({ compressionLevel: 0 }).toBuffer();
+  const cid = rawCid(png), record = { type: 'image/png', data: png.toString('base64') };
+  const thumbs = new Thumbnails({ dir });
+  const [square, inside] = await Promise.all([thumbs.get(cid, record, 256), thumbs.get(cid, record, 256, 'inside')]);
+  const [squareSize, insideSize] = await Promise.all([sharp(square).metadata(), sharp(inside).metadata()]);
+  assert.deepEqual([squareSize.width, squareSize.height], [256, 256]);
+  assert.deepEqual([insideSize.width, insideSize.height], [256, 128]);
+  assert.deepEqual(readdirSync(dir).sort(), [`${cid}-256-inside.webp`, `${cid}-256.webp`]);
+  assert.deepEqual(await thumbs.get(cid, record, 256, 'fill'), square);
+});
+
 test('avatars ask for a thumbnail of stored logos only, at twice their displayed size', async () => {
   globalThis.document ??= undefined;
   const { thumbnailUrl } = await import('../apps/web/ui.mjs').catch(() => ({}));
