@@ -50,7 +50,7 @@ export function homeFirstScreen(items) {
   const card = i => {
     const item = typeof items[i] === 'string' ? { src: items[i] } : items[i] ?? {}, src = esc(item.src);
     const media = src
-      ? `<div class="tc-media"><div class="avatar tc-image"><img class="tc-backdrop" alt="" aria-hidden="true" src="${src}" decoding="async"><img alt="" src="${src}" decoding="async"${i < 2 ? ' fetchpriority="high"' : ''}></div></div>`
+      ? `<div class="tc-media"><div class="avatar tc-image"><img alt="" src="${src}" decoding="async"${i < 2 ? ' fetchpriority="high"' : ''}></div></div>`
       : '<div class="tc-media skeleton"></div>';
     const details = src && item.name ? `<div class="tc-heading"><span class="rank-chip">#${i + 1}</span><h3 class="tc-name">${esc(item.name)}</h3></div>${item.symbol ? `<span class="tc-ticker">$${esc(item.symbol)}</span>` : ''}` : '';
     return `<li class="trend-card trend-skeleton">${media}<div class="tc-band">${details}</div><div class="skeleton trend-skeleton-line"></div></li>`;
