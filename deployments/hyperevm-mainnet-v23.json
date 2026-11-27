@@ -1,0 +1,214 @@
+{
+  "network": "hyperevm-mainnet-v23",
+  "name": "HyperEVM",
+  "chainId": 999,
+  "planSha256": "d9c070377c3a3072f3bf20fef310f3fee89c02ac09e718b53d439067f97cdedc",
+  "approval": "hyperevm-mainnet-v23-d9c070377c3a3072.json",
+  "model": "v2.3-hook",
+  "compiler": "solc 0.8.26 (cancun, via IR, 200 runs)",
+  "gitCommit": "eb1c074464e4f404186ab162202b254d5b9505e9",
+  "startMcapUsd": 20000,
+  "contracts": {
+    "create2": "0xB549943443f12006D83E6c2a0B3eD0bd7a3DE5e8",
+    "factory": "0xC3C730EFade65F72B677E877d2ACcb8C5a697960",
+    "airdrop": "0xDD7620485af435D6f276c99011D03309a04EC95B",
+    "hook": "0x7Db82aF4E4F037670f71703115CE84b2F0c3A8cc",
+    "router": "0x77B003Db95Ee4041Eb1af6EFD5Ab1eEf47fD08c9"
+  },
+  "txs": {
+    "create2": {
+      "hash": "0x248fd3ece242b244cacef3d029cf8f51a03d1bc70eb22838b5de268c991344c0",
+      "block": 52419664
+    },
+    "factory": {
+      "hash": "0xcb459b1422daf1777f486b08bd223b77d08813c45f6d1e956228c9ef1f3bd86a",
+      "block": 52419725
+    },
+    "airdrop": {
+      "hash": "0xf8bda1c433168477fd626b503370fa04c6cbf6fbc10f313ba37888f62217fa8d",
+      "block": 52419786
+    },
+    "hook": {
+      "hash": "0xd80bb4f7c300f464e2c337c67c57c58fbc555f353655c9ed3b237079f55235ed",
+      "block": 52419847
+    },
+    "router": {
+      "hash": "0x5e8f79c34b0387481e3bc414a6ce16f185d362abe5d6d8b6218d66765060c10d",
+      "block": 52419908
+    }
+  },
+  "deployer": "0x9c99387c63A5d893D3bDe9c71CF2fe2b1191F08E",
+  "block": 52419725,
+  "airdropGenesis": 1793491200,
+  "hookSalt": "0x0000000000000000000000000000000000000000000000000000000000003f6f",
+  "gate": {
+    "recordedAt": "2026-11-27T22:13:19.345Z",
+    "plan": {
+      "chainId": 999,
+      "network": "HyperEVM",
+      "mainnet": true,
+      "startMcapUsd": 20000,
+      "treasury": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01",
+      "recipients": [
+        "0xDD7620485af435D6f276c99011D03309a04EC95B",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000"
+      ],
+      "minFeeBps": 100,
+      "metadataRequired": true,
+      "approver": "Malik",
+      "approvedAt": 1795737600000,
+      "planHash": "0x6fd39ea4ce2df8eb56b47e9bcf39813203bc0329ffca180fa6a5805368d191ad"
+    },
+    "deployment": {
+      "factory": "0xC3C730EFade65F72B677E877d2ACcb8C5a697960",
+      "hook": "0x7Db82aF4E4F037670f71703115CE84b2F0c3A8cc",
+      "router": "0x77B003Db95Ee4041Eb1af6EFD5Ab1eEf47fD08c9",
+      "blockNumber": 52419725,
+      "transactions": [
+        "0x248fd3ece242b244cacef3d029cf8f51a03d1bc70eb22838b5de268c991344c0",
+        "0xcb459b1422daf1777f486b08bd223b77d08813c45f6d1e956228c9ef1f3bd86a",
+        "0xf8bda1c433168477fd626b503370fa04c6cbf6fbc10f313ba37888f62217fa8d",
+        "0xd80bb4f7c300f464e2c337c67c57c58fbc555f353655c9ed3b237079f55235ed",
+        "0x5e8f79c34b0387481e3bc414a6ce16f185d362abe5d6d8b6218d66765060c10d"
+      ]
+    }
+  },
+  "constructorChecks": [
+    {
+      "check": "factory treasury",
+      "ok": true,
+      "detail": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01"
+    },
+    {
+      "check": "factory start $20,000",
+      "ok": true,
+      "detail": "20000"
+    },
+    {
+      "check": "factory requires metadata",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "check": "factory has launch controls",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "check": "hook factory",
+      "ok": true,
+      "detail": "0xC3C730EFade65F72B677E877d2ACcb8C5a697960"
+    },
+    {
+      "check": "hook treasury",
+      "ok": true,
+      "detail": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01"
+    },
+    {
+      "check": "hook PoolManager",
+      "ok": true,
+      "detail": "0x12D4Fd9C5DeDd00ab8a0bCe2CF0167bbf94b6B1F"
+    },
+    {
+      "check": "hook airdrop vault",
+      "ok": true,
+      "detail": "0xDD7620485af435D6f276c99011D03309a04EC95B"
+    },
+    {
+      "check": "hook flywheel vault",
+      "ok": true,
+      "detail": "0x0000000000000000000000000000000000000000"
+    },
+    {
+      "check": "hook holder vault",
+      "ok": true,
+      "detail": "0x0000000000000000000000000000000000000000"
+    },
+    {
+      "check": "hook is V2.3",
+      "ok": true,
+      "detail": "23"
+    },
+    {
+      "check": "hook split 50% traders / 30% creator / 20% treasury / 0 / 0",
+      "ok": true,
+      "detail": "5000/3000/2000/0/0"
+    },
+    {
+      "check": "hook minimum fee",
+      "ok": true,
+      "detail": "100"
+    },
+    {
+      "check": "airdrop operator is the keeper",
+      "ok": true,
+      "detail": "0x10299c3Cff25C3e775e91463c5D9c8670483d39F"
+    },
+    {
+      "check": "airdrop period",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "check": "router hook",
+      "ok": true,
+      "detail": "0x7Db82aF4E4F037670f71703115CE84b2F0c3A8cc"
+    },
+    {
+      "check": "router PoolManager",
+      "ok": true,
+      "detail": "0x12D4Fd9C5DeDd00ab8a0bCe2CF0167bbf94b6B1F"
+    },
+    {
+      "check": "gate (#234) verifyDeployment: no mismatches",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "safeBatch": "hyperevm-mainnet-v23-safe-batch.json",
+  "status": "ready",
+  "pending": {
+    "safe": "Execute the Safe batch (setHook, configureUsdPricing, approveQuote USDC, setGuardian, setDailyLaunchCap), then run verify."
+  },
+  "verify": {
+    "at": "2026-11-27T22:30:14.612Z",
+    "checks": [
+      {
+        "check": "factory hook",
+        "ok": true,
+        "detail": "0x7Db82aF4E4F037670f71703115CE84b2F0c3A8cc"
+      },
+      {
+        "check": "USD feed",
+        "ok": true,
+        "detail": "0x2b25BC41D55de29F3A2e163F8Eebf63966B25b57"
+      },
+      {
+        "check": "USDC approved at $25,000 virtual",
+        "ok": true,
+        "detail": "25000000000"
+      },
+      {
+        "check": "guardian",
+        "ok": true,
+        "detail": "0xfC08505EfEf934c3fF19d82D189f60f28a0255eB"
+      },
+      {
+        "check": "daily launch cap",
+        "ok": true,
+        "detail": "1000"
+      },
+      {
+        "check": "launches paused",
+        "ok": true,
+        "detail": "false"
+      },
+      {
+        "check": "native start price readable",
+        "ok": true,
+        "detail": "394.082759702322726409 native = $25,000 virtual"
+      }
+    ]
+  }
+}
