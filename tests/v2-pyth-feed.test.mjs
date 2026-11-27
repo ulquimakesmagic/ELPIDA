@@ -96,7 +96,7 @@ test('scripts/ondo-pyth-feeds.mjs: maps Ondo tickers to Pyth equity feeds, check
 
 test('launch page pushes a fresh Pyth price before a Pyth-priced stock launch, through the server relay', async () => {
   const page = readFileSync(new URL('../apps/web/v2-launchpad.mjs', import.meta.url), 'utf8');
-  assert.match(page, /if \(pair === 'xstock'\) await refreshPythPrice\(w, factory, asset\);\n  const quote/);
+  assert.match(page, /if \(pair === 'xstock'\) await refreshPythPrice\(w, factory, asset\);\r?\n  const quote/);
   assert.match(page, /fetchImpl\(`\/api\/public\/pyth-update\?id=\$\{id\}`\)/);
   const server = readFileSync(new URL('../apps/api/server.mjs', import.meta.url), 'utf8');
   assert.ok(server.includes("if(url.pathname==='/api/public/pyth-update')"));

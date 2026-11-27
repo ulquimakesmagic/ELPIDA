@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 contract MockUsdFeed {
-    uint8 public constant decimals=8;
+    uint8 public decimals=8;
     string public description="ETH / USD";
     address public immutable owner=msg.sender;
     int256 public answer;
@@ -14,5 +14,6 @@ contract MockUsdFeed {
     }
     /// BNB Chain rehearsals read "BNB / USD" (13 November).
     function setDescription(string calldata value) external { require(msg.sender==owner,"owner"); description=value; }
+    function setDecimals(uint8 value) external { require(msg.sender==owner,"owner"); decimals=value; }
     function latestRoundData() external view returns(uint80,int256,uint256,uint256,uint80){return(roundId,answer,updatedAt,updatedAt,answeredInRound);}
 }
