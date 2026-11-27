@@ -1,6 +1,7 @@
 import {h,icon} from './ui.mjs';
 import {stockIdentity,looksLikeStock} from '/stock-catalog.mjs';
-const ASSET_ICONS={ETH:'/assets/chains/ethereum.png',WETH:'/assets/chains/ethereum.png',BNB:'/assets/chains/bnb.svg',tBNB:'/assets/chains/bnb.svg',WBNB:'/assets/chains/bnb.svg',SOL:'/assets/chains/solana.svg',WSOL:'/assets/chains/solana.svg',USDC:'/assets/tokens/usdc.png',tUSDC:'/assets/tokens/usdc.png',USDG:'/assets/tokens/usdg.png',tUSDG:'/assets/tokens/usdg.png'};
+const HYPE_ICON = 'hyperevm.svg';
+const ASSET_ICONS={ETH:'/assets/chains/ethereum.png',WETH:'/assets/chains/ethereum.png',BNB:'/assets/chains/bnb.svg',tBNB:'/assets/chains/bnb.svg',WBNB:'/assets/chains/bnb.svg',SOL:'/assets/chains/solana.svg',WSOL:'/assets/chains/solana.svg',HYPE:`/assets/chains/${HYPE_ICON}`,WHYPE:`/assets/chains/${HYPE_ICON}`,USDC:'/assets/tokens/usdc.png',tUSDC:'/assets/tokens/usdc.png',USDG:'/assets/tokens/usdg.png',tUSDG:'/assets/tokens/usdg.png'};
 /**
  * A tokenized stock's tile: its ticker on a colour of its own (or an operator-supplied logo), with a small issuer mark
  * (Ondo "on", xStocks "x", a flask for a test stand-in). `size` is 'sm' (inline, 20px), 'md' (32px) or 'lg' (44px).
@@ -23,6 +24,7 @@ const CHAIN_ICONS = new Map([
   ['base', 'base.png'],
   ['ethereum', 'ethereum.png'],
   ['robinhood', 'robinhood.png'],
+  ['hyperevm', HYPE_ICON],
 ]);
 
 export function chainIcon(key) {
