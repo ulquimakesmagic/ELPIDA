@@ -33,7 +33,7 @@ export const CONTRACTS = {
   router: 'contracts/evm/v4/ElpidaV4Router.sol:ElpidaV4Router',
 };
 const ART_KEY = { create2: 'create2', factory: 'factory', airdrop: 'distributor', holder: 'distributor', flywheel: 'flywheel', hook: 'hook', router: 'router' };
-export const EXPLORERS = { 8453: 'https://basescan.org', 84532: 'https://sepolia.basescan.org', 1: 'https://etherscan.io', 11155111: 'https://sepolia.etherscan.io', 56: 'https://bscscan.com', 97: 'https://testnet.bscscan.com', 4663: 'https://robinhoodchain.blockscout.com' };
+export const EXPLORERS = { 8453: 'https://basescan.org', 84532: 'https://sepolia.basescan.org', 1: 'https://etherscan.io', 11155111: 'https://sepolia.etherscan.io', 56: 'https://bscscan.com', 97: 'https://testnet.bscscan.com', 4663: 'https://robinhoodchain.blockscout.com', 42161: 'https://arbiscan.io' };
 /**
  * Chains whose explorer is a Blockscout (Robinhood Chain, 23 November 2026): Etherscan API V2 does not cover them, so
  * the same calls go to the explorer's own Etherscan-compatible API, which needs no key.
