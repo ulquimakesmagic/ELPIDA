@@ -46,6 +46,25 @@ test('display prices renew before expiry instead of disappearing between refresh
  now=1181;assert.equal(k.snapshot()['solana-devnet'].status,'fresh');assert.equal(k.snapshot()['solana-devnet'].updatedAt,1121);
 });
 
+test('HyperEVM publishes its own HYPE oracle price and preserves the source timestamp', () => {
+  let now = 1000;
+  const keeper = new PriceKeeper({ now: () => now, oracles: {} });
+  keeper.values.ETH = { usd: 2500, updatedAt: now };
+  keeper.chainValues['hyperevm-mainnet'] = {
+    usd: 64.5, updatedAt: 900, maxAge: 86400, source: 'On-chain USD oracle', referenceOnly: false,
+  };
+
+  const price = keeper.snapshot()['hyperevm-mainnet'];
+  assert.equal(price.symbol, 'HYPE');
+  assert.equal(price.usd, 64.5);
+  assert.equal(price.updatedAt, 900);
+  assert.equal(price.status, 'fresh');
+  assert.equal(price.referenceOnly, false);
+
+  now = 87301;
+  assert.equal(keeper.snapshot()['hyperevm-mainnet'].status, 'stale');
+});
+
 test('a fresh ETH oracle on another chain covers an unavailable chain without mixing native assets',()=>{
  let now=1000;const k=new PriceKeeper({now:()=>now,oracles:{}});
  k.values.ETH={usd:2500,updatedAt:700,source:'CoinGecko'};
