@@ -31,7 +31,9 @@ test('the home page draws the first trending logos into the app\'s own loading s
   const out = withFirstScreen(page, [null, a]);
   assert.doesNotMatch(out, /page-head/); assert.match(out, /<div class="explore" aria-busy="true">/);
   const cards = out.match(/<li class="trend-card trend-skeleton">.*?<\/li>/g);
-  assert.equal(cards.length, 5); assert.match(cards[0], /tc-media skeleton/); assert.match(cards[1], new RegExp(`<img alt="" src="${a.replaceAll('&', '&amp;').replace(/[?]/g, '\\?')}" decoding="async" fetchpriority="high">`));
+  assert.equal(cards.length, 5); assert.match(cards[0], /tc-media skeleton/);
+  const src = a.replaceAll('&', '&amp;').replace(/[?]/g, '\\?');
+  assert.match(cards[1], new RegExp(`<img class="tc-backdrop" alt="" aria-hidden="true" src="${src}" decoding="async"><img alt="" src="${src}" decoding="async" fetchpriority="high">`));
   assert.equal(out.match(/list-skeleton/g).length, 6);
   assert.equal(withFirstScreen(page, [null, null]), page, 'no logo of our own: the page is unchanged');
   assert.equal(withFirstScreen('<div id="view"></div>', [a]), '<div id="view"></div>');
