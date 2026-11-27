@@ -15,6 +15,9 @@ test('tokens: native, USDC and the verified stocks; only Kyber chains', () => {
   assert.deepEqual(swapTokens({ ...base, key: 'solana-mainnet' }, list), []);
   assert.equal(KYBER_CHAINS['robinhood-mainnet'], 'robinhood', 'Robinhood Chain swaps through Kyber too (24 November 2026)');
   assert.equal(KYBER_CHAINS['bnb-mainnet'], 'bsc');
+  const arbitrum = { ...base, key: 'arbitrum-mainnet', chainId: 42161, payoutStable: { ...base.payoutStable, address: '0xaf88d065e77c8cC2239327C5EDb3A432268e5831' } };
+  assert.equal(KYBER_CHAINS[arbitrum.key], 'arbitrum');
+  assert.deepEqual(swapTokens(arbitrum).map(t => t.symbol), ['ETH', 'USDC']);
 });
 
 test('quote and build: offered tokens only, Kyber router only, slippage bounds', async () => {

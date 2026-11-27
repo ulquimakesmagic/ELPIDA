@@ -92,7 +92,7 @@ await router.buy(TOKEN, amount, out * 98n / 100n, await signer.getAddress(), dea
 function developers(origin) {
   const api = `${origin}/api/v1`;
   return [
-    h('p', 'Build bots, terminals, trackers and scanners on Elpida. Every token trades in its own Uniswap v4 pool, so any wallet or router can trade it; the Elpida router below is the simplest way. All contracts are verified on each chain\u2019s explorer.'),
+    h('p', 'Build bots, terminals, trackers and scanners on Elpida. Every token trades in its own Uniswap v4 pool. Use the Elpida router below or open each contract in its explorer from the Contracts section.'),
     h('div.dc-options',
       tile('Contracts', 'Addresses for every chain are in Contracts above, and in /api/v1/chains.'),
       tile('Public API', `Read-only JSON at ${api}, open to any site, ${'up to 120 requests a minute per client'}.`),
@@ -107,20 +107,22 @@ function developers(origin) {
     note('info', 'info', 'The /api/v1 endpoints stay stable: new fields and endpoints may be added, nothing is renamed or removed. Other /api paths on this site are internal and can change without notice.'),
   ];
 }
-const FAQ = mainnet => [
+const FAQ = (mainnet, mainnetNames) => [
   ['Can I change a token’s name, symbol or image after launch?', 'No. Name, symbol, image and links are recorded in the launch transaction and cannot be edited.'],
   ['Do I have to buy my own token?', `No. A creator purchase is optional. If you buy, it is part of the launch transaction, pays the token’s own fee and can receive at most ${pct(V2.firstBuyCapBps)} of the supply; the token page shows how much the creator bought and still holds. Launch fees and network costs apply either way.`],
   ['What is the launch fee?', 'A $10 fee, converted to the network’s native coin by a verified on-chain price feed at execution, or paid as 10 USDC where supported.'],
   ['Can a token’s fee change later?', 'No. The creator picks it once at launch and no one, including Elpida, can change it.'],
-  ['Are the contracts verified?', 'Yes. Every Elpida contract is open source and verified on each chain\u2019s explorer, so anyone can read exactly what it does. An independent audit has not been done yet.'],
+  ['Where can I inspect the contracts?', 'The Elpida contracts are open source. The Contracts section links to each explorer, where you can check the deployed address and source verification status.'],
   ...(mainnet ? [
     ['Do fees continue after graduation?', 'Yes. Graduation happens inside the same Uniswap v4 pool, so every trade keeps paying the token\u2019s fee, shared the same way, for good. There is no migration to another pool.'],
-    ['Is Elpida live with real money?', 'Yes, on the networks marked mainnet: Base, BNB Chain, Robinhood Chain and Ethereum. As with any token, only trade what you can afford to lose.'],
+    ['Is Elpida live with real money?', `Yes. Transactions use real funds on ${mainnetNames}. Only trade what you can afford to lose.`],
   ] : [['Can I trade on mainnet?', 'Not on this site. Elpida here runs on public test networks, where tokens have no monetary value.']]),
 ];
 
 export function renderDocs(ctx, section) {
-  const mainnet = !!ctx.config?.solana?.mainnet || (ctx.networks?.() ?? []).some(n => n.mainnet);
+  const mainnets = (ctx.networks?.() ?? []).filter(network => network.mainnet);
+  const mainnet = !!ctx.config?.solana?.mainnet || mainnets.length > 0;
+  const mainnetNames = new Intl.ListFormat('en').format(mainnets.map(network => network.name)) || 'enabled mainnet networks';
   const links = SECTIONS.map(([key, label, glyph]) => h('a.dc-toc-link', { href: `#/docs/${key}`, 'data-key': key }, icon(glyph, 'icon-sm'), label));
   const side = h('aside.dc-side', h('p.dc-eyebrow', '◆ ', ctx.envLabel?.() ?? 'Elpida'),
     h('h1', 'A little guidance. A whole new token.'),
@@ -157,7 +159,7 @@ export function renderDocs(ctx, section) {
       h('p.small.muted', mainnet ? 'The traders’ airdrop is paid in USDC (USDG on Robinhood Chain).' : 'Where a reward is paid out, it is paid in USDC (a labelled test dollar on some test networks). Older test tokens launched before V2 keep the rules they launched with.')),
     card(5, SECTIONS[5], h('p.muted', 'Generated from the network registry. Always compare an address with the explorer before interacting.'), contracts(ctx)),
     card(6, SECTIONS[6], ...developers(location.origin)),
-    card(7, SECTIONS[7], h('div.dc-faq', ...FAQ(mainnet).map(([q, a]) => h('details.dc-q', h('summary', q, icon('chevron-down', 'icon-sm')), h('p', a))))),
+    card(7, SECTIONS[7], h('div.dc-faq', ...FAQ(mainnet, mainnetNames).map(([q, a]) => h('details.dc-q', h('summary', q, icon('chevron-down', 'icon-sm')), h('p', a))))),
     card(8, SECTIONS[8],
       h('p', 'Elpida keeps as little about you as it can. It has no accounts, no advertising and no third-party trackers.'),
       h('div.dc-options',
@@ -167,7 +169,7 @@ export function renderDocs(ctx, section) {
         tile('Public by nature', 'Transactions you make are public on the blockchain. Elpida reads and shows that public data, as any explorer does.')),
       h('p', 'Turning analytics off deletes the random id from your browser. After that only your choice itself is counted, with no id. Clearing your site data also removes the id and brings back the disclaimer and the cookie banner.'),
       h('p', h('button.btn.btn-secondary', { type: 'button', 'data-cookie-settings': '' }, icon('sliders-horizontal', 'icon-sm'), 'Cookie settings'))),
-    h('section.dc-cta', h('div', h('strong', 'Your idea is next.'), h('p.muted', mainnet ? 'Launch on Base, BNB Chain, Robinhood Chain or Ethereum in one transaction.' : 'Launch on a test network first and see every step.')), h('a.btn.btn-primary', { href: '#/launch' }, 'Create a token', icon('arrow-right', 'icon-sm'))));
+    h('section.dc-cta', h('div', h('strong', 'Your idea is next.'), h('p.muted', mainnet ? `Launch in one transaction on ${mainnetNames}.` : 'Launch on a test network first and see every step.')), h('a.btn.btn-primary', { href: '#/launch' }, 'Create a token', icon('arrow-right', 'icon-sm'))));
 
   const root = h('div.dc', side, body);
   const setActive = key => links.forEach(a => a.classList.toggle('is-active', a.dataset.key === key));

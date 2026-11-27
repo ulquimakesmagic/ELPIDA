@@ -140,6 +140,17 @@ test('mainnet prices come from the plan\'s Chainlink feed through the private RP
   await keeper.readOracle(net);
   assert.equal(urls[0], 'https://private.example/rpc');
   assert.equal(keeper.chainValues['base-mainnet'].usd, 1811);
+
+  const arbitrumPlan = JSON.parse(readFileSync(new URL('../deployments/plans/arbitrum-mainnet-v23.json', import.meta.url), 'utf8'));
+  const arbitrumTemplate = EVM_MAINNETS.find(network => network.chainId === 42161);
+  const arbitrum = mainnetNetwork(arbitrumTemplate, null, null, { record: { ...record, chainId: 42161, model: 'v2.3-hook' }, plan: arbitrumPlan }).net;
+  const arbKeeper = new PriceKeeper({ fetcher, now: () => now, networks: [arbitrum], env: { ELPIDA_RPC_42161: 'https://arb-private.example/rpc' } });
+  await arbKeeper.readOracle(arbitrum);
+  assert.equal(urls.at(-1), 'https://arb-private.example/rpc');
+  const arbPrice = arbKeeper.snapshot()[arbitrum.key];
+  assert.equal(arbPrice.symbol, 'ETH');
+  assert.equal(arbPrice.status, 'fresh');
+  assert.equal(arbPrice.feed, arbitrumPlan.usdFeed);
 });
 
 test('BNB Chain, Robinhood Chain and Ethereum: each plan names its chain, its own dollar and price feed', () => {

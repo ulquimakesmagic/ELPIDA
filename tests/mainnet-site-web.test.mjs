@@ -43,7 +43,9 @@ test('the /learn guides, the FAQ and llms.txt carry no testnet wording on the ma
   const out = pages.map(p => seoText(p, { mode: 'mainnet', names: ['Base'] })).join('\n');
   assert.deepEqual([...out.matchAll(/.{0,40}(test ?net|Sepolia|Devnet).{0,40}/gi)].map(m => m[0]), []);
   // The real-money answer reaches both the visible FAQ and its JSON-LD copy.
-  assert.equal((out.match(/Yes, on Base mainnet\. Every contract is open source and verified/g) ?? []).length >= 2, true);
+  assert.equal((out.match(/Yes, on Base mainnet\. The contracts are open source/g) ?? []).length >= 2, true);
+  const arbitrum = pages.map(page => seoText(page, { mode: 'mainnet', names: ['Arbitrum One'] })).join('\n');
+  assert.match(arbitrum, /Yes, on Arbitrum One mainnet\./);
   assert.match(out, /Approved tokenized stocks can be a trading pair/);
   // 24 November 2026: the V2.3 split, no Solana, and no five-way split on the mainnet site.
   assert.deepEqual([...out.matchAll(/.{0,40}(Solana|flywheel|five ways|Raydium).{0,40}/gi)].map(m => m[0]), []);
@@ -78,6 +80,7 @@ test('the docs page lists each mainnet launchpad contract and no token-to-token 
   const docs = readFileSync(new URL('../apps/web/docs-view.mjs', import.meta.url), 'utf8');
   for (const role of ['Factory', 'Hook', 'Router', 'Trader airdrop', 'Treasury']) assert.match(docs, new RegExp(`contractCard\\(net, '${role}'`));
   assert.match(docs, /const v2 = net\.v2\?\.shared/);
+  assert.match(docs, /mainnets\.map\(network => network\.name\)/);
   assert.doesNotMatch(docs, /Elpida tokens|graduated Elpida token can be the pair|five ways/);
   const page = readFileSync(new URL('../apps/web/token-page.mjs', import.meta.url), 'utf8');
   assert.match(page, /model === 'v2\.3-hook' \? "50% traders' monthly airdrop, 30% creator, 20% Elpida"/);

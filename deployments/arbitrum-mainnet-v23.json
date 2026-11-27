@@ -1,0 +1,224 @@
+{
+  "network": "arbitrum-mainnet-v23",
+  "name": "Arbitrum One",
+  "chainId": 42161,
+  "planSha256": "6c18f42249ab13af07afa18c573d2afc97546ec3946f1bea3dc7f183d17205af",
+  "approval": "arbitrum-mainnet-v23-6c18f42249ab13af.json",
+  "model": "v2.3-hook",
+  "compiler": "solc 0.8.26 (cancun, via IR, 200 runs)",
+  "gitCommit": "b7912f1784a3b84f283d3c6335f406f94640033c",
+  "startMcapUsd": 20000,
+  "contracts": {
+    "create2": "0x9a69566fCDE488F7913fc03fB26F8142Dd21e62D",
+    "factory": "0x29f0D2A8F2DD5B2dF872222f10bE35D6B27aFD71",
+    "airdrop": "0x30c8C1f345f68C3b48efEe450FA916F6CE6340a7",
+    "hook": "0x5F93fb67833a1dEbcF9d53b5Edb3f7acD10068CC",
+    "router": "0xC3C730EFade65F72B677E877d2ACcb8C5a697960",
+    "usdcAirdrop": "0x63Cb3BCbDB6F00302EaD64Bd8D17A614FfBBD4B9"
+  },
+  "txs": {
+    "create2": {
+      "hash": "0xe7c2d1d9b9372981dac6d43895fe59c9e8434e61353e5436b4987fefebd55f20",
+      "block": 527912749
+    },
+    "factory": {
+      "hash": "0x7de99e5945b2852191a1529348ea2689f9192569b826e8cd5d546a4ec30ab8c9",
+      "block": 527912769
+    },
+    "airdrop": {
+      "hash": "0xe3358257e017d323cb450fae106a3d7de072fb2f9110bc0705d012bdfbd64f26",
+      "block": 527912786
+    },
+    "hook": {
+      "hash": "0x443716b29e186b82eddbe9a79706a453d509ab594ce8dab65dd24e1b8b3d9ec3",
+      "block": 527912804
+    },
+    "router": {
+      "hash": "0x9b599e1e26311585943c18527273707b43d14a68716b8c12b7212d99ea54f399",
+      "block": 527912825
+    },
+    "usdcAirdrop": {
+      "hash": "0x7b946c51096695bb37c6b26c939835e672d3341eb3b104255868e968b7952a9e",
+      "block": 527915750
+    }
+  },
+  "deployer": "0x9c99387c63A5d893D3bDe9c71CF2fe2b1191F08E",
+  "block": 527912769,
+  "airdropGenesis": 1793491200,
+  "hookSalt": "0x0000000000000000000000000000000000000000000000000000000000007e8a",
+  "gate": {
+    "recordedAt": "2026-11-27T04:34:00.541Z",
+    "plan": {
+      "chainId": 42161,
+      "network": "Arbitrum One",
+      "mainnet": true,
+      "startMcapUsd": 20000,
+      "treasury": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01",
+      "recipients": [
+        "0x30c8C1f345f68C3b48efEe450FA916F6CE6340a7",
+        "0x0000000000000000000000000000000000000000",
+        "0x0000000000000000000000000000000000000000"
+      ],
+      "minFeeBps": 100,
+      "metadataRequired": true,
+      "approver": "Malik",
+      "approvedAt": 1795737600000,
+      "planHash": "0xeec3c4fbbe87d8f5122b9ad9694bdfe624079849347b251edff8adaa570e208e"
+    },
+    "deployment": {
+      "factory": "0x29f0D2A8F2DD5B2dF872222f10bE35D6B27aFD71",
+      "hook": "0x5F93fb67833a1dEbcF9d53b5Edb3f7acD10068CC",
+      "router": "0xC3C730EFade65F72B677E877d2ACcb8C5a697960",
+      "blockNumber": 527912769,
+      "transactions": [
+        "0xe7c2d1d9b9372981dac6d43895fe59c9e8434e61353e5436b4987fefebd55f20",
+        "0x7de99e5945b2852191a1529348ea2689f9192569b826e8cd5d546a4ec30ab8c9",
+        "0xe3358257e017d323cb450fae106a3d7de072fb2f9110bc0705d012bdfbd64f26",
+        "0x443716b29e186b82eddbe9a79706a453d509ab594ce8dab65dd24e1b8b3d9ec3",
+        "0x9b599e1e26311585943c18527273707b43d14a68716b8c12b7212d99ea54f399"
+      ]
+    }
+  },
+  "constructorChecks": [
+    {
+      "check": "factory treasury",
+      "ok": true,
+      "detail": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01"
+    },
+    {
+      "check": "factory start $20,000",
+      "ok": true,
+      "detail": "20000"
+    },
+    {
+      "check": "factory requires metadata",
+      "ok": true,
+      "detail": "true"
+    },
+    {
+      "check": "factory has launch controls",
+      "ok": true,
+      "detail": "1"
+    },
+    {
+      "check": "hook factory",
+      "ok": true,
+      "detail": "0x29f0D2A8F2DD5B2dF872222f10bE35D6B27aFD71"
+    },
+    {
+      "check": "hook treasury",
+      "ok": true,
+      "detail": "0x8bB68257d69c717779B7f5c52DfEDDDb4c31Fd01"
+    },
+    {
+      "check": "hook PoolManager",
+      "ok": true,
+      "detail": "0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32"
+    },
+    {
+      "check": "hook airdrop vault",
+      "ok": true,
+      "detail": "0x30c8C1f345f68C3b48efEe450FA916F6CE6340a7"
+    },
+    {
+      "check": "hook flywheel vault",
+      "ok": true,
+      "detail": "0x0000000000000000000000000000000000000000"
+    },
+    {
+      "check": "hook holder vault",
+      "ok": true,
+      "detail": "0x0000000000000000000000000000000000000000"
+    },
+    {
+      "check": "hook is V2.3",
+      "ok": true,
+      "detail": "23"
+    },
+    {
+      "check": "hook split 50% traders / 30% creator / 20% treasury / 0 / 0",
+      "ok": true,
+      "detail": "5000/3000/2000/0/0"
+    },
+    {
+      "check": "hook minimum fee",
+      "ok": true,
+      "detail": "100"
+    },
+    {
+      "check": "airdrop operator is the keeper",
+      "ok": true,
+      "detail": "0x10299c3Cff25C3e775e91463c5D9c8670483d39F"
+    },
+    {
+      "check": "airdrop period",
+      "ok": true,
+      "detail": "0"
+    },
+    {
+      "check": "router hook",
+      "ok": true,
+      "detail": "0x5F93fb67833a1dEbcF9d53b5Edb3f7acD10068CC"
+    },
+    {
+      "check": "router PoolManager",
+      "ok": true,
+      "detail": "0x360E68faCcca8cA495c1B759Fd9EEe466db9FB32"
+    },
+    {
+      "check": "gate (#234) verifyDeployment: no mismatches",
+      "ok": true,
+      "detail": ""
+    }
+  ],
+  "safeBatch": "arbitrum-mainnet-v23-safe-batch.json",
+  "status": "ready",
+  "pending": {
+    "safe": "Execute the Safe batch (setHook, configureUsdPricing, approveQuote USDC, setGuardian, setDailyLaunchCap), then run verify."
+  },
+  "verify": {
+    "at": "2026-11-27T04:45:29.406Z",
+    "checks": [
+      {
+        "check": "factory hook",
+        "ok": true,
+        "detail": "0x5F93fb67833a1dEbcF9d53b5Edb3f7acD10068CC"
+      },
+      {
+        "check": "USD feed",
+        "ok": true,
+        "detail": "0x639Fe6ab55C921f74e7fac1ee960C0B6293ba612"
+      },
+      {
+        "check": "USDC approved at $25,000 virtual",
+        "ok": true,
+        "detail": "25000000000"
+      },
+      {
+        "check": "guardian",
+        "ok": true,
+        "detail": "0xfC08505EfEf934c3fF19d82D189f60f28a0255eB"
+      },
+      {
+        "check": "daily launch cap",
+        "ok": true,
+        "detail": "1000"
+      },
+      {
+        "check": "launches paused",
+        "ok": true,
+        "detail": "false"
+      },
+      {
+        "check": "native start price readable",
+        "ok": true,
+        "detail": "14.41697988970791973 native = $25,000 virtual"
+      }
+    ]
+  },
+  "usdcAirdrop": {
+    "deployedAt": "2026-11-27T04:49:50.415Z",
+    "deployer": "0x9c99387c63A5d893D3bDe9c71CF2fe2b1191F08E",
+    "readBack": "ok"
+  }
+}

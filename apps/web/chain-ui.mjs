@@ -17,7 +17,7 @@ export function stockTile(symbol,{size='sm',provider=null,name=null,catalog=null
   return tile;
 }
 export function assetIcon(symbol,stock=false,options={}){if(stock||looksLikeStock(symbol))return stockTile(symbol,options);const src=ASSET_ICONS[symbol];return src?h('img.asset-icon',{src,alt:'',width:20,height:20,'data-asset':String(symbol).toLowerCase()}):icon('coins','icon-sm');}
-export function chainIcon(key){const name=key?.startsWith('solana')?'solana':key?.startsWith('bnb')?'bnb':key?.startsWith('base')?'base':key?.startsWith('ethereum')?'ethereum':key?.startsWith('robinhood')?'robinhood':null;return name?h('img.asset-icon',{src:`/assets/chains/${name}.${['base','robinhood','ethereum'].includes(name)?'png':'svg'}`,alt:'',width:20,height:20}):icon('flask-conical','icon-sm');}
+export function chainIcon(key){const name=key?.startsWith('solana')?'solana':key?.startsWith('bnb')?'bnb':key?.startsWith('base')?'base':key?.startsWith('ethereum')?'ethereum':key?.startsWith('robinhood')?'robinhood':null;return name?h('img.asset-icon',{src:`/assets/chains/${name}.${['base','robinhood','ethereum'].includes(name)?'png':'svg'}`,alt:'',width:20,height:20}):icon(key==='arbitrum-mainnet'?'layers':'flask-conical','icon-sm');}
 export function chainSelector({button,networks,current,onSelect,listId='chain-options',simulation=()=>true}){
   const list=h('div.chain-options',{role:'listbox',id:listId,'aria-label':'Choose chain',hidden:true});button.after(list);button.setAttribute('aria-haspopup','listbox');button.setAttribute('aria-controls',list.id);
   const close=()=>{list.hidden=true;button.setAttribute('aria-expanded','false');};
