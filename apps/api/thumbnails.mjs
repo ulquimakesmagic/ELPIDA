@@ -52,9 +52,11 @@ export class Thumbnails {
    * A WebP thumbnail of `record` (the stored content: { type, data base64 }) at `width`, or null when it cannot or need
    * not be made (not an image, an SVG, already small enough, or undecodable): then the caller serves the original.
    */
-  async get(cid, record, width) {
+  async get(cid, record, width, fit = 'cover') {
     if (!CID.test(String(cid)) || !THUMB_WIDTHS.includes(width) || !RESIZABLE.has(record?.type)) return null;
-    const key = `${cid}-${width}`;
+    // Trending uses a separate cached variant that keeps the full source framing.
+    const preserveAspect = fit === 'inside';
+    const key = `${cid}-${width}${preserveAspect ? '-inside' : ''}`;
     if (this.failed.has(cid)) return null;
     const hit = this.memory.get(key);
     if (hit) { this.remember(key, hit); return hit; }
@@ -67,7 +69,7 @@ export class Thumbnails {
         const input = Buffer.from(record.data, 'base64');
         const bytes = await sharp(input, { animated: false, limitInputPixels: 40_000_000 })
           .rotate()
-          .resize({ width, height: width, fit: 'cover', withoutEnlargement: true })
+          .resize({ width, height: width, fit: preserveAspect ? 'inside' : 'cover', withoutEnlargement: true })
           .webp({ quality: 80, effort: 4 })
           .toBuffer();
         // A thumbnail that is not smaller than the original is no help: serve the original.
