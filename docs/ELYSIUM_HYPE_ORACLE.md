@@ -27,6 +27,16 @@ The HyperEVM transaction debited `0.000184473637360992 HYPE` before any Elysium 
 
 The plan uses the [published Uniswap v4 PoolManager](https://developers.uniswap.org/docs/protocols/v4/deployments#elysium-99901) and the six-decimal [bridged USDC](ELYSIUM_XSTOCK_CANDIDATES.md) mapped to Circle USDC on HyperEVM.
 
+## Recurring price relay
+
+The mainnet service checks HyperEVM and Elysium every five minutes. In **Operations**, use **Elysium HYPE/USD relay** to see both round IDs and when the delivered observation expires. The operations monitor reports read failures, delayed delivery and a price within two hours of expiry to the existing incident log. Monitoring starts without a gas wallet. It runs independently of the public Elysium launchpad.
+
+After approval of the recurring gas budget, configure a dedicated HyperEVM gas wallet in the server environment. Set `ELPIDA_ELYSIUM_RELAY_KEY` through the server's secret configuration. Set `ELPIDA_ELYSIUM_RELAY_TX_CAP_HYPE` and `ELPIDA_ELYSIUM_RELAY_24H_CAP_HYPE` to the approved HYPE limits, and set `ELPIDA_ELYSIUM_RELAY_MODE=publish`. The per-transaction cap includes both the bridge deposit and the maximum parent-chain gas. The rolling 24-hour cap reserves that same maximum for each submission, including uncertain attempts, before broadcast. Publishing requires persistent storage. Returning the mode to `monitor` stops submissions on the next service start.
+
+The relay checks for a newer round before quoting fees. It skips rounds already delivered or queued and records the transaction hash before broadcasting so a restart cannot submit the same round again. To resolve an unconfirmed broadcast, check the recorded HyperEVM hash and the wallet's nonce, then confirm the receiver's round. Never delete the spend ledger to retry a submission. If the parent transaction succeeded and the receiver is still behind, investigate the ticket before any manual redemption. A reverted parent transaction is recorded and the relay can proceed on the next round.
+
+Before enabling public Elysium launches, confirm the publishing service has delivered a fresh round and the receiver reports the same round and observation timestamp as the source. Keep the rolling budget funded and review expiry and delivery incidents in Operations.
+
 ## Native V2.3 fork rehearsal
 
 An Anvil fork pinned at Elysium block `11867100` used the deployed oracle and treasury Safe with test keeper and guardian wallets. The deployment and all seven wiring checks passed after applying the Safe batch by impersonating the treasury on the fork. A native launch opened at `$20,014.78` after tick rounding. The guardian paused new launches and the existing pool still completed a native HYPE buy and full sell. Both trades ran during the opening fee window. They used 240,699 and 137,881 gas respectively.

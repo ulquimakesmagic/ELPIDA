@@ -1,9 +1,13 @@
-export function evaluateOperations({now=Date.now(),startedAt=now,storage={},networks={},prices={},backup={},graduation,relay,durable=false}={}){
+import { elysiumRelayIncident } from './elysium-relay.mjs';
+
+export function evaluateOperations({now=Date.now(),startedAt=now,storage={},networks={},prices={},backup={},graduation,relay,elysiumRelay,durable=false}={}){
  const incidents=[],add=(code,severity,message)=>incidents.push({code,severity,message});
  if(!durable)add('storage_ephemeral','warning','Persistent storage is not configured.');
  for(const [field,cap,code] of [['bytes','maxBytes','storage_capacity'],['pendingBytes','maxPendingBytes','pending_capacity']])if(storage[cap]>0&&storage[field]/storage[cap]>=0.8)add(code,storage[field]>=storage[cap]?'critical':'warning','Metadata storage is approaching its limit.');
  if(storage.expiredPendingBytes>0)add('pending_review','warning','Old provisional uploads need review; they have not been deleted.');
  const warm=now-startedAt<180000;
+ const elysiumIssue = elysiumRelayIncident(elysiumRelay, now);
+ if (!warm && elysiumIssue) add('elysium_price_relay', 'warning', elysiumIssue);
  if(graduation){
   if(!graduation.enabled)add('graduation_disabled','warning','Automatic Base Sepolia graduation needs an operator gas wallet.');
   else if(graduation.state==='retrying'||graduation.reason)add('graduation_delayed','critical','Automatic graduation needs operator attention: '+(graduation.reason??'transaction reverted')+'.');

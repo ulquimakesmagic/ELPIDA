@@ -4,6 +4,7 @@ import { protocolAnalytics } from './protocol-analytics.mjs';
 import { feeAnalytics } from './fee-analytics.mjs';
 import { AdminAuth, parseAdminAddresses, sessionCookie, clearCookie } from './admin-auth.mjs';
 import { createAdminSafeWiring, elysiumWiringProvider } from './admin-safe-wiring.mjs';
+import { createElysiumRelay } from './elysium-relay.mjs';
 import { readTreasuries, operatorAddresses, cachedLoader } from './admin-overview.mjs';
 import { SiteAnalytics, cleanEvent, telemetryLimiter, restrictedJurisdictions } from './site-analytics.mjs';
 import { createElpidaSolana, creatorRowDue, v2Owed } from '../../packages/solana/client.mjs';
@@ -293,6 +294,10 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   bootPhase('indexers_ready');
   // Testnet-only price relay for test chains without a Chainlink feed (Robinhood testnet). Idle without its key.
   const feedRelay=soft('feedRelay',()=>new FeedRelay({networks:port===0?[]:evmNetworks,env:port===0?{}:process.env}).start(),()=>new FeedRelay({networks:[],env:{}}).start());
+  const elysiumRelay = createElysiumRelay({ env: process.env.ELPIDA_STAGING === '1' ? {} : process.env,
+    enabled: port !== 0 && Boolean(publicUrl) && process.env.ELPIDA_MODE === 'mainnet',
+    durable: durableStorage(), ledgerPath: dataFile('elysium-price-relay.sqlite') });
+  elysiumRelay.start();
   const graduationKeeper=soft('graduationKeeper',()=>configuredGraduationKeeper({env:port===0?{}:process.env,publicIndex,path:port===0?null:dataFile('graduation-keeper.sqlite')}),()=>configuredGraduationKeeper({env:{},publicIndex,path:null}));
   // Solana public indexer: the deployed program's pools and trades, read-only, stored on the data volume.
   // Solana RPCs: SOLANA_RPC_URL, then every endpoint in SOLANA_RPC_URLS (the rotator), then the network's public ones.
@@ -467,7 +472,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const operationsStartedAt=Date.now();
   const backupRunner=configuredBackup({env:port===0?{}:process.env,dataDir,statePath:port===0?null:dataFile('ops-backup-state.json'),workDir:process.env.ELPIDA_BACKUP_WORK_DIR??resolve(tmpdir(),'elpida-backups-'+dataPrefix.replace(/[^a-z0-9-]/gi,'')),log:console.log});
   // The graduation keeper serves Base Sepolia's Model 10 launchpad only; the mainnet site has no such network.
-  const operationsInput=()=>({relay:feedRelay.status(),graduation:evmNetworks.some(n=>n.key==='base-sepolia')?graduationKeeper.status():undefined,startedAt:operationsStartedAt,durable:durableStorage(),storage:metadataStore.status().storage,networks:Object.fromEntries([...publicIndex.entries.keys()].map(key=>[key,publicIndex.status(key)])),prices:priceSnapshot(),backup:backupRunner.status()});
+  const operationsInput=()=>({relay:feedRelay.status(),elysiumRelay:elysiumRelay.status(),graduation:evmNetworks.some(n=>n.key==='base-sepolia')?graduationKeeper.status():undefined,startedAt:operationsStartedAt,durable:durableStorage(),storage:metadataStore.status().storage,networks:Object.fromEntries([...publicIndex.entries.keys()].map(key=>[key,publicIndex.status(key)])),prices:priceSnapshot(),backup:backupRunner.status()});
   const monitor=new OperationsMonitor({read:operationsInput});
   const operationsTimer=port===0?null:setInterval(()=>monitor.tick(),60000);operationsTimer?.unref();
   const memoryNow=()=>memoryReport({heapLimit:getHeapStatistics().heap_size_limit,extra:{uptimeMinutes:Math.round(process.uptime()/60),streams:tradeFeed.status().clients,vanityWorkers:vanity.status().grinding}});
@@ -564,7 +569,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
           const activity=Object.fromEntries(['24h','7d','all'].map(period=>{try{const a=protocolAnalytics({sources:analyticsSources(),prices:priceSnapshot(),period});return [period,{totals:a.totals,coverage:a.coverage}];}catch(error){return [period,{error:error.message}];}}));
           let treasury=[];try{treasury=await treasuries();}catch(error){treasury=[{error:String(error.message).slice(0,160)}];}
           const keepers=await keeperStatus();
-          return send(200,{operator:s.address,keepers,generatedAt:Date.now(),memory:memoryNow(),health,backup:backupRunner.status(),relay:feedRelay.status(),graduation:graduationKeeper.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),metadata:metadataStore.status().storage},prices:priceSnapshot(),networks:{...Object.fromEntries(evmNetworks.map(n=>[n.key,{name:n.name,...publicIndex.status(n.key)}])),...(solanaIndex?{[solanaIndex.network.key]:{name:solanaIndex.network.name,enabled:true,...solanaIndex.status()}}:{})},treasury,activity,admins:{configured:adminAddresses.length,treasuries:treasury.filter(t=>t.treasury).length}});
+          return send(200,{operator:s.address,keepers,generatedAt:Date.now(),memory:memoryNow(),health,backup:backupRunner.status(),relay:feedRelay.status(),elysiumRelay:elysiumRelay.status(),graduation:graduationKeeper.status(),storage:{durable:Boolean(process.env.RAILWAY_VOLUME_MOUNT_PATH),metadata:metadataStore.status().storage},prices:priceSnapshot(),networks:{...Object.fromEntries(evmNetworks.map(n=>[n.key,{name:n.name,...publicIndex.status(n.key)}])),...(solanaIndex?{[solanaIndex.network.key]:{name:solanaIndex.network.name,enabled:true,...solanaIndex.status()}}:{})},treasury,activity,admins:{configured:adminAddresses.length,treasuries:treasury.filter(t=>t.treasury).length}});
           return send(200,{operator:s.address,keepers,generatedAt:Date.now(),health,backup:backupRunner.status(),relay:feedRelay.status(),graduation:graduationKeeper.status(),storage:{durable:durableStorage(),metadata:metadataStore.status().storage},prices:priceSnapshot(),networks:{...Object.fromEntries(evmNetworks.map(n=>[n.key,{name:n.name,...publicIndex.status(n.key)}])),...(solanaIndex?{[solanaIndex.network.key]:{name:solanaIndex.network.name,enabled:true,...solanaIndex.status()}}:{})},treasury,activity,admins:{configured:adminAddresses.length,treasuries:treasury.filter(t=>t.treasury).length}});
         }
         if(url.pathname==='/api/admin/visitors'){
@@ -850,7 +855,7 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   const rewardTimer=port===0?null:setInterval(()=>runtime.transact('reward-process',{}).catch(()=>{}),30000);rewardTimer?.unref();
   await new Promise((done, reject) => { server.once('error', reject); server.listen(port, host, done); });
   bootPhase('listening');
-  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();coinbaseStocks.stop?.();ondoStatus.stop?.();await v2Keeper.close();solanaRewards?.stop();await solanaV2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);clearInterval(memoryTimer);clearTimeout(priceHistoryStart);clearInterval(priceHistoryTimer);clearTimeout(homeCardsStart);clearInterval(homeCardsTimer);try{priceHistory.close();}catch{};try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
+  return { url: `http://localhost:${server.address().port}`, runtime, publicIndex, tradeFeed, vanity, async close() {v2Rewards.stop();coinbaseStocks.stop?.();ondoStatus.stop?.();await elysiumRelay.close();await v2Keeper.close();solanaRewards?.stop();await solanaV2Keeper.close();await buybackKeeper.close();await flywheelKeeper.close();stockCatalog.close?.();tradeFeed.close();vanity.stop();clearInterval(priceTimer);clearInterval(rewardTimer);clearInterval(solanaTimer);clearInterval(operationsTimer);clearInterval(memoryTimer);clearTimeout(priceHistoryStart);clearInterval(priceHistoryTimer);clearTimeout(homeCardsStart);clearInterval(homeCardsTimer);try{priceHistory.close();}catch{};try{solanaIndex?.close();}catch{} await new Promise(done => server.close(done));await backupRunner.close();await creatorFeeTotals.close(); await graduationKeeper.close(); await feedRelay.close(); await publicIndex.close();uploadAdmission.close();theses.close();chat.close();siteAnalytics.close();await runtime.close(); } };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
