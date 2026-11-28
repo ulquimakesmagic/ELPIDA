@@ -218,6 +218,10 @@
 .op-kv { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 8px 14px; margin: 0; font-size: 13px; }
 .op-kv dt { color: var(--muted); }
 .op-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.op-safe-details { overflow-wrap: anywhere; }
+.op-safe-details ol, .op-safe-details ul { padding-inline-start: 24px; }
+.op-safe-details li + li { margin-top: 8px; }
+.op-safe-actions { display: flex; flex-wrap: wrap; gap: 8px; }
 .op-jobs { list-style: none; margin: 6px 0 0; padding: 0; display: grid; gap: 4px; }
 .op-job-error { color: var(--down); overflow-wrap: anywhere; }
 .op-card .meta { margin: 10px 0 0; }

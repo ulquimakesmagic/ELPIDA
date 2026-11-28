@@ -3,6 +3,7 @@ import { indexedChange, indexedActivity, activityOf } from '../web/discovery.mjs
 import { protocolAnalytics } from './protocol-analytics.mjs';
 import { feeAnalytics } from './fee-analytics.mjs';
 import { AdminAuth, parseAdminAddresses, sessionCookie, clearCookie } from './admin-auth.mjs';
+import { createAdminSafeWiring, elysiumWiringProvider } from './admin-safe-wiring.mjs';
 import { readTreasuries, operatorAddresses, cachedLoader } from './admin-overview.mjs';
 import { SiteAnalytics, cleanEvent, telemetryLimiter, restrictedJurisdictions } from './site-analytics.mjs';
 import { createElpidaSolana, creatorRowDue, v2Owed } from '../../packages/solana/client.mjs';
@@ -102,6 +103,7 @@ resources.set('/test-stock.mjs',['test-stock.mjs','text/javascript']);
 resources.set('/portfolio-view.mjs',['portfolio-view.mjs','text/javascript']);
 resources.set('/portfolio-model.mjs',['portfolio-model.mjs','text/javascript']);
 resources.set('/admin-view.mjs',['admin-view.mjs','text/javascript']);
+resources.set('/admin-safe-wiring.mjs',['admin-safe-wiring.mjs','text/javascript']);
 resources.set('/admin-pairs.mjs',['admin-pairs.mjs','text/javascript']);
 resources.set('/stock-approval.mjs',['stock-approval.mjs','text/javascript']);
 resources.set('/tax-policy.mjs',['tax-policy.mjs','text/javascript']);
@@ -398,6 +400,13 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
   // Operator panel (read-only): wallet sign-in against the factory treasuries plus ELPIDA_ADMIN_ADDRESSES.
   const adminAuth=new AdminAuth({host:(()=>{try{return publicUrl?new URL(publicUrl).host:'localhost';}catch{return 'elpida';}})()});
   const adminAddresses=parseAdminAddresses(process.env.ELPIDA_ADMIN_ADDRESSES);
+  const safeWiring = createAdminSafeWiring({ provider: elysiumWiringProvider(process.env.ELPIDA_RPC_99901), adminAddresses });
+  const safeWiringRequest = async (req, send, operation) => {
+    const session = adminAuth.session(req.headers.cookie);
+    if (!session) return send(401, { error: 'Sign in to view Elysium Safe wiring.' });
+    try { return send(200, await operation(session.address)); }
+    catch (error) { return send(error.status ?? 500, { error: error.status ? error.message : 'Elysium Safe wiring is unavailable.' }); }
+  };
   const treasuryNetworks=()=>evmNetworks.filter(n=>publicIndex.entries.get(n.key)).map(n=>({key:n.key,name:n.name,explorer:n.explorer,nativeSymbol:n.nativeCurrency?.symbol,factory:n.shared?.factory??n.v2?.shared?.factory,provider:publicIndex.entries.get(n.key).provider}));
   const treasuries=cachedLoader(()=>readTreasuries(treasuryNetworks()),60000);
   const siteHost=(()=>{try{return publicUrl?new URL(publicUrl).host:'localhost';}catch{return 'elpida';}})();
@@ -547,7 +556,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         }
         if(url.pathname==='/api/theses/history'){const i=thesisIdentity(url.searchParams.get('network'),url.searchParams.get('token'),url.searchParams.get('author'));indexedMarket(i.network,i.token);return send(200,theses.history(i));}
         if(url.pathname==='/api/admin/challenge')return send(200,adminAuth.challenge());
-        if(url.pathname==='/api/admin/session'){const s=adminAuth.session(req.headers.cookie);return send(200,s?{signedIn:true,address:s.address,expires:s.expires}:{signedIn:false});}
+        if(url.pathname==='/api/admin/session'){const s=adminAuth.session(req.headers.cookie);return send(200,s?{signedIn:true,address:s.address,expires:s.expires,...(safeWiring.allows(s.address)?{safeWiring:true}:{})}:{signedIn:false});}
+        if (url.pathname === '/api/admin/safe-wiring') return safeWiringRequest(req, send, safeWiring.status);
         if(url.pathname==='/api/admin/overview'){
           const s=adminAuth.session(req.headers.cookie);if(!s)return send(401,{error:'Sign in as an operator to see this.'});
           const health=evaluateOperations(operationsInput());
@@ -773,6 +783,8 @@ export async function startServer({ port = Number(process.env.PORT ?? 3000), see
         try{const r=await adminAuth.signIn(body,isAllowed);res.setHeader('Set-Cookie',sessionCookie(r.token,{secure:!!publicUrl}));return send(200,{signedIn:true,address:r.address,expires:r.expires});}
         catch(error){return send(error.status??400,{error:error.message});}
       }
+      if (action === 'admin/safe-wiring/sign') return safeWiringRequest(req, send, address => safeWiring.sign(address, body.signature));
+      if (action === 'admin/safe-wiring/prepare') return safeWiringRequest(req, send, safeWiring.prepare);
       // A wallet just confirmed a trade, launch or migration: index that network now instead of at the next tick, so
       // the trade reaches every open page within a second or two. Coalesced per network and capped; nothing is signed.
       if(action==='index-now'){
