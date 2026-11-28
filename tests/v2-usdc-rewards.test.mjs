@@ -41,7 +41,8 @@ test('the USDC distributor: only the operator converts, only into USDC, and it p
 });
 
 test('with USDC distributors pinned, the keeper converts every vault asset and pays the airdrop and holder rewards in USDC only', async t => {
-  const f = await v2Fixture(t, { vaults: true, convert: true, usdcPayouts: true }), { airdrop, holder, flywheel, usdcAirdrop, usdcHolder, v3 } = f.contracts;
+  const f = await v2Fixture(t, { vaults: true, convert: true, usdcPayouts: true, initialDate: '2026-11-24T12:00:00Z' });
+  const { airdrop, holder, flywheel, usdcAirdrop, usdcHolder, v3 } = f.contracts;
   const index = new V2Indexer({ provider: f.provider, factory: f.factory.target, hook: f.hook.target, poolManager: f.manager.target, router: f.router.target });
   t.after(() => index.close());
   let chainTime = (await f.provider.getBlock('latest')).timestamp;

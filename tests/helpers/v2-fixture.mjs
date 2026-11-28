@@ -31,8 +31,10 @@ const hex = s => (s.startsWith('0x') ? s : '0x' + s);
  * distributor its USDC → native conversion. `usdcPayouts: true` (with convert) also deploys the two USDC payout
  * distributors (contracts.usdcAirdrop, contracts.usdcHolder) fed by the airdrop and holder distributors.
  */
-export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN_FEE_BPS, requireMetadata = false, vaults: realVaults = false, convert = false, usdcPayouts = false, usdcDecimals = 6, v23 = false } = {}) {
-  const connection = await network.create('localCancun'), provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 });
+export async function v2Fixture(t, { startMcapUsd = 20_000, minFeeBps = TEST_MIN_FEE_BPS, requireMetadata = false, vaults: realVaults = false, convert = false, usdcPayouts = false, usdcDecimals = 6, v23 = false, initialDate } = {}) {
+  const networkConfig = initialDate ? { network: 'localCancun', override: { initialDate } } : 'localCancun';
+  const connection = await network.create(networkConfig);
+  const provider = new BrowserProvider(connection.provider, undefined, { cacheTimeout: -1 });
   provider.pollingInterval = 10; t.after(async () => { provider.destroy(); await connection.close(); });
   const signers = await Promise.all([0, 1, 2, 3, 4].map(i => provider.getSigner(i))), addresses = await Promise.all(signers.map(s => s.getAddress()));
   const deploy = async (a, ...args) => { const c = await new ContractFactory(a.abi, a.bytecode ?? a.evm.bytecode.object, signers[0]).deploy(...args); await c.waitForDeployment(); return c; };
