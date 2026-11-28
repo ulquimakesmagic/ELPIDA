@@ -16,6 +16,7 @@ export const ELYSIUM_ORACLE = Object.freeze({
 const day = ELYSIUM_ORACLE.maxAge * 1000;
 const pollInterval = 5 * 60_000;
 const deliveryGrace = 15 * 60_000;
+const parentPublicRpc = 'https://hyperliquid-rpc.publicnode.com';
 const feedAbi = ['function latestRoundData() view returns (uint80,int256,uint256,uint256,uint80)', 'function decimals() view returns (uint8)'];
 const gasPad = gas => (gas * 125n + 99n) / 100n;
 const larger = (a, b) => a > b ? a : b;
@@ -38,9 +39,19 @@ function boundedProvider(env, rpcUrl, chainId, key) {
   return new RelayRpcProvider({ chainId, key, rpcUrl }, rpcEnv, chainId, { batchMaxCount: 1 });
 }
 
+export async function relayHistoryLogs(parent, history, filter) {
+  try { return await parent.getLogs(filter); }
+  catch (error) {
+    const rpc = error.info?.error ?? error.error;
+    if (!/block[\s-]+range/i.test(rpc?.message ?? error.shortMessage ?? '')) throw error;
+    return history.getLogs(filter);
+  }
+}
+
 export function createElysiumOracleReader(env = process.env) {
   const cfg = ELYSIUM_ORACLE;
-  const parent = boundedProvider(env, 'https://hyperliquid-rpc.publicnode.com', 999, 'hyperevm-mainnet');
+  const parent = boundedProvider(env, parentPublicRpc, 999, 'hyperevm-mainnet');
+  const history = boundedProvider({}, parentPublicRpc, 999, 'hyperevm-mainnet');
   const child = boundedProvider(env, 'https://elysium-rpc.publicnode.com', 99901, 'elysium-mainnet');
   const source = new Contract(cfg.source, feedAbi, parent);
   const publisher = new Contract(cfg.publisher, [
@@ -82,7 +93,7 @@ export function createElysiumOracleReader(env = process.env) {
     const filter = { address: cfg.publisher, topics: [publisher.interface.getEvent('RoundQueued').topicHash, zeroPadValue(toBeHex(round[0]), 32)] };
     for (let end = head.number; end >= cfg.deployedAt;) {
       const fromBlock = Math.max(cfg.deployedAt, end - 4999);
-      const logs = await parent.getLogs({ ...filter, fromBlock, toBlock: end });
+      const logs = await relayHistoryLogs(parent, history, { ...filter, fromBlock, toBlock: end });
       if (logs.length) return publisher.interface.parseLog(logs.at(-1)).args.ticketId.toString();
       const first = await parent.getBlock(fromBlock);
       if (!first) throw fault('queue_history_unavailable');
@@ -118,7 +129,7 @@ export function createElysiumOracleReader(env = process.env) {
   }
 
   return { read, queued, quote, broadcast: raw => parent.broadcastTransaction(raw),
-    receipt: hash => parent.getTransactionReceipt(hash), close() { parent.destroy(); child.destroy(); } };
+    receipt: hash => parent.getTransactionReceipt(hash), close() { parent.destroy(); child.destroy(); history.destroy(); } };
 }
 
 function validRound(round, timestamp) {

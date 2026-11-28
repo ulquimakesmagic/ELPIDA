@@ -5,13 +5,24 @@ import { rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { Transaction, Wallet, keccak256, parseEther } from 'ethers';
-import { createElysiumRelay, ELYSIUM_ORACLE } from '../apps/api/elysium-relay.mjs';
+import { createElysiumRelay, ELYSIUM_ORACLE, relayHistoryLogs } from '../apps/api/elysium-relay.mjs';
 import { evaluateOperations } from '../apps/api/operations-health.mjs';
 
 const time = 1_795_835_000_000;
 const timestamp = time / 1000;
 const oracleRound = (id, age) => [BigInt(id), parseEther('63'), BigInt(timestamp - age - 1), BigInt(timestamp - age), BigInt(id)];
 const snapshot = (round, delivered) => ({ head: { timestamp }, childHead: { timestamp }, round, delivered });
+
+test('the publisher can still look for queued rounds when the configured RPC limits block ranges', async () => {
+  const filter = { address: ELYSIUM_ORACLE.publisher, fromBlock: 52_470_000, toBlock: 52_474_999, topics: ['event', 'round'] };
+  const rangeError = Object.assign(new Error('RPC request failed'), { error: { code: -32602, message: 'eth_getLogs block range is too large' } });
+  const configured = { async getLogs() { throw rangeError; } };
+  const records = [{ transactionHash: 'queued-transaction' }];
+  const history = { async getLogs(query) { assert.deepEqual(query, filter); return records; } };
+  assert.equal(await relayHistoryLogs(configured, history, filter), records);
+  const failure = new Error('History endpoint unavailable');
+  await assert.rejects(relayHistoryLogs(configured, { async getLogs() { throw failure; } }, filter), failure);
+});
 
 test('monitoring reports lag, an expiring round, and recovery without quoting or signing a transaction', async () => {
   let data = snapshot(oracleRound(8, 1200), oracleRound(7, 82_800));
