@@ -1,4 +1,5 @@
 import { h, icon, short, number, compact, errorText } from './ui.mjs';
+import { hexlify, toUtf8Bytes } from '/vendor/ethers.js';
 import { chainIcon } from './chain-ui.mjs';
 import { withWalletTimeout } from './wallet.mjs';
 import { injectedSolanaWallets } from './wallet-discovery.mjs';
@@ -6,6 +7,7 @@ import { renderVisitors } from './admin-visitors.mjs';
 import { renderLaunchpads } from './admin-launchpads.mjs';
 import { renderTestFunds } from './admin-funds.mjs';
 import { renderPairs } from './admin-pairs.mjs';
+import { adminEvmWallet, renderSafeWiring } from './admin-safe-wiring.mjs';
 
 // Operator panel (#/monkey; deliberately not #/admin, the first path scanners try). The Operations tab is read-only:
 // health, treasury balances, activity, indexers, the price
@@ -31,7 +33,7 @@ export function renderAdmin(ctx, { connect }) {
   const status = h('p.small.muted', { role: 'status', 'aria-live': 'polite' });
 
   function signInView(message) {
-    const evm = ctx.mode === 'testnet' && ctx.wallet !== ctx.solWallet;
+    const evm = ctx.mode === 'testnet' && ctx.wallet !== ctx.solWallet && !ctx.wallet?.net?.mainnet;
     const address = evm ? ctx.wallet?.address : null;
     const error = h('p.error-text', { role: 'alert' }, message ?? '');
     const button = h('button.btn-accent', { type: 'button', disabled: !address, on: { click: async () => {
@@ -44,6 +46,19 @@ export function renderAdmin(ctx, { connect }) {
         status.textContent = ''; load();
       } catch (e) { status.textContent = ''; error.textContent = errorText(e); button.disabled = false; }
     } } }, icon('wallet', 'icon-sm'), 'Sign in with this wallet');
+    const evmButton = h('button.btn-accent', { type: 'button', on: { click: async () => {
+      error.textContent = ''; evmButton.disabled = true; status.textContent = 'Waiting for your browser wallet…';
+      try {
+        const ask = adminEvmWallet();
+        const [walletAddress] = await ask({ method: 'eth_requestAccounts' });
+        if (!walletAddress) throw new Error('Select an account in your wallet.');
+        const challenge = await getJson('admin/challenge');
+        const signature = await ask({ method: 'personal_sign', params: [hexlify(toUtf8Bytes(challenge.message)), walletAddress] });
+        status.textContent = 'Checking…';
+        await getJson('admin/session', { method: 'POST', headers: { 'Content-Type': 'application/json', 'X-Elpida-Token': ctx.config.csrf }, body: JSON.stringify({ nonce: challenge.nonce, address: walletAddress, signature }) });
+        status.textContent = ''; load();
+      } catch (e) { status.textContent = ''; error.textContent = errorText(e); evmButton.disabled = false; }
+    } } }, icon('wallet', 'icon-sm'), 'Sign in with browser wallet');
     // A Solana admin (ELPIDA_ADMIN_ADDRESSES) signs the same message with Phantom, Solflare or Backpack; this works on
     // every site, including mainnet before Solana is live there.
     const solButton = h('button.btn.btn-secondary', { type: 'button', on: { click: async () => {
@@ -68,11 +83,10 @@ export function renderAdmin(ctx, { connect }) {
     return h('section.op-signin.tk-card',
       h('span.pf-mark', icon('shield-check')),
       h('h1', 'Operator sign-in'),
-      h('p.muted', 'Read-only operations view. Sign a message with a factory treasury wallet or an address listed in ELPIDA_ADMIN_ADDRESSES. Signing is free and sends no transaction.'),
-      !evm ? h('p.small.muted', 'Switch to an EVM network (Base, Ethereum, BNB or Robinhood) to sign in.')
-        : address ? h('p.small', 'Wallet: ', h('span.mono', short(address)))
-        : h('button.btn.btn-secondary', { type: 'button', on: { click: connect } }, 'Connect wallet'),
-      evm ? button : null, solButton, status, error);
+      h('p.muted', 'Sign a message with an authorized operator wallet. Signing in is free.'),
+      evm ? (address ? h('p.small', 'Wallet ', h('span.mono', short(address)))
+        : h('button.btn.btn-secondary', { type: 'button', on: { click: connect } }, 'Connect wallet')) : null,
+      evm ? button : evmButton, solButton, status, error);
   }
 
   function dashboard(d, refresh) {
@@ -187,13 +201,15 @@ export function renderAdmin(ctx, { connect }) {
     try {
       const session = await getJson('admin/session');
       if (!session.signedIn) { root.replaceChildren(signInView()); return; }
-      const tab = { visitors: 'visitors', pairs: 'pairs', launchpads: 'launchpads', funds: 'funds' }[new URLSearchParams(location.hash.split('?')[1] ?? '').get('tab')] ?? 'ops';
+      const tab = { visitors: 'visitors', pairs: 'pairs', launchpads: 'launchpads', funds: 'funds', safe: 'safe' }[new URLSearchParams(location.hash.split('?')[1] ?? '').get('tab')] ?? 'ops';
       const tabs = h('nav.op-tabs', { 'aria-label': 'Admin sections' },
         h('a', { href: '#/monkey', 'aria-current': tab === 'ops' ? 'page' : undefined }, 'Operations'),
         h('a', { href: '#/monkey?tab=launchpads', 'aria-current': tab === 'launchpads' ? 'page' : undefined }, 'Launchpads'),
         h('a', { href: '#/monkey?tab=pairs', 'aria-current': tab === 'pairs' ? 'page' : undefined }, 'Pairs'),
+        session.safeWiring ? h('a', { href: '#/monkey?tab=safe', 'aria-current': tab === 'safe' ? 'page' : undefined }, 'Safe wiring') : null,
         ctx.wallet?.net?.mainnet ? null : h('a', { href: '#/monkey?tab=funds', 'aria-current': tab === 'funds' ? 'page' : undefined }, 'Test funds'),
         h('a', { href: '#/monkey?tab=visitors', 'aria-current': tab === 'visitors' ? 'page' : undefined }, 'Visitors'));
+      if (tab === 'safe') { root.replaceChildren(tabs, session.safeWiring ? renderSafeWiring(ctx, { getJson, address: session.address }) : h('p.small.muted', 'Sign in with one of the selected Elysium Safe owners to open this tab.')); return; }
       if (tab === 'visitors') { root.replaceChildren(tabs, renderVisitors(ctx, { getJson })); return; }
       if (tab === 'funds') { if (ctx.wallet?.net?.mainnet) { root.replaceChildren(tabs, h('p.small.muted', 'Test funds are for test networks only.')); return; } const funds = renderTestFunds(ctx, { connect }); root.replaceChildren(tabs, funds.root); ctx.refresh?.().catch(() => {}).finally(funds.update); return; }
       if (tab === 'launchpads') { const pads = renderLaunchpads(ctx, { connect }); root.replaceChildren(tabs, pads.root); ctx.refresh?.().catch(() => {}).finally(pads.update); return; }

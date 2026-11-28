@@ -88,6 +88,7 @@ test('HTTP: challenge, signed session cookie, overview behind it, CSRF and sign-
   const config = await (await fetch(app.url + '/api/config')).json();
   const post = (path, body, headers = {}) => fetch(app.url + '/api/' + path, { method: 'POST', headers: { Origin: app.url, 'Content-Type': 'application/json', 'X-Elpida-Token': config.csrf, ...headers }, body: JSON.stringify(body) });
   assert.equal((await fetch(app.url + '/api/admin/overview')).status, 401);
+  assert.equal((await fetch(app.url + '/api/admin/safe-wiring')).status, 401);
   assert.deepEqual(await (await fetch(app.url + '/api/admin/session')).json(), { signedIn: false });
   const c = await (await fetch(app.url + '/api/admin/challenge')).json();
   const body = { nonce: c.nonce, address: operator.address, signature: await operator.signMessage(c.message) };
@@ -101,6 +102,11 @@ test('HTTP: challenge, signed session cookie, overview behind it, CSRF and sign-
   const cookie = ok.headers.get('set-cookie');
   assert.match(cookie, /^elpida_admin=[0-9a-f]{64}; HttpOnly; SameSite=Strict; Path=\/api\/admin/);
   const jar = cookie.split(';')[0];
+  // An ordinary allowlisted operator cannot read or prepare the one-time Safe batch.
+  assert.equal((await (await fetch(app.url + '/api/admin/session', { headers: { Cookie: jar } })).json()).safeWiring, undefined);
+  assert.equal((await fetch(app.url + '/api/admin/safe-wiring', { headers: { Cookie: jar } })).status, 403);
+  assert.equal((await post('admin/safe-wiring/sign', {}, { Cookie: jar })).status, 403);
+  assert.equal((await post('admin/safe-wiring/prepare', {}, { Cookie: jar })).status, 403);
   const overview = await fetch(app.url + '/api/admin/overview', { headers: { Cookie: jar } });
   assert.equal(overview.status, 200);
   const data = await overview.json();
@@ -111,6 +117,22 @@ test('HTTP: challenge, signed session cookie, overview behind it, CSRF and sign-
   assert.ok(data.activity['24h'] && data.activity.all);
   assert.equal((await post('admin/logout', {}, { Cookie: jar })).status, 200);
   assert.equal((await fetch(app.url + '/api/admin/overview', { headers: { Cookie: jar } })).status, 401, 'signed out');
+});
+
+test('Elysium wiring requires an allowlisted selected owner and a signature for the exact batch', async () => {
+  const { createAdminSafeWiring, wiringHash } = await import('../apps/api/admin-safe-wiring.mjs');
+  const selectedOwner = '0x1e994ec9ae8fa989598fff02a601845118b016c5';
+  const omittedOwner = '0x97f1b036d26dddfd60906bf54e70e39f6be6c16b';
+  const thirdOwner = '0xa74c0f944ca4fedfad966bd0531d81333db7ba79';
+  const provider = { getNetwork: async () => assert.fail('Invalid signatures and owners must be rejected before any RPC request.') };
+  const wiring = createAdminSafeWiring({ provider, adminAddresses: [selectedOwner, thirdOwner] });
+  assert.equal(wiring.allows(selectedOwner), true);
+  assert.equal(wiring.allows(omittedOwner), false);
+  assert.equal(wiring.allows(thirdOwner), false);
+  await assert.rejects(wiring.status(omittedOwner), { status: 403 });
+  await assert.rejects(wiring.prepare(thirdOwner), { status: 403 });
+  await assert.rejects(wiring.sign(selectedOwner, operator.signingKey.sign(wiringHash).serialized), { status: 400 });
+  await assert.rejects(wiring.sign(selectedOwner, '0x01'), { status: 400 });
 });
 
 test('the operator page lives at #/monkey; #/admin is not a page', async () => {
