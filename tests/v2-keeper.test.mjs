@@ -73,7 +73,8 @@ test('the flywheel plan: independent net buying ranks tokens; creator wallets an
 });
 
 test('the keeper runs fees, flywheel, holder rewards (USDC → native) and the monthly airdrop on the real contracts', async t => {
-  const f = await v2Fixture(t, { vaults: true, convert: true }), { airdrop, holder, flywheel } = f.contracts;
+  const f = await v2Fixture(t, { vaults: true, convert: true, initialDate: '2026-11-24T12:00:00Z' });
+  const { airdrop, holder, flywheel } = f.contracts;
   const index = new V2Indexer({ provider: f.provider, factory: f.factory.target, hook: f.hook.target, poolManager: f.manager.target, router: f.router.target });
   t.after(() => index.close());
   let chainTime = (await f.provider.getBlock('latest')).timestamp;
