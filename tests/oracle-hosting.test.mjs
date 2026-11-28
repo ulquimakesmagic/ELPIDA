@@ -5,7 +5,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, chmodSync, readdirSync } from 'node:fs';
-import { join } from 'node:path';
+import { join, resolve } from 'node:path';
 import { tmpdir } from 'node:os';
 import { fileURLToPath } from 'node:url';
 
@@ -28,17 +28,18 @@ function start(env) {
   chmodSync(fake, 0o755);
   const staging = join(t, 'staging.env');
   if (env.staging) writeFileSync(staging, env.staging);
-  const r = spawnSync('bash', [join(dir, 'start.sh')], { encoding: 'utf8', env: { PATH: process.env.PATH, ...env.vars, ELPIDA_NODE: fake, ELPIDA_STAGING_FILE: staging } });
+  const r = spawnSync('bash', [join(dir, 'start.sh')], { encoding: 'utf8', env: { PATH: process.env.PATH, MSYS2_ENV_CONV_EXCL: '*', ...env.vars, ELPIDA_NODE: fake, ELPIDA_STAGING_FILE: staging } });
   rmSync(t, { recursive: true, force: true });
   assert.equal(r.status, 0, r.stderr);
   return JSON.parse(r.stdout.slice(r.stdout.lastIndexOf('{"cwd"')));
 }
 
 const railway = { PORT: '8080', HOST: '0.0.0.0', ELPIDA_DATA_DIR: '/data', ELPIDA_PUBLIC_URL: 'https://elpida.fun', ELPIDA_V2_KEEPER_KEY: 'k1', ELPIDA_V2_KEEPER_SOLANA_KEY: 'k2', ELPIDA_TESTNET_RELAY_KEY: 'k3', ELPIDA_GRADUATION_KEY_FILE: '/etc/elpida/g.key', CIRCLE_API_KEY: 'c', CIRCLE_ENTITY_SECRET: 'c2', ELPIDA_BACKUP_ENABLED: 'true', PINATA_JWT: 'p' };
+const elysium = { ELPIDA_ELYSIUM_RELAY_KEY: 'test-key', ELPIDA_ELYSIUM_RELAY_MODE: 'publish' };
 
 test('start.sh: the hosting values win over anything copied from Railway, and production keeps its keepers', () => {
-  const { cwd, args, env } = start({ vars: railway });
-  assert.equal(cwd, root.replace(/\/$/, ''));
+  const { cwd, args, env } = start({ vars: { ...railway, ...elysium } });
+  assert.equal(cwd, resolve(root));
   assert.deepEqual(args.slice(-1), ['apps/api/server.mjs']);
   assert.equal(env.HOST, '127.0.0.1', 'only cloudflared on this machine reaches the server');
   assert.equal(env.PORT, '3000');
@@ -47,13 +48,15 @@ test('start.sh: the hosting values win over anything copied from Railway, and pr
   assert.equal(env.ELPIDA_TRUST_PROXY, 'cloudflare');
   assert.equal(env.NODE_ENV, 'production');
   for (const k of ['ELPIDA_V2_KEEPER_KEY', 'ELPIDA_V2_KEEPER_SOLANA_KEY', 'ELPIDA_TESTNET_RELAY_KEY', 'ELPIDA_GRADUATION_KEY_FILE', 'CIRCLE_API_KEY']) assert.equal(env[k], railway[k]);
+  for (const [key, value] of Object.entries(elysium)) assert.equal(env[key], value);
   assert.equal(env.ELPIDA_BACKUP_ENABLED, 'true');
   assert.equal(env.ELPIDA_PUBLIC_URL, 'https://elpida.fun');
 });
 
 test('start.sh staging: no signing keys, no Circle, no backups, the staging address; everything else unchanged', () => {
-  const { env } = start({ vars: railway, staging: 'ELPIDA_PUBLIC_URL=https://staging.elpida.fun\n' });
+  const { env } = start({ vars: { ...railway, ...elysium }, staging: 'ELPIDA_PUBLIC_URL=https://staging.elpida.fun\nELPIDA_ELYSIUM_RELAY_MODE=publish\n' });
   for (const k of ['ELPIDA_V2_KEEPER_KEY', 'ELPIDA_V2_KEEPER_SOLANA_KEY', 'ELPIDA_TESTNET_RELAY_KEY', 'ELPIDA_GRADUATION_KEY_FILE', 'CIRCLE_API_KEY', 'CIRCLE_ENTITY_SECRET']) assert.equal(env[k], undefined, `${k} removed`);
+  for (const key of Object.keys(elysium)) assert.equal(env[key], undefined, `${key} removed`);
   assert.equal(env.ELPIDA_BACKUP_ENABLED, 'false');
   assert.equal(env.ELPIDA_PUBLIC_URL, 'https://staging.elpida.fun');
   assert.equal(env.PINATA_JWT, 'p');

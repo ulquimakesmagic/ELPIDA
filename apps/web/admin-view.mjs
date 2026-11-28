@@ -139,6 +139,19 @@ export function renderAdmin(ctx, { connect }) {
       d.relay?.enabled ? h('p.small', 'Updater ', h('span.mono', short(d.relay.address ?? ''))) : h('p.small.muted', d.relay?.misconfigured ? 'Misconfigured. Check ELPIDA_TESTNET_RELAY_KEY.' : 'Not configured on this server.'),
       relayNets.length ? kv(relayNets.map(([key, r]) => [h('span.op-net', chainIcon(key), key), h('span', r.error ? pill('bad', 'error') : pill('ok', 'posting'), ` last post ${ago(r.lastPost)}`, r.balance != null ? ` · gas ${number(r.balance, 5)}` : '', r.error ? h('small.muted', ` ${r.error}`) : null)])) : null);
 
+    const er = d.elysiumRelay;
+    const elysiumRelay = er && er.mode !== 'off' ? card('Elysium HYPE/USD relay', kv([
+      ['Mode', er.mode === 'publish' && !er.configurationIssue ? 'Publishing' : 'Monitoring'],
+      ['Delivery', pill(er.state === 'current' && !er.error ? 'ok' : 'warn',
+        ({ current: 'Current', awaiting_delivery: 'Awaiting delivery', stale_or_missing: 'Price expired or missing' })[er.state] ?? 'Checking')],
+      ['Source round', er.sourceRound ?? '—'],
+      ['Delivered round', er.deliveredRound ?? '—'],
+      ['Price expires', er.expiresAt ? new Date(er.expiresAt * 1000).toLocaleString() : '—'],
+      ['Last check', ago(er.checkedAt)],
+      er.pendingHash ? ['Pending relay', h('a.mono', { href: `https://hyperevmscan.io/tx/${er.pendingHash}`, target: '_blank', rel: 'noopener noreferrer' }, short(er.pendingHash))] : null,
+      er.error || er.configurationIssue ? ['Issue', (er.error ?? er.configurationIssue).replaceAll('_', ' ')] : null,
+    ])) : null;
+
     const g = d.graduation ?? {};
     const graduation = card('Graduation service', kv([
       ['State', g.enabled === false ? pill('warn', 'off') : pill(g.state === 'watching' ? 'ok' : 'warn', g.state ?? 'unknown')],
@@ -192,7 +205,7 @@ export function renderAdmin(ctx, { connect }) {
       banner, strip,
       h('div.op-grid', treasury, nets),
       h('div.op-grid.op-grid-3', relay, graduation, backup),
-      memory ? h('div.op-grid.op-grid-3', memory) : null,
+      memory || elysiumRelay ? h('div.op-grid.op-grid-3', memory, elysiumRelay) : null,
       keepers, prices);
   }
 
