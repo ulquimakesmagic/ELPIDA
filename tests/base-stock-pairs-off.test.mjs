@@ -8,9 +8,9 @@ const { stockApprovalGate } = await import('../apps/web/stock-approval.mjs');
 
 const ready = { symbol: 'NVDAc', address: '0x' + '1'.repeat(40), feed: '0x' + '2'.repeat(40), capabilities: { launchQuote: { enabled: true }, graduatedPool: { enabled: true } } };
 
-test('no chain has stock pairs switched off since Base passed its fork rehearsal (16 November 2026)', () => {
+test('existing chains keep stock pairing rules while Elysium awaits the xStocks rollout', () => {
   for (const id of [8453, '8453', 1, 56, 84532, 11155111, 97, null, undefined]) assert.equal(stockPairsBlocked(id), null);
-  assert.deepEqual(Object.keys(STOCK_PAIRS_OFF), []);
+  assert.match(stockPairsBlocked(99901), /Elysium.*xStocks/);
   assert.ok(Object.isFrozen(STOCK_PAIRS_OFF));
 });
 

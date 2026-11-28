@@ -39,8 +39,11 @@ test('the wallet offers V2 pairs on mainnet and the launch page loads them; laun
   assert.match(flow, /ctx\.wallet\.loadV2Pairs\?\.\(\)\.then\(\(\) => draw\(\)\)/);
   assert.match(v2, /a\.kind === 'xstock' && \(a\.test \|\| a\.verified\)/);
   assert.match(v2, /launchStock\(w, body\.quoteAsset\)/);
-  assert.match(flow, /net\(\)\?\.mainnet \? 'Contracts verified on the block explorer\.' : 'Not audited; test networks only\.'/);
-  assert.match(flow, /v2Deployment\(net\(\)\)\?\.model === 'v2\.3-hook' \? 'Every fee is shared: 50% to traders/, 'a V2.3 network shows the split it pays');
+  assert.match(flow, /!net\(\)\?\.mainnet \? 'Not audited; test networks only\.'/);
+  assert.match(flow, /net\(\)\.explorerSourceVerified === false \? '' : 'Contracts verified on the block explorer\.'/);
+  assert.match(flow, /v2Deployment\(net\(\)\)\?\.model === 'v2\.3-hook' \? traderPayoutCopy/);
+  assert.match(flow, /Every fee is shared: 50% to traders as a monthly airdrop in USDC/);
+  assert.match(flow, /Trading fees accrue 50% for trader rewards, 30% for you, and 20% for Elpida\. Trader payouts are pending\./);
 });
 
 test('the launch flow offers no token-to-token pair on any network; a saved token draft falls back to native', () => {

@@ -84,7 +84,9 @@ export const PAIR_LIMITS = {
 // Base came off this list on 16 November 2026: the ten Coinbase Tokenized Stocks launched, traded and graduated in a
 // fork rehearsal (docs/evidence/base-coinbase-stock-rehearsal-2026-11-16.json). A stock still needs its registry
 // capabilities switched on and the Safe's approval before it can be a pair.
-export const STOCK_PAIRS_OFF = Object.freeze({});
+export const STOCK_PAIRS_OFF = Object.freeze({
+  99901: 'Tokenized stock pairs on Elysium will be available after the xStocks rollout is verified.',
+});
 /** Why new stock-paired launches are off on this chain id, or null when they are allowed. */
 export function stockPairsOff(chainId) { return STOCK_PAIRS_OFF[Number(chainId)] ?? null; }
 

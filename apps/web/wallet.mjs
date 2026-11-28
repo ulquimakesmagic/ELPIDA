@@ -116,7 +116,7 @@ export class TestnetWallet {
     const feed=new Contract(this.oracle.feed,['function decimals() view returns(uint8)','function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)'],this.provider);
     const [r,d,b]=await Promise.all([feed.latestRoundData(),feed.decimals(),this.provider.getBlock('latest')]);
     if(r[1]<=0n||r[0]===0n||r[4]<r[0]||r[3]<=0n||r[3]>BigInt(b.timestamp)||BigInt(b.timestamp)-r[3]>BigInt(this.oracle.maxAge)||d>18n)throw new Error('The launch oracle is stale or unavailable. Refresh later; no launch was sent.');
-    return {usd:Number(r[1])/10**Number(d),updatedAt:Number(r[3]),maxAge:this.oracle.maxAge,status:'fresh',source:'On-chain USD oracle',feed:this.oracle.feed};
+    return {usd:Number(r[1])/10**Number(d),updatedAt:Number(r[3]),maxAge:this.oracle.maxAge,status:'fresh',source:this.net?.usd?.source??'On-chain USD oracle',feed:this.oracle.feed};
   }
 
   get deployment() {

@@ -10,6 +10,7 @@ import { normalizeMetadata } from '../web/metadata.mjs';
 import { isDexModel, MODEL_VERSIONS } from '../../packages/core/curve-model.mjs';
 import { testnetDexes } from '../../packages/core/uniswap.mjs';
 import { serverRpcUrls } from '../../packages/core/mainnets.mjs';
+import { RotatingRpcProvider } from './rotating-provider.mjs';
 
 // A read-only worker per configured deployment. Never accepts user RPCs or private keys.
 // How often the public indexes poll, and how many networks sync at once. A trade is visible to the API once the
@@ -23,6 +24,21 @@ const TICK_MS=Math.max(1500,Math.min(60000,Number(process.env.ELPIDA_INDEX_INTER
 export function evmConfirmations(value=process.env.ELPIDA_EVM_CONFIRMATIONS){const n=Number(value);return Number.isInteger(n)&&n>=0?Math.min(n,64):0;}
 const EVM_CONFIRMATIONS=evmConfirmations();
 const TICK_CONCURRENCY=Math.max(1,Math.min(8,Number(process.env.ELPIDA_INDEX_CONCURRENCY)||3));
+
+// Elysium's public index RPC accepts wide log queries. The authenticated RPC serves historical contract state.
+class ElysiumIndexProvider extends JsonRpcProvider {
+  constructor(rpc, archive, options) { super(rpc, 99901, options); this.archive = archive; }
+  call(transaction) { return this.archive.call(transaction); }
+  destroy() { this.archive.destroy(); super.destroy(); }
+}
+
+function indexProvider(rpc, net) {
+  const options = { cacheTimeout: -1, batchMaxCount: 1 };
+  if (net?.key === 'elysium-mainnet' && process.env.ELPIDA_RPC_99901) {
+    return new ElysiumIndexProvider(rpc, new RotatingRpcProvider(net, process.env, 99901, options), options);
+  }
+  return new JsonRpcProvider(rpc, undefined, options);
+}
 // One token's inline data: image made every listing 1.1 MB. A listing ships the URL instead; the bytes are
 // served once by /api/wallet-logo and cached by the browser.
 const INLINE_IMAGE=/^data:image\//i;
@@ -32,7 +48,7 @@ export const publicMetadata=(entry,token)=>{
   return INLINE_IMAGE.test(image)?{...metadata,image:`/api/wallet-logo/${entry.net.key}/${token.address}`,imageInline:true}:metadata;
 };
 export class PublicIndexer {
-  constructor({networks,contracts,dataDir,metadataStore,onTrades,providerFactory=rpc=>new JsonRpcProvider(rpc,undefined,{cacheTimeout:-1,batchMaxCount:1}),log=console.log}){
+  constructor({networks,contracts,dataDir,metadataStore,onTrades,providerFactory=indexProvider,log=console.log}){
     this.entries=new Map();this.legacy=new Map();this.metadataStore=metadataStore;this.log=log;this.stopping=false;
     this.providerFactory=providerFactory;this.rpcs=new Map();this.onTrades=onTrades??null;
     // Set by the server (apps/api/stock-prices.mjs): marks real stock pairs 'xstock' with their dollar rate.
@@ -45,7 +61,7 @@ export class PublicIndexer {
       const indexRpcs=String(process.env['ELPIDA_INDEX_RPC_'+net.chainId]??'').split(',').map(u=>u.trim()).filter(u=>/^https:\/\//.test(u));
       const override=process.env['ELPIDA_RPC_'+net.chainId],list=indexRpcs.length?indexRpcs:override?serverRpcUrls(net,process.env):[net.rpcUrl,...(net.rpcFallbacks??[])];
       this.rpcs.set(net.key,{list,index:0,failures:0});
-      const provider=providerFactory(list[0]);
+      const provider=providerFactory(list[0],net);
       if(!net.shared?.factory){this.entries.set(net.key,openV2Entry({net,provider,dataDir}));this.legacy.set(net.key,(net.v2.previous??[]).filter(d=>d?.factory).map(deployment=>openV2Entry({net,provider,dataDir,deployment,legacy:true})));continue;}
       this.entries.set(net.key,openEntry({net,deployment:net.shared,provider,contracts,dataDir}));
       // Earlier team factories on the same network stay indexed, so their tokens remain listed and tradable.
@@ -131,8 +147,8 @@ export class PublicIndexer {
     const r=this.rpcs?.get(key);if(!r)return;r.failures++;
     if(r.failures<PublicIndexer.FAILOVER_AFTER||r.list.length<2)return;
     const from=rpcHost(r);r.index=(r.index+1)%r.list.length;r.failures=0;
-    const provider=this.providerFactory(r.list[r.index]),old=new Set();
-    for(const e of this.all(key)){old.add(e.provider);e.provider=provider;e.index.provider=provider;e.validated=false;}
+    const entries=this.all(key),provider=this.providerFactory(r.list[r.index],entries[0]?.net),old=new Set();
+    for(const e of entries){old.add(e.provider);e.provider=provider;e.index.provider=provider;e.validated=false;}
     for(const p of old)p.destroy?.();
     this.log(JSON.stringify({event:'public_indexer_rpc_failover',network:key,from,to:rpcHost(r)}));
   }
@@ -201,7 +217,7 @@ function openV4Entry({net,provider,dataDir}){
 // 2026: the V2.0 launchpad once V2.3 takes new launches). `launchpad` keeps its own model ('v2-hook' or 'v2.3-hook').
 function openV2Entry({net,provider,dataDir,deployment:d=net.v2.shared,legacy=false}){
   const deployment={...d,model:V2_MODEL,launchpad:d.model??'v2-hook'},factory=deployment.factory.toLowerCase();
-  const index=new V2Indexer({provider,factory:deployment.factory,hook:deployment.hook,poolManager:net.v4.poolManager,router:deployment.router??null,path:join(dataDir,`public-v2-${net.chainId}-${factory}.sqlite`),chainId:net.chainId,fromBlock:deployment.block,confirmations:EVM_CONFIRMATIONS,nativeSymbol:net.nativeCurrency.symbol,batchSize:100,fullRefreshMs:60000});
+  const index=new V2Indexer({provider,factory:deployment.factory,hook:deployment.hook,poolManager:net.v4.poolManager,router:deployment.router??null,path:join(dataDir,`public-v2-${net.chainId}-${factory}.sqlite`),chainId:net.chainId,fromBlock:deployment.block,confirmations:EVM_CONFIRMATIONS,nativeSymbol:net.nativeCurrency.symbol,batchSize:net.key==='elysium-mainnet'?2000:100,fullRefreshMs:60000});
   const metadataPath=join(dataDir,`public-metadata-${net.chainId}-${factory}.json`);
   const metadata=new Map(existsSync(metadataPath)?Object.entries(JSON.parse(readFileSync(metadataPath,'utf8'))):[]);
   return {net,deployment,legacy,v4:true,v2:true,index,provider,metadata,metadataPath,validated:false,error:null,lastSuccess:null};

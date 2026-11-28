@@ -6,7 +6,7 @@ import {parsePriceUpdate,PYTH_RECEIVER} from '../../packages/solana/client.mjs';
 import { usdOracles,SOLANA_ORACLES } from '../../packages/core/usd-oracles.mjs';
 const oracleAbi=new Interface(['function decimals() view returns(uint8)','function latestRoundData() view returns(uint80,int256,uint256,uint256,uint80)']);
 export const PRICE_MAX_AGE = 180;
-export const CHAIN_ASSET = Object.freeze({local:'ETH','base-sepolia':'ETH','ethereum-sepolia':'ETH','bnb-testnet':'BNB','robinhood-testnet':'ETH','solana-devnet':'SOL','solana-localnet':'SOL','solana-mainnet':'SOL','base-mainnet':'ETH','bnb-mainnet':'BNB','robinhood-mainnet':'ETH','ethereum-mainnet':'ETH','arbitrum-mainnet':'ETH','hyperevm-mainnet':'HYPE'});
+export const CHAIN_ASSET = Object.freeze({local:'ETH','base-sepolia':'ETH','ethereum-sepolia':'ETH','bnb-testnet':'BNB','robinhood-testnet':'ETH','solana-devnet':'SOL','solana-localnet':'SOL','solana-mainnet':'SOL','base-mainnet':'ETH','bnb-mainnet':'BNB','robinhood-mainnet':'ETH','ethereum-mainnet':'ETH','arbitrum-mainnet':'ETH','hyperevm-mainnet':'HYPE','elysium-mainnet':'HYPE'});
 export function validatePrice(value, now = Date.now()/1000) {
   const usd=Number(value?.usd), updatedAt=Number(value?.updatedAt);
   if(!Number.isFinite(usd)||usd<=0||!Number.isSafeInteger(updatedAt)||updatedAt<=0||updatedAt>now+5||now-updatedAt>(value.maxAge??PRICE_MAX_AGE))throw new Error('Price is unavailable or stale.');
@@ -23,7 +23,7 @@ export class PriceKeeper {
     if(!r.ok)throw new Error('RPC unavailable');const data=await r.json();
     const round=oracleAbi.decodeFunctionResult('latestRoundData',data.find(x=>x.id===0)?.result),d=Number(oracleAbi.decodeFunctionResult('decimals',data.find(x=>x.id===1)?.result)[0]);
     if(round[0]<=0n||round[1]<=0n||round[4]<round[0]||d>18)throw new Error('Invalid oracle');
-    this.chainValues[net.key]=validatePrice({usd:Number(round[1])/10**d,updatedAt:Number(round[3]),source:'On-chain USD oracle',feed:oracle.feed,maxAge:oracle.maxAge,referenceOnly:false},this.now());
+    this.chainValues[net.key]=validatePrice({usd:Number(round[1])/10**d,updatedAt:Number(round[3]),source:net.usd?.source??'On-chain USD oracle',feed:oracle.feed,maxAge:oracle.maxAge,referenceOnly:false},this.now());
   }
   async readSolanaOracle(){
     try{validatePrice(this.values.SOL,this.now()+60);return;}catch{}
