@@ -54,11 +54,25 @@ test('the server runs the testnets unless ELPIDA_MODE=mainnet, and then only rea
   writeFileSync(join(root, 'deployments', 'base-mainnet.json'), JSON.stringify(record));
   const ready = loadEvmNetworks({ env: { ELPIDA_MODE: 'mainnet' }, root });
   assert.deepEqual(ready.networks.map(n => n.key), ['base-mainnet']);
-  assert.deepEqual(ready.skipped.map(s => s.key), ['bnb-mainnet', 'robinhood-mainnet', 'ethereum-mainnet', 'arbitrum-mainnet', 'hyperevm-mainnet'], 'the other mainnets wait for their own records');
+  assert.deepEqual(ready.skipped.map(s => s.key), ['bnb-mainnet', 'robinhood-mainnet', 'ethereum-mainnet', 'arbitrum-mainnet', 'hyperevm-mainnet', 'elysium-mainnet'], 'the other mainnets wait for their own records');
   assert.ok(ready.skipped.every(s => /no mainnet deployment record yet/.test(s.reason)));
   assert.ok(ready.networks.every(n => n.mainnet), 'no testnet on the mainnet site');
   writeFileSync(join(root, 'deployments', 'base-mainnet.json'), '{ not json');
   assert.match(loadEvmNetworks({ env: { ELPIDA_MODE: 'mainnet' }, root }).skipped.find(s => s.key === 'base-mainnet').reason, /could not be read/);
+});
+
+test('Elysium uses the verified V2.3 record, native HYPE and the relayed launch price', () => {
+  const net = loadEvmNetworks({ env: { ELPIDA_MODE: 'mainnet' } }).networks.find(n => n.key === 'elysium-mainnet');
+  const read = key => JSON.parse(readFileSync(new URL(`../deployments/${key}.json`, import.meta.url), 'utf8'));
+  const plan = read('plans/elysium-mainnet-v23'), release = read('elysium-mainnet-v23');
+  assert.equal(net.chainId, 99901);
+  assert.equal(net.nativeCurrency.symbol, 'HYPE');
+  assert.equal(net.rpcUrl, 'https://elysium-rpc.publicnode.com');
+  assert.equal(net.v2.shared.model, 'v2.3-hook');
+  assert.equal(net.v2.shared.factory, release.contracts.factory);
+  assert.deepEqual(usdOracles({}, [net])[net.key], { feed: plan.usdFeed, usdc: plan.usdc, maxAge: plan.feedMaxAge, available: true, source: 'Chainlink HYPE / USD relayed from HyperEVM' });
+  assert.equal(net.v2.shared.usdcAirdrop, undefined);
+  assert.equal(net.payoutDex, undefined);
 });
 
 const evm = () => ({ mode: 'mainnet', networks: [mainnetNetwork(base, record, plan).net], skipped: [] });

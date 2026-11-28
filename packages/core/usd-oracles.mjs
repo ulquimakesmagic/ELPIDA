@@ -12,7 +12,7 @@ export function usdOracles(env=process.env,networks=[]){
     const feed=env[prefix+'_USD_FEED']??d.feed,usdc=env[prefix+'_USDC']??d.usdc;
     const maxAge=Number(env[prefix+'_USD_MAX_AGE']??d.maxAge??3600);
     return [key,{feed:address.test(feed??'')?feed:null,usdc:address.test(usdc??'')?usdc:null,maxAge:Number.isInteger(maxAge)&&maxAge>0&&maxAge<=86400?maxAge:3600,available:address.test(feed??''),source:d.source??'Chainlink-compatible on-chain feed'}];
-  }).concat((networks??[]).filter(n=>n?.mainnet&&n.usd).map(n=>[n.key,{feed:address.test(n.usd.feed??'')?n.usd.feed:null,usdc:address.test(n.usd.usdc??'')?n.usd.usdc:null,maxAge:Number.isInteger(n.usd.maxAge)&&n.usd.maxAge>0&&n.usd.maxAge<=86400?n.usd.maxAge:3600,available:address.test(n.usd.feed??''),source:`Chainlink ${n.nativeCurrency?.symbol??'ETH'} / USD`}])));
+  }).concat((networks??[]).filter(n=>n?.mainnet&&n.usd).map(n=>[n.key,{feed:address.test(n.usd.feed??'')?n.usd.feed:null,usdc:address.test(n.usd.usdc??'')?n.usd.usdc:null,maxAge:Number.isInteger(n.usd.maxAge)&&n.usd.maxAge>0&&n.usd.maxAge<=86400?n.usd.maxAge:3600,available:address.test(n.usd.feed??''),source:n.usd.source??`Chainlink ${n.nativeCurrency?.symbol??'ETH'} / USD`}])));
 }
 
 // Solana: the program verifies a Pyth PriceUpdateV2 account on-chain (owner, full verification, feed id,

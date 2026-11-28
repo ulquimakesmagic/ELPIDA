@@ -37,6 +37,14 @@ The relay checks for a newer round before quoting fees. It skips rounds already 
 
 Before enabling public Elysium launches, confirm the publishing service has delivered a fresh round and the receiver reports the same round and observation timestamp as the source. Keep the rolling budget funded and review expiry and delivery incidents in Operations.
 
+## Public V2.3 launchpad
+
+The [treasury Safe execution](https://elysiumexplore.com/tx/0xf823ee74d801ca1559dc6b5f89fd141579ff4d2c44d315376fb91cc325ae9a6a) wired the factory, and all seven verification checks passed. The [automatic oracle delivery](https://elysiumexplore.com/tx/0xf9648ccb8594b5f7f98324afe2cd68796224c9693d2efe4223c024efa905db98) provided the same round, answer and observation timestamp as Chainlink. The verified [deployment record](../deployments/elysium-mainnet-v23.json) registers Elysium as chain 99901 with HYPE for network gas.
+
+Set `ELPIDA_RPC_99901` to the authenticated archive RPC and `ELPIDA_INDEX_RPC_99901` to the RPC serving wide historical log ranges. The index begins at the factory deployment block. Fund the plan's keeper on Elysium for creator reward processing and verify that the index has caught up after rollout. The first live smoke test uses a native HYPE launch, buy and sell. The approved USDC pair is available for launches, and xStocks and the trader payout converter each have a separate rollout.
+
+Sources: [Elysium RPC and chain emblem](https://www.alchemy.com/rpc/elysium), [Elysium block explorer](https://elysiumexplore.com/).
+
 ## Native V2.3 fork rehearsal
 
 An Anvil fork pinned at Elysium block `11867100` used the deployed oracle and treasury Safe with test keeper and guardian wallets. The deployment and all seven wiring checks passed after applying the Safe batch by impersonating the treasury on the fork. A native launch opened at `$20,014.78` after tick rounding. The guardian paused new launches and the existing pool still completed a native HYPE buy and full sell. Both trades ran during the opening fee window. They used 240,699 and 137,881 gas respectively.

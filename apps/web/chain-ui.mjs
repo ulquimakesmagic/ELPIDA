@@ -25,6 +25,7 @@ const CHAIN_ICONS = new Map([
   ['ethereum', 'ethereum.png'],
   ['robinhood', 'robinhood.png'],
   ['hyperevm', HYPE_ICON],
+  ['elysium', 'elysium.svg'],
 ]);
 
 export function chainIcon(key) {

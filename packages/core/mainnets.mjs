@@ -65,6 +65,12 @@ export const EVM_MAINNETS = Object.freeze([
     usdMaxAge: 86400,
     payoutDex: Object.freeze({ name: 'HyperSwap v3', router: '0x6D99e7f6747AF2cDbB5164b6DD50e40D4fDe1e77', quoter: '0x03A918028f22D9E1473B7959C927AD7425A45C7C', weth: '0x5555555555555555555555555555555555555555', routerVersion: 2 }),
   }),
+  Object.freeze({
+    key: 'elysium-mainnet', planKey: 'elysium-mainnet', name: 'Elysium', short: 'ELYSIUM', kind: 'evm', mainnet: true,
+    chainId: 99901, rpcUrl: 'https://elysium-rpc.publicnode.com', explorer: 'https://elysiumexplore.com',
+    nativeCurrency: Object.freeze({ name: 'Hyperliquid', symbol: 'HYPE', decimals: 18 }), gasFaucet: null,
+    usdMaxAge: 86400, usdSource: 'Chainlink HYPE / USD relayed from HyperEVM', explorerSourceVerified: false,
+  }),
 ]);
 
 const ADDRESS = /^0x[0-9a-fA-F]{40}$/;
@@ -109,13 +115,13 @@ export function mainnetNetwork(template, record, plan, next = null) {
   const why = unusable(template, record, plan);
   if (why && !nextReady) return { net: null, reason: why };
   const main = nextReady ?? { record, plan }, previous = [];
-  const { planKey, usdMaxAge, payoutDex, stable, ...facts } = template, p = main.plan, r = main.record;
+  const { planKey, usdMaxAge, usdSource, payoutDex, stable, ...facts } = template, p = main.plan, r = main.record;
   return {
     net: {
       ...facts, enabled: true,
       v4: { poolManager: p.poolManager },
       v2: { shared: sharedOf(r, p), ...(previous.length ? { previous } : {}) },
-      usd: { feed: p.usdFeed, usdc: p.usdc, maxAge: usdMaxAge ?? 3600 },
+      usd: { feed: p.usdFeed, usdc: p.usdc, maxAge: usdMaxAge ?? 3600, ...(usdSource ? { source: usdSource } : {}) },
       // The plan's dollar: USDC (18 decimals on BNB Chain), or USDG on Robinhood Chain. Pinned so payouts and amounts use
       // the plan's own symbol and decimals instead of assuming a 6-decimal USDC.
       payoutStable: { address: p.usdc, symbol: p.usdcSymbol ?? stable?.symbol ?? 'USDC', name: stable?.name ?? 'USD Coin', decimals: Number(p.usdcDecimals ?? 6), test: false },
