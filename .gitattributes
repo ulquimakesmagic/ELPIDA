@@ -1,1 +1,4 @@
 deploy/oracle/** text eol=lf
+
+# Keep this deployment plan's approval hash stable across checkouts.
+deployments/plans/elysium-mainnet-v23.json text eol=lf
