@@ -165,6 +165,16 @@ test('mainnet prices come from the plan\'s Chainlink feed through the private RP
   assert.equal(arbPrice.symbol, 'ETH');
   assert.equal(arbPrice.status, 'fresh');
   assert.equal(arbPrice.feed, arbitrumPlan.usdFeed);
+
+  const elysium = loadEvmNetworks({ env: { ELPIDA_MODE: 'mainnet' } }).networks.find(network => network.key === 'elysium-mainnet');
+  const elysiumKeeper = new PriceKeeper({ fetcher, now: () => now, networks: [elysium], env: { ELPIDA_RPC_99901: 'https://elysium-private.example/rpc' } });
+  await elysiumKeeper.readOracle(elysium);
+  assert.equal(urls.at(-1), 'https://elysium-private.example/rpc');
+  const elysiumPrice = elysiumKeeper.snapshot()[elysium.key];
+  assert.equal(elysiumPrice.symbol, 'HYPE');
+  assert.equal(elysiumPrice.status, 'fresh');
+  assert.equal(elysiumPrice.feed, elysium.usd.feed);
+  assert.equal(elysiumPrice.source, 'Chainlink HYPE / USD relayed from HyperEVM');
 });
 
 test('BNB Chain, Robinhood Chain and Ethereum: each plan names its chain, its own dollar and price feed', () => {
